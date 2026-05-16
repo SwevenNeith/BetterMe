@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "gh-pages -d dist && echo '🚀 App déployée : https://swevenneith.github.io/BetterMe/'"
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "pinia": "^3.0.4",
