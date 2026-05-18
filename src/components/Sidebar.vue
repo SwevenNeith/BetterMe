@@ -367,6 +367,7 @@ const toggleSidebar = () => {
   backdrop-filter: blur(2px);
   z-index: 99;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.3s ease;
 }
 
@@ -386,6 +387,7 @@ const toggleSidebar = () => {
   }
   .sidebar-overlay.visible {
     opacity: 1;
+    pointer-events: auto;
   }
 }
 </style>

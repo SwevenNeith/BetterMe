@@ -10,14 +10,94 @@ const selectedDayIndex = ref(new Date().getDay() === 0 ? 6 : new Date().getDay()
 // Modal quick add state
 const isModalOpen = ref(false)
 const newEventTitle = ref('')
-const newEventTime = ref('10:00 - 11:30')
+const newEventDetail = ref('')
+const newEventStartTime = ref('10:00')
+const newEventEndTime = ref('11:30')
 const newEventCategory = ref('Travail')
-const newEventDay = ref(selectedDayIndex.value)
+const newEventDay = ref(new Date().toISOString().split('T')[0])
+const newEventDateEnd = ref('')
+const newEventAllDay = ref(false)
+
+const openModalWithDefaultDate = () => {
+  if (weekDays.value && weekDays.value[selectedDayIndex.value]) {
+    newEventDay.value = formatDateToLocalISO(weekDays.value[selectedDayIndex.value].date)
+  }
+  newEventDateEnd.value = ''
+  newEventAllDay.value = false
+  newEventDetail.value = ''
+  isModalOpen.value = true
+}
 
 // User-created events list, loaded from Supabase
 const userEvents = ref([])
 const userCategories = ref([])
 const isLoading = ref(true)
+
+// Computed property to extract unique Hobbies events from the loaded list
+const uniqueHobbyEvents = computed(() => {
+  const hobbyCat = userCategories.value.find(
+    (c) => c.name.toLowerCase() === 'hobbies',
+  )
+  if (!hobbyCat) return []
+
+  const filtered = userEvents.value.filter(
+    (event) => event.category === hobbyCat.id || event.category === 'Hobbies',
+  )
+
+  const seen = new Set()
+  const result = []
+  for (const ev of filtered) {
+    if (!seen.has(ev.title.toLowerCase())) {
+      seen.add(ev.title.toLowerCase())
+      result.push(ev)
+    }
+  }
+  return result
+})
+
+const openModalWithHobby = (hobbyTitle) => {
+  newEventTitle.value = hobbyTitle
+  newEventCategory.value = 'Hobbies'
+  newEventStartTime.value = '10:00'
+  newEventEndTime.value = '11:30'
+  if (weekDays.value && weekDays.value[selectedDayIndex.value]) {
+    newEventDay.value = formatDateToLocalISO(weekDays.value[selectedDayIndex.value].date)
+  }
+  newEventDateEnd.value = ''
+  newEventAllDay.value = false
+  newEventDetail.value = ''
+  isModalOpen.value = true
+}
+
+const handleDragStart = (event, hobbyTitle) => {
+  event.dataTransfer.setData('text/plain', hobbyTitle)
+  event.dataTransfer.effectAllowed = 'copy'
+}
+
+const handleDrop = (event, dayIdx, startHour) => {
+  event.preventDefault()
+  const hobbyTitle = event.dataTransfer.getData('text/plain')
+  if (!hobbyTitle) return
+
+  newEventTitle.value = hobbyTitle
+  newEventCategory.value = 'Hobbies'
+
+  if (weekDays.value && weekDays.value[dayIdx]) {
+    newEventDay.value = formatDateToLocalISO(weekDays.value[dayIdx].date)
+  }
+  newEventDateEnd.value = ''
+  newEventAllDay.value = false
+
+  const startStr = `${String(startHour).padStart(2, '0')}:00`
+  const endHour = Math.min(startHour + 1, 23)
+  const endStr = `${String(endHour).padStart(2, '0')}:00`
+
+  newEventStartTime.value = startStr
+  newEventEndTime.value = endStr
+  newEventDetail.value = ''
+
+  isModalOpen.value = true
+}
 
 // Helper: Get ISO Week Number
 const getWeekNumber = (date) => {
@@ -171,6 +251,26 @@ const fetchEvents = async () => {
     if (catError) throw catError
     userCategories.value = catData || []
 
+    const defaultCategories = [
+      { name: 'Travail', color: 'hsl(280, 65%, 72%)', icon: '💼' },
+      { name: 'Hobbies', color: 'hsl(25, 75%, 72%)', icon: '🎨' },
+    ]
+
+    for (const defCat of defaultCategories) {
+      const exists = userCategories.value.some(
+        (c) => c.name.toLowerCase() === defCat.name.toLowerCase(),
+      )
+      if (!exists) {
+        userCategories.value.push({
+          id: `temp-${defCat.name.toLowerCase()}`,
+          name: defCat.name,
+          color: defCat.color,
+          icon: defCat.icon,
+          is_temp: true,
+        })
+      }
+    }
+
     // Fetch events
     const mondayStr = formatDateToLocalISO(weekDays.value[0].date)
     const sundayStr = formatDateToLocalISO(weekDays.value[6].date)
@@ -179,8 +279,8 @@ const fetchEvents = async () => {
       .from('timetable_events')
       .select('*')
       .eq('user_id', user.id)
-      .gte('date', mondayStr)
-      .lte('date', sundayStr)
+      .gte('date_start', mondayStr)
+      .lte('date_start', sundayStr)
 
     if (error) throw error
     userEvents.value = data || []
@@ -199,6 +299,45 @@ watch(
   },
   { immediate: true },
 )
+
+// Watch to automatically maintain end time > start time (with a 1 hour default buffer)
+watch(newEventStartTime, (newStart) => {
+  if (!newStart) return
+  const [startH, startM] = newStart.split(':').map(Number)
+  const [endH, endM] = newEventEndTime.value.split(':').map(Number)
+
+  const startMin = startH * 60 + startM
+  const endMin = endH * 60 + endM
+
+  if (endMin <= startMin) {
+    let newEndH = startH + 1
+    let newEndM = startM
+    if (newEndH >= 24) {
+      newEndH = 23
+      newEndM = 59
+    }
+    newEventEndTime.value = `${String(newEndH).padStart(2, '0')}:${String(newEndM).padStart(2, '0')}`
+  }
+})
+
+watch(newEventEndTime, (newEnd) => {
+  if (!newEnd) return
+  const [startH, startM] = newEventStartTime.value.split(':').map(Number)
+  const [endH, endM] = newEnd.split(':').map(Number)
+
+  const startMin = startH * 60 + startM
+  const endMin = endH * 60 + endM
+
+  if (endMin <= startMin) {
+    let newStartH = endH - 1
+    let newStartM = endM
+    if (newStartH < 0) {
+      newStartH = 0
+      newStartM = 0
+    }
+    newEventStartTime.value = `${String(newStartH).padStart(2, '0')}:${String(newStartM).padStart(2, '0')}`
+  }
+})
 
 // Navigation handlers
 const nextWeek = () => {
@@ -220,13 +359,106 @@ const resetToToday = () => {
 
 // Filtered events matching selected date
 const getEventsForDay = (dayIdx) => {
-  const dayDateStr = formatDateToLocalISO(weekDays.value[dayIdx].date)
-  return userEvents.value.filter((event) => event.date === dayDateStr)
+  if (!weekDays.value || !weekDays.value[dayIdx]) return []
+  const targetDate = weekDays.value[dayIdx].date
+  const targetDateStr = formatDateToLocalISO(targetDate)
+  const targetTime = new Date(targetDateStr + 'T00:00:00').getTime()
+
+  const matched = []
+
+  for (const event of userEvents.value) {
+    if (event.all_day) continue // All day events are handled separately
+
+    const startStr = event.date_start
+    if (!startStr) continue
+    const endStr = event.date_end || event.date_start
+
+    const startTime = new Date(startStr + 'T00:00:00').getTime()
+    const endTime = new Date(endStr + 'T00:00:00').getTime()
+
+    if (targetTime >= startTime && targetTime <= endTime) {
+      // Parse the event's time field (e.g. "15:00 - 13:00")
+      const timeParts = (event.time || "12:00 - 13:00").split(" - ")
+      const startHourStr = timeParts[0] || "12:00"
+      const endHourStr = timeParts[1] || "13:00"
+
+      let slicedTime = ""
+
+      if (targetTime === startTime && targetTime === endTime) {
+        slicedTime = `${startHourStr} - ${endHourStr}`
+      } else if (targetTime === startTime) {
+        slicedTime = `${startHourStr} - 24:00`
+      } else if (targetTime === endTime) {
+        slicedTime = `00:00 - ${endHourStr}`
+      } else {
+        slicedTime = `00:00 - 24:00`
+      }
+
+      matched.push({
+        ...event,
+        time: slicedTime,
+      })
+    }
+  }
+
+  return matched
+}
+
+const hasAllDayEvents = computed(() => {
+  return userEvents.value.some(e => e.all_day)
+})
+
+const getAllDayEventsForDay = (dayIdx) => {
+  if (!weekDays.value || !weekDays.value[dayIdx]) return []
+  const targetDate = weekDays.value[dayIdx].date
+  const targetTime = new Date(formatDateToLocalISO(targetDate) + 'T00:00:00').getTime()
+
+  return userEvents.value.filter(e => {
+    if (!e.all_day) return false
+
+    const startStr = e.date_start
+    if (!startStr) return false
+    const startD = new Date(startStr + 'T00:00:00')
+    const startTime = startD.getTime()
+
+    const endStr = e.date_end || e.date_start
+    const endD = new Date(endStr + 'T23:59:59')
+    const endTime = endD.getTime()
+
+    return targetTime >= startTime && targetTime <= endTime
+  })
 }
 
 // Add event handler to Supabase (with auto-creating missing categories)
 const handleAddEvent = async () => {
   if (!newEventTitle.value.trim()) return
+
+  // Validate dates
+  const startDStr = newEventDay.value
+  const endDStr = newEventDateEnd.value
+
+  if (endDStr) {
+    const startD = new Date(startDStr + 'T00:00:00')
+    const endD = new Date(endDStr + 'T00:00:00')
+    if (endD < startD) {
+      alert("La date de fin ne peut pas être antérieure à la date de début !")
+      return
+    }
+  }
+
+  // Validate hours if not an all-day event
+  if (!newEventAllDay.value) {
+    const [startH, startM] = newEventStartTime.value.split(':').map(Number)
+    const [endH, endM] = newEventEndTime.value.split(':').map(Number)
+    const startMin = startH * 60 + startM
+    const endMin = endH * 60 + endM
+
+    const isSameDay = !endDStr || endDStr === startDStr
+    if (isSameDay && endMin <= startMin) {
+      alert("L'heure de fin doit être strictement supérieure à l'heure de début !")
+      return
+    }
+  }
 
   try {
     const {
@@ -245,13 +477,16 @@ const handleAddEvent = async () => {
       (c) => c.name.toLowerCase() === categoryName.toLowerCase(),
     )
 
-    if (!existingCat) {
+    if (!existingCat || existingCat.is_temp) {
+      const catColor = existingCat ? existingCat.color : null
+      const catIcon = existingCat ? existingCat.icon : null
+
       // Generate a dynamic, premium pastel HSL color that perfectly fits the theme
       const beautifulHues = [280, 140, 170, 200, 340, 25, 300, 220]
       const randomHue = beautifulHues[Math.floor(Math.random() * beautifulHues.length)]
       const variation = Math.floor(Math.random() * 24) - 12 // +/- 12 degrees variation
       const hue = (randomHue + variation + 360) % 360
-      const randomColor = `hsl(${hue}, 65%, 72%)`
+      const randomColor = catColor || `hsl(${hue}, 65%, 72%)`
 
       // Pick a random default emoji
       const defaultEmojis = [
@@ -271,7 +506,7 @@ const handleAddEvent = async () => {
         '🥗',
         '☕',
       ]
-      const randomEmoji = defaultEmojis[Math.floor(Math.random() * defaultEmojis.length)]
+      const randomEmoji = catIcon || defaultEmojis[Math.floor(Math.random() * defaultEmojis.length)]
 
       const { data: catData, error: catError } = await supabase
         .from('timetable_categories')
@@ -285,22 +520,26 @@ const handleAddEvent = async () => {
 
       if (catError) throw catError
       if (catData && catData.length > 0) {
+        // Remove temporary one
+        userCategories.value = userCategories.value.filter(
+          (c) => c.name.toLowerCase() !== categoryName.toLowerCase(),
+        )
         existingCat = catData[0]
         userCategories.value.push(existingCat)
       }
     }
-
-    const selectedDayDate = weekDays.value[newEventDay.value].date
-    const dateStr = formatDateToLocalISO(selectedDayDate)
 
     const { data, error } = await supabase
       .from('timetable_events')
       .insert({
         user_id: user.id,
         title: newEventTitle.value,
-        date: dateStr,
-        time: newEventTime.value,
+        date_start: startDStr,
+        date_end: endDStr || null,
+        all_day: newEventAllDay.value,
+        time: newEventAllDay.value ? null : `${newEventStartTime.value} - ${newEventEndTime.value}`,
         category: existingCat ? existingCat.id : null,
+        detail: newEventDetail.value,
       })
       .select()
 
@@ -313,8 +552,12 @@ const handleAddEvent = async () => {
 
     // Reset form & Close modal
     newEventTitle.value = ''
-    newEventTime.value = '10:00 - 11:30'
+    newEventDetail.value = ''
+    newEventStartTime.value = '10:00'
+    newEventEndTime.value = '11:30'
     newEventCategory.value = 'Travail'
+    newEventDateEnd.value = ''
+    newEventAllDay.value = false
     isModalOpen.value = false
   } catch (err) {
     console.error('Error adding event:', err)
@@ -345,6 +588,7 @@ const hourHeight = 65 // Height of 1 hour in pixels
 
 // Format single hour value to string HH:00
 const formatHour = (hour) => {
+  if (hour === 0) return ''
   return `${String(hour).padStart(2, '0')}:00`
 }
 
@@ -529,8 +773,28 @@ const getPositionedEventsForDay = (dayIdx) => {
       </div>
       <div class="action-group">
         <button class="today-btn" @click="resetToToday">Aujourd'hui</button>
-        <button class="add-event-btn" @click="isModalOpen = true">
+        <button class="add-event-btn" @click="openModalWithDefaultDate">
           <span class="plus-icon">+</span> Ajouter
+        </button>
+      </div>
+    </div>
+
+    <!-- Hobbies quick reference pills -->
+    <div class="hobbies-quick-reference" v-if="uniqueHobbyEvents.length > 0">
+      <span class="hobbies-ref-label">Mes Hobbies :</span>
+      <div class="hobbies-ref-pills">
+        <button
+          v-for="hobby in uniqueHobbyEvents"
+          :key="hobby.id"
+          class="hobby-ref-pill"
+          draggable="true"
+          @dragstart="handleDragStart($event, hobby.title)"
+          @click="openModalWithHobby(hobby.title)"
+          title="Planifier cette activité à nouveau (Glisse-dépose dans l'edt !)"
+        >
+          <span class="hobby-pill-icon">🎨</span>
+          <span class="hobby-pill-title">{{ hobby.title }}</span>
+          <span class="hobby-pill-plus">+</span>
         </button>
       </div>
     </div>
@@ -572,6 +836,37 @@ const getPositionedEventsForDay = (dayIdx) => {
           </div>
         </div>
 
+        <!-- All Day Events Row (Desktop) -->
+        <div class="all-day-row" v-if="hasAllDayEvents">
+          <div class="time-header-spacer"></div>
+          <div class="all-day-columns-container">
+            <div
+              v-for="(day, idx) in weekDays"
+              :key="idx"
+              class="all-day-column-slot"
+            >
+              <div
+                v-for="event in getAllDayEventsForDay(idx)"
+                :key="event.id"
+                class="all-day-event-bar"
+                :style="getCategoryStyle(event.category)"
+              >
+                <span class="all-day-event-icon">{{ getCategoryIcon(event.category) }}</span>
+                <span class="all-day-event-title" :title="event.title + (event.detail ? ' - ' + event.detail : '')">
+                  {{ event.title }}
+                </span>
+                <button
+                  class="all-day-delete-btn"
+                  @click.stop="deleteEvent(event.id)"
+                  title="Supprimer"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Scrollable Grid Body -->
         <div class="grid-scroll-viewport" ref="gridViewport">
           <div class="weekly-timetable-grid">
@@ -592,7 +887,14 @@ const getPositionedEventsForDay = (dayIdx) => {
               >
                 <!-- Background grid lines -->
                 <div class="grid-hour-lines">
-                  <div class="grid-hour-line" v-for="hour in 24" :key="hour"></div>
+                  <div
+                    class="grid-hour-line"
+                    v-for="hour in 24"
+                    :key="hour"
+                    @dragover.prevent
+                    @dragenter.prevent
+                    @drop="handleDrop($event, idx, hour - 1)"
+                  ></div>
                 </div>
 
                 <!-- Absolutely Positioned Events -->
@@ -616,6 +918,9 @@ const getPositionedEventsForDay = (dayIdx) => {
                         <span class="event-time">{{ event.time }}</span>
                       </div>
                       <h4 class="event-title">{{ event.title }}</h4>
+                      <p class="event-description" v-if="event.detail">
+                        {{ event.detail }}
+                      </p>
                       <span class="event-category-tag" v-if="event.category">
                         {{ getCategoryName(event.category) }}
                       </span>
@@ -637,9 +942,30 @@ const getPositionedEventsForDay = (dayIdx) => {
           }}</span>
         </h3>
 
+        <!-- Mobile All Day Events List -->
+        <div class="mobile-all-day-list" v-if="getAllDayEventsForDay(selectedDayIndex).length > 0">
+          <div
+            v-for="event in getAllDayEventsForDay(selectedDayIndex)"
+            :key="event.id"
+            class="all-day-event-bar"
+            :style="getCategoryStyle(event.category)"
+          >
+            <span class="all-day-event-icon">{{ getCategoryIcon(event.category) }}</span>
+            <span class="all-day-event-title" :title="event.title + (event.detail ? ' - ' + event.detail : '')">
+              {{ event.title }}
+            </span>
+            <button
+              class="all-day-delete-btn"
+              @click.stop="deleteEvent(event.id)"
+              title="Supprimer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
         <!-- Scrollable Hourly Grid Body (Mobile Layout) -->
         <div
-          v-if="getEventsForDay(selectedDayIndex).length > 0"
           class="grid-scroll-viewport grid-scroll-viewport--mobile"
           ref="mobileGridViewport"
         >
@@ -659,7 +985,14 @@ const getPositionedEventsForDay = (dayIdx) => {
               >
                 <!-- Background grid lines -->
                 <div class="grid-hour-lines">
-                  <div class="grid-hour-line" v-for="hour in 24" :key="hour"></div>
+                  <div
+                    class="grid-hour-line"
+                    v-for="hour in 24"
+                    :key="hour"
+                    @dragover.prevent
+                    @dragenter.prevent
+                    @drop="handleDrop($event, selectedDayIndex, hour - 1)"
+                  ></div>
                 </div>
 
                 <!-- Absolutely Positioned Events -->
@@ -683,6 +1016,9 @@ const getPositionedEventsForDay = (dayIdx) => {
                         <span class="event-time">{{ event.time }}</span>
                       </div>
                       <h4 class="event-title">{{ event.title }}</h4>
+                      <p class="event-description" v-if="event.detail">
+                        {{ event.detail }}
+                      </p>
                       <span class="event-category-tag" v-if="event.category">
                         {{ getCategoryName(event.category) }}
                       </span>
@@ -692,20 +1028,6 @@ const getPositionedEventsForDay = (dayIdx) => {
               </div>
             </div>
           </div>
-        </div>
-
-        <div v-if="getEventsForDay(selectedDayIndex).length === 0" class="mobile-empty-state">
-          <div class="mobile-empty-illustration">🌿</div>
-          <p class="mobile-empty-text">Aucun événement planifié pour cette journée.</p>
-          <button
-            class="mobile-empty-add-btn"
-            @click="
-              newEventDay = selectedDayIndex;
-              isModalOpen = true;
-            "
-          >
-            Ajouter un bloc
-          </button>
         </div>
       </div>
     </div>
@@ -731,24 +1053,64 @@ const getPositionedEventsForDay = (dayIdx) => {
             />
           </div>
 
+          <div class="form-group">
+            <label for="event-detail">Description / Détails (Optionnel)</label>
+            <textarea
+              v-model="newEventDetail"
+              id="event-detail"
+              placeholder="Ex: Séance de cardio HIIT, avancer sur la maquette Figma, etc."
+              rows="2"
+            ></textarea>
+          </div>
+
           <div class="form-row">
             <div class="form-group">
-              <label for="event-day">Jour</label>
-              <select v-model="newEventDay" id="event-day">
-                <option v-for="(day, idx) in weekDays" :key="idx" :value="idx">
-                  {{ day.name }}
-                </option>
-              </select>
+              <label for="event-day">Date de début</label>
+              <input
+                v-model="newEventDay"
+                type="date"
+                id="event-day"
+                required
+              />
             </div>
 
             <div class="form-group">
-              <label for="event-time">Créneau horaire</label>
+              <label for="event-date-end">Date de fin (Optionnelle)</label>
               <input
-                v-model="newEventTime"
-                type="text"
-                id="event-time"
-                placeholder="Ex: 14:00 - 15:30"
-                required
+                v-model="newEventDateEnd"
+                type="date"
+                id="event-date-end"
+                :min="newEventDay"
+                placeholder="Identique au début si vide"
+              />
+            </div>
+          </div>
+
+          <div class="form-group all-day-toggle-group">
+            <label class="all-day-toggle-label">
+              <input
+                v-model="newEventAllDay"
+                type="checkbox"
+                class="all-day-checkbox"
+              />
+              <span class="all-day-toggle-custom"></span>
+              <span>Toute la journée 🕒</span>
+            </label>
+          </div>
+
+          <div class="form-group" v-if="!newEventAllDay">
+            <label>Créneau horaire</label>
+            <div class="time-range-picker">
+              <input
+                v-model="newEventStartTime"
+                type="time"
+                :required="!newEventAllDay"
+              />
+              <span class="time-range-separator">à</span>
+              <input
+                v-model="newEventEndTime"
+                type="time"
+                :required="!newEventAllDay"
               />
             </div>
           </div>
@@ -868,6 +1230,91 @@ const getPositionedEventsForDay = (dayIdx) => {
   .page-subtitle {
     color: #adb5bd;
   }
+}
+
+/* ─── Hobbies Quick Reference ─── */
+.hobbies-quick-reference {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 0.6rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(213, 181, 234, 0.2);
+  flex-wrap: wrap;
+  animation: fadeIn 0.25s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  .hobbies-quick-reference {
+    background: rgba(25, 20, 35, 0.55);
+    border-color: rgba(213, 181, 234, 0.1);
+  }
+}
+
+.hobbies-ref-label {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #72a098;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hobbies-ref-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.hobby-ref-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 12px;
+  border: 2px solid transparent;
+  background: rgba(255, 140, 0, 0.1); /* Soft HSL peach tint */
+  color: hsl(25, 75%, 62%); /* Premium salmon peach text */
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 6px rgba(255, 140, 0, 0.03);
+}
+
+.hobby-ref-pill:hover {
+  background: rgba(255, 140, 0, 0.2);
+  border-color: hsl(25, 75%, 72%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 140, 0, 0.1);
+}
+
+.hobby-pill-icon {
+  font-size: 0.95rem;
+}
+
+.hobby-pill-title {
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hobby-pill-plus {
+  font-size: 0.8rem;
+  font-weight: 800;
+  opacity: 0.75;
+  margin-left: 0.15rem;
+  transition: transform 0.2s ease;
+}
+
+.hobby-ref-pill:hover .hobby-pill-plus {
+  transform: scale(1.2);
 }
 
 /* ─── Navigation Controls ─── */
@@ -1138,6 +1585,98 @@ const getPositionedEventsForDay = (dayIdx) => {
   padding-right: 8px; /* account for scrollbar width alignment */
 }
 
+/* ─── All Day Events Styles (Desktop & Mobile) ─── */
+.all-day-row {
+  display: flex;
+  align-items: flex-start;
+  background: rgba(255, 255, 255, 0.7);
+  border-bottom: 1.5px solid rgba(213, 181, 234, 0.15);
+  padding: 0.6rem 0;
+  z-index: 9;
+}
+
+@media (prefers-color-scheme: dark) {
+  .all-day-row {
+    background: rgba(30, 26, 40, 0.85);
+    border-bottom-color: rgba(213, 181, 234, 0.1);
+  }
+}
+
+.all-day-columns-container {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.75rem;
+  padding-right: 8px;
+}
+
+.all-day-column-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-height: 28px;
+}
+
+.all-day-event-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: inherit;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+  position: relative;
+  overflow: hidden;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.all-day-event-bar:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+}
+
+.all-day-event-icon {
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.all-day-event-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.all-day-delete-btn {
+  background: transparent;
+  border: none;
+  color: currentColor;
+  opacity: 0.4;
+  cursor: pointer;
+  padding: 0 0.15rem;
+  font-size: 0.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s ease;
+}
+
+.all-day-delete-btn:hover {
+  opacity: 1;
+}
+
+.mobile-all-day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+  padding: 0 0.25rem;
+}
+
 .grid-day-header {
   display: flex;
   flex-direction: column;
@@ -1248,19 +1787,21 @@ const getPositionedEventsForDay = (dayIdx) => {
 .grid-hour-lines {
   position: absolute;
   inset: 0;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .grid-hour-line {
   height: 65px;
   border-bottom: 1px dashed rgba(213, 181, 234, 0.08);
   box-sizing: border-box;
+  pointer-events: auto;
 }
 
 .grid-events-layer {
   position: absolute;
   inset: 0;
   height: 100%;
+  pointer-events: none;
 }
 
 /* ─── Event Blocks ─── */
@@ -1278,12 +1819,15 @@ const getPositionedEventsForDay = (dayIdx) => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  pointer-events: auto;
 }
 
 .event-block:hover {
   width: max-content !important;
   min-width: 100% !important;
   max-width: 280px;
+  height: auto !important;
+  min-height: max-content !important;
   padding-right: 1.6rem !important;
   z-index: 50;
   overflow: visible;
@@ -1375,6 +1919,33 @@ const getPositionedEventsForDay = (dayIdx) => {
   text-transform: uppercase;
   letter-spacing: 0.3px;
   margin-top: 0.2rem;
+  display: block;
+}
+
+.event-description {
+  display: none;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #4f5f6f;
+  margin-top: 0.4rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.15);
+  padding-top: 0.4rem;
+  white-space: normal;
+  word-break: break-word;
+}
+
+@media (prefers-color-scheme: dark) {
+  .event-description {
+    color: #c5b8d2;
+    border-top-color: rgba(213, 181, 234, 0.1);
+  }
+}
+
+.event-block:hover .event-description {
+  display: block;
+}
+
+.event-block--mobile .event-description {
   display: block;
 }
 
@@ -1508,20 +2079,24 @@ const getPositionedEventsForDay = (dayIdx) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: 1.5rem;
   animation: fadeIn 0.25s ease;
 }
 
 .modal-card {
   width: 100%;
-  max-width: 460px;
+  max-width: 430px;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(16px);
   border-radius: 24px;
   border: 1px solid rgba(213, 181, 234, 0.4);
   box-shadow: 0 20px 50px rgba(173, 129, 190, 0.25);
-  padding: 2rem;
+  padding: 1.5rem;
   animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1535,7 +2110,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .modal-header h3 {
@@ -1566,7 +2141,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 .modal-form {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.95rem;
 }
 
 .form-group {
@@ -1584,6 +2159,81 @@ const getPositionedEventsForDay = (dayIdx) => {
   flex: 1;
 }
 
+.all-day-toggle-group {
+  margin: 0.25rem 0;
+}
+
+.all-day-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #5d6d7e;
+  user-select: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .all-day-toggle-label {
+    color: #aeb6bf;
+  }
+}
+
+.all-day-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 38px;
+  height: 20px;
+  background-color: rgba(213, 181, 234, 0.3);
+  border-radius: 20px;
+  position: relative;
+  cursor: pointer;
+  outline: none;
+  transition: background-color 0.3s ease;
+  flex-shrink: 0;
+}
+
+.all-day-checkbox:checked {
+  background-color: #ad81be;
+}
+
+.all-day-checkbox::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  background-color: white;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}
+
+.all-day-checkbox:checked::before {
+  transform: translateX(18px);
+}
+
+.time-range-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.time-range-picker input {
+  flex: 1;
+  text-align: center;
+}
+
+.time-range-separator {
+  font-size: 0.85rem;
+  color: #72a098;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
 .form-group label {
   font-size: 0.85rem;
   font-weight: 700;
@@ -1591,19 +2241,26 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .form-group input,
-.form-group select {
+.form-group select,
+.form-group textarea {
   padding: 0.75rem 1rem;
   border-radius: 12px;
   border: 1px solid rgba(213, 181, 234, 0.4);
   background: white;
   font-size: 0.95rem;
   color: #2c3e50;
+  font-family: inherit;
   transition: all 0.2s ease;
+}
+
+.form-group textarea {
+  resize: vertical;
 }
 
 @media (prefers-color-scheme: dark) {
   .form-group input,
-  .form-group select {
+  .form-group select,
+  .form-group textarea {
     background: rgba(0, 0, 0, 0.3);
     border-color: rgba(213, 181, 234, 0.2);
     color: #f0e8f8;
@@ -1611,7 +2268,8 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .form-group input:focus,
-.form-group select:focus {
+.form-group select:focus,
+.form-group textarea:focus {
   outline: none;
   border-color: #d5b5ea;
   box-shadow: 0 0 0 3px rgba(213, 181, 234, 0.3);
@@ -1765,6 +2423,15 @@ const getPositionedEventsForDay = (dayIdx) => {
     word-break: break-word;
     font-size: 0.9rem;
     line-height: 1.3;
+  }
+
+  .form-row {
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .modal-card {
+    padding: 1.5rem;
   }
 }
 
