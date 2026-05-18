@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase.js';
 
 const router = useRouter();
 
+const baseUrl = import.meta.env.BASE_URL || '/';
+
 const isLogin = ref(true);
 const name = ref('');
 const email = ref('');
@@ -75,7 +77,7 @@ const handleSubmit = async () => {
 <template>
   <div class="auth-wrapper">
     <div class="auth-header-outside">
-      <img src="/favicon.ico" alt="BetterMe Logo" class="logo" />
+      <img :src="baseUrl + 'icon-512.png'" alt="BetterMe Logo" class="logo" />
       <h1 class="app-name">BetterMe</h1>
       <p class="subtitle">{{ isLogin ? 'Bon retour parmi nous !' : 'Commencez votre aventure' }}</p>
     </div>
