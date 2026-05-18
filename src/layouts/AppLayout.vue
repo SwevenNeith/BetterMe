@@ -1,4 +1,5 @@
 <script setup>
+import { RouterView } from 'vue-router';
 import AppSidebar from '../components/Sidebar.vue';
 </script>
 
@@ -6,7 +7,7 @@ import AppSidebar from '../components/Sidebar.vue';
   <div class="app-layout">
     <AppSidebar />
     <main class="app-content">
-      <slot />
+      <RouterView />
     </main>
   </div>
 </template>
@@ -17,6 +18,7 @@ import AppSidebar from '../components/Sidebar.vue';
   min-height: 100vh;
   width: 100%;
   background-color: #f9f6fd;
+  overflow-x: hidden;
 }
 
 @media (prefers-color-scheme: dark) {
