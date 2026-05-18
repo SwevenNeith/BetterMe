@@ -1,10 +1,74 @@
 <script setup>
 import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { supabase } from '../lib/supabase.js';
+
+const router = useRouter();
 
 const isLogin = ref(true);
+const name = ref('');
+const email = ref('');
+const password = ref('');
+const errorMessage = ref('');
+const isLoading = ref(false);
 
 const toggleMode = () => {
   isLogin.value = !isLogin.value;
+  errorMessage.value = '';
+  name.value = '';
+  email.value = '';
+  password.value = '';
+};
+
+const getErrorMessage = (error) => {
+  const msg = error?.message?.toLowerCase() ?? '';
+  if (!email.value || !password.value) return 'Veuillez remplir tous les champs.';
+  if (!isLogin.value && !name.value) return 'Veuillez entrer votre nom complet.';
+  if (msg.includes('user already registered') || msg.includes('already been registered'))
+    return 'Cet email est déjà utilisé. Essayez de vous connecter.';
+  if (msg.includes('invalid login credentials') || msg.includes('invalid credentials'))
+    return 'Email ou mot de passe incorrect.';
+  if (msg.includes('password should be at least'))
+    return 'Le mot de passe doit contenir au moins 6 caractères.';
+  if (msg.includes('unable to validate email address'))
+    return 'Adresse email invalide.';
+  return error?.message ?? 'Une erreur est survenue. Veuillez réessayer.';
+};
+
+const handleSubmit = async () => {
+  errorMessage.value = '';
+
+  if (!email.value || !password.value || (!isLogin.value && !name.value)) {
+    errorMessage.value = 'Veuillez remplir tous les champs.';
+    return;
+  }
+
+  isLoading.value = true;
+
+  try {
+    if (isLogin.value) {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.value,
+        password: password.value,
+      });
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.auth.signUp({
+        email: email.value,
+        password: password.value,
+        options: {
+          data: { nom: name.value },
+        },
+      });
+      if (error) throw error;
+    }
+
+    router.push('/dashboard');
+  } catch (error) {
+    errorMessage.value = getErrorMessage(error);
+  } finally {
+    isLoading.value = false;
+  }
 };
 </script>
 
@@ -17,24 +81,45 @@ const toggleMode = () => {
     </div>
 
     <div class="auth-card">
-      <form class="auth-form" @submit.prevent>
+      <form class="auth-form" @submit.prevent="handleSubmit">
         <div class="input-group" v-if="!isLogin">
           <label for="name">Nom complet</label>
-          <input type="text" id="name" placeholder="John Doe" />
+          <input
+            v-model="name"
+            type="text"
+            id="name"
+            placeholder="John Doe"
+            autocomplete="name"
+          />
         </div>
-        
+
         <div class="input-group">
           <label for="email">Email</label>
-          <input type="email" id="email" placeholder="john@example.com" />
+          <input
+            v-model="email"
+            type="email"
+            id="email"
+            placeholder="john@example.com"
+            autocomplete="email"
+          />
         </div>
 
         <div class="input-group">
           <label for="password">Mot de passe</label>
-          <input type="password" id="password" placeholder="••••••••" />
+          <input
+            v-model="password"
+            type="password"
+            id="password"
+            placeholder="••••••••"
+            autocomplete="current-password"
+          />
         </div>
 
-        <button type="submit" class="submit-btn">
-          {{ isLogin ? 'Se connecter' : "S'inscrire" }}
+        <p v-if="errorMessage" class="error-message">{{ errorMessage }}</p>
+
+        <button type="submit" class="submit-btn" :disabled="isLoading">
+          <span v-if="isLoading" class="spinner"></span>
+          <span v-else>{{ isLogin ? 'Se connecter' : "S'inscrire" }}</span>
         </button>
       </form>
 
@@ -226,5 +311,51 @@ const toggleMode = () => {
 .toggle-link:hover {
   color: #D5B5EA;
   text-decoration: underline;
+}
+
+.error-message {
+  background: rgba(255, 80, 80, 0.1);
+  border: 1px solid rgba(255, 80, 80, 0.35);
+  color: #c0392b;
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0.65rem 1rem;
+  border-radius: 10px;
+  text-align: center;
+  animation: fadeIn 0.2s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  .error-message {
+    color: #ff8a80;
+    background: rgba(255, 80, 80, 0.15);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.submit-btn:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Loading spinner inside button */
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>
