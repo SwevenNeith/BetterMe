@@ -1,6 +1,6 @@
 <!-- eslint-disable no-useless-assignment -->
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { useRouter } from 'vue-router'
 
@@ -28,6 +28,88 @@ const formattedToday = formattedTodayRaw.charAt(0).toUpperCase() + formattedToda
 const userEvents = ref([])
 const userCategories = ref([])
 const isLoadingEvents = ref(true)
+
+// Carousel mobile (scroll-snap)
+const activePage = ref(0)
+const carouselViewport = ref(null)
+const carouselTrack = ref(null)
+const slideWidthPx = ref(0)
+const slideCount = ref(2)
+const isMobileCarousel = ref(false)
+let carouselResizeObserver = null
+let scrollSyncRaf = null
+let mobileMediaQuery = null
+
+const MOBILE_MEDIA = '(max-width: 768px)'
+
+const lastSlideIndex = computed(() => Math.max(0, slideCount.value - 1))
+
+const updateCarouselLayout = () => {
+  isMobileCarousel.value = window.matchMedia(MOBILE_MEDIA).matches
+
+  if (carouselTrack.value) {
+    slideCount.value = carouselTrack.value.querySelectorAll('.dashboard-column').length || 2
+  }
+
+  if (!isMobileCarousel.value || !carouselViewport.value) {
+    slideWidthPx.value = 0
+    activePage.value = 0
+    return
+  }
+
+  const width = carouselViewport.value.getBoundingClientRect().width
+  if (width > 0) {
+    slideWidthPx.value = width
+  }
+
+  if (activePage.value > lastSlideIndex.value) {
+    activePage.value = lastSlideIndex.value
+  }
+}
+
+const syncActivePageFromScroll = () => {
+  if (!isMobileCarousel.value || !carouselViewport.value || slideWidthPx.value <= 0) return
+  const index = Math.round(carouselViewport.value.scrollLeft / slideWidthPx.value)
+  activePage.value = Math.min(Math.max(index, 0), lastSlideIndex.value)
+}
+
+const onCarouselScroll = () => {
+  if (scrollSyncRaf) cancelAnimationFrame(scrollSyncRaf)
+  scrollSyncRaf = requestAnimationFrame(syncActivePageFromScroll)
+}
+
+const goToSlide = (index) => {
+  const target = Math.min(Math.max(index, 0), lastSlideIndex.value)
+  activePage.value = target
+
+  if (!isMobileCarousel.value || !carouselViewport.value || slideWidthPx.value <= 0) return
+
+  carouselViewport.value.scrollTo({
+    left: target * slideWidthPx.value,
+    behavior: 'smooth',
+  })
+}
+
+const setupCarouselObserver = () => {
+  updateCarouselLayout()
+  carouselResizeObserver?.disconnect()
+  if (carouselViewport.value) {
+    carouselResizeObserver = new ResizeObserver(() => {
+      const previousWidth = slideWidthPx.value
+      const previousPage = activePage.value
+      updateCarouselLayout()
+      if (
+        isMobileCarousel.value &&
+        carouselViewport.value &&
+        previousWidth > 0 &&
+        slideWidthPx.value > 0
+      ) {
+        carouselViewport.value.scrollLeft = previousPage * slideWidthPx.value
+      }
+    })
+    carouselResizeObserver.observe(carouselViewport.value)
+  }
+}
 
 // Fetch Events & Categories from Supabase
 const fetchTodayEvents = async (userId) => {
@@ -94,6 +176,88 @@ const fetchTodayEvents = async (userId) => {
   }
 }
 
+// Calendar Logic
+const currentCalendarDate = ref(new Date())
+
+const monthNames = [
+  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
+]
+const weekDayNames = ['Lu', 'Ma', 'Me', 'Je', 'Ve', 'Sa', 'Di']
+
+const calendarMonthName = computed(() => {
+  return monthNames[currentCalendarDate.value.getMonth()]
+})
+
+const calendarYear = computed(() => {
+  return currentCalendarDate.value.getFullYear()
+})
+
+const prevMonth = () => {
+  const newDate = new Date(currentCalendarDate.value)
+  newDate.setMonth(newDate.getMonth() - 1)
+  currentCalendarDate.value = newDate
+}
+
+const nextMonth = () => {
+  const newDate = new Date(currentCalendarDate.value)
+  newDate.setMonth(newDate.getMonth() + 1)
+  currentCalendarDate.value = newDate
+}
+
+const calendarDays = computed(() => {
+  const year = currentCalendarDate.value.getFullYear()
+  const month = currentCalendarDate.value.getMonth()
+  
+  const firstDayOfMonth = new Date(year, month, 1)
+  const lastDayOfMonth = new Date(year, month + 1, 0)
+  
+  const daysInMonth = lastDayOfMonth.getDate()
+  
+  // getDay() returns 0 for Sunday, 1 for Monday. We want Monday=0, Sunday=6
+  let firstDayIndex = firstDayOfMonth.getDay() - 1
+  if (firstDayIndex === -1) firstDayIndex = 6
+  
+  const days = []
+  
+  // Previous month padding
+  const prevMonthLastDay = new Date(year, month, 0).getDate()
+  for (let i = firstDayIndex - 1; i >= 0; i--) {
+    days.push({
+      date: prevMonthLastDay - i,
+      isCurrentMonth: false,
+      isToday: false
+    })
+  }
+  
+  // Current month days
+  const today = new Date()
+  for (let i = 1; i <= daysInMonth; i++) {
+    const isToday = 
+      today.getDate() === i &&
+      today.getMonth() === month &&
+      today.getFullYear() === year
+      
+    days.push({
+      date: i,
+      isCurrentMonth: true,
+      isToday
+    })
+  }
+  
+  // Next month padding to complete 42 days grid (6 weeks)
+  const remainingDays = 42 - days.length
+  for (let i = 1; i <= remainingDays; i++) {
+    days.push({
+      date: i,
+      isCurrentMonth: false,
+      isToday: false
+    })
+  }
+  
+  return days
+})
+
 onMounted(async () => {
   const {
     data: { user },
@@ -105,6 +269,20 @@ onMounted(async () => {
   userName.value = user.user_metadata?.nom ?? user.email
 
   await fetchTodayEvents(user.id)
+
+  await nextTick()
+  setupCarouselObserver()
+
+  mobileMediaQuery = window.matchMedia(MOBILE_MEDIA)
+  mobileMediaQuery.addEventListener('change', updateCarouselLayout)
+  window.addEventListener('resize', updateCarouselLayout)
+})
+
+onUnmounted(() => {
+  carouselResizeObserver?.disconnect()
+  mobileMediaQuery?.removeEventListener('change', updateCarouselLayout)
+  window.removeEventListener('resize', updateCarouselLayout)
+  if (scrollSyncRaf) cancelAnimationFrame(scrollSyncRaf)
 })
 
 // Category properties generators
@@ -160,52 +338,136 @@ const getCategoryStyle = (categoryIdOrName) => {
     </div>
 
     <!-- 2 columns layout -->
-    <div class="dashboard-content">
-      <!-- Left Column -->
-      <div class="dashboard-column left-column">
-        <h2 class="column-title">
-          <span>Aujourd'hui</span>
-          <span class="column-date">{{ formattedToday }}</span>
-        </h2>
-        <div class="today-events-container">
-          <div v-if="isLoadingEvents" class="loading-state">
-            <span class="spinner"></span> Chargement de ton planning...
-          </div>
-          <div v-else-if="userEvents.length === 0" class="empty-state">
-            <span class="empty-icon">☕</span>
-            <p>Aucun événement prévu aujourd'hui. Profite de ton temps libre !</p>
-          </div>
-          <div v-else class="today-events-list">
-            <div
-              v-for="event in userEvents"
-              :key="event.id"
-              class="dashboard-event-card"
-              :style="getCategoryStyle(event.category)"
-            >
-              <div class="event-time">
-                <span v-if="event.all_day" class="time-badge">Toute la journée</span>
-                <span v-else class="time-badge">{{ event.time }}</span>
-              </div>
-              <div class="event-details">
-                <div class="event-title-row">
-                  <span class="event-icon">{{ getCategoryIcon(event.category) }}</span>
-                  <h4 class="event-title">{{ event.title }}</h4>
+    <div class="dashboard-carousel-wrapper">
+      <!-- Navigation Arrows for mobile (outside the sliding track) -->
+      <button
+        class="carousel-arrow prev-arrow"
+        v-if="isMobileCarousel && activePage > 0"
+        @click="goToSlide(activePage - 1)"
+        aria-label="Colonne précédente"
+      >
+        ‹
+      </button>
+      <button
+        class="carousel-arrow next-arrow"
+        v-if="isMobileCarousel && activePage < lastSlideIndex"
+        @click="goToSlide(activePage + 1)"
+        aria-label="Colonne suivante"
+      >
+        ›
+      </button>
+
+      <div
+        ref="carouselViewport"
+        class="dashboard-content"
+        @scroll.passive="onCarouselScroll"
+      >
+        <div ref="carouselTrack" class="carousel-track">
+        <!-- Left Column -->
+        <div class="dashboard-column left-column">
+          <h2 class="column-title">
+            <span>Aujourd'hui</span>
+            <span class="column-date">{{ formattedToday }}</span>
+          </h2>
+          <div class="today-events-container">
+            <div v-if="isLoadingEvents" class="loading-state">
+              <span class="spinner"></span> Chargement de ton planning...
+            </div>
+            <div v-else-if="userEvents.length === 0" class="empty-state">
+              <span class="empty-icon">☕</span>
+              <p>Aucun événement prévu aujourd'hui. Profite de ton temps libre !</p>
+            </div>
+            <div v-else class="today-events-list">
+              <div
+                v-for="event in userEvents"
+                :key="event.id"
+                class="dashboard-event-card"
+                :style="getCategoryStyle(event.category)"
+              >
+                <div class="event-time">
+                  <span v-if="event.all_day" class="time-badge">Toute la journée</span>
+                  <span v-else class="time-badge">{{ event.time }}</span>
                 </div>
-                <p v-if="event.detail" class="event-description">{{ event.detail }}</p>
-                <div v-if="event.category" class="event-tags">
-                  <span class="event-category-tag">
-                    {{ getCategoryName(event.category) }}
-                  </span>
+                <div class="event-details">
+                  <div class="event-title-row">
+                    <span class="event-icon">{{ getCategoryIcon(event.category) }}</span>
+                    <h4 class="event-title">{{ event.title }}</h4>
+                  </div>
+                  <p v-if="event.detail" class="event-description">{{ event.detail }}</p>
+                  <div v-if="event.category" class="event-tags">
+                    <span class="event-category-tag">
+                      {{ getCategoryName(event.category) }}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+
+        <!-- Right Column -->
+        <div class="dashboard-column right-column">
+          <div class="mini-calendar-wrapper">
+            <div class="mini-calendar-header">
+              <button class="calendar-nav-btn" @click="prevMonth">&lt;</button>
+              <h3 class="calendar-month-title">{{ calendarMonthName }} {{ calendarYear }}</h3>
+              <button class="calendar-nav-btn" @click="nextMonth">&gt;</button>
+            </div>
+            
+            <div class="mini-calendar-grid">
+              <!-- Days of week headers -->
+              <div 
+                v-for="day in weekDayNames" 
+                :key="'header-'+day" 
+                class="calendar-weekday"
+              >
+                {{ day }}
+              </div>
+              
+              <!-- Calendar days -->
+              <div 
+                v-for="(dayObj, index) in calendarDays" 
+                :key="'day-'+index"
+                class="calendar-day"
+                :class="{
+                  'is-current-month': dayObj.isCurrentMonth,
+                  'is-today': dayObj.isToday
+                }"
+              >
+                {{ dayObj.date }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Legend -->
+          <div v-if="userCategories.length > 0" class="dashboard-legend">
+            <h4 class="legend-title">Mes Activités</h4>
+            <div class="legend-items">
+              <div v-for="cat in userCategories.slice(0, 5)" :key="cat.id" class="legend-item">
+                <span class="legend-color" :style="{ background: cat.color }"></span>
+                <span class="legend-label">{{ cat.name }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        </div>
       </div>
 
-      <!-- Right Column -->
-      <div class="dashboard-column right-column">
-        <!-- Currently empty as requested -->
+      <div
+        v-if="isMobileCarousel && slideCount > 1"
+        class="carousel-indicators"
+        role="tablist"
+        aria-label="Navigation entre les colonnes"
+      >
+        <span
+          v-for="index in slideCount"
+          :key="index - 1"
+          class="indicator-dot"
+          role="tab"
+          :aria-selected="activePage === index - 1"
+          :class="{ active: activePage === index - 1 }"
+          @click="goToSlide(index - 1)"
+        ></span>
       </div>
     </div>
   </div>
@@ -278,22 +540,28 @@ const getCategoryStyle = (categoryIdOrName) => {
   }
 }
 
-/* ─── Dashboard Columns ─── */
-.dashboard-content {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2rem;
+/* ─── Dashboard Columns & Carousel ─── */
+
+/* Wrapper handles arrows on mobile (relative positioning context) */
+.dashboard-carousel-wrapper {
+  position: relative;
   width: 100%;
   max-width: 1000px;
-  position: relative;
   z-index: 1;
   flex: 1;
 }
 
-@media (max-width: 768px) {
-  .dashboard-content {
-    grid-template-columns: 1fr;
-  }
+/* On desktop: the content is just the grid */
+.dashboard-content {
+  width: 100%;
+  max-width: 1000px;
+}
+
+.carousel-track {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  width: 100%;
 }
 
 .dashboard-column {
@@ -301,6 +569,158 @@ const getCategoryStyle = (categoryIdOrName) => {
   flex-direction: column;
   gap: 1.5rem;
 }
+
+/* Hidden by default on desktop */
+.carousel-arrow {
+  display: none;
+}
+
+.carousel-indicators {
+  display: none;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  z-index: 2;
+  width: 100%;
+}
+
+/* Mobile responsive carousel */
+@media (max-width: 768px) {
+  .dashboard-wrapper {
+    overflow-x: hidden;
+    padding: 1rem 0.75rem;
+    gap: 1.25rem;
+  }
+
+  .dashboard-carousel-wrapper {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* Viewport: horizontal scroll with snap (one column at a time) */
+  .dashboard-content {
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    width: 100%;
+    max-width: 100%;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    touch-action: pan-x pan-y;
+  }
+
+  .dashboard-content::-webkit-scrollbar {
+    display: none;
+  }
+
+  .carousel-track {
+    display: flex;
+    grid-template-columns: none;
+    gap: 0;
+    flex: 0 0 auto;
+    min-width: 100%;
+  }
+
+  .dashboard-column {
+    flex: 0 0 100%;
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 0;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+
+  .column-title {
+    flex-wrap: wrap;
+  }
+
+  .today-events-container,
+  .mini-calendar-wrapper,
+  .dashboard-legend {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .dashboard-event-card {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  /* Indicators: centered below the carousel viewport */
+  .carousel-indicators {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding-top: 1rem;
+    margin-top: 0;
+  }
+
+  /* Arrows sit outside the overflow:hidden area, floating on the sides */
+  .carousel-arrow {
+    display: flex;
+    position: absolute;
+    top: 40%;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(213, 181, 234, 0.3);
+    color: #ad81be;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 20;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: all 0.2s ease;
+    /* Arrows sit outside the content area, not on top of it */
+    pointer-events: all;
+  }
+
+  .carousel-arrow:active {
+    background: rgba(213, 181, 234, 0.35);
+    transform: translateY(-50%) scale(0.95);
+  }
+
+  .prev-arrow { left: 4px; }
+  .next-arrow { right: 4px; }
+
+  .indicator-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(213, 181, 234, 0.3);
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+
+  .indicator-dot.active {
+    background: #ad81be;
+    width: 20px;
+    border-radius: 4px;
+  }
+}
+
+@media (max-width: 768px) and (prefers-color-scheme: dark) {
+  .carousel-arrow {
+    background: rgba(25, 20, 35, 0.75);
+    border-color: rgba(213, 181, 234, 0.2);
+  }
+}
+
 
 .column-title {
   font-size: 1.4rem;
@@ -463,5 +883,173 @@ const getCategoryStyle = (categoryIdOrName) => {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   opacity: 0.75;
+}
+
+/* ─── Mini Calendar ─── */
+.mini-calendar-wrapper {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(213, 181, 234, 0.25);
+  border-radius: 20px;
+  padding: 1.25rem;
+  box-shadow: 0 8px 32px rgba(173, 129, 190, 0.08);
+  max-width: 320px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+@media (prefers-color-scheme: dark) {
+  .mini-calendar-wrapper {
+    background: rgba(25, 20, 35, 0.65);
+    border-color: rgba(213, 181, 234, 0.15);
+  }
+}
+
+.mini-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.calendar-month-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #2c3e50;
+  margin: 0;
+  text-transform: capitalize;
+}
+
+@media (prefers-color-scheme: dark) {
+  .calendar-month-title { color: #f0e8f8; }
+}
+
+.calendar-nav-btn {
+  background: rgba(213, 181, 234, 0.2);
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #ad81be;
+  font-weight: bold;
+  font-size: 1.1rem;
+  transition: all 0.2s ease;
+}
+
+.calendar-nav-btn:hover {
+  background: rgba(213, 181, 234, 0.4);
+  transform: scale(1.05);
+}
+
+.mini-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.4rem;
+}
+
+.calendar-weekday {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #a0aab5;
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+.calendar-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-radius: 50%;
+  color: #a0aab5;
+  cursor: default;
+  transition: all 0.2s ease;
+}
+
+.calendar-day.is-current-month {
+  color: #4f5f6f;
+}
+
+@media (prefers-color-scheme: dark) {
+  .calendar-day.is-current-month { color: #c5b8d2; }
+}
+
+.calendar-day.is-today {
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  color: white !important;
+  font-weight: 800;
+  box-shadow: 0 4px 10px rgba(173, 129, 190, 0.3);
+  transform: scale(1.05);
+}
+
+/* ─── Dashboard Legend ─── */
+.dashboard-legend {
+  margin-top: 1rem;
+  padding: 1.25rem;
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(213, 181, 234, 0.15);
+  border-radius: 20px;
+  max-width: 320px;
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (prefers-color-scheme: dark) {
+  .dashboard-legend {
+    background: rgba(25, 20, 35, 0.4);
+    border-color: rgba(213, 181, 234, 0.1);
+  }
+}
+
+.legend-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #5d6d7e;
+  margin-bottom: 0.75rem;
+  text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  .legend-title { color: #aeb6bf; }
+}
+
+.legend-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.legend-color {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.legend-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #4f5f6f;
+}
+
+@media (prefers-color-scheme: dark) {
+  .legend-label { color: #c5b8d2; }
 }
 </style>
