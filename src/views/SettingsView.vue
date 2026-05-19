@@ -2,7 +2,11 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
-import { listDailyReminders, saveDailyReminders } from '../services/dailyReminders.js'
+import {
+  listDailyReminders,
+  saveDailyReminders,
+  deleteDailyReminder,
+} from '../services/dailyReminders.js'
 import {
   notificationsActives,
   notificationsSupportees,
@@ -21,6 +25,7 @@ const saveMessage = ref('')
 const saveError = ref('')
 const isTestingPush = ref(false)
 const isRunningCron = ref(false)
+const deletingIndex = ref(null)
 
 function newEmptyReminder() {
   return {
@@ -50,8 +55,28 @@ const addReminder = () => {
   reminders.value.push(newEmptyReminder())
 }
 
-const removeReminder = (index) => {
-  reminders.value.splice(index, 1)
+const removeReminder = async (index) => {
+  const reminder = reminders.value[index]
+  if (!reminder || !userId.value) return
+
+  deletingIndex.value = index
+  saveError.value = ''
+  saveMessage.value = ''
+
+  try {
+    if (reminder.id) {
+      await deleteDailyReminder(supabase, userId.value, reminder.id)
+    }
+    reminders.value.splice(index, 1)
+    saveMessage.value = 'Rappel supprimé.'
+    setTimeout(() => {
+      saveMessage.value = ''
+    }, 2500)
+  } catch (err) {
+    saveError.value = err.message || 'Impossible de supprimer ce rappel.'
+  } finally {
+    deletingIndex.value = null
+  }
 }
 
 const onSave = async () => {
@@ -203,9 +228,10 @@ onUnmounted(() => {
             type="button"
             class="btn-remove"
             title="Supprimer"
+            :disabled="deletingIndex === index"
             @click="removeReminder(index)"
           >
-            Supprimer
+            {{ deletingIndex === index ? 'Suppression…' : 'Supprimer' }}
           </button>
         </article>
       </div>

@@ -18,6 +18,17 @@ export async function listDailyReminders(supabase, userId) {
   return data ?? []
 }
 
+/** Supprime un rappel en base (immédiat). */
+export async function deleteDailyReminder(supabase, userId, reminderId) {
+  const { error } = await supabase
+    .from('daily_reminders')
+    .delete()
+    .eq('id', reminderId)
+    .eq('user_id', userId)
+
+  if (error) throw error
+}
+
 /**
  * Enregistre la liste complète des rappels (ajouts, modifications, suppressions).
  * Une liste vide supprime tous les rappels de l'utilisateur.
