@@ -1826,8 +1826,12 @@ const getPositionedEventsForDay = (dayIdx) => {
   width: max-content !important;
   min-width: 100% !important;
   max-width: 280px;
-  height: auto !important;
+  
+  /* We do NOT override height. It keeps the inline style height (e.g. 130px).
+     We add min-height: max-content so it CAN grow beyond the inline height if the content is taller, 
+     but it will NEVER shrink below the inline height! */
   min-height: max-content !important;
+
   padding-right: 1.6rem !important;
   z-index: 50;
   overflow: visible;
