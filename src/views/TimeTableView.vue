@@ -2,6 +2,11 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
+import { TIMETABLE_REMINDER_MINUTES } from '../config/notifications.js'
+import {
+  notificationsActives,
+  planifierNotificationActivite,
+} from '../services/notifications.js'
 
 // State
 const currentDate = ref(new Date())
@@ -548,6 +553,17 @@ const handleAddEvent = async () => {
     // Insert locally to update UI immediately
     if (data && data.length > 0) {
       userEvents.value.push(data[0])
+    }
+
+    if (notificationsActives() && !newEventAllDay.value) {
+      await planifierNotificationActivite(
+        user.id,
+        {
+          nom: newEventTitle.value,
+          heure: `${startDStr}T${newEventStartTime.value}:00`,
+        },
+        TIMETABLE_REMINDER_MINUTES,
+      )
     }
 
     // Reset form & Close modal

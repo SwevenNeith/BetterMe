@@ -12,7 +12,8 @@ app.use(router)
 
 app.mount('#app')
 
+import { ensureServiceWorker } from './services/notifications.js'
+
 if ('serviceWorker' in navigator) {
-  const base = import.meta.env.BASE_URL || '/';
-  navigator.serviceWorker.register(`${base}sw.js`);
+  ensureServiceWorker().catch((err) => console.warn('Service Worker:', err))
 }

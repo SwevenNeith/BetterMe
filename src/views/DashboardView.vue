@@ -3,7 +3,6 @@
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { useRouter } from 'vue-router'
-
 const router = useRouter()
 const userName = ref('')
 

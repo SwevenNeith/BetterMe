@@ -1,12 +1,14 @@
 <script setup>
 import { RouterView } from 'vue-router';
 import AppSidebar from '../components/Sidebar.vue';
+import NotificationPrompt from '../components/NotificationPrompt.vue';
 </script>
 
 <template>
   <div class="app-layout">
     <AppSidebar />
     <main class="app-content">
+      <NotificationPrompt />
       <RouterView />
     </main>
   </div>
