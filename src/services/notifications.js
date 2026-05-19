@@ -1,4 +1,4 @@
-import { supabaseUrl, supabaseAnonKey } from '../lib/supabase.js'
+import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase.js'
 
 // ============================================
 // CONFIGURATION TECHNIQUE (VAPID, Edge Function)
@@ -8,10 +8,61 @@ const VAPID_PUBLIC_KEY =
   'BBhVBoaApvqEOSFlmunhMwXCeZXr-k2HNi8faBumTBtws8Kq8r8EnPDP2bOMZ_s_tNOpABLdCHwPRn6vIWjDouc'
 
 const EDGE_FUNCTION_URL = `${supabaseUrl}/functions/v1/send-notification`
+const APP_TIMEZONE = 'Europe/Paris'
 
 // ============================================
 // HELPERS
 // ============================================
+
+/** Composantes calendrier/heure pour un instant donné à Paris */
+function getParisDateTimeParts(ms) {
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: APP_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+  const parts = Object.fromEntries(
+    formatter.formatToParts(new Date(ms)).map((p) => [p.type, p.value]),
+  )
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+  }
+}
+
+/**
+ * Date YYYY-MM-DD + heure HH:mm interprétées en Europe/Paris → Date UTC.
+ * Aligné sur le cron serveur (fuseau Paris).
+ */
+export function dateTimeParisToUtc(dateStr, timeStr) {
+  const [targetYear, targetMonth, targetDay] = dateStr.split('-').map(Number)
+  const [targetHour, targetMinute] = String(timeStr || '00:00')
+    .slice(0, 5)
+    .split(':')
+    .map(Number)
+
+  let utcMs = Date.UTC(targetYear, targetMonth - 1, targetDay, targetHour, targetMinute)
+
+  for (let i = 0; i < 8; i++) {
+    const p = getParisDateTimeParts(utcMs)
+    const dayDiff =
+      (targetYear - p.year) * 372 +
+      (targetMonth - p.month) * 31 +
+      (targetDay - p.day)
+    const minuteDiff = dayDiff * 24 * 60 + (targetHour - p.hour) * 60 + (targetMinute - p.minute)
+    if (minuteDiff === 0) break
+    utcMs += minuteDiff * 60 * 1000
+  }
+
+  return new Date(utcMs)
+}
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -210,18 +261,75 @@ export async function envoyerNotificationManuelle(userId, title, body) {
   })
 }
 
-/** Rappel X minutes avant une activité EDT */
-export async function planifierNotificationActivite(userId, activite, minutesAvant = 15) {
-  const heureActivite = new Date(activite.heure)
+/** Libellé humain pour un délai heures + minutes avant l'événement */
+export function formatDelaiAvantEvenement(heures, minutes) {
+  const h = Math.min(23, Math.max(0, Number(heures) || 0))
+  const m = Math.min(59, Math.max(0, Number(minutes) || 0))
+  if (h > 0 && m > 0) return `${h} h ${m} min`
+  if (h > 0) return `${h} h`
+  return `${m} min`
+}
+
+/** Décompose un délai stocké en minutes (ex. 60 → 1 h 0 min) */
+export function decomposerDelaiEnMinutes(totalMinutes) {
+  const total = Math.max(0, Number(totalMinutes) || 0)
+  return {
+    heures: Math.floor(total / 60),
+    minutes: total % 60,
+  }
+}
+
+/** Libellé à partir du total en minutes (ex. 60 → "1 h") */
+export function formatDelaiDepuisMinutes(totalMinutes) {
+  const { heures, minutes } = decomposerDelaiEnMinutes(totalMinutes)
+  return formatDelaiAvantEvenement(heures, minutes)
+}
+
+/**
+ * Rappel avant une activité EDT.
+ * - dateStart + timeStart : heure de début en Europe/Paris
+ * - minutesAvant : délai total (heures×60 + minutes) stocké dans reminder_time
+ */
+export async function planifierNotificationActivite(userId, activite) {
+  const minutesAvant = activite.minutesAvant ?? 15
+  if (minutesAvant <= 0) return false
+
+  const heureActivite =
+    activite.dateStart && activite.timeStart
+      ? dateTimeParisToUtc(activite.dateStart, activite.timeStart)
+      : new Date(activite.heure)
+
   const heureNotification = new Date(heureActivite.getTime() - minutesAvant * 60 * 1000)
+
+  if (heureNotification.getTime() >= heureActivite.getTime()) {
+    console.warn('planifierNotificationActivite: rappel après le début de l’événement, ignoré')
+    return false
+  }
+
+  const delaiLabel =
+    activite.delaiLabel ?? formatDelaiDepuisMinutes(minutesAvant)
 
   return callEdgeFunction({
     type: 'activite',
     userId,
+    eventId: activite.eventId,
     title: 'BetterMe - Rappel',
-    body: `Dans ${minutesAvant} minutes : ${activite.nom}`,
+    body: `Dans ${delaiLabel} : ${activite.nom}`,
     scheduledAt: heureNotification.toISOString(),
   })
+}
+
+/** Supprime les rappels planifiés non envoyés liés à un événement */
+export async function supprimerRappelsEvenement(eventId) {
+  const { error } = await supabase
+    .from('scheduled_notifications')
+    .delete()
+    .eq('event_id', eventId)
+    .eq('sent', false)
+
+  if (error) {
+    console.error('supprimerRappelsEvenement:', error)
+  }
 }
 
 /** Timer : notification à la fin */

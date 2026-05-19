@@ -112,8 +112,10 @@ async function runCronJob() {
 
   for (const notif of notificationsAEnvoyer ?? []) {
     const { sent } = await sendPushToUser(notif.user_id, notif.title, notif.body)
-    if (sent > 0) scheduledSent++
-    await supabase.from('scheduled_notifications').update({ sent: true }).eq('id', notif.id)
+    if (sent > 0) {
+      scheduledSent++
+      await supabase.from('scheduled_notifications').delete().eq('id', notif.id)
+    }
   }
 
   const { data: allRappels, error: rappelErr } = await supabase
@@ -158,7 +160,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { type, userId, title, body, scheduledAt, heureRappel } = await req.json()
+    const { type, userId, title, body, scheduledAt, heureRappel, eventId } = await req.json()
 
     if (type === 'manuel') {
       const result = await sendPushToUser(userId, title, body)
@@ -175,13 +177,17 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: true, ...result })
     }
 
-    if (type === 'activite' || type === 'timer') {
-      await supabase.from('scheduled_notifications').insert({
+    if (type === 'activite' || type === 'timer' || type === 'ponctuel') {
+      const row: Record<string, unknown> = {
         user_id: userId,
         title,
         body,
         scheduled_at: scheduledAt,
-      })
+      }
+      if (eventId) {
+        row.event_id = eventId
+      }
+      await supabase.from('scheduled_notifications').insert(row)
       return jsonResponse({ success: true })
     }
 

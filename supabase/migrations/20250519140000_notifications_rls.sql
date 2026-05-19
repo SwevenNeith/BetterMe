@@ -43,6 +43,13 @@ create policy "scheduled_notifications_select_authenticated"
   to authenticated
   using (auth.uid() = user_id);
 
+drop policy if exists "scheduled_notifications_delete_authenticated" on public.scheduled_notifications;
+
+create policy "scheduled_notifications_delete_authenticated"
+  on public.scheduled_notifications for delete
+  to authenticated
+  using (auth.uid() = user_id);
+
 -- daily_reminders
 alter table public.daily_reminders enable row level security;
 

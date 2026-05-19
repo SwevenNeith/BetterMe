@@ -8,6 +8,13 @@ import {
   deleteDailyReminder,
 } from '../services/dailyReminders.js'
 import {
+  loadOneTimeRemindersGrouped,
+  createOneTimeReminder,
+  deleteOneTimeReminder,
+  getLocalTodayISO,
+  formatScheduledAtLocal,
+} from '../services/scheduledReminders.js'
+import {
   notificationsActives,
   notificationsSupportees,
   activerNotificationsUtilisateur,
@@ -16,6 +23,9 @@ import {
 } from '../services/notifications.js'
 
 const router = useRouter()
+
+const ONE_TIME_REFRESH_MS = 30_000
+let oneTimeRefreshIntervalId = null
 
 const isLoading = ref(true)
 const isSaving = ref(false)
@@ -26,6 +36,21 @@ const saveError = ref('')
 const isTestingPush = ref(false)
 const isRunningCron = ref(false)
 const deletingIndex = ref(null)
+
+const oneTimeUpcoming = ref([])
+const oneTimeFailed = ref([])
+const isLoadingOneTime = ref(true)
+const isPlanningOneTime = ref(false)
+const deletingOneTimeId = ref(null)
+const oneTimeMessage = ref('')
+const oneTimeError = ref('')
+const localToday = getLocalTodayISO()
+const oneTimeForm = ref({
+  title: 'BetterMe',
+  body: '',
+  scheduled_date: localToday,
+  scheduled_time: '12:00',
+})
 
 function newEmptyReminder() {
   return {
@@ -108,6 +133,7 @@ const onActiverNotifications = async () => {
 
 const onNotificationsGranted = () => {
   loadReminders()
+  loadOneTimeReminders()
 }
 
 const onTestPush = async () => {
@@ -124,13 +150,88 @@ const onTestPush = async () => {
   }, 4000)
 }
 
+const loadOneTimeReminders = async () => {
+  if (!userId.value) return
+  isLoadingOneTime.value = true
+  oneTimeError.value = ''
+  try {
+    const { upcoming, failed } = await loadOneTimeRemindersGrouped(supabase, userId.value)
+    oneTimeUpcoming.value = upcoming
+    oneTimeFailed.value = failed
+  } catch (err) {
+    console.error(err)
+    oneTimeError.value = err.message || 'Impossible de charger les rappels ponctuels.'
+  } finally {
+    isLoadingOneTime.value = false
+  }
+}
+
+const resetOneTimeForm = () => {
+  oneTimeForm.value = {
+    title: 'BetterMe',
+    body: '',
+    scheduled_date: getLocalTodayISO(),
+    scheduled_time: '12:00',
+  }
+}
+
+const onPlanOneTimeReminder = async () => {
+  if (!userId.value) return
+  isPlanningOneTime.value = true
+  oneTimeMessage.value = ''
+  oneTimeError.value = ''
+
+  try {
+    const created = await createOneTimeReminder(supabase, userId.value, {
+      title: oneTimeForm.value.title,
+      body: oneTimeForm.value.body,
+      scheduledDate: oneTimeForm.value.scheduled_date,
+      scheduledTime: oneTimeForm.value.scheduled_time,
+    })
+    await loadOneTimeReminders()
+    resetOneTimeForm()
+    oneTimeMessage.value = `Rappel planifié pour le ${formatScheduledAtLocal(created.scheduled_at)}.`
+    setTimeout(() => {
+      oneTimeMessage.value = ''
+    }, 3000)
+  } catch (err) {
+    oneTimeError.value = err.message || 'Impossible de planifier ce rappel.'
+  } finally {
+    isPlanningOneTime.value = false
+  }
+}
+
+const onRemoveOneTimeReminder = async (reminderId) => {
+  if (!userId.value) return
+  deletingOneTimeId.value = reminderId
+  oneTimeError.value = ''
+  oneTimeMessage.value = ''
+
+  try {
+    await deleteOneTimeReminder(supabase, userId.value, reminderId)
+    oneTimeUpcoming.value = oneTimeUpcoming.value.filter((r) => r.id !== reminderId)
+    oneTimeFailed.value = oneTimeFailed.value.filter((r) => r.id !== reminderId)
+    oneTimeMessage.value = 'Rappel ponctuel annulé.'
+    setTimeout(() => {
+      oneTimeMessage.value = ''
+    }, 2500)
+  } catch (err) {
+    oneTimeError.value = err.message || 'Impossible d’annuler ce rappel.'
+  } finally {
+    deletingOneTimeId.value = null
+  }
+}
+
 const onRunCronNow = async () => {
   isRunningCron.value = true
   saveError.value = ''
   const ok = await declencherCronNotifications()
   isRunningCron.value = false
+  if (ok) {
+    await loadOneTimeReminders()
+  }
   saveMessage.value = ok
-    ? 'Vérification des rappels effectuée (heure actuelle à Paris).'
+    ? 'Vérification des rappels effectuée.'
     : 'Échec — redéploie send-notification et configure le cron Supabase.'
   setTimeout(() => {
     saveMessage.value = ''
@@ -146,12 +247,17 @@ onMounted(async () => {
     return
   }
   userId.value = user.id
-  await loadReminders()
+  await Promise.all([loadReminders(), loadOneTimeReminders()])
   window.addEventListener('betterme-notifications-granted', onNotificationsGranted)
+  oneTimeRefreshIntervalId = window.setInterval(loadOneTimeReminders, ONE_TIME_REFRESH_MS)
 })
 
 onUnmounted(() => {
   window.removeEventListener('betterme-notifications-granted', onNotificationsGranted)
+  if (oneTimeRefreshIntervalId) {
+    clearInterval(oneTimeRefreshIntervalId)
+    oneTimeRefreshIntervalId = null
+  }
 })
 </script>
 
@@ -159,7 +265,9 @@ onUnmounted(() => {
   <div class="settings-wrapper">
     <header class="settings-header">
       <h1 class="settings-title">Réglages</h1>
-      <p class="settings-subtitle">Gère tes rappels quotidiens et tes notifications.</p>
+      <p class="settings-subtitle">
+        Gère tes rappels quotidiens, tes rappels ponctuels et tes notifications.
+      </p>
     </header>
 
     <section class="settings-card">
@@ -252,6 +360,151 @@ onUnmounted(() => {
           {{ isSaving ? 'Enregistrement…' : 'Enregistrer' }}
         </button>
       </div>
+    </section>
+
+    <section class="settings-card settings-card--spaced">
+      <div class="card-head">
+        <h2>Rappels ponctuels</h2>
+        <p>
+          Une notification unique à la date et l’heure de ton appareil. Envoyée automatiquement si
+          l’app est ouverte ou via le cron Supabase.
+        </p>
+      </div>
+
+      <div v-if="!notificationsSupportees()" class="settings-alert settings-alert--warn">
+        Les rappels ponctuels nécessitent les notifications push sur cet appareil.
+      </div>
+
+      <div v-else-if="!notificationsActives()" class="settings-alert">
+        <p>Autorise les notifications pour recevoir tes rappels planifiés.</p>
+        <button type="button" class="btn btn--secondary" @click="onActiverNotifications">
+          Autoriser les notifications
+        </button>
+      </div>
+
+      <form class="one-time-form" @submit.prevent="onPlanOneTimeReminder">
+        <div class="reminder-fields">
+          <label class="field field--grow">
+            <span>Titre</span>
+            <input
+              v-model="oneTimeForm.title"
+              type="text"
+              maxlength="80"
+              required
+              placeholder="Ex. Rappel important"
+            />
+          </label>
+        </div>
+        <label class="field field--full">
+          <span>Message</span>
+          <input
+            v-model="oneTimeForm.body"
+            type="text"
+            maxlength="200"
+            placeholder="Texte de la notification"
+          />
+        </label>
+        <div class="reminder-fields">
+          <label class="field">
+            <span>Date d’envoi</span>
+            <input
+              v-model="oneTimeForm.scheduled_date"
+              type="date"
+              required
+              :min="localToday"
+            />
+          </label>
+          <label class="field">
+            <span>Heure</span>
+            <input v-model="oneTimeForm.scheduled_time" type="time" required />
+          </label>
+        </div>
+        <div class="settings-actions settings-actions--form">
+          <button type="submit" class="btn btn--primary" :disabled="isPlanningOneTime">
+            {{ isPlanningOneTime ? 'Planification…' : 'Planifier ce rappel' }}
+          </button>
+        </div>
+      </form>
+
+      <div v-if="isLoadingOneTime" class="settings-loading">Chargement…</div>
+
+      <template v-else>
+        <div v-if="oneTimeFailed.length > 0" class="one-time-failed-block">
+          <h3 class="one-time-subheading one-time-subheading--error">Échecs d’envoi</h3>
+          <div class="reminders-list one-time-list">
+            <article
+              v-for="item in oneTimeFailed"
+              :key="`failed-${item.id}`"
+              class="reminder-row reminder-row--failed"
+            >
+              <div class="one-time-summary">
+                <strong class="one-time-title">{{ item.title }}</strong>
+                <p v-if="item.body" class="one-time-body">{{ item.body }}</p>
+                <time class="one-time-when" :datetime="item.scheduled_at">
+                  Prévu le {{ formatScheduledAtLocal(item.scheduled_at) }}
+                </time>
+                <p class="one-time-failed-msg">
+                  L’heure d’envoi est passée et la notification n’a pas été reçue. Vérifie que les
+                  notifications sont autorisées et qu’un appareil est abonné, puis utilise « Vérifier
+                  les rappels » ou supprime ce rappel.
+                </p>
+              </div>
+              <button
+                type="button"
+                class="btn-remove"
+                title="Supprimer ce rappel en échec"
+                :disabled="deletingOneTimeId === item.id"
+                @click="onRemoveOneTimeReminder(item.id)"
+              >
+                {{ deletingOneTimeId === item.id ? 'Suppression…' : 'Supprimer' }}
+              </button>
+            </article>
+          </div>
+        </div>
+
+        <h3
+          v-if="oneTimeUpcoming.length > 0"
+          class="one-time-subheading"
+          :class="{ 'one-time-subheading--spaced': oneTimeFailed.length > 0 }"
+        >
+          À venir
+        </h3>
+
+        <p
+          v-if="oneTimeUpcoming.length === 0 && oneTimeFailed.length === 0"
+          class="settings-empty"
+        >
+          Aucun rappel ponctuel planifié.
+        </p>
+
+        <div v-else-if="oneTimeUpcoming.length > 0" class="reminders-list one-time-list">
+          <article
+            v-for="item in oneTimeUpcoming"
+            :key="item.id"
+            class="reminder-row reminder-row--readonly"
+          >
+            <div class="one-time-summary">
+              <strong class="one-time-title">{{ item.title }}</strong>
+              <p v-if="item.body" class="one-time-body">{{ item.body }}</p>
+              <time class="one-time-when" :datetime="item.scheduled_at">
+                {{ formatScheduledAtLocal(item.scheduled_at) }}
+              </time>
+            </div>
+            <button
+              type="button"
+              class="btn-remove"
+              title="Annuler ce rappel"
+              :disabled="deletingOneTimeId === item.id"
+              @click="onRemoveOneTimeReminder(item.id)"
+            >
+              {{ deletingOneTimeId === item.id ? 'Annulation…' : 'Annuler' }}
+            </button>
+          </article>
+        </div>
+      </template>
+
+      <p v-if="oneTimeError" class="settings-feedback settings-feedback--error">{{ oneTimeError }}</p>
+      <p v-if="oneTimeMessage" class="settings-feedback settings-feedback--ok">{{ oneTimeMessage }}</p>
     </section>
   </div>
 </template>
@@ -526,5 +779,116 @@ onUnmounted(() => {
 
 .settings-feedback--ok {
   color: #27ae60;
+}
+
+.settings-card--spaced {
+  margin-top: 1.5rem;
+}
+
+.one-time-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.settings-actions--form {
+  margin-top: 0.25rem;
+  justify-content: flex-start;
+}
+
+.one-time-list {
+  margin-top: 0.5rem;
+}
+
+.reminder-row--readonly {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.one-time-summary {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.one-time-title {
+  font-size: 1rem;
+  color: #2c3e50;
+}
+
+.one-time-body {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #5d6d7e;
+  line-height: 1.4;
+}
+
+.one-time-when {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #ad81be;
+}
+
+@media (prefers-color-scheme: dark) {
+  .one-time-title {
+    color: #f0e8f8;
+  }
+  .one-time-body {
+    color: #adb5bd;
+  }
+}
+
+.one-time-subheading {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #ad81be;
+}
+
+.one-time-subheading--spaced {
+  margin-top: 1.25rem;
+}
+
+.one-time-subheading--error {
+  color: #c0392b;
+}
+
+@media (prefers-color-scheme: dark) {
+  .one-time-subheading--error {
+    color: #e74c3c;
+  }
+}
+
+.one-time-failed-block {
+  margin-bottom: 0.5rem;
+}
+
+.reminder-row--failed {
+  border-color: rgba(192, 57, 43, 0.35);
+  background: rgba(192, 57, 43, 0.06);
+}
+
+.one-time-failed-msg {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #c0392b;
+  line-height: 1.45;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reminder-row--failed {
+    background: rgba(231, 76, 60, 0.08);
+    border-color: rgba(231, 76, 60, 0.3);
+  }
+  .one-time-failed-msg {
+    color: #e74c3c;
+  }
 }
 </style>

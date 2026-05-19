@@ -2,10 +2,11 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
-import { TIMETABLE_REMINDER_MINUTES } from '../config/notifications.js'
 import {
   notificationsActives,
   planifierNotificationActivite,
+  formatDelaiAvantEvenement,
+  supprimerRappelsEvenement,
 } from '../services/notifications.js'
 
 // State
@@ -22,6 +23,21 @@ const newEventCategory = ref('Travail')
 const newEventDay = ref(new Date().toISOString().split('T')[0])
 const newEventDateEnd = ref('')
 const newEventAllDay = ref(false)
+const newEventReminderEnabled = ref(false)
+const newEventReminderHours = ref(0)
+const newEventReminderMinutes = ref(15)
+
+const resetReminderFields = () => {
+  newEventReminderEnabled.value = false
+  newEventReminderHours.value = 0
+  newEventReminderMinutes.value = 0
+}
+
+const getReminderMinutesBefore = () => {
+  const hours = Math.min(23, Math.max(0, Number(newEventReminderHours.value) || 0))
+  const minutes = Math.min(59, Math.max(0, Number(newEventReminderMinutes.value) || 0))
+  return hours * 60 + minutes
+}
 
 const openModalWithDefaultDate = () => {
   if (weekDays.value && weekDays.value[selectedDayIndex.value]) {
@@ -30,6 +46,7 @@ const openModalWithDefaultDate = () => {
   newEventDateEnd.value = ''
   newEventAllDay.value = false
   newEventDetail.value = ''
+  resetReminderFields()
   isModalOpen.value = true
 }
 
@@ -71,6 +88,7 @@ const openModalWithHobby = (hobbyTitle) => {
   newEventDateEnd.value = ''
   newEventAllDay.value = false
   newEventDetail.value = ''
+  resetReminderFields()
   isModalOpen.value = true
 }
 
@@ -100,9 +118,22 @@ const handleDrop = (event, dayIdx, startHour) => {
   newEventStartTime.value = startStr
   newEventEndTime.value = endStr
   newEventDetail.value = ''
+  resetReminderFields()
 
   isModalOpen.value = true
 }
+
+watch(newEventAllDay, (allDay) => {
+  if (allDay) {
+    newEventReminderEnabled.value = false
+  }
+})
+
+watch(newEventReminderEnabled, (enabled) => {
+  if (enabled && getReminderMinutesBefore() === 0) {
+    newEventReminderMinutes.value = 15
+  }
+})
 
 // Helper: Get ISO Week Number
 const getWeekNumber = (date) => {
@@ -465,6 +496,13 @@ const handleAddEvent = async () => {
     }
   }
 
+  if (newEventReminderEnabled.value && !newEventAllDay.value) {
+    if (getReminderMinutesBefore() <= 0) {
+      alert('Indique un délai de rappel (au moins 1 minute) ou désactive le rappel.')
+      return
+    }
+  }
+
   try {
     const {
       data: { user },
@@ -534,6 +572,10 @@ const handleAddEvent = async () => {
       }
     }
 
+    const reminderActive =
+      newEventReminderEnabled.value && !newEventAllDay.value
+    const reminderMinutes = reminderActive ? getReminderMinutesBefore() : null
+
     const { data, error } = await supabase
       .from('timetable_events')
       .insert({
@@ -545,25 +587,33 @@ const handleAddEvent = async () => {
         time: newEventAllDay.value ? null : `${newEventStartTime.value} - ${newEventEndTime.value}`,
         category: existingCat ? existingCat.id : null,
         detail: newEventDetail.value,
+        reminder: reminderActive,
+        reminder_time: reminderActive ? reminderMinutes : null,
       })
       .select()
 
     if (error) throw error
 
+    const createdEvent = data?.[0]
+
     // Insert locally to update UI immediately
-    if (data && data.length > 0) {
-      userEvents.value.push(data[0])
+    if (createdEvent) {
+      userEvents.value.push(createdEvent)
     }
 
-    if (notificationsActives() && !newEventAllDay.value) {
-      await planifierNotificationActivite(
-        user.id,
-        {
-          nom: newEventTitle.value,
-          heure: `${startDStr}T${newEventStartTime.value}:00`,
-        },
-        TIMETABLE_REMINDER_MINUTES,
+    if (notificationsActives() && reminderActive && createdEvent) {
+      const delaiLabel = formatDelaiAvantEvenement(
+        newEventReminderHours.value,
+        newEventReminderMinutes.value,
       )
+      await planifierNotificationActivite(user.id, {
+        nom: newEventTitle.value,
+        dateStart: startDStr,
+        timeStart: newEventStartTime.value,
+        minutesAvant: reminderMinutes,
+        delaiLabel,
+        eventId: createdEvent.id,
+      })
     }
 
     // Reset form & Close modal
@@ -574,6 +624,7 @@ const handleAddEvent = async () => {
     newEventCategory.value = 'Travail'
     newEventDateEnd.value = ''
     newEventAllDay.value = false
+    resetReminderFields()
     isModalOpen.value = false
   } catch (err) {
     console.error('Error adding event:', err)
@@ -584,6 +635,8 @@ const handleAddEvent = async () => {
 // Remove event handler from Supabase
 const deleteEvent = async (eventId) => {
   try {
+    await supprimerRappelsEvenement(eventId)
+
     const { error } = await supabase.from('timetable_events').delete().eq('id', eventId)
 
     if (error) throw error
@@ -1128,6 +1181,50 @@ const getPositionedEventsForDay = (dayIdx) => {
                 type="time"
                 :required="!newEventAllDay"
               />
+            </div>
+          </div>
+
+          <div v-if="!newEventAllDay" class="form-group reminder-section">
+            <label class="all-day-toggle-label reminder-toggle-label">
+              <input
+                v-model="newEventReminderEnabled"
+                type="checkbox"
+                class="all-day-checkbox"
+              />
+              <span class="all-day-toggle-custom"></span>
+              <span>Rappel 🔔</span>
+            </label>
+
+            <div v-if="newEventReminderEnabled" class="reminder-offset">
+              <span class="reminder-offset-label">Me rappeler avant l'événement</span>
+              <div class="reminder-timer" role="group" aria-label="Délai du rappel">
+                <div class="reminder-timer-unit">
+                  <input
+                    v-model.number="newEventReminderHours"
+                    type="number"
+                    min="0"
+                    max="23"
+                    class="reminder-timer-input"
+                    aria-label="Heures"
+                  />
+                  <span class="reminder-timer-suffix">h</span>
+                </div>
+                <span class="reminder-timer-sep">:</span>
+                <div class="reminder-timer-unit">
+                  <input
+                    v-model.number="newEventReminderMinutes"
+                    type="number"
+                    min="0"
+                    max="59"
+                    class="reminder-timer-input"
+                    aria-label="Minutes"
+                  />
+                  <span class="reminder-timer-suffix">min</span>
+                </div>
+              </div>
+              <p v-if="!notificationsActives()" class="reminder-hint reminder-hint--warn">
+                Active les notifications dans Réglages pour recevoir ce rappel.
+              </p>
             </div>
           </div>
 
@@ -2233,6 +2330,125 @@ const getPositionedEventsForDay = (dayIdx) => {
 
 .all-day-checkbox:checked::before {
   transform: translateX(18px);
+}
+
+.reminder-section {
+  gap: 0.65rem;
+}
+
+.reminder-toggle-label {
+  margin-bottom: 0;
+}
+
+.reminder-offset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  background: rgba(213, 181, 234, 0.12);
+  border: 1px solid rgba(173, 129, 190, 0.25);
+}
+
+@media (prefers-color-scheme: dark) {
+  .reminder-offset {
+    background: rgba(173, 129, 190, 0.1);
+    border-color: rgba(213, 181, 234, 0.2);
+  }
+}
+
+.reminder-offset-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #6c757d;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reminder-offset-label {
+    color: #aeb6bf;
+  }
+}
+
+.reminder-timer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.reminder-timer-unit {
+  display: flex;
+  align-items: baseline;
+  gap: 0.2rem;
+}
+
+.reminder-timer-input {
+  width: 3.25rem;
+  padding: 0.45rem 0.35rem;
+  font-size: 1.35rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  border: 2px solid rgba(173, 129, 190, 0.35);
+  border-radius: 10px;
+  background: #fff;
+  color: #2c3e50;
+}
+
+.reminder-timer-input:focus {
+  outline: none;
+  border-color: #ad81be;
+  box-shadow: 0 0 0 3px rgba(173, 129, 190, 0.2);
+}
+
+@media (prefers-color-scheme: dark) {
+  .reminder-timer-input {
+    background: #2a2433;
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.3);
+  }
+}
+
+.reminder-timer-input::-webkit-outer-spin-button,
+.reminder-timer-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.reminder-timer-input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.reminder-timer-sep {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #ad81be;
+  line-height: 1;
+  padding: 0 0.15rem;
+}
+
+.reminder-timer-suffix {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #9b59b6;
+  text-transform: lowercase;
+}
+
+.reminder-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #6c757d;
+}
+
+.reminder-hint--warn {
+  color: #c0392b;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reminder-hint--warn {
+    color: #e74c3c;
+  }
 }
 
 .time-range-picker {
