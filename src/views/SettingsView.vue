@@ -7,6 +7,8 @@ import {
   notificationsActives,
   notificationsSupportees,
   activerNotificationsUtilisateur,
+  testerNotificationPush,
+  declencherCronNotifications,
 } from '../services/notifications.js'
 
 const router = useRouter()
@@ -17,6 +19,8 @@ const userId = ref(null)
 const reminders = ref([])
 const saveMessage = ref('')
 const saveError = ref('')
+const isTestingPush = ref(false)
+const isRunningCron = ref(false)
 
 function newEmptyReminder() {
   return {
@@ -81,6 +85,33 @@ const onNotificationsGranted = () => {
   loadReminders()
 }
 
+const onTestPush = async () => {
+  if (!userId.value) return
+  isTestingPush.value = true
+  saveError.value = ''
+  const ok = await testerNotificationPush(userId.value, 'BetterMe', 'Notification Test')
+  isTestingPush.value = false
+  saveMessage.value = ok
+    ? 'Notification test envoyée (vérifie tes appareils).'
+    : "Échec de l'envoi — vérifie push_subscriptions et le déploiement de l'Edge Function."
+  setTimeout(() => {
+    saveMessage.value = ''
+  }, 4000)
+}
+
+const onRunCronNow = async () => {
+  isRunningCron.value = true
+  saveError.value = ''
+  const ok = await declencherCronNotifications()
+  isRunningCron.value = false
+  saveMessage.value = ok
+    ? 'Vérification des rappels effectuée (heure actuelle à Paris).'
+    : 'Échec — redéploie send-notification et configure le cron Supabase.'
+  setTimeout(() => {
+    saveMessage.value = ''
+  }, 4000)
+}
+
 onMounted(async () => {
   const {
     data: { user },
@@ -120,6 +151,25 @@ onUnmounted(() => {
         <p>Active les notifications pour recevoir tes rappels.</p>
         <button type="button" class="btn btn--secondary" @click="onActiverNotifications">
           Autoriser les notifications
+        </button>
+      </div>
+
+      <div v-else class="settings-test-actions">
+        <button
+          type="button"
+          class="btn btn--secondary"
+          :disabled="isTestingPush"
+          @click="onTestPush"
+        >
+          {{ isTestingPush ? 'Envoi…' : 'Tester une notification maintenant' }}
+        </button>
+        <button
+          type="button"
+          class="btn btn--ghost"
+          :disabled="isRunningCron"
+          @click="onRunCronNow"
+        >
+          {{ isRunningCron ? 'Vérification…' : 'Vérifier les rappels maintenant' }}
         </button>
       </div>
 
@@ -384,6 +434,13 @@ onUnmounted(() => {
 .btn-remove:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+.settings-test-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
 }
 
 .settings-actions {

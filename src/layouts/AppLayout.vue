@@ -1,7 +1,38 @@
 <script setup>
+import { onMounted, onUnmounted } from 'vue';
 import { RouterView } from 'vue-router';
 import AppSidebar from '../components/Sidebar.vue';
 import NotificationPrompt from '../components/NotificationPrompt.vue';
+import {
+  declencherCronNotifications,
+  notificationsActives,
+} from '../services/notifications.js';
+
+const CRON_INTERVAL_MS = 60_000;
+let cronIntervalId = null;
+
+const startNotificationCron = () => {
+  if (!notificationsActives() || cronIntervalId) return;
+  declencherCronNotifications();
+  cronIntervalId = window.setInterval(declencherCronNotifications, CRON_INTERVAL_MS);
+};
+
+const stopNotificationCron = () => {
+  if (cronIntervalId) {
+    clearInterval(cronIntervalId);
+    cronIntervalId = null;
+  }
+};
+
+onMounted(() => {
+  startNotificationCron();
+  window.addEventListener('betterme-notifications-granted', startNotificationCron);
+});
+
+onUnmounted(() => {
+  stopNotificationCron();
+  window.removeEventListener('betterme-notifications-granted', startNotificationCron);
+});
 </script>
 
 <template>

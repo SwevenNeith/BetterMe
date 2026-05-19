@@ -1,8 +1,9 @@
 export function normalizeReminderTime(time) {
   if (!time) return '09:00'
-  const parts = String(time).split(':')
-  const h = String(Math.min(23, Math.max(0, parseInt(parts[0], 10) || 0))).padStart(2, '0')
-  const m = String(Math.min(59, Math.max(0, parseInt(parts[1], 10) || 0))).padStart(2, '0')
+  const part = String(time).trim().slice(0, 5)
+  const [hRaw, mRaw] = part.split(':')
+  const h = String(Math.min(23, Math.max(0, parseInt(hRaw, 10) || 0))).padStart(2, '0')
+  const m = String(Math.min(59, Math.max(0, parseInt(mRaw, 10) || 0))).padStart(2, '0')
   return `${h}:${m}`
 }
 

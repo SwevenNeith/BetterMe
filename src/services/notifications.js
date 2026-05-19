@@ -251,6 +251,21 @@ export async function lancerTimer(userId, dureeEnMinutes, label) {
   })
 }
 
+/** Déclenche l'envoi des rappels dus (quotidiens + planifiés). À appeler chaque minute (cron serveur ou app ouverte). */
+export async function declencherCronNotifications() {
+  return callEdgeFunction({ type: 'cron' })
+}
+
+/** Notification push immédiate sur cet appareil / compte */
+export async function testerNotificationPush(userId, title = 'BetterMe', body = 'Notification Test') {
+  return callEdgeFunction({
+    type: 'manuel',
+    userId,
+    title,
+    body,
+  })
+}
+
 /** @deprecated Préférer saveDailyReminders (dailyReminders.js) depuis Réglages */
 export async function activerRappelQuotidien(
   userId,
