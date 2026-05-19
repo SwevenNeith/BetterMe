@@ -1,4 +1,5 @@
 import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase.js'
+import { dateTimeLocalToDate } from './scheduledReminders.js'
 
 // ============================================
 // CONFIGURATION TECHNIQUE (VAPID, Edge Function)
@@ -332,10 +333,29 @@ export async function supprimerRappelsEvenement(eventId) {
   }
 }
 
-/** Timer : notification à la fin */
+/** Notification push à la fin d’un timer (activité EDT ou autre) */
+export async function planifierNotificationFinTimer(
+  userId,
+  { label, dateStart, timeStart, durationMinutes, eventId, body = 'Le timer est terminé !' },
+) {
+  if (durationMinutes <= 0) return false
+
+  const start = dateTimeLocalToDate(dateStart, timeStart)
+  const heureFin = new Date(start.getTime() + durationMinutes * 60 * 1000)
+
+  return callEdgeFunction({
+    type: 'timer',
+    userId,
+    eventId,
+    title: `⏱️ ${label}`,
+    body,
+    scheduledAt: heureFin.toISOString(),
+  })
+}
+
+/** @deprecated Préférer createStandaloneTimer (Réglages) */
 export async function lancerTimer(userId, dureeEnMinutes, label) {
-  const maintenant = new Date()
-  const heureFin = new Date(maintenant.getTime() + dureeEnMinutes * 60 * 1000)
+  const heureFin = new Date(Date.now() + dureeEnMinutes * 60 * 1000)
   const base = import.meta.env.BASE_URL || '/'
 
   if (document.visibilityState === 'visible') {

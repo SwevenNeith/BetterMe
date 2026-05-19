@@ -8,12 +8,15 @@ import {
   deleteDailyReminder,
 } from '../services/dailyReminders.js'
 import {
-  loadOneTimeRemindersGrouped,
+  loadStandaloneScheduledGrouped,
   createOneTimeReminder,
+  createStandaloneTimer,
   deleteOneTimeReminder,
   getLocalTodayISO,
   formatScheduledAtLocal,
+  getScheduledDisplayBody,
 } from '../services/scheduledReminders.js'
+import { formatDelaiAvantEvenement } from '../services/notifications.js'
 import {
   notificationsActives,
   notificationsSupportees,
@@ -39,11 +42,22 @@ const deletingIndex = ref(null)
 
 const oneTimeUpcoming = ref([])
 const oneTimeFailed = ref([])
+const standaloneTimersUpcoming = ref([])
+const standaloneTimersFailed = ref([])
 const isLoadingOneTime = ref(true)
 const isPlanningOneTime = ref(false)
+const isStartingTimer = ref(false)
 const deletingOneTimeId = ref(null)
 const oneTimeMessage = ref('')
 const oneTimeError = ref('')
+const timerMessage = ref('')
+const timerError = ref('')
+const standaloneTimerForm = ref({
+  title: 'BetterMe',
+  body: '',
+  duration_hours: 0,
+  duration_minutes: 15,
+})
 const localToday = getLocalTodayISO()
 const oneTimeForm = ref({
   title: 'BetterMe',
@@ -150,21 +164,26 @@ const onTestPush = async () => {
   }, 4000)
 }
 
-const loadOneTimeReminders = async () => {
+const loadStandaloneScheduled = async () => {
   if (!userId.value) return
   isLoadingOneTime.value = true
   oneTimeError.value = ''
+  timerError.value = ''
   try {
-    const { upcoming, failed } = await loadOneTimeRemindersGrouped(supabase, userId.value)
-    oneTimeUpcoming.value = upcoming
-    oneTimeFailed.value = failed
+    const { ponctuel, timers } = await loadStandaloneScheduledGrouped(supabase, userId.value)
+    oneTimeUpcoming.value = ponctuel.upcoming
+    oneTimeFailed.value = ponctuel.failed
+    standaloneTimersUpcoming.value = timers.upcoming
+    standaloneTimersFailed.value = timers.failed
   } catch (err) {
     console.error(err)
-    oneTimeError.value = err.message || 'Impossible de charger les rappels ponctuels.'
+    oneTimeError.value = err.message || 'Impossible de charger les notifications planifiées.'
   } finally {
     isLoadingOneTime.value = false
   }
 }
+
+const loadOneTimeReminders = loadStandaloneScheduled
 
 const resetOneTimeForm = () => {
   oneTimeForm.value = {
@@ -201,6 +220,41 @@ const onPlanOneTimeReminder = async () => {
   }
 }
 
+const onStartStandaloneTimer = async () => {
+  if (!userId.value) return
+  isStartingTimer.value = true
+  timerMessage.value = ''
+  timerError.value = ''
+
+  try {
+    const durationLabel = formatDelaiAvantEvenement(
+      standaloneTimerForm.value.duration_hours,
+      standaloneTimerForm.value.duration_minutes,
+    )
+    const created = await createStandaloneTimer(supabase, userId.value, {
+      title: standaloneTimerForm.value.title,
+      body: standaloneTimerForm.value.body,
+      durationHours: standaloneTimerForm.value.duration_hours,
+      durationMinutes: standaloneTimerForm.value.duration_minutes,
+    })
+    await loadStandaloneScheduled()
+    standaloneTimerForm.value = {
+      title: 'BetterMe',
+      body: '',
+      duration_hours: 0,
+      duration_minutes: 15,
+    }
+    timerMessage.value = `Timer lancé — fin prévue le ${formatScheduledAtLocal(created.scheduled_at)} (${durationLabel}).`
+    setTimeout(() => {
+      timerMessage.value = ''
+    }, 4000)
+  } catch (err) {
+    timerError.value = err.message || 'Impossible de démarrer ce timer.'
+  } finally {
+    isStartingTimer.value = false
+  }
+}
+
 const onRemoveOneTimeReminder = async (reminderId) => {
   if (!userId.value) return
   deletingOneTimeId.value = reminderId
@@ -211,7 +265,9 @@ const onRemoveOneTimeReminder = async (reminderId) => {
     await deleteOneTimeReminder(supabase, userId.value, reminderId)
     oneTimeUpcoming.value = oneTimeUpcoming.value.filter((r) => r.id !== reminderId)
     oneTimeFailed.value = oneTimeFailed.value.filter((r) => r.id !== reminderId)
-    oneTimeMessage.value = 'Rappel ponctuel annulé.'
+    standaloneTimersUpcoming.value = standaloneTimersUpcoming.value.filter((r) => r.id !== reminderId)
+    standaloneTimersFailed.value = standaloneTimersFailed.value.filter((r) => r.id !== reminderId)
+    oneTimeMessage.value = 'Notification planifiée annulée.'
     setTimeout(() => {
       oneTimeMessage.value = ''
     }, 2500)
@@ -249,7 +305,7 @@ onMounted(async () => {
   userId.value = user.id
   await Promise.all([loadReminders(), loadOneTimeReminders()])
   window.addEventListener('betterme-notifications-granted', onNotificationsGranted)
-  oneTimeRefreshIntervalId = window.setInterval(loadOneTimeReminders, ONE_TIME_REFRESH_MS)
+  oneTimeRefreshIntervalId = window.setInterval(loadStandaloneScheduled, ONE_TIME_REFRESH_MS)
 })
 
 onUnmounted(() => {
@@ -266,7 +322,7 @@ onUnmounted(() => {
     <header class="settings-header">
       <h1 class="settings-title">Réglages</h1>
       <p class="settings-subtitle">
-        Gère tes rappels quotidiens, tes rappels ponctuels et tes notifications.
+        Gère tes rappels, tes timers et tes notifications.
       </p>
     </header>
 
@@ -439,7 +495,9 @@ onUnmounted(() => {
             >
               <div class="one-time-summary">
                 <strong class="one-time-title">{{ item.title }}</strong>
-                <p v-if="item.body" class="one-time-body">{{ item.body }}</p>
+                <p v-if="getScheduledDisplayBody(item)" class="one-time-body">
+                  {{ getScheduledDisplayBody(item) }}
+                </p>
                 <time class="one-time-when" :datetime="item.scheduled_at">
                   Prévu le {{ formatScheduledAtLocal(item.scheduled_at) }}
                 </time>
@@ -485,7 +543,9 @@ onUnmounted(() => {
           >
             <div class="one-time-summary">
               <strong class="one-time-title">{{ item.title }}</strong>
-              <p v-if="item.body" class="one-time-body">{{ item.body }}</p>
+              <p v-if="getScheduledDisplayBody(item)" class="one-time-body">
+                {{ getScheduledDisplayBody(item) }}
+              </p>
               <time class="one-time-when" :datetime="item.scheduled_at">
                 {{ formatScheduledAtLocal(item.scheduled_at) }}
               </time>
@@ -505,6 +565,111 @@ onUnmounted(() => {
 
       <p v-if="oneTimeError" class="settings-feedback settings-feedback--error">{{ oneTimeError }}</p>
       <p v-if="oneTimeMessage" class="settings-feedback settings-feedback--ok">{{ oneTimeMessage }}</p>
+    </section>
+
+    <section class="settings-card settings-card--spaced">
+      <div class="card-head">
+        <h2>Timer seul</h2>
+        <p>Compte a rebours : notification a la fin de la duree choisie.</p>
+      </div>
+
+      <form class="one-time-form" @submit.prevent="onStartStandaloneTimer">
+        <div class="reminder-fields">
+          <label class="field field--grow">
+            <span>Titre</span>
+            <input v-model="standaloneTimerForm.title" type="text" maxlength="80" required />
+          </label>
+        </div>
+        <label class="field field--full">
+          <span>Message (optionnel)</span>
+          <input v-model="standaloneTimerForm.body" type="text" maxlength="200" />
+        </label>
+        <div class="reminder-fields">
+          <label class="field field--full">
+            <span>Duree</span>
+            <div class="reminder-timer reminder-timer--inline">
+              <div class="reminder-timer-unit">
+                <input
+                  v-model.number="standaloneTimerForm.duration_hours"
+                  type="number"
+                  min="0"
+                  max="23"
+                  class="reminder-timer-input"
+                />
+                <span class="reminder-timer-suffix">h</span>
+              </div>
+              <span class="reminder-timer-sep">:</span>
+              <div class="reminder-timer-unit">
+                <input
+                  v-model.number="standaloneTimerForm.duration_minutes"
+                  type="number"
+                  min="0"
+                  max="59"
+                  class="reminder-timer-input"
+                />
+                <span class="reminder-timer-suffix">min</span>
+              </div>
+            </div>
+          </label>
+        </div>
+        <div class="settings-actions settings-actions--form">
+          <button type="submit" class="btn btn--primary" :disabled="isStartingTimer">
+            {{ isStartingTimer ? 'Demarrage…' : 'Demarrer le timer' }}
+          </button>
+        </div>
+      </form>
+
+      <template v-if="!isLoadingOneTime">
+        <div v-if="standaloneTimersFailed.length > 0" class="one-time-failed-block">
+          <h3 class="one-time-subheading one-time-subheading--error">Timers en echec</h3>
+          <div class="reminders-list one-time-list">
+            <article
+              v-for="item in standaloneTimersFailed"
+              :key="`tf-${item.id}`"
+              class="reminder-row reminder-row--failed"
+            >
+              <div class="one-time-summary">
+                <strong class="one-time-title">⏱️ {{ item.title }}</strong>
+                <time class="one-time-when" :datetime="item.scheduled_at">
+                  Fin prevue le {{ formatScheduledAtLocal(item.scheduled_at) }}
+                </time>
+                <p class="one-time-failed-msg">Fin du timer passee sans notification.</p>
+              </div>
+              <button type="button" class="btn-remove" @click="onRemoveOneTimeReminder(item.id)">
+                Supprimer
+              </button>
+            </article>
+          </div>
+        </div>
+
+        <h3 v-if="standaloneTimersUpcoming.length > 0" class="one-time-subheading">Timers en cours</h3>
+        <p
+          v-if="standaloneTimersUpcoming.length === 0 && standaloneTimersFailed.length === 0"
+          class="settings-empty"
+        >
+          Aucun timer en cours.
+        </p>
+        <div v-else-if="standaloneTimersUpcoming.length > 0" class="reminders-list one-time-list">
+          <article
+            v-for="item in standaloneTimersUpcoming"
+            :key="`tu-${item.id}`"
+            class="reminder-row reminder-row--readonly"
+          >
+            <div class="one-time-summary">
+              <strong class="one-time-title">⏱️ {{ item.title }}</strong>
+              <time class="one-time-when" :datetime="item.scheduled_at">
+                Fin le {{ formatScheduledAtLocal(item.scheduled_at) }}
+              </time>
+            </div>
+            <button type="button" class="btn-remove" @click="onRemoveOneTimeReminder(item.id)">
+              Annuler
+            </button>
+          </article>
+        </div>
+      </template>
+
+      <p v-if="timerError" class="settings-feedback settings-feedback--error">{{ timerError }}</p>
+      <p v-if="timerMessage" class="settings-feedback settings-feedback--ok">{{ timerMessage }}</p>
     </section>
   </div>
 </template>
@@ -890,5 +1055,78 @@ onUnmounted(() => {
   .one-time-failed-msg {
     color: #e74c3c;
   }
+}
+
+.reminder-timer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.reminder-timer--inline {
+  margin-top: 0.25rem;
+}
+
+.reminder-timer-unit {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.reminder-timer-input {
+  box-sizing: border-box;
+  width: 4rem;
+  min-width: 4rem;
+  padding: 0.5rem 0.4rem;
+  font-size: 1.15rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  border: 2px solid rgba(173, 129, 190, 0.35);
+  border-radius: 10px;
+  background: #fff;
+  color: #2c3e50;
+}
+
+.reminder-timer-input:focus {
+  outline: none;
+  border-color: #ad81be;
+  box-shadow: 0 0 0 3px rgba(173, 129, 190, 0.2);
+}
+
+.reminder-timer-input::-webkit-outer-spin-button,
+.reminder-timer-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.reminder-timer-input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reminder-timer-input {
+    background: #2a2433;
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.3);
+  }
+}
+
+.reminder-timer-sep {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #ad81be;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.reminder-timer-suffix {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #9b59b6;
+  flex-shrink: 0;
 }
 </style>

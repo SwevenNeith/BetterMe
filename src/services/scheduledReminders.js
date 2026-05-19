@@ -1,3 +1,46 @@
+import { getDurationMinutes } from './durationUtils.js'
+
+/** Ancien marqueur (lignes créées avant la colonne kind) */
+const LEGACY_TIMER_BODY_MARKER = '__betterme_kind:timer__'
+
+export const SCHEDULED_KIND = {
+  PONCTUEL: 'ponctuel',
+  TIMER: 'timer',
+}
+
+export function isStandaloneTimer(row) {
+  if (row?.kind === SCHEDULED_KIND.TIMER) return true
+  const body = String(row?.body ?? '').trim()
+  return body === LEGACY_TIMER_BODY_MARKER || body.startsWith(`${LEGACY_TIMER_BODY_MARKER}\n`)
+}
+
+/** Corps affiché dans l’UI (Réglages) */
+export function getScheduledDisplayBody(row) {
+  if (isStandaloneTimer(row)) {
+    const text = cleanTimerBodyFromStorage(row.body)
+    return text || null
+  }
+  return row.body?.trim() || null
+}
+
+/** Corps envoyé dans la push (sans marqueur) */
+export function pushBodyFromStored(stored, kind) {
+  if (kind === SCHEDULED_KIND.TIMER || isStandaloneTimer({ body: stored, kind })) {
+    const text = cleanTimerBodyFromStorage(stored)
+    return text || 'Le timer est terminé !'
+  }
+  return String(stored ?? '').trim()
+}
+
+function cleanTimerBodyFromStorage(body) {
+  const raw = String(body ?? '').trim()
+  if (!raw) return ''
+  if (raw === LEGACY_TIMER_BODY_MARKER || raw.startsWith(`${LEGACY_TIMER_BODY_MARKER}\n`)) {
+    return raw.slice(LEGACY_TIMER_BODY_MARKER.length).replace(/^\n/, '').trim()
+  }
+  return raw
+}
+
 /** Date du jour locale (YYYY-MM-DD) — alignée sur l’appareil */
 export function getLocalTodayISO() {
   const d = new Date()
@@ -86,7 +129,7 @@ export function isScheduledOverdue(value, nowMs = Date.now()) {
   return scheduledMs <= nowMs
 }
 
-const ONE_TIME_SELECT = 'id, title, body, scheduled_at, sent'
+const SCHEDULED_SELECT = 'id, title, body, scheduled_at, sent, kind'
 
 /** Marge après l’heure prévue pour laisser le cron envoyer avant d’afficher l’échec */
 const OVERDUE_GRACE_MS = 90 * 1000
@@ -103,25 +146,12 @@ export async function purgeSentOneTimeReminders(supabase, userId) {
   if (error) throw error
 }
 
-/** Rappels ponctuels : à venir vs échec (heure dépassée + non envoyé) */
-export async function loadOneTimeRemindersGrouped(supabase, userId) {
-  await purgeSentOneTimeReminders(supabase, userId)
-
-  const { data, error } = await supabase
-    .from('scheduled_notifications')
-    .select(ONE_TIME_SELECT)
-    .eq('user_id', userId)
-    .is('event_id', null)
-    .eq('sent', false)
-    .order('scheduled_at', { ascending: true })
-
-  if (error) throw error
-
+function splitUpcomingFailed(rows) {
   const now = Date.now()
   const upcoming = []
   const failed = []
 
-  for (const row of data ?? []) {
+  for (const row of rows) {
     const scheduledMs = parseScheduledAt(row.scheduled_at).getTime()
     if (Number.isNaN(scheduledMs)) continue
 
@@ -133,6 +163,43 @@ export async function loadOneTimeRemindersGrouped(supabase, userId) {
   }
 
   return { upcoming, failed }
+}
+
+/** Rappels ponctuels + timers seuls (scheduled_notifications, sans event_id) */
+export async function loadStandaloneScheduledGrouped(supabase, userId) {
+  await purgeSentOneTimeReminders(supabase, userId)
+
+  const { data, error } = await supabase
+    .from('scheduled_notifications')
+    .select(SCHEDULED_SELECT)
+    .eq('user_id', userId)
+    .is('event_id', null)
+    .eq('sent', false)
+    .order('scheduled_at', { ascending: true })
+
+  if (error) throw error
+
+  const ponctuelRows = []
+  const timerRows = []
+
+  for (const row of data ?? []) {
+    if (isStandaloneTimer(row)) {
+      timerRows.push(row)
+    } else {
+      ponctuelRows.push(row)
+    }
+  }
+
+  return {
+    ponctuel: splitUpcomingFailed(ponctuelRows),
+    timers: splitUpcomingFailed(timerRows),
+  }
+}
+
+/** @deprecated Utiliser loadStandaloneScheduledGrouped */
+export async function loadOneTimeRemindersGrouped(supabase, userId) {
+  const { ponctuel } = await loadStandaloneScheduledGrouped(supabase, userId)
+  return ponctuel
 }
 
 export async function createOneTimeReminder(supabase, userId, { title, body, scheduledDate, scheduledTime }) {
@@ -157,14 +224,22 @@ export async function createOneTimeReminder(supabase, userId, { title, body, sch
     .insert({
       user_id: userId,
       title: trimmedTitle,
-      body: (body || '').trim(),
+      body: (body || '').trim() || null,
       scheduled_at: scheduledAt.toISOString(),
       event_id: null,
+      kind: SCHEDULED_KIND.PONCTUEL,
     })
-    .select(ONE_TIME_SELECT)
+    .select(SCHEDULED_SELECT)
     .single()
 
-  if (error) throw error
+  if (error) {
+    if (String(error.message || '').includes('kind')) {
+      throw new Error(
+        'Colonne kind manquante sur scheduled_notifications. Exécute la migration Supabase (voir supabase/migrations/20250519170000_scheduled_notifications_kind.sql).',
+      )
+    }
+    throw error
+  }
   return data
 }
 
@@ -177,4 +252,42 @@ export async function deleteOneTimeReminder(supabase, userId, reminderId) {
     .is('event_id', null)
 
   if (error) throw error
+}
+
+export async function createStandaloneTimer(supabase, userId, { title, body, durationHours, durationMinutes }) {
+  const trimmedTitle = (title || '').trim()
+  if (!trimmedTitle) {
+    throw new Error('Le titre est obligatoire.')
+  }
+
+  const totalMinutes = getDurationMinutes(durationHours, durationMinutes)
+  if (totalMinutes <= 0) {
+    throw new Error('Indique une durée d’au moins 1 minute.')
+  }
+
+  const scheduledAt = new Date(Date.now() + totalMinutes * 60 * 1000)
+  const userBody = (body || '').trim() || null
+
+  const { data, error } = await supabase
+    .from('scheduled_notifications')
+    .insert({
+      user_id: userId,
+      title: trimmedTitle,
+      body: userBody,
+      scheduled_at: scheduledAt.toISOString(),
+      event_id: null,
+      kind: SCHEDULED_KIND.TIMER,
+    })
+    .select(SCHEDULED_SELECT)
+    .single()
+
+  if (error) {
+    if (String(error.message || '').includes('kind')) {
+      throw new Error(
+        'Colonne kind manquante sur scheduled_notifications. Exécute la migration Supabase (voir supabase/migrations/20250519170000_scheduled_notifications_kind.sql).',
+      )
+    }
+    throw error
+  }
+  return data
 }

@@ -5,9 +5,11 @@ import { supabase } from '../lib/supabase.js'
 import {
   notificationsActives,
   planifierNotificationActivite,
+  planifierNotificationFinTimer,
   formatDelaiAvantEvenement,
   supprimerRappelsEvenement,
 } from '../services/notifications.js'
+import { getDurationMinutes, addMinutesToTimeString } from '../services/durationUtils.js'
 
 // State
 const currentDate = ref(new Date())
@@ -26,6 +28,9 @@ const newEventAllDay = ref(false)
 const newEventReminderEnabled = ref(false)
 const newEventReminderHours = ref(0)
 const newEventReminderMinutes = ref(15)
+const newEventTimerEnabled = ref(false)
+const newEventTimerHours = ref(0)
+const newEventTimerMinutes = ref(30)
 
 const resetReminderFields = () => {
   newEventReminderEnabled.value = false
@@ -33,10 +38,28 @@ const resetReminderFields = () => {
   newEventReminderMinutes.value = 0
 }
 
+const resetTimerFields = () => {
+  newEventTimerEnabled.value = false
+  newEventTimerHours.value = 0
+  newEventTimerMinutes.value = 30
+}
+
 const getReminderMinutesBefore = () => {
-  const hours = Math.min(23, Math.max(0, Number(newEventReminderHours.value) || 0))
-  const minutes = Math.min(59, Math.max(0, Number(newEventReminderMinutes.value) || 0))
-  return hours * 60 + minutes
+  return getDurationMinutes(newEventReminderHours.value, newEventReminderMinutes.value)
+}
+
+const getTimerDurationMinutes = () => {
+  return getDurationMinutes(newEventTimerHours.value, newEventTimerMinutes.value)
+}
+
+const syncEndTimeFromTimer = () => {
+  if (!newEventTimerEnabled.value || newEventAllDay.value) return
+  const duration = getTimerDurationMinutes()
+  if (duration <= 0) return
+  const endTime = addMinutesToTimeString(newEventStartTime.value, duration)
+  if (endTime) {
+    newEventEndTime.value = endTime
+  }
 }
 
 const openModalWithDefaultDate = () => {
@@ -47,6 +70,7 @@ const openModalWithDefaultDate = () => {
   newEventAllDay.value = false
   newEventDetail.value = ''
   resetReminderFields()
+  resetTimerFields()
   isModalOpen.value = true
 }
 
@@ -89,6 +113,7 @@ const openModalWithHobby = (hobbyTitle) => {
   newEventAllDay.value = false
   newEventDetail.value = ''
   resetReminderFields()
+  resetTimerFields()
   isModalOpen.value = true
 }
 
@@ -119,6 +144,7 @@ const handleDrop = (event, dayIdx, startHour) => {
   newEventEndTime.value = endStr
   newEventDetail.value = ''
   resetReminderFields()
+  resetTimerFields()
 
   isModalOpen.value = true
 }
@@ -126,6 +152,7 @@ const handleDrop = (event, dayIdx, startHour) => {
 watch(newEventAllDay, (allDay) => {
   if (allDay) {
     newEventReminderEnabled.value = false
+    newEventTimerEnabled.value = false
   }
 })
 
@@ -133,7 +160,27 @@ watch(newEventReminderEnabled, (enabled) => {
   if (enabled && getReminderMinutesBefore() === 0) {
     newEventReminderMinutes.value = 15
   }
+  if (enabled) {
+    newEventTimerEnabled.value = false
+  }
 })
+
+watch(newEventTimerEnabled, (enabled) => {
+  if (enabled && getTimerDurationMinutes() === 0) {
+    newEventTimerMinutes.value = 30
+  }
+  if (enabled) {
+    newEventReminderEnabled.value = false
+    syncEndTimeFromTimer()
+  }
+})
+
+watch(
+  [newEventStartTime, newEventTimerHours, newEventTimerMinutes],
+  () => {
+    syncEndTimeFromTimer()
+  },
+)
 
 // Helper: Get ISO Week Number
 const getWeekNumber = (date) => {
@@ -339,6 +386,10 @@ watch(
 // Watch to automatically maintain end time > start time (with a 1 hour default buffer)
 watch(newEventStartTime, (newStart) => {
   if (!newStart) return
+  if (newEventTimerEnabled.value) {
+    syncEndTimeFromTimer()
+    return
+  }
   const [startH, startM] = newStart.split(':').map(Number)
   const [endH, endM] = newEventEndTime.value.split(':').map(Number)
 
@@ -357,7 +408,7 @@ watch(newEventStartTime, (newStart) => {
 })
 
 watch(newEventEndTime, (newEnd) => {
-  if (!newEnd) return
+  if (!newEnd || newEventTimerEnabled.value) return
   const [startH, startM] = newEventStartTime.value.split(':').map(Number)
   const [endH, endM] = newEnd.split(':').map(Number)
 
@@ -482,17 +533,33 @@ const handleAddEvent = async () => {
     }
   }
 
+  const timerActive = newEventTimerEnabled.value && !newEventAllDay.value
+  const timerMinutes = timerActive ? getTimerDurationMinutes() : null
+
   // Validate hours if not an all-day event
   if (!newEventAllDay.value) {
-    const [startH, startM] = newEventStartTime.value.split(':').map(Number)
-    const [endH, endM] = newEventEndTime.value.split(':').map(Number)
-    const startMin = startH * 60 + startM
-    const endMin = endH * 60 + endM
+    if (timerActive) {
+      if (timerMinutes <= 0) {
+        alert('Indique une durée de timer (au moins 1 minute) ou désactive le timer.')
+        return
+      }
+      syncEndTimeFromTimer()
+      const endTime = addMinutesToTimeString(newEventStartTime.value, timerMinutes)
+      if (!endTime) {
+        alert('Le timer dépasse minuit. Réduis la durée ou choisis un début plus tôt.')
+        return
+      }
+    } else {
+      const [startH, startM] = newEventStartTime.value.split(':').map(Number)
+      const [endH, endM] = newEventEndTime.value.split(':').map(Number)
+      const startMin = startH * 60 + startM
+      const endMin = endH * 60 + endM
 
-    const isSameDay = !endDStr || endDStr === startDStr
-    if (isSameDay && endMin <= startMin) {
-      alert("L'heure de fin doit être strictement supérieure à l'heure de début !")
-      return
+      const isSameDay = !endDStr || endDStr === startDStr
+      if (isSameDay && endMin <= startMin) {
+        alert("L'heure de fin doit être strictement supérieure à l'heure de début !")
+        return
+      }
     }
   }
 
@@ -576,21 +643,22 @@ const handleAddEvent = async () => {
       newEventReminderEnabled.value && !newEventAllDay.value
     const reminderMinutes = reminderActive ? getReminderMinutesBefore() : null
 
-    const { data, error } = await supabase
-      .from('timetable_events')
-      .insert({
-        user_id: user.id,
-        title: newEventTitle.value,
-        date_start: startDStr,
-        date_end: endDStr || null,
-        all_day: newEventAllDay.value,
-        time: newEventAllDay.value ? null : `${newEventStartTime.value} - ${newEventEndTime.value}`,
-        category: existingCat ? existingCat.id : null,
-        detail: newEventDetail.value,
-        reminder: reminderActive,
-        reminder_time: reminderActive ? reminderMinutes : null,
-      })
-      .select()
+    const eventInsert = {
+      user_id: user.id,
+      title: newEventTitle.value,
+      date_start: startDStr,
+      date_end: endDStr || null,
+      all_day: newEventAllDay.value,
+      time: newEventAllDay.value ? null : `${newEventStartTime.value} - ${newEventEndTime.value}`,
+      category: existingCat ? existingCat.id : null,
+      detail: newEventDetail.value,
+      reminder: reminderActive,
+      reminder_time: reminderActive ? reminderMinutes : null,
+      timer: timerActive,
+      timer_duration: timerActive ? timerMinutes : null,
+    }
+
+    const { data, error } = await supabase.from('timetable_events').insert(eventInsert).select()
 
     if (error) throw error
 
@@ -616,6 +684,17 @@ const handleAddEvent = async () => {
       })
     }
 
+    if (notificationsActives() && timerActive && createdEvent) {
+      await planifierNotificationFinTimer(user.id, {
+        label: newEventTitle.value,
+        dateStart: startDStr,
+        timeStart: newEventStartTime.value,
+        durationMinutes: timerMinutes,
+        eventId: createdEvent.id,
+        body: `${newEventTitle.value} : le timer est terminé !`,
+      })
+    }
+
     // Reset form & Close modal
     newEventTitle.value = ''
     newEventDetail.value = ''
@@ -625,10 +704,18 @@ const handleAddEvent = async () => {
     newEventDateEnd.value = ''
     newEventAllDay.value = false
     resetReminderFields()
+    resetTimerFields()
     isModalOpen.value = false
   } catch (err) {
     console.error('Error adding event:', err)
-    alert("Erreur lors de l'ajout de l'activité.")
+    const msg = err.message || ''
+    if (msg.includes('timer') && msg.includes('column')) {
+      alert(
+        "Erreur : ajoute les colonnes timer et timer_duration sur timetable_events dans Supabase (voir la doc du projet).",
+      )
+    } else {
+      alert("Erreur lors de l'ajout de l'activité.")
+    }
   }
 }
 
@@ -1169,7 +1256,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 
           <div class="form-group" v-if="!newEventAllDay">
             <label>Créneau horaire</label>
-            <div class="time-range-picker">
+            <div class="time-range-picker" :class="{ 'time-range-picker--timer': newEventTimerEnabled }">
               <input
                 v-model="newEventStartTime"
                 type="time"
@@ -1179,7 +1266,9 @@ const getPositionedEventsForDay = (dayIdx) => {
               <input
                 v-model="newEventEndTime"
                 type="time"
-                :required="!newEventAllDay"
+                :disabled="newEventTimerEnabled"
+                :required="!newEventAllDay && !newEventTimerEnabled"
+                title="Calculée automatiquement par le timer"
               />
             </div>
           </div>
@@ -1224,6 +1313,50 @@ const getPositionedEventsForDay = (dayIdx) => {
               </div>
               <p v-if="!notificationsActives()" class="reminder-hint reminder-hint--warn">
                 Active les notifications dans Réglages pour recevoir ce rappel.
+              </p>
+            </div>
+          </div>
+
+          <div v-if="!newEventAllDay" class="form-group reminder-section">
+            <label class="all-day-toggle-label reminder-toggle-label">
+              <input
+                v-model="newEventTimerEnabled"
+                type="checkbox"
+                class="all-day-checkbox"
+              />
+              <span class="all-day-toggle-custom"></span>
+              <span>Timer ⏱️</span>
+            </label>
+
+            <div v-if="newEventTimerEnabled" class="reminder-offset">
+              <span class="reminder-offset-label">Durée de l’activité</span>
+              <div class="reminder-timer" role="group" aria-label="Durée du timer">
+                <div class="reminder-timer-unit">
+                  <input
+                    v-model.number="newEventTimerHours"
+                    type="number"
+                    min="0"
+                    max="23"
+                    class="reminder-timer-input"
+                    aria-label="Heures"
+                  />
+                  <span class="reminder-timer-suffix">h</span>
+                </div>
+                <span class="reminder-timer-sep">:</span>
+                <div class="reminder-timer-unit">
+                  <input
+                    v-model.number="newEventTimerMinutes"
+                    type="number"
+                    min="0"
+                    max="59"
+                    class="reminder-timer-input"
+                    aria-label="Minutes"
+                  />
+                  <span class="reminder-timer-suffix">min</span>
+                </div>
+              </div>
+              <p v-if="!notificationsActives()" class="reminder-hint reminder-hint--warn">
+                Active les notifications dans Réglages pour être prévenu à la fin du timer.
               </p>
             </div>
           </div>
@@ -2461,6 +2594,12 @@ const getPositionedEventsForDay = (dayIdx) => {
 .time-range-picker input {
   flex: 1;
   text-align: center;
+}
+
+.time-range-picker--timer input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: rgba(108, 117, 125, 0.12);
 }
 
 .time-range-separator {

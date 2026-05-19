@@ -8,6 +8,29 @@ const corsHeaders = {
 }
 
 const TIMEZONE = 'Europe/Paris'
+const LEGACY_TIMER_BODY_MARKER = '__betterme_kind:timer__'
+
+/** Corps push : kind=timer ou ancien marqueur dans body */
+function pushBodyFromStored(
+  stored: string | null | undefined,
+  kind?: string | null,
+): string {
+  const isTimer =
+    kind === 'timer' ||
+    String(stored ?? '').trim() === LEGACY_TIMER_BODY_MARKER ||
+    String(stored ?? '').startsWith(`${LEGACY_TIMER_BODY_MARKER}\n`)
+
+  if (isTimer) {
+    const raw = String(stored ?? '').trim()
+    let text = raw
+    if (raw.startsWith(LEGACY_TIMER_BODY_MARKER)) {
+      text = raw.slice(LEGACY_TIMER_BODY_MARKER.length).replace(/^\n/, '').trim()
+    }
+    return text || 'Le timer est terminé !'
+  }
+
+  return String(stored ?? '').trim()
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -111,10 +134,26 @@ async function runCronJob() {
   if (schedErr) throw schedErr
 
   for (const notif of notificationsAEnvoyer ?? []) {
-    const { sent } = await sendPushToUser(notif.user_id, notif.title, notif.body)
+    // Réserve la ligne (évite double envoi si cron app + pg_cron en parallèle)
+    const { data: claimed, error: claimErr } = await supabase
+      .from('scheduled_notifications')
+      .update({ sent: true })
+      .eq('id', notif.id)
+      .eq('sent', false)
+      .select('id, user_id, title, body, kind')
+
+    if (claimErr) throw claimErr
+    if (!claimed?.length) continue
+
+    const row = claimed[0]
+    const pushBody = pushBodyFromStored(row.body, row.kind)
+    const { sent } = await sendPushToUser(row.user_id, row.title, pushBody)
+
     if (sent > 0) {
       scheduledSent++
-      await supabase.from('scheduled_notifications').delete().eq('id', notif.id)
+      await supabase.from('scheduled_notifications').delete().eq('id', row.id)
+    } else {
+      await supabase.from('scheduled_notifications').update({ sent: false }).eq('id', row.id)
     }
   }
 
