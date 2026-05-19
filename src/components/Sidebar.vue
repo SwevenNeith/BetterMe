@@ -382,6 +382,10 @@ const toggleSidebar = () => {
   .hamburger {
     display: flex;
   }
+  /* Pas de croix quand le menu est ouvert : fermeture via l'overlay */
+  .hamburger.is-open {
+    display: none;
+  }
   .sidebar-overlay {
     display: block;
   }
