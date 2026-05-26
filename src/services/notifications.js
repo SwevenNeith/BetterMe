@@ -1,5 +1,10 @@
 import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase.js'
-import { dateTimeLocalToDate } from './scheduledReminders.js'
+import {
+  dateTimeLocalToDate,
+  deletePendingTimerEndNotifications,
+  deletePendingTimerStartNotifications,
+  SCHEDULED_KIND,
+} from './scheduledReminders.js'
 
 // ============================================
 // CONFIGURATION TECHNIQUE (VAPID, Edge Function)
@@ -72,14 +77,23 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
 }
 
+async function getEdgeFunctionHeaders() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  const token = session?.access_token ?? supabaseAnonKey
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+    apikey: supabaseAnonKey,
+  }
+}
+
 async function callEdgeFunction(payload) {
   try {
     const response = await fetch(EDGE_FUNCTION_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${supabaseAnonKey}`,
-      },
+      headers: await getEdgeFunctionHeaders(),
       body: JSON.stringify(payload),
     })
 
@@ -333,6 +347,48 @@ export async function supprimerRappelsEvenement(eventId) {
   }
 }
 
+/**
+ * Notification push au début d'un événement avec timer.
+ * - dateStart + timeStart : heure de début en Europe/Paris
+ * - durationMinutes : durée totale du timer, pour l'afficher dans le corps du message
+ */
+export async function planifierNotificationDebutEvenement(
+  userId,
+  { label, dateStart, timeStart, durationMinutes, eventId },
+) {
+  const heureDebut = dateTimeLocalToDate(dateStart, timeStart)
+  const startMs = heureDebut.getTime()
+  if (Number.isNaN(startMs)) return false
+
+  const h = Math.floor(durationMinutes / 60)
+  const m = durationMinutes % 60
+  let dureeLabel = ''
+  if (h > 0 && m > 0) dureeLabel = `${h} h ${m} min`
+  else if (h > 0) dureeLabel = `${h} h`
+  else dureeLabel = `${m} min`
+
+  const title = `⏱️ ${label}`
+  const body = `C'est parti ! Timer de ${dureeLabel} démarré.`
+
+  await deletePendingTimerStartNotifications(supabase, { eventId, userId })
+
+  const scheduledAtMs = Math.max(startMs, Date.now())
+  const { error } = await supabase.from('scheduled_notifications').insert({
+    user_id: userId,
+    event_id: eventId ?? null,
+    title,
+    body,
+    scheduled_at: new Date(scheduledAtMs).toISOString(),
+    kind: SCHEDULED_KIND.TIMER_START,
+  })
+
+  if (error) {
+    console.error('planifierNotificationDebutEvenement:', error)
+    return false
+  }
+  return true
+}
+
 /** Notification push à la fin d’un timer (activité EDT ou autre) */
 export async function planifierNotificationFinTimer(
   userId,
@@ -343,10 +399,13 @@ export async function planifierNotificationFinTimer(
   const start = dateTimeLocalToDate(dateStart, timeStart)
   const heureFin = new Date(start.getTime() + durationMinutes * 60 * 1000)
 
+  await deletePendingTimerEndNotifications(supabase, { eventId, userId })
+
   return callEdgeFunction({
     type: 'timer',
     userId,
     eventId,
+    kind: SCHEDULED_KIND.TIMER,
     title: `⏱️ ${label}`,
     body,
     scheduledAt: heureFin.toISOString(),
@@ -356,23 +415,13 @@ export async function planifierNotificationFinTimer(
 /** @deprecated Préférer createStandaloneTimer (Réglages) */
 export async function lancerTimer(userId, dureeEnMinutes, label) {
   const heureFin = new Date(Date.now() + dureeEnMinutes * 60 * 1000)
-  const base = import.meta.env.BASE_URL || '/'
 
-  if (document.visibilityState === 'visible') {
-    setTimeout(
-      () => {
-        new Notification(`⏱️ ${label}`, {
-          body: 'Le timer est terminé !',
-          icon: `${base}icon-192.png`,
-        })
-      },
-      dureeEnMinutes * 60 * 1000,
-    )
-  }
+  await deletePendingTimerEndNotifications(supabase, { userId })
 
   return callEdgeFunction({
     type: 'timer',
     userId,
+    kind: SCHEDULED_KIND.TIMER,
     title: `⏱️ ${label}`,
     body: 'Le timer est terminé !',
     scheduledAt: heureFin.toISOString(),

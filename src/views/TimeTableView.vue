@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase.js'
 import {
   notificationsActives,
   planifierNotificationActivite,
+  planifierNotificationDebutEvenement,
   planifierNotificationFinTimer,
   formatDelaiAvantEvenement,
   supprimerRappelsEvenement,
@@ -685,6 +686,13 @@ const handleAddEvent = async () => {
     }
 
     if (notificationsActives() && timerActive && createdEvent) {
+      await planifierNotificationDebutEvenement(user.id, {
+        label: newEventTitle.value,
+        dateStart: startDStr,
+        timeStart: newEventStartTime.value,
+        durationMinutes: timerMinutes,
+        eventId: createdEvent.id,
+      })
       await planifierNotificationFinTimer(user.id, {
         label: newEventTitle.value,
         dateStart: startDStr,

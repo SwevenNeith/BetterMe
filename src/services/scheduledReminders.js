@@ -6,6 +6,7 @@ const LEGACY_TIMER_BODY_MARKER = '__betterme_kind:timer__'
 export const SCHEDULED_KIND = {
   PONCTUEL: 'ponctuel',
   TIMER: 'timer',
+  TIMER_START: 'timer_start',
 }
 
 export function isStandaloneTimer(row) {
@@ -254,6 +255,71 @@ export async function deleteOneTimeReminder(supabase, userId, reminderId) {
   if (error) throw error
 }
 
+/** Supprime les notifications de début de timer non envoyées. */
+export async function deletePendingTimerStartNotifications(supabase, { eventId, userId }) {
+  if (eventId) {
+    await supabase
+      .from('scheduled_notifications')
+      .delete()
+      .eq('event_id', eventId)
+      .eq('sent', false)
+      .eq('kind', SCHEDULED_KIND.TIMER_START)
+
+    await supabase
+      .from('scheduled_notifications')
+      .delete()
+      .eq('event_id', eventId)
+      .eq('sent', false)
+      .like('body', "C'est parti ! Timer de%")
+  }
+
+  if (userId) {
+    await supabase
+      .from('scheduled_notifications')
+      .delete()
+      .eq('user_id', userId)
+      .eq('sent', false)
+      .eq('kind', SCHEDULED_KIND.TIMER_START)
+
+    await supabase
+      .from('scheduled_notifications')
+      .delete()
+      .eq('user_id', userId)
+      .eq('sent', false)
+      .like('body', "C'est parti ! Timer de%")
+  }
+}
+
+/** Supprime les fins de timer non envoyées (évite doublons avant replanification). */
+export async function deletePendingTimerEndNotifications(supabase, { eventId, userId }) {
+  if (eventId) {
+    await supabase
+      .from('scheduled_notifications')
+      .delete()
+      .eq('event_id', eventId)
+      .eq('sent', false)
+      .eq('kind', SCHEDULED_KIND.TIMER)
+
+    await supabase
+      .from('scheduled_notifications')
+      .delete()
+      .eq('event_id', eventId)
+      .eq('sent', false)
+      .like('body', '%timer est terminé%')
+    return
+  }
+
+  if (userId) {
+    await supabase
+      .from('scheduled_notifications')
+      .delete()
+      .eq('user_id', userId)
+      .is('event_id', null)
+      .eq('sent', false)
+      .eq('kind', SCHEDULED_KIND.TIMER)
+  }
+}
+
 export async function createStandaloneTimer(supabase, userId, { title, body, durationHours, durationMinutes }) {
   const trimmedTitle = (title || '').trim()
   if (!trimmedTitle) {
@@ -267,6 +333,8 @@ export async function createStandaloneTimer(supabase, userId, { title, body, dur
 
   const scheduledAt = new Date(Date.now() + totalMinutes * 60 * 1000)
   const userBody = (body || '').trim() || null
+
+  await deletePendingTimerEndNotifications(supabase, { userId })
 
   const { data, error } = await supabase
     .from('scheduled_notifications')

@@ -102,10 +102,16 @@ async function sendPushToUser(
   const payload = JSON.stringify({ title, body })
   let sent = 0
   const errors: string[] = []
+  const seenEndpoints = new Set<string>()
 
   for (const row of rows) {
     try {
       const subscription = parseSubscription(row.subscription)
+      const endpoint =
+        typeof subscription?.endpoint === 'string' ? subscription.endpoint : ''
+      if (!endpoint || seenEndpoints.has(endpoint)) continue
+      seenEndpoints.add(endpoint)
+
       await webpush.sendNotification(subscription, payload)
       sent++
     } catch (err) {
@@ -199,7 +205,8 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { type, userId, title, body, scheduledAt, heureRappel, eventId } = await req.json()
+    const { type, userId, title, body, scheduledAt, heureRappel, eventId, kind } =
+      await req.json()
 
     if (type === 'manuel') {
       const result = await sendPushToUser(userId, title, body)
@@ -217,11 +224,79 @@ Deno.serve(async (req) => {
     }
 
     if (type === 'activite' || type === 'timer' || type === 'ponctuel') {
+      const rowKind =
+        typeof kind === 'string' && kind.trim()
+          ? kind.trim()
+          : type === 'timer'
+            ? 'timer'
+            : 'ponctuel'
+
+      if (rowKind === 'timer_start') {
+        if (eventId) {
+          await supabase
+            .from('scheduled_notifications')
+            .delete()
+            .eq('event_id', eventId)
+            .eq('sent', false)
+            .eq('kind', 'timer_start')
+
+          await supabase
+            .from('scheduled_notifications')
+            .delete()
+            .eq('event_id', eventId)
+            .eq('sent', false)
+            .like('body', "C'est parti ! Timer de%")
+        } else if (userId) {
+          await supabase
+            .from('scheduled_notifications')
+            .delete()
+            .eq('user_id', userId)
+            .is('event_id', null)
+            .eq('sent', false)
+            .eq('kind', 'timer_start')
+
+          await supabase
+            .from('scheduled_notifications')
+            .delete()
+            .eq('user_id', userId)
+            .is('event_id', null)
+            .eq('sent', false)
+            .like('body', "C'est parti ! Timer de%")
+        }
+      }
+
+      if (rowKind === 'timer') {
+        if (eventId) {
+          await supabase
+            .from('scheduled_notifications')
+            .delete()
+            .eq('event_id', eventId)
+            .eq('sent', false)
+            .eq('kind', 'timer')
+
+          await supabase
+            .from('scheduled_notifications')
+            .delete()
+            .eq('event_id', eventId)
+            .eq('sent', false)
+            .like('body', '%timer est terminé%')
+        } else if (userId) {
+          await supabase
+            .from('scheduled_notifications')
+            .delete()
+            .eq('user_id', userId)
+            .is('event_id', null)
+            .eq('sent', false)
+            .eq('kind', 'timer')
+        }
+      }
+
       const row: Record<string, unknown> = {
         user_id: userId,
         title,
         body,
         scheduled_at: scheduledAt,
+        kind: rowKind,
       }
       if (eventId) {
         row.event_id = eventId
