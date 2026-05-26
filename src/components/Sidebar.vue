@@ -265,7 +265,8 @@ const toggleSidebar = () => {
   flex-shrink: 0;
 }
 
-.sidebar-svg-icon {
+.sidebar-svg-icon,
+:deep(.sidebar-svg-icon) {
   width: 18px;
   height: 18px;
   stroke: currentColor;
