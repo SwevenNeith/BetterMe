@@ -1,3 +1,4 @@
+/* eslint-disable no-useless-assignment */
 import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase.js'
 import {
   dateTimeLocalToDate,
@@ -58,10 +59,7 @@ export function dateTimeParisToUtc(dateStr, timeStr) {
 
   for (let i = 0; i < 8; i++) {
     const p = getParisDateTimeParts(utcMs)
-    const dayDiff =
-      (targetYear - p.year) * 372 +
-      (targetMonth - p.month) * 31 +
-      (targetDay - p.day)
+    const dayDiff = (targetYear - p.year) * 372 + (targetMonth - p.month) * 31 + (targetDay - p.day)
     const minuteDiff = dayDiff * 24 * 60 + (targetHour - p.hour) * 60 + (targetMinute - p.minute)
     if (minuteDiff === 0) break
     utcMs += minuteDiff * 60 * 1000
@@ -321,8 +319,7 @@ export async function planifierNotificationActivite(userId, activite) {
     return false
   }
 
-  const delaiLabel =
-    activite.delaiLabel ?? formatDelaiDepuisMinutes(minutesAvant)
+  const delaiLabel = activite.delaiLabel ?? formatDelaiDepuisMinutes(minutesAvant)
 
   return callEdgeFunction({
     type: 'activite',
@@ -434,7 +431,11 @@ export async function declencherCronNotifications() {
 }
 
 /** Notification push immédiate sur cet appareil / compte */
-export async function testerNotificationPush(userId, title = 'BetterMe', body = 'Notification Test') {
+export async function testerNotificationPush(
+  userId,
+  title = 'BetterMe',
+  body = 'Notification Test',
+) {
   return callEdgeFunction({
     type: 'manuel',
     userId,
