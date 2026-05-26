@@ -1,59 +1,75 @@
 <script setup>
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { supabase } from '../lib/supabase.js';
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { supabase } from '../lib/supabase.js'
 
-const router = useRouter();
+const router = useRouter()
+const isCheckingSession = ref(true)
 
-const baseUrl = import.meta.env.BASE_URL || '/';
+onMounted(async () => {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (session) {
+      router.push('/dashboard')
+      return
+    }
+  } catch (error) {
+    console.error('Error checking session:', error)
+  } finally {
+    isCheckingSession.value = false
+  }
+})
 
-const isLogin = ref(true);
-const name = ref('');
-const email = ref('');
-const password = ref('');
-const errorMessage = ref('');
-const isLoading = ref(false);
+const baseUrl = import.meta.env.BASE_URL || '/'
+
+const isLogin = ref(true)
+const name = ref('')
+const email = ref('')
+const password = ref('')
+const errorMessage = ref('')
+const isLoading = ref(false)
 
 const toggleMode = () => {
-  isLogin.value = !isLogin.value;
-  errorMessage.value = '';
-  name.value = '';
-  email.value = '';
-  password.value = '';
-};
+  isLogin.value = !isLogin.value
+  errorMessage.value = ''
+  name.value = ''
+  email.value = ''
+  password.value = ''
+}
 
 const getErrorMessage = (error) => {
-  const msg = error?.message?.toLowerCase() ?? '';
-  if (!email.value || !password.value) return 'Veuillez remplir tous les champs.';
-  if (!isLogin.value && !name.value) return 'Veuillez entrer votre nom complet.';
+  const msg = error?.message?.toLowerCase() ?? ''
+  if (!email.value || !password.value) return 'Veuillez remplir tous les champs.'
+  if (!isLogin.value && !name.value) return 'Veuillez entrer votre nom complet.'
   if (msg.includes('user already registered') || msg.includes('already been registered'))
-    return 'Cet email est déjà utilisé. Essayez de vous connecter.';
+    return 'Cet email est déjà utilisé. Essayez de vous connecter.'
   if (msg.includes('invalid login credentials') || msg.includes('invalid credentials'))
-    return 'Email ou mot de passe incorrect.';
+    return 'Email ou mot de passe incorrect.'
   if (msg.includes('password should be at least'))
-    return 'Le mot de passe doit contenir au moins 6 caractères.';
-  if (msg.includes('unable to validate email address'))
-    return 'Adresse email invalide.';
-  return error?.message ?? 'Une erreur est survenue. Veuillez réessayer.';
-};
+    return 'Le mot de passe doit contenir au moins 6 caractères.'
+  if (msg.includes('unable to validate email address')) return 'Adresse email invalide.'
+  return error?.message ?? 'Une erreur est survenue. Veuillez réessayer.'
+}
 
 const handleSubmit = async () => {
-  errorMessage.value = '';
+  errorMessage.value = ''
 
   if (!email.value || !password.value || (!isLogin.value && !name.value)) {
-    errorMessage.value = 'Veuillez remplir tous les champs.';
-    return;
+    errorMessage.value = 'Veuillez remplir tous les champs.'
+    return
   }
 
-  isLoading.value = true;
+  isLoading.value = true
 
   try {
     if (isLogin.value) {
       const { error } = await supabase.auth.signInWithPassword({
         email: email.value,
         password: password.value,
-      });
-      if (error) throw error;
+      })
+      if (error) throw error
     } else {
       const { error } = await supabase.auth.signUp({
         email: email.value,
@@ -61,17 +77,17 @@ const handleSubmit = async () => {
         options: {
           data: { nom: name.value },
         },
-      });
-      if (error) throw error;
+      })
+      if (error) throw error
     }
 
-    router.push('/dashboard');
+    router.push('/dashboard')
   } catch (error) {
-    errorMessage.value = getErrorMessage(error);
+    errorMessage.value = getErrorMessage(error)
   } finally {
-    isLoading.value = false;
+    isLoading.value = false
   }
-};
+}
 </script>
 
 <template>
@@ -83,56 +99,62 @@ const handleSubmit = async () => {
     </div>
 
     <div class="auth-card">
-      <form class="auth-form" @submit.prevent="handleSubmit">
-        <div class="input-group" v-if="!isLogin">
-          <label for="name">Nom complet</label>
-          <input
-            v-model="name"
-            type="text"
-            id="name"
-            placeholder="John Doe"
-            autocomplete="name"
-          />
-        </div>
-
-        <div class="input-group">
-          <label for="email">Email</label>
-          <input
-            v-model="email"
-            type="email"
-            id="email"
-            placeholder="john@example.com"
-            autocomplete="email"
-          />
-        </div>
-
-        <div class="input-group">
-          <label for="password">Mot de passe</label>
-          <input
-            v-model="password"
-            type="password"
-            id="password"
-            placeholder="••••••••"
-            autocomplete="current-password"
-          />
-        </div>
-
-        <p v-if="errorMessage" class="error-message">{{ errorMessage }}</p>
-
-        <button type="submit" class="submit-btn" :disabled="isLoading">
-          <span v-if="isLoading" class="spinner"></span>
-          <span v-else>{{ isLogin ? 'Se connecter' : "S'inscrire" }}</span>
-        </button>
-      </form>
-
-      <div class="auth-footer">
-        <p>
-          {{ isLogin ? "Vous n'avez pas de compte ?" : 'Déjà un compte ?' }}
-          <a href="#" @click.prevent="toggleMode" class="toggle-link">
-            {{ isLogin ? "S'inscrire" : 'Se connecter' }}
-          </a>
-        </p>
+      <div v-if="isCheckingSession" class="loading-session">
+        <span class="spinner"></span>
+        <p>Connexion automatique...</p>
       </div>
+      <template v-else>
+        <form class="auth-form" @submit.prevent="handleSubmit">
+          <div class="input-group" v-if="!isLogin">
+            <label for="name">Nom complet</label>
+            <input
+              v-model="name"
+              type="text"
+              id="name"
+              placeholder="John Doe"
+              autocomplete="name"
+            />
+          </div>
+
+          <div class="input-group">
+            <label for="email">Email</label>
+            <input
+              v-model="email"
+              type="email"
+              id="email"
+              placeholder="john@example.com"
+              autocomplete="email"
+            />
+          </div>
+
+          <div class="input-group">
+            <label for="password">Mot de passe</label>
+            <input
+              v-model="password"
+              type="password"
+              id="password"
+              placeholder="••••••••"
+              autocomplete="current-password"
+            />
+          </div>
+
+          <p v-if="errorMessage" class="error-message">{{ errorMessage }}</p>
+
+          <button type="submit" class="submit-btn" :disabled="isLoading">
+            <span v-if="isLoading" class="spinner"></span>
+            <span v-else>{{ isLogin ? 'Se connecter' : "S'inscrire" }}</span>
+          </button>
+        </form>
+
+        <div class="auth-footer">
+          <p>
+            {{ isLogin ? "Vous n'avez pas de compte ?" : 'Déjà un compte ?' }}
+            <a href="#" @click.prevent="toggleMode" class="toggle-link">
+              {{ isLogin ? "S'inscrire" : 'Se connecter' }}
+            </a>
+          </p>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -148,7 +170,7 @@ const handleSubmit = async () => {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  background: linear-gradient(-45deg, #D5B5EA, #72A098, #8FA2D4, #95D1AA, #FEDFED, #AD81BE);
+  background: linear-gradient(-45deg, #d5b5ea, #72a098, #8fa2d4, #95d1aa, #fedfed, #ad81be);
   background-size: 400% 400%;
   animation: gradientBG 15s ease infinite;
   overflow: hidden;
@@ -156,9 +178,15 @@ const handleSubmit = async () => {
 }
 
 @keyframes gradientBG {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
 }
 
 .auth-header-outside {
@@ -173,12 +201,17 @@ const handleSubmit = async () => {
   height: 60px;
   margin-bottom: 0.5rem;
   animation: bounce 3s infinite ease-in-out;
-  filter: drop-shadow(0 4px 10px rgba(0,0,0,0.15));
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.15));
 }
 
 @keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
 }
 
 .app-name {
@@ -238,7 +271,7 @@ const handleSubmit = async () => {
 .input-group label {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #AD81BE;
+  color: #ad81be;
   margin-left: 0.25rem;
 }
 
@@ -261,7 +294,7 @@ const handleSubmit = async () => {
 }
 
 .input-group input:focus {
-  border-color: #D5B5EA;
+  border-color: #d5b5ea;
   box-shadow: 0 0 0 3px rgba(213, 181, 234, 0.3);
   background: rgba(255, 255, 255, 0.95);
 }
@@ -277,12 +310,14 @@ const handleSubmit = async () => {
   padding: 1rem;
   border: none;
   border-radius: 12px;
-  background: linear-gradient(135deg, #D5B5EA, #AD81BE);
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
   color: white;
   font-size: 1.05rem;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
   box-shadow: 0 4px 15px rgba(213, 181, 234, 0.4);
 }
 
@@ -303,7 +338,7 @@ const handleSubmit = async () => {
 }
 
 .toggle-link {
-  color: #AD81BE;
+  color: #ad81be;
   font-weight: 700;
   text-decoration: none;
   margin-left: 0.5rem;
@@ -311,7 +346,7 @@ const handleSubmit = async () => {
 }
 
 .toggle-link:hover {
-  color: #D5B5EA;
+  color: #d5b5ea;
   text-decoration: underline;
 }
 
@@ -335,8 +370,14 @@ const handleSubmit = async () => {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .submit-btn:disabled {
@@ -357,7 +398,28 @@ const handleSubmit = async () => {
   vertical-align: middle;
 }
 
+.loading-session {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 0;
+  gap: 1.25rem;
+  color: #ad81be;
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.loading-session .spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(213, 181, 234, 0.3);
+  border-top-color: #ad81be;
+}
+
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>
