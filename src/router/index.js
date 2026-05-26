@@ -4,6 +4,7 @@ import AppLayout from '../layouts/AppLayout.vue'
 import DashboardView from '../views/DashboardView.vue'
 import TimeTableView from '../views/TimeTableView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import MenstruationView from '../views/MenstruationView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -29,10 +30,15 @@ const router = createRouter({
           component: TimeTableView
         },
         {
+          path: 'menstruation',
+          name: 'menstruation',
+          component: MenstruationView,
+        },
+        {
           path: 'settings',
           name: 'settings',
-          component: SettingsView
-        }
+          component: SettingsView,
+        },
       ]
     }
   ]
