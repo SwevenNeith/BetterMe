@@ -179,8 +179,18 @@ const fetchTodayEvents = async (userId) => {
 const currentCalendarDate = ref(new Date())
 
 const monthNames = [
-  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
-  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
+  'Janvier',
+  'Février',
+  'Mars',
+  'Avril',
+  'Mai',
+  'Juin',
+  'Juillet',
+  'Août',
+  'Septembre',
+  'Octobre',
+  'Novembre',
+  'Décembre',
 ]
 const weekDayNames = ['Lu', 'Ma', 'Me', 'Je', 'Ve', 'Sa', 'Di']
 
@@ -207,53 +217,51 @@ const nextMonth = () => {
 const calendarDays = computed(() => {
   const year = currentCalendarDate.value.getFullYear()
   const month = currentCalendarDate.value.getMonth()
-  
+
   const firstDayOfMonth = new Date(year, month, 1)
   const lastDayOfMonth = new Date(year, month + 1, 0)
-  
+
   const daysInMonth = lastDayOfMonth.getDate()
-  
+
   // getDay() returns 0 for Sunday, 1 for Monday. We want Monday=0, Sunday=6
   let firstDayIndex = firstDayOfMonth.getDay() - 1
   if (firstDayIndex === -1) firstDayIndex = 6
-  
+
   const days = []
-  
+
   // Previous month padding
   const prevMonthLastDay = new Date(year, month, 0).getDate()
   for (let i = firstDayIndex - 1; i >= 0; i--) {
     days.push({
       date: prevMonthLastDay - i,
       isCurrentMonth: false,
-      isToday: false
+      isToday: false,
     })
   }
-  
+
   // Current month days
   const today = new Date()
   for (let i = 1; i <= daysInMonth; i++) {
-    const isToday = 
-      today.getDate() === i &&
-      today.getMonth() === month &&
-      today.getFullYear() === year
-      
+    const isToday =
+      today.getDate() === i && today.getMonth() === month && today.getFullYear() === year
+
     days.push({
       date: i,
       isCurrentMonth: true,
-      isToday
+      isToday,
     })
   }
-  
+
   // Next month padding to complete 42 days grid (6 weeks)
   const remainingDays = 42 - days.length
   for (let i = 1; i <= remainingDays; i++) {
     days.push({
       date: i,
       isCurrentMonth: false,
-      isToday: false
+      isToday: false,
     })
   }
-  
+
   return days
 })
 
@@ -356,99 +364,91 @@ const getCategoryStyle = (categoryIdOrName) => {
         ›
       </button>
 
-      <div
-        ref="carouselViewport"
-        class="dashboard-content"
-        @scroll.passive="onCarouselScroll"
-      >
+      <div ref="carouselViewport" class="dashboard-content" @scroll.passive="onCarouselScroll">
         <div ref="carouselTrack" class="carousel-track">
-        <!-- Left Column -->
-        <div class="dashboard-column left-column">
-          <h2 class="column-title">
-            <span>Aujourd'hui</span>
-            <span class="column-date">{{ formattedToday }}</span>
-          </h2>
-          <div class="today-events-container">
-            <div v-if="isLoadingEvents" class="loading-state">
-              <span class="spinner"></span> Chargement de ton planning...
-            </div>
-            <div v-else-if="userEvents.length === 0" class="empty-state">
-              <span class="empty-icon">☕</span>
-              <p>Aucun événement prévu aujourd'hui. Profite de ton temps libre !</p>
-            </div>
-            <div v-else class="today-events-list">
-              <div
-                v-for="event in userEvents"
-                :key="event.id"
-                class="dashboard-event-card"
-                :style="getCategoryStyle(event.category)"
-              >
-                <div class="event-time">
-                  <span v-if="event.all_day" class="time-badge">Toute la journée</span>
-                  <span v-else class="time-badge">{{ event.time }}</span>
-                </div>
-                <div class="event-details">
-                  <div class="event-title-row">
-                    <span class="event-icon">{{ getCategoryIcon(event.category) }}</span>
-                    <h4 class="event-title">{{ event.title }}</h4>
-                  </div>
-                  <p v-if="event.detail" class="event-description">{{ event.detail }}</p>
-                  <div v-if="event.category" class="event-tags">
-                    <span class="event-category-tag">
-                      {{ getCategoryName(event.category) }}
-                    </span>
-                  </div>
-                </div>
+          <!-- Left Column -->
+          <div class="dashboard-column left-column">
+            <h2 class="column-title">
+              <span>Aujourd'hui</span>
+              <span class="column-date">{{ formattedToday }}</span>
+            </h2>
+            <div class="today-events-container">
+              <div v-if="isLoadingEvents" class="loading-state">
+                <span class="spinner"></span> Chargement de ton planning...
               </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right Column -->
-        <div class="dashboard-column right-column">
-          <div class="mini-calendar-wrapper">
-            <div class="mini-calendar-header">
-              <button class="calendar-nav-btn" @click="prevMonth">&lt;</button>
-              <h3 class="calendar-month-title">{{ calendarMonthName }} {{ calendarYear }}</h3>
-              <button class="calendar-nav-btn" @click="nextMonth">&gt;</button>
-            </div>
-            
-            <div class="mini-calendar-grid">
-              <!-- Days of week headers -->
-              <div 
-                v-for="day in weekDayNames" 
-                :key="'header-'+day" 
-                class="calendar-weekday"
-              >
-                {{ day }}
+              <div v-else-if="userEvents.length === 0" class="empty-state">
+                <span class="empty-icon">☕</span>
+                <p>Aucun événement prévu aujourd'hui. Profite de ton temps libre !</p>
               </div>
-              
-              <!-- Calendar days -->
-              <div 
-                v-for="(dayObj, index) in calendarDays" 
-                :key="'day-'+index"
-                class="calendar-day"
-                :class="{
-                  'is-current-month': dayObj.isCurrentMonth,
-                  'is-today': dayObj.isToday
-                }"
-              >
-                {{ dayObj.date }}
+              <div v-else class="today-events-list">
+                <div
+                  v-for="event in userEvents"
+                  :key="event.id"
+                  class="dashboard-event-card"
+                  :style="getCategoryStyle(event.category)"
+                >
+                  <div class="event-time">
+                    <span v-if="event.all_day" class="time-badge">Toute la journée</span>
+                    <span v-else class="time-badge">{{ event.time }}</span>
+                  </div>
+                  <div class="event-details">
+                    <div class="event-title-row">
+                      <span class="event-icon">{{ getCategoryIcon(event.category) }}</span>
+                      <h4 class="event-title">{{ event.title }}</h4>
+                    </div>
+                    <p v-if="event.detail" class="event-description">{{ event.detail }}</p>
+                    <div v-if="event.category" class="event-tags">
+                      <span class="event-category-tag">
+                        {{ getCategoryName(event.category) }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- Legend -->
-          <div v-if="userCategories.length > 0" class="dashboard-legend">
-            <h4 class="legend-title">Mes Activités</h4>
-            <div class="legend-items">
-              <div v-for="cat in userCategories.slice(0, 5)" :key="cat.id" class="legend-item">
-                <span class="legend-color" :style="{ background: cat.color }"></span>
-                <span class="legend-label">{{ cat.name }}</span>
+          <!-- Right Column -->
+          <div class="dashboard-column right-column">
+            <div class="mini-calendar-wrapper">
+              <div class="mini-calendar-header">
+                <button class="calendar-nav-btn" @click="prevMonth">&lt;</button>
+                <h3 class="calendar-month-title">{{ calendarMonthName }} {{ calendarYear }}</h3>
+                <button class="calendar-nav-btn" @click="nextMonth">&gt;</button>
+              </div>
+
+              <div class="mini-calendar-grid">
+                <!-- Days of week headers -->
+                <div v-for="day in weekDayNames" :key="'header-' + day" class="calendar-weekday">
+                  {{ day }}
+                </div>
+
+                <!-- Calendar days -->
+                <div
+                  v-for="(dayObj, index) in calendarDays"
+                  :key="'day-' + index"
+                  class="calendar-day"
+                  :class="{
+                    'is-current-month': dayObj.isCurrentMonth,
+                    'is-today': dayObj.isToday,
+                  }"
+                >
+                  {{ dayObj.date }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Legend -->
+            <div v-if="userCategories.length > 0" class="dashboard-legend">
+              <h4 class="legend-title">Mes Activités</h4>
+              <div class="legend-items">
+                <div v-for="cat in userCategories.slice(0, 5)" :key="cat.id" class="legend-item">
+                  <span class="legend-color" :style="{ background: cat.color }"></span>
+                  <span class="legend-label">{{ cat.name }}</span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
         </div>
       </div>
 
@@ -482,6 +482,7 @@ const getCategoryStyle = (categoryIdOrName) => {
   justify-content: flex-start;
   padding: 2rem 1.5rem;
   min-height: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
   gap: 2rem;
 }
@@ -523,6 +524,7 @@ const getCategoryStyle = (categoryIdOrName) => {
 .highlight {
   background: linear-gradient(135deg, #d5b5ea, #ad81be);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -694,8 +696,12 @@ const getCategoryStyle = (categoryIdOrName) => {
     transform: translateY(-50%) scale(0.95);
   }
 
-  .prev-arrow { left: 4px; }
-  .next-arrow { right: 4px; }
+  .prev-arrow {
+    left: 4px;
+  }
+  .next-arrow {
+    right: 4px;
+  }
 
   .indicator-dot {
     width: 8px;
@@ -719,7 +725,6 @@ const getCategoryStyle = (categoryIdOrName) => {
     border-color: rgba(213, 181, 234, 0.2);
   }
 }
-
 
 .column-title {
   font-size: 1.4rem;
@@ -921,7 +926,9 @@ const getCategoryStyle = (categoryIdOrName) => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .calendar-month-title { color: #f0e8f8; }
+  .calendar-month-title {
+    color: #f0e8f8;
+  }
 }
 
 .calendar-nav-btn {
@@ -977,7 +984,9 @@ const getCategoryStyle = (categoryIdOrName) => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .calendar-day.is-current-month { color: #c5b8d2; }
+  .calendar-day.is-current-month {
+    color: #c5b8d2;
+  }
 }
 
 .calendar-day.is-today {
@@ -1019,7 +1028,9 @@ const getCategoryStyle = (categoryIdOrName) => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .legend-title { color: #aeb6bf; }
+  .legend-title {
+    color: #aeb6bf;
+  }
 }
 
 .legend-items {
@@ -1049,6 +1060,8 @@ const getCategoryStyle = (categoryIdOrName) => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .legend-label { color: #c5b8d2; }
+  .legend-label {
+    color: #c5b8d2;
+  }
 }
 </style>
