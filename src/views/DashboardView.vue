@@ -508,6 +508,16 @@ const getCategoryStyle = (categoryIdOrName) => {
   .dashboard-menstruation-wrap :deep(.cycle-calendar) {
     max-width: 100%;
     min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .dashboard-menstruation-wrap :deep(.cycle-calendar__legend),
+  .dashboard-menstruation-wrap :deep(.cycle-calendar__legend-groups),
+  .dashboard-menstruation-wrap :deep(.cycle-calendar__meta) {
+    max-width: 100%;
+    width: 100%;
+    min-width: 0;
     box-sizing: border-box;
   }
 }
@@ -898,6 +908,56 @@ const getCategoryStyle = (categoryIdOrName) => {
   max-width: 320px;
   width: 100%;
   margin: 0 auto;
+}
+
+/* Dashboard : carte cycle = toute la largeur de la colonne (sinon max 320px + légende illisible) */
+.right-column .dashboard-menstruation-wrap.mini-calendar-wrapper {
+  max-width: 100%;
+  width: 100%;
+  margin-left: 0;
+  margin-right: 0;
+  align-self: stretch;
+  box-sizing: border-box;
+  container-type: inline-size;
+  container-name: dash-mensu-card;
+}
+
+/* Légende : grille 3 colonnes selon la largeur RÉELLE de la carte (pas le viewport) */
+@container dash-mensu-card (min-width: 320px) {
+  .right-column .dashboard-menstruation-wrap :deep(.cycle-calendar__legend-groups) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.65rem 0.85rem;
+    width: 100%;
+    min-width: 0;
+    align-items: start;
+  }
+
+  .right-column .dashboard-menstruation-wrap :deep(.cycle-calendar__legend-group) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+
+  .right-column .dashboard-menstruation-wrap :deep(.cycle-calendar__legend-list) {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .right-column .dashboard-menstruation-wrap :deep(.cycle-calendar__legend-item) {
+    min-width: 0;
+  }
+
+  .right-column .dashboard-menstruation-wrap :deep(.cycle-calendar__legend-text),
+  .right-column .dashboard-menstruation-wrap :deep(.cycle-calendar__legend-desc) {
+    overflow-wrap: break-word;
+    word-break: normal;
+    min-width: 0;
+  }
 }
 
 .calendar-placeholder-text {

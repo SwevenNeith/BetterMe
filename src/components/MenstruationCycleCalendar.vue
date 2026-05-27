@@ -211,27 +211,29 @@ watch(
         aria-label="Légende du calendrier"
       >
         <h4 class="cycle-calendar__legend-title">Légende</h4>
-        <div
-          v-for="group in visibleLegendGroups"
-          :key="group.id"
-          class="cycle-calendar__legend-group"
-        >
-          <h5 class="cycle-calendar__legend-group-title">{{ group.title }}</h5>
-          <ul class="cycle-calendar__legend-list">
-            <li
-              v-for="item in group.items"
-              :key="item.kind"
-              class="cycle-calendar__legend-item"
-            >
-              <span class="cycle-calendar__legend-swatch" :class="legendSwatchClasses(item)"></span>
-              <span class="cycle-calendar__legend-text">
-                <strong>{{ item.label }}</strong>
-                <span v-if="item.description" class="cycle-calendar__legend-desc">
-                  {{ item.description }}
+        <div class="cycle-calendar__legend-groups">
+          <div
+            v-for="group in visibleLegendGroups"
+            :key="group.id"
+            class="cycle-calendar__legend-group"
+          >
+            <h5 class="cycle-calendar__legend-group-title">{{ group.title }}</h5>
+            <ul class="cycle-calendar__legend-list">
+              <li
+                v-for="item in group.items"
+                :key="item.kind"
+                class="cycle-calendar__legend-item"
+              >
+                <span class="cycle-calendar__legend-swatch" :class="legendSwatchClasses(item)"></span>
+                <span class="cycle-calendar__legend-text">
+                  <strong>{{ item.label }}</strong>
+                  <span v-if="item.description" class="cycle-calendar__legend-desc">
+                    {{ item.description }}
+                  </span>
                 </span>
-              </span>
-            </li>
-          </ul>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
 
@@ -289,6 +291,9 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .cycle-calendar--compact {
@@ -382,6 +387,12 @@ watch(
 
 .cal-today-btn:hover {
   color: #ad81be;
+}
+
+.cycle-calendar__grid {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .cycle-calendar__weekdays,
@@ -517,12 +528,21 @@ watch(
 .cycle-calendar__legend {
   padding-top: 0.5rem;
   border-top: 1px solid rgba(213, 181, 234, 0.25);
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  /* Largeur réelle de la carte (pas le viewport) pour décider 1 vs 3 colonnes */
+  container-type: inline-size;
+  container-name: cycle-legend;
 }
 
 .cycle-calendar__meta {
   display: grid;
   grid-template-columns: 1fr;
   gap: 1rem;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .cycle-calendar__rules-form {
@@ -587,21 +607,37 @@ watch(
   color: #5d6d7e;
 }
 
-.cycle-calendar__legend-group {
-  margin-bottom: 0.75rem;
+.cycle-calendar__legend-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
-.cycle-calendar__legend-group:last-child {
+.cycle-calendar__legend-group {
   margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .cycle-calendar__legend-group-title {
+  display: block;
   margin: 0 0 0.4rem;
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #ad81be;
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .cycle-calendar__legend-list {
@@ -611,12 +647,16 @@ watch(
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 0.5rem 1rem;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .cycle-calendar__legend-item {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 .cycle-calendar__legend-swatch {
@@ -630,11 +670,16 @@ watch(
   flex-direction: column;
   font-size: 0.82rem;
   color: #5d6d7e;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .cycle-calendar__legend-text strong {
   color: #2c3e50;
   font-weight: 700;
+  overflow-wrap: normal;
 }
 
 .cycle-calendar__legend-desc {
@@ -721,10 +766,44 @@ watch(
   }
 }
 
+/* 3 colonnes dès que la zone légende est assez large (colonne dashboard étroite ≠ viewport) */
+@container cycle-legend (min-width: 360px) {
+  .cycle-calendar__legend-groups {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.65rem 0.85rem;
+    align-items: start;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .cycle-calendar__legend-group {
+    min-width: 0;
+  }
+
+  .cycle-calendar__legend-groups .cycle-calendar__legend-list,
+  .cycle-calendar.cycle-calendar--compact .cycle-calendar__legend-groups .cycle-calendar__legend-list {
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
 @media (min-width: 880px) {
   .cycle-calendar__meta {
     grid-template-columns: minmax(0, 1fr) 280px;
     align-items: start;
+  }
+
+  /* Dashboard / compact : pas de formulaire à droite — ne pas réserver 280px vides */
+  .cycle-calendar--compact .cycle-calendar__meta {
+    grid-template-columns: 1fr;
+  }
+
+  /* Vue complète sans formulaire : une seule colonne pour la légende pleine largeur */
+  .cycle-calendar__meta:not(:has(.cycle-calendar__rules-form)) {
+    grid-template-columns: 1fr;
   }
 }
 </style>
