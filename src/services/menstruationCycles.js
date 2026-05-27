@@ -319,6 +319,19 @@ export async function listCyclesPilule(supabase, userId) {
   return data ?? []
 }
 
+function copyKnownRealFieldsIfPresent(fromRow, toRow) {
+  if (!fromRow || !toRow) return
+  if (fromRow[COL.dateDebutReglesReelle]) {
+    toRow[COL.dateDebutReglesReelle] = fromRow[COL.dateDebutReglesReelle]
+  }
+  if (fromRow[COL.dateFinReglesReelle]) {
+    toRow[COL.dateFinReglesReelle] = fromRow[COL.dateFinReglesReelle]
+  }
+  if (fromRow[COL.dureeReglesReelle] != null) {
+    toRow[COL.dureeReglesReelle] = fromRow[COL.dureeReglesReelle]
+  }
+}
+
 async function getNextNumeroCycle(supabase, userId) {
   const { data, error } = await supabase
     .from(TABLE)
@@ -384,6 +397,11 @@ export async function syncForecastCyclesPilule(supabase, userId) {
 
     const existing = byNum.get(n)
     if (existing?.id) {
+      copyKnownRealFieldsIfPresent(existing, record)
+      applyDureeReglesFields(record)
+      applySpmDatesEstimees(record)
+      record[COL.dureeSpmReelle] = computeDureeSpmReelle(record)
+
       const { data, error } = await supabase
         .from(TABLE)
         .update(record)
@@ -401,6 +419,88 @@ export async function syncForecastCyclesPilule(supabase, userId) {
       cycles.push(data)
     }
   }
+}
+
+function pickTargetCycleForRulesUpdate(cycles, { dateDebutReglesReelle, dateFinReglesReelle }) {
+  if (!cycles.length) return null
+
+  if (dateDebutReglesReelle) {
+    const exact = cycles.find((c) => c[COL.dateDebutReglesEstimee] === dateDebutReglesReelle)
+    if (exact) return exact
+  }
+
+  if (dateFinReglesReelle) {
+    const exact = cycles.find((c) => c[COL.dateFinReglesEstimee] === dateFinReglesReelle)
+    if (exact) return exact
+  }
+
+  if (dateDebutReglesReelle) {
+    const within = cycles.find((c) => {
+      const d1 = c[COL.dateDebutReglesEstimee]
+      const d2 = c[COL.dateFinReglesEstimee]
+      return d1 && d2 && dateDebutReglesReelle >= d1 && dateDebutReglesReelle <= d2
+    })
+    if (within) return within
+  }
+
+  return cycles[cycles.length - 1]
+}
+
+export async function saveMenstruationRulesDates(supabase, userId, payload) {
+  const dateDebutReglesReelle = payload?.dateDebutReglesReelle || null
+  const dateFinReglesReelle = payload?.dateFinReglesReelle || null
+
+  if (!dateDebutReglesReelle && !dateFinReglesReelle) {
+    throw new Error('Renseigne au moins une date.')
+  }
+  if (!dateDebutReglesReelle && dateFinReglesReelle) {
+    throw new Error('Tu dois renseigner un début de règles réel avant la fin.')
+  }
+  if (dateDebutReglesReelle && dateFinReglesReelle && dateFinReglesReelle < dateDebutReglesReelle) {
+    throw new Error('La date de fin réelle ne peut pas être avant la date de début réelle.')
+  }
+
+  const cycles = await listCyclesPilule(supabase, userId)
+  const target = pickTargetCycleForRulesUpdate(cycles, {
+    dateDebutReglesReelle,
+    dateFinReglesReelle,
+  })
+  if (!target?.id) {
+    throw new Error('Aucun cycle trouvé pour enregistrer ces dates.')
+  }
+
+  const next = { ...target }
+  next[COL.dateDebutReglesReelle] = dateDebutReglesReelle
+  next[COL.dateFinReglesReelle] = dateFinReglesReelle
+  next[COL.dateDebutReglesEstimee] = dateDebutReglesReelle || next[COL.dateDebutReglesEstimee]
+  if (!next[COL.dateFinReglesEstimee] && dateFinReglesReelle) {
+    next[COL.dateFinReglesEstimee] = dateFinReglesReelle
+  }
+
+  applyDureeReglesFields(next)
+  next[COL.delaiRegles] = computeDelaiRegles(next)
+  applySpmDatesEstimees(next)
+  next[COL.dureeSpmReelle] = computeDureeSpmReelle(next)
+
+  const { error } = await supabase
+    .from(TABLE)
+    .update({
+      [COL.dateDebutReglesReelle]: next[COL.dateDebutReglesReelle],
+      [COL.dateFinReglesReelle]: next[COL.dateFinReglesReelle],
+      [COL.dateDebutReglesEstimee]: next[COL.dateDebutReglesEstimee],
+      [COL.dateFinReglesEstimee]: next[COL.dateFinReglesEstimee],
+      [COL.dureeReglesReelle]: next[COL.dureeReglesReelle],
+      [COL.dureeReglesEstimee]: next[COL.dureeReglesEstimee],
+      [COL.delaiRegles]: next[COL.delaiRegles],
+      [COL.dateDebutSpmEstimee]: next[COL.dateDebutSpmEstimee],
+      [COL.dateFinSpmEstimee]: next[COL.dateFinSpmEstimee],
+      [COL.dureeSpmReelle]: next[COL.dureeSpmReelle],
+    })
+    .eq('id', target.id)
+
+  if (error) throw error
+
+  await syncForecastCyclesPilule(supabase, userId)
 }
 
 export async function createMenstruationCyclePilule(supabase, userId, payload) {

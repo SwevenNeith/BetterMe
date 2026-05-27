@@ -16,7 +16,24 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  compact: {
+    type: Boolean,
+    default: false,
+  },
+  showRulesForm: {
+    type: Boolean,
+    default: false,
+  },
+  isSubmittingRules: {
+    type: Boolean,
+    default: false,
+  },
+  rulesError: {
+    type: String,
+    default: '',
+  },
 })
+const emit = defineEmits(['submit-rules-dates'])
 
 const WEEKDAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
 
@@ -45,6 +62,10 @@ const monthSummaries = computed(() =>
 )
 
 const visibleLegendGroups = computed(() => buildVisibleLegendGroups(calendarData.value))
+const rulesForm = ref({
+  dateDebutReglesReelle: '',
+  dateFinReglesReelle: '',
+})
 
 function prevMonth() {
   if (viewMonth.value === 0) {
@@ -68,6 +89,13 @@ function goToToday() {
   const now = new Date()
   viewYear.value = now.getFullYear()
   viewMonth.value = now.getMonth()
+}
+
+function onSubmitRulesDates() {
+  emit('submit-rules-dates', {
+    dateDebutReglesReelle: rulesForm.value.dateDebutReglesReelle || null,
+    dateFinReglesReelle: rulesForm.value.dateFinReglesReelle || null,
+  })
 }
 
 function cellLayers(iso) {
@@ -126,14 +154,14 @@ watch(
 </script>
 
 <template>
-  <div class="cycle-calendar">
+  <div class="cycle-calendar" :class="{ 'cycle-calendar--compact': compact }">
     <div class="cycle-calendar__nav">
       <button type="button" class="cal-nav-btn" aria-label="Mois précédent" @click="prevMonth">
         ‹
       </button>
       <div class="cycle-calendar__title-wrap">
         <h3 class="cycle-calendar__title">{{ monthTitle }}</h3>
-        <button type="button" class="cal-today-btn" @click="goToToday">Aujourd’hui</button>
+        <button v-if="!compact" type="button" class="cal-today-btn" @click="goToToday">Aujourd’hui</button>
       </div>
       <button type="button" class="cal-nav-btn" aria-label="Mois suivant" @click="nextMonth">
         ›
@@ -176,37 +204,59 @@ watch(
       </div>
     </div>
 
-    <div
-      v-if="visibleLegendGroups.length"
-      class="cycle-calendar__legend"
-      aria-label="Légende du calendrier"
-    >
-      <h4 class="cycle-calendar__legend-title">Légende</h4>
+    <div class="cycle-calendar__meta">
       <div
-        v-for="group in visibleLegendGroups"
-        :key="group.id"
-        class="cycle-calendar__legend-group"
+        v-if="visibleLegendGroups.length"
+        class="cycle-calendar__legend"
+        aria-label="Légende du calendrier"
       >
-        <h5 class="cycle-calendar__legend-group-title">{{ group.title }}</h5>
-        <ul class="cycle-calendar__legend-list">
-          <li
-            v-for="item in group.items"
-            :key="item.kind"
-            class="cycle-calendar__legend-item"
-          >
-            <span class="cycle-calendar__legend-swatch" :class="legendSwatchClasses(item)"></span>
-            <span class="cycle-calendar__legend-text">
-              <strong>{{ item.label }}</strong>
-              <span v-if="item.description" class="cycle-calendar__legend-desc">
-                {{ item.description }}
+        <h4 class="cycle-calendar__legend-title">Légende</h4>
+        <div
+          v-for="group in visibleLegendGroups"
+          :key="group.id"
+          class="cycle-calendar__legend-group"
+        >
+          <h5 class="cycle-calendar__legend-group-title">{{ group.title }}</h5>
+          <ul class="cycle-calendar__legend-list">
+            <li
+              v-for="item in group.items"
+              :key="item.kind"
+              class="cycle-calendar__legend-item"
+            >
+              <span class="cycle-calendar__legend-swatch" :class="legendSwatchClasses(item)"></span>
+              <span class="cycle-calendar__legend-text">
+                <strong>{{ item.label }}</strong>
+                <span v-if="item.description" class="cycle-calendar__legend-desc">
+                  {{ item.description }}
+                </span>
               </span>
-            </span>
-          </li>
-        </ul>
+            </li>
+          </ul>
+        </div>
       </div>
+
+      <form
+        v-if="showRulesForm && !compact"
+        class="cycle-calendar__rules-form"
+        @submit.prevent="onSubmitRulesDates"
+      >
+        <h4 class="cycle-calendar__legend-title">Renseigner le réel</h4>
+        <label class="cycle-calendar__field">
+          <span>Début des règles</span>
+          <input v-model="rulesForm.dateDebutReglesReelle" type="date" />
+        </label>
+        <label class="cycle-calendar__field">
+          <span>Fin des règles</span>
+          <input v-model="rulesForm.dateFinReglesReelle" type="date" />
+        </label>
+        <p v-if="rulesError" class="cycle-calendar__rules-error">{{ rulesError }}</p>
+        <button type="submit" class="cycle-calendar__rules-btn" :disabled="isSubmittingRules">
+          {{ isSubmittingRules ? 'Validation…' : 'Valider les dates' }}
+        </button>
+      </form>
     </div>
 
-    <section v-if="monthSummaries.length" class="cycle-calendar__periods">
+    <section v-if="monthSummaries.length && !compact" class="cycle-calendar__periods">
       <h4 class="cycle-calendar__periods-title">Périodes ce mois</h4>
       <ul class="cycle-calendar__periods-list">
         <li
@@ -239,6 +289,44 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+}
+
+.cycle-calendar--compact {
+  gap: 0.8rem;
+}
+
+.cycle-calendar--compact .cycle-calendar__title {
+  font-size: 1rem;
+}
+
+.cycle-calendar--compact .cal-nav-btn {
+  width: 1.9rem;
+  height: 1.9rem;
+  font-size: 1.1rem;
+}
+
+.cycle-calendar--compact .cycle-calendar__cell {
+  min-height: 2.5rem;
+  padding: 0.15rem 0.2rem 0.1rem;
+}
+
+.cycle-calendar--compact .cycle-calendar__day-num {
+  width: 1.25rem;
+  height: 1.25rem;
+  font-size: 0.72rem;
+}
+
+.cycle-calendar--compact .cycle-calendar__legend-list {
+  grid-template-columns: 1fr;
+  gap: 0.4rem;
+}
+
+.cycle-calendar--compact .cycle-calendar__legend-text {
+  font-size: 0.78rem;
+}
+
+.cycle-calendar--compact .cycle-calendar__legend-desc {
+  font-size: 0.71rem;
 }
 
 .cycle-calendar__nav {
@@ -431,6 +519,66 @@ watch(
   border-top: 1px solid rgba(213, 181, 234, 0.25);
 }
 
+.cycle-calendar__meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+.cycle-calendar__rules-form {
+  border-top: 1px solid rgba(213, 181, 234, 0.25);
+  padding-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.cycle-calendar__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.cycle-calendar__field span {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #ad81be;
+}
+
+.cycle-calendar__field input {
+  padding: 0.45rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.8);
+  color: #2c3e50;
+  font-family: inherit;
+}
+
+.cycle-calendar__rules-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  cursor: pointer;
+}
+
+.cycle-calendar__rules-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.cycle-calendar__rules-error {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #c0392b;
+}
+
 .cycle-calendar__legend-title,
 .cycle-calendar__periods-title {
   margin: 0 0 0.6rem;
@@ -564,6 +712,19 @@ watch(
 
   .cycle-calendar__periods-item {
     background: rgba(0, 0, 0, 0.2);
+  }
+
+  .cycle-calendar__field input {
+    background: rgba(0, 0, 0, 0.2);
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.2);
+  }
+}
+
+@media (min-width: 880px) {
+  .cycle-calendar__meta {
+    grid-template-columns: minmax(0, 1fr) 280px;
+    align-items: start;
   }
 }
 </style>

@@ -10,7 +10,13 @@ import {
   createMenstruationCyclePilule,
   listCyclesPilule,
   refreshAllCyclesSpmDatesEstimees,
+  saveMenstruationRulesDates,
 } from '../services/menstruationCycles.js'
+import {
+  createDefaultMenstruationNotifSettings,
+  loadMenstruationNotifSettings,
+  rescheduleMenstruationEstimatedNotifications,
+} from '../services/menstruationNotifications.js'
 
 const router = useRouter()
 const localToday = getLocalTodayISO()
@@ -33,6 +39,9 @@ const cycleLengthDaysModel = computed({
 
 const isSaving = ref(false)
 const saveError = ref('')
+const isSavingRulesDates = ref(false)
+const rulesDatesError = ref('')
+const menstruationNotifSettings = ref(createDefaultMenstruationNotifSettings())
 
 let isPageActive = true
 onBeforeUnmount(() => {
@@ -49,9 +58,15 @@ const loadPage = async () => {
 
     hasCycleData.value = count > 0
     if (hasCycleData.value) {
+      menstruationNotifSettings.value = await loadMenstruationNotifSettings(userId.value)
       await refreshAllCyclesSpmDatesEstimees(supabase, userId.value)
       if (!isPageActive) return
       cycles.value = await listCyclesPilule(supabase, userId.value)
+      await rescheduleMenstruationEstimatedNotifications(
+        userId.value,
+        cycles.value,
+        menstruationNotifSettings.value,
+      )
     } else {
       cycles.value = []
     }
@@ -65,6 +80,26 @@ const loadPage = async () => {
         : msg || 'Impossible de charger tes données.'
   } finally {
     if (isPageActive) isLoading.value = false
+  }
+}
+
+const onSubmitRulesDates = async (payload) => {
+  if (!userId.value) return
+  rulesDatesError.value = ''
+  isSavingRulesDates.value = true
+  try {
+    await saveMenstruationRulesDates(supabase, userId.value, payload)
+    cycles.value = await listCyclesPilule(supabase, userId.value)
+    await rescheduleMenstruationEstimatedNotifications(
+      userId.value,
+      cycles.value,
+      menstruationNotifSettings.value,
+    )
+  } catch (err) {
+    console.error(err)
+    rulesDatesError.value = err.message || 'Impossible de valider ces dates.'
+  } finally {
+    isSavingRulesDates.value = false
   }
 }
 
@@ -154,7 +189,13 @@ onMounted(async () => {
           détail.
         </p>
       </div>
-      <MenstruationCycleCalendar :cycles="cycles" />
+      <MenstruationCycleCalendar
+        :cycles="cycles"
+        :show-rules-form="true"
+        :is-submitting-rules="isSavingRulesDates"
+        :rules-error="rulesDatesError"
+        @submit-rules-dates="onSubmitRulesDates"
+      />
     </section>
 
     <section v-else class="menstruation-card">

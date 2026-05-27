@@ -24,6 +24,13 @@ import {
   testerNotificationPush,
   declencherCronNotifications,
 } from '../services/notifications.js'
+import { listCyclesPilule } from '../services/menstruationCycles.js'
+import {
+  createDefaultMenstruationNotifSettings,
+  loadMenstruationNotifSettings,
+  saveMenstruationNotifSettings,
+  rescheduleMenstruationEstimatedNotifications,
+} from '../services/menstruationNotifications.js'
 
 const router = useRouter()
 
@@ -39,6 +46,10 @@ const saveError = ref('')
 const isTestingPush = ref(false)
 const isRunningCron = ref(false)
 const deletingIndex = ref(null)
+const menstruationNotifSettings = ref(createDefaultMenstruationNotifSettings())
+const isSavingMenstruationNotif = ref(false)
+const menstruationNotifMessage = ref('')
+const menstruationNotifError = ref('')
 
 const oneTimeUpcoming = ref([])
 const oneTimeFailed = ref([])
@@ -265,7 +276,9 @@ const onRemoveOneTimeReminder = async (reminderId) => {
     await deleteOneTimeReminder(supabase, userId.value, reminderId)
     oneTimeUpcoming.value = oneTimeUpcoming.value.filter((r) => r.id !== reminderId)
     oneTimeFailed.value = oneTimeFailed.value.filter((r) => r.id !== reminderId)
-    standaloneTimersUpcoming.value = standaloneTimersUpcoming.value.filter((r) => r.id !== reminderId)
+    standaloneTimersUpcoming.value = standaloneTimersUpcoming.value.filter(
+      (r) => r.id !== reminderId,
+    )
     standaloneTimersFailed.value = standaloneTimersFailed.value.filter((r) => r.id !== reminderId)
     oneTimeMessage.value = 'Notification planifiée annulée.'
     setTimeout(() => {
@@ -294,6 +307,41 @@ const onRunCronNow = async () => {
   }, 4000)
 }
 
+const loadMenstruationSettings = async () => {
+  if (!userId.value) return
+  try {
+    menstruationNotifSettings.value = await loadMenstruationNotifSettings(userId.value)
+  } catch (err) {
+    console.error(err)
+    menstruationNotifError.value = err.message || 'Impossible de charger les réglages menstruation.'
+  }
+}
+
+const onSaveMenstruationSettings = async () => {
+  if (!userId.value) return
+  isSavingMenstruationNotif.value = true
+  menstruationNotifError.value = ''
+  menstruationNotifMessage.value = ''
+  try {
+    await saveMenstruationNotifSettings(userId.value, menstruationNotifSettings.value)
+    const cycles = await listCyclesPilule(supabase, userId.value)
+    await rescheduleMenstruationEstimatedNotifications(
+      userId.value,
+      cycles,
+      menstruationNotifSettings.value,
+    )
+    menstruationNotifMessage.value = 'Réglages menstruation enregistrés.'
+    setTimeout(() => {
+      menstruationNotifMessage.value = ''
+    }, 2500)
+  } catch (err) {
+    console.error(err)
+    menstruationNotifError.value = err.message || 'Impossible d’enregistrer ces réglages.'
+  } finally {
+    isSavingMenstruationNotif.value = false
+  }
+}
+
 onMounted(async () => {
   const {
     data: { user },
@@ -303,7 +351,7 @@ onMounted(async () => {
     return
   }
   userId.value = user.id
-  await Promise.all([loadReminders(), loadOneTimeReminders()])
+  await Promise.all([loadReminders(), loadOneTimeReminders(), loadMenstruationSettings()])
   window.addEventListener('betterme-notifications-granted', onNotificationsGranted)
   oneTimeRefreshIntervalId = window.setInterval(loadStandaloneScheduled, ONE_TIME_REFRESH_MS)
 })
@@ -321,15 +369,16 @@ onUnmounted(() => {
   <div class="settings-wrapper">
     <header class="settings-header">
       <h1 class="settings-title">Réglages</h1>
-      <p class="settings-subtitle">
-        Gère tes rappels, tes timers et tes notifications.
-      </p>
+      <p class="settings-subtitle">Gère tes rappels, tes timers et tes notifications.</p>
     </header>
 
     <section class="settings-card">
       <div class="card-head">
         <h2>Rappels quotidiens</h2>
-        <p>Chaque rappel envoie une notification push à l'heure choisie (plusieurs par jour possibles).</p>
+        <p>
+          Chaque rappel envoie une notification push à l'heure choisie (plusieurs par jour
+          possibles).
+        </p>
       </div>
 
       <div v-if="!notificationsSupportees()" class="settings-alert settings-alert--warn">
@@ -386,7 +435,12 @@ onUnmounted(() => {
           </div>
           <label class="field field--full">
             <span>Message</span>
-            <input v-model="reminder.body" type="text" maxlength="200" placeholder="Texte de la notification" />
+            <input
+              v-model="reminder.body"
+              type="text"
+              maxlength="200"
+              placeholder="Texte de la notification"
+            />
           </label>
           <button
             type="button"
@@ -414,6 +468,50 @@ onUnmounted(() => {
           @click="onSave"
         >
           {{ isSaving ? 'Enregistrement…' : 'Enregistrer' }}
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-card settings-card--spaced">
+      <div class="card-head">
+        <h2>Menstruation</h2>
+        <p>Notifications estimées de début SPM et début règles.</p>
+      </div>
+
+      <div class="reminder-row">
+        <label class="choice-check choice-check--card">
+          <input
+            v-model="menstruationNotifSettings.menstruation_notify_spm_estimee"
+            type="checkbox"
+          />
+          <span>Notifier le début estimé du SPM</span>
+        </label>
+        <label class="choice-check choice-check--card">
+          <input
+            v-model="menstruationNotifSettings.menstruation_notify_regles_estimees"
+            type="checkbox"
+          />
+          <span>Notifier le début estimé des règles</span>
+        </label>
+        <label class="field">
+          <span>Heure d’envoi</span>
+          <input v-model="menstruationNotifSettings.menstruation_notification_time" type="time" />
+        </label>
+      </div>
+      <p v-if="menstruationNotifError" class="settings-feedback settings-feedback--error">
+        {{ menstruationNotifError }}
+      </p>
+      <p v-if="menstruationNotifMessage" class="settings-feedback settings-feedback--ok">
+        {{ menstruationNotifMessage }}
+      </p>
+      <div class="settings-actions">
+        <button
+          type="button"
+          class="btn btn--primary"
+          :disabled="isSavingMenstruationNotif"
+          @click="onSaveMenstruationSettings"
+        >
+          {{ isSavingMenstruationNotif ? 'Enregistrement…' : 'Enregistrer menstruation' }}
         </button>
       </div>
     </section>
@@ -463,12 +561,7 @@ onUnmounted(() => {
         <div class="reminder-fields">
           <label class="field">
             <span>Date d’envoi</span>
-            <input
-              v-model="oneTimeForm.scheduled_date"
-              type="date"
-              required
-              :min="localToday"
-            />
+            <input v-model="oneTimeForm.scheduled_date" type="date" required :min="localToday" />
           </label>
           <label class="field">
             <span>Heure</span>
@@ -503,8 +596,8 @@ onUnmounted(() => {
                 </time>
                 <p class="one-time-failed-msg">
                   L’heure d’envoi est passée et la notification n’a pas été reçue. Vérifie que les
-                  notifications sont autorisées et qu’un appareil est abonné, puis utilise « Vérifier
-                  les rappels » ou supprime ce rappel.
+                  notifications sont autorisées et qu’un appareil est abonné, puis utilise «
+                  Vérifier les rappels » ou supprime ce rappel.
                 </p>
               </div>
               <button
@@ -528,10 +621,7 @@ onUnmounted(() => {
           À venir
         </h3>
 
-        <p
-          v-if="oneTimeUpcoming.length === 0 && oneTimeFailed.length === 0"
-          class="settings-empty"
-        >
+        <p v-if="oneTimeUpcoming.length === 0 && oneTimeFailed.length === 0" class="settings-empty">
           Aucun rappel ponctuel planifié.
         </p>
 
@@ -563,8 +653,12 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <p v-if="oneTimeError" class="settings-feedback settings-feedback--error">{{ oneTimeError }}</p>
-      <p v-if="oneTimeMessage" class="settings-feedback settings-feedback--ok">{{ oneTimeMessage }}</p>
+      <p v-if="oneTimeError" class="settings-feedback settings-feedback--error">
+        {{ oneTimeError }}
+      </p>
+      <p v-if="oneTimeMessage" class="settings-feedback settings-feedback--ok">
+        {{ oneTimeMessage }}
+      </p>
     </section>
 
     <section class="settings-card settings-card--spaced">
@@ -642,7 +736,9 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <h3 v-if="standaloneTimersUpcoming.length > 0" class="one-time-subheading">Timers en cours</h3>
+        <h3 v-if="standaloneTimersUpcoming.length > 0" class="one-time-subheading">
+          Timers en cours
+        </h3>
         <p
           v-if="standaloneTimersUpcoming.length === 0 && standaloneTimersFailed.length === 0"
           class="settings-empty"
@@ -854,6 +950,29 @@ onUnmounted(() => {
   font-size: 0.95rem;
   background: rgba(255, 255, 255, 0.9);
   color: #2c3e50;
+}
+
+.choice-check {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #5d6d7e;
+}
+
+.choice-check input {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: #ad81be;
+}
+
+.choice-check--card {
+  padding: 0.65rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid rgba(213, 181, 234, 0.3);
+  background: rgba(255, 255, 255, 0.55);
 }
 
 @media (prefers-color-scheme: dark) {

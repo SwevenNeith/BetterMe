@@ -131,6 +131,7 @@ export function isScheduledOverdue(value, nowMs = Date.now()) {
 }
 
 const SCHEDULED_SELECT = 'id, title, body, scheduled_at, sent, kind'
+const MENSTRUATION_KIND_PREFIX = 'menstruation_'
 
 /** Marge après l’heure prévue pour laisser le cron envoyer avant d’afficher l’échec */
 const OVERDUE_GRACE_MS = 90 * 1000
@@ -184,6 +185,9 @@ export async function loadStandaloneScheduledGrouped(supabase, userId) {
   const timerRows = []
 
   for (const row of data ?? []) {
+    if (String(row?.kind || '').startsWith(MENSTRUATION_KIND_PREFIX)) {
+      continue
+    }
     if (isStandaloneTimer(row)) {
       timerRows.push(row)
     } else {

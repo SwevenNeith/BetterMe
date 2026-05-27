@@ -3,6 +3,8 @@
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { useRouter } from 'vue-router'
+import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
+import { listCyclesPilule } from '../services/menstruationCycles.js'
 const router = useRouter()
 const userName = ref('')
 
@@ -27,6 +29,7 @@ const formattedToday = formattedTodayRaw.charAt(0).toUpperCase() + formattedToda
 const userEvents = ref([])
 const userCategories = ref([])
 const isLoadingEvents = ref(true)
+const menstruationCycles = ref([])
 
 // Carousel mobile (scroll-snap)
 const activePage = ref(0)
@@ -56,13 +59,22 @@ const updateCarouselLayout = () => {
     return
   }
 
-  const width = carouselViewport.value.getBoundingClientRect().width
+  const viewport = carouselViewport.value
+  const vW = Math.round(viewport.clientWidth || viewport.getBoundingClientRect().width)
+  const firstCol = viewport.querySelector('.dashboard-column')
+  const colW = firstCol ? Math.round(firstCol.getBoundingClientRect().width) : 0
+  const width = colW > 0 ? colW : vW
   if (width > 0) {
     slideWidthPx.value = width
   }
 
   if (activePage.value > lastSlideIndex.value) {
     activePage.value = lastSlideIndex.value
+  }
+
+  const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth)
+  if (Number.isFinite(maxScroll) && viewport.scrollLeft > maxScroll) {
+    viewport.scrollLeft = maxScroll
   }
 }
 
@@ -94,17 +106,19 @@ const setupCarouselObserver = () => {
   carouselResizeObserver?.disconnect()
   if (carouselViewport.value) {
     carouselResizeObserver = new ResizeObserver(() => {
-      const previousWidth = slideWidthPx.value
-      const previousPage = activePage.value
-      updateCarouselLayout()
-      if (
-        isMobileCarousel.value &&
-        carouselViewport.value &&
-        previousWidth > 0 &&
-        slideWidthPx.value > 0
-      ) {
-        carouselViewport.value.scrollLeft = previousPage * slideWidthPx.value
-      }
+      requestAnimationFrame(() => {
+        const previousWidth = slideWidthPx.value
+        const previousPage = activePage.value
+        updateCarouselLayout()
+        if (
+          isMobileCarousel.value &&
+          carouselViewport.value &&
+          previousWidth > 0 &&
+          slideWidthPx.value > 0
+        ) {
+          carouselViewport.value.scrollLeft = previousPage * slideWidthPx.value
+        }
+      })
     })
     carouselResizeObserver.observe(carouselViewport.value)
   }
@@ -175,96 +189,6 @@ const fetchTodayEvents = async (userId) => {
   }
 }
 
-// Calendar Logic
-const currentCalendarDate = ref(new Date())
-
-const monthNames = [
-  'Janvier',
-  'Février',
-  'Mars',
-  'Avril',
-  'Mai',
-  'Juin',
-  'Juillet',
-  'Août',
-  'Septembre',
-  'Octobre',
-  'Novembre',
-  'Décembre',
-]
-const weekDayNames = ['Lu', 'Ma', 'Me', 'Je', 'Ve', 'Sa', 'Di']
-
-const calendarMonthName = computed(() => {
-  return monthNames[currentCalendarDate.value.getMonth()]
-})
-
-const calendarYear = computed(() => {
-  return currentCalendarDate.value.getFullYear()
-})
-
-const prevMonth = () => {
-  const newDate = new Date(currentCalendarDate.value)
-  newDate.setMonth(newDate.getMonth() - 1)
-  currentCalendarDate.value = newDate
-}
-
-const nextMonth = () => {
-  const newDate = new Date(currentCalendarDate.value)
-  newDate.setMonth(newDate.getMonth() + 1)
-  currentCalendarDate.value = newDate
-}
-
-const calendarDays = computed(() => {
-  const year = currentCalendarDate.value.getFullYear()
-  const month = currentCalendarDate.value.getMonth()
-
-  const firstDayOfMonth = new Date(year, month, 1)
-  const lastDayOfMonth = new Date(year, month + 1, 0)
-
-  const daysInMonth = lastDayOfMonth.getDate()
-
-  // getDay() returns 0 for Sunday, 1 for Monday. We want Monday=0, Sunday=6
-  let firstDayIndex = firstDayOfMonth.getDay() - 1
-  if (firstDayIndex === -1) firstDayIndex = 6
-
-  const days = []
-
-  // Previous month padding
-  const prevMonthLastDay = new Date(year, month, 0).getDate()
-  for (let i = firstDayIndex - 1; i >= 0; i--) {
-    days.push({
-      date: prevMonthLastDay - i,
-      isCurrentMonth: false,
-      isToday: false,
-    })
-  }
-
-  // Current month days
-  const today = new Date()
-  for (let i = 1; i <= daysInMonth; i++) {
-    const isToday =
-      today.getDate() === i && today.getMonth() === month && today.getFullYear() === year
-
-    days.push({
-      date: i,
-      isCurrentMonth: true,
-      isToday,
-    })
-  }
-
-  // Next month padding to complete 42 days grid (6 weeks)
-  const remainingDays = 42 - days.length
-  for (let i = 1; i <= remainingDays; i++) {
-    days.push({
-      date: i,
-      isCurrentMonth: false,
-      isToday: false,
-    })
-  }
-
-  return days
-})
-
 onMounted(async () => {
   const {
     data: { user },
@@ -277,8 +201,19 @@ onMounted(async () => {
 
   await fetchTodayEvents(user.id)
 
+  try {
+    menstruationCycles.value = await listCyclesPilule(supabase, user.id)
+  } catch (err) {
+    console.error('Erreur chargement cycles menstruation:', err)
+    menstruationCycles.value = []
+  }
+
   await nextTick()
   setupCarouselObserver()
+  requestAnimationFrame(() => {
+    updateCarouselLayout()
+    requestAnimationFrame(() => updateCarouselLayout())
+  })
 
   mobileMediaQuery = window.matchMedia(MOBILE_MEDIA)
   mobileMediaQuery.addEventListener('change', updateCarouselLayout)
@@ -410,41 +345,29 @@ const getCategoryStyle = (categoryIdOrName) => {
 
           <!-- Right Column -->
           <div class="dashboard-column right-column">
-            <div class="mini-calendar-wrapper">
-              <div class="mini-calendar-header">
-                <button class="calendar-nav-btn" @click="prevMonth">&lt;</button>
-                <h3 class="calendar-month-title">{{ calendarMonthName }} {{ calendarYear }}</h3>
-                <button class="calendar-nav-btn" @click="nextMonth">&gt;</button>
+            <div class="right-column-stack">
+              <div class="mini-calendar-wrapper">
+                <p class="calendar-placeholder-text">
+                  Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor
+                  incididunt ut labore et dolore magna aliqua.
+                </p>
               </div>
 
-              <div class="mini-calendar-grid">
-                <!-- Days of week headers -->
-                <div v-for="day in weekDayNames" :key="'header-' + day" class="calendar-weekday">
-                  {{ day }}
-                </div>
-
-                <!-- Calendar days -->
-                <div
-                  v-for="(dayObj, index) in calendarDays"
-                  :key="'day-' + index"
-                  class="calendar-day"
-                  :class="{
-                    'is-current-month': dayObj.isCurrentMonth,
-                    'is-today': dayObj.isToday,
-                  }"
-                >
-                  {{ dayObj.date }}
-                </div>
+              <div class="mini-calendar-wrapper dashboard-menstruation-wrap">
+                <MenstruationCycleCalendar
+                  :cycles="menstruationCycles"
+                  :compact="true"
+                />
               </div>
-            </div>
 
-            <!-- Legend -->
-            <div v-if="userCategories.length > 0" class="dashboard-legend">
-              <h4 class="legend-title">Mes Activités</h4>
-              <div class="legend-items">
-                <div v-for="cat in userCategories.slice(0, 5)" :key="cat.id" class="legend-item">
-                  <span class="legend-color" :style="{ background: cat.color }"></span>
-                  <span class="legend-label">{{ cat.name }}</span>
+              <!-- Legend -->
+              <div v-if="userCategories.length > 0" class="dashboard-legend">
+                <h4 class="legend-title">Mes Activités</h4>
+                <div class="legend-items">
+                  <div v-for="cat in userCategories.slice(0, 5)" :key="cat.id" class="legend-item">
+                    <span class="legend-color" :style="{ background: cat.color }"></span>
+                    <span class="legend-label">{{ cat.name }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -563,12 +486,48 @@ const getCategoryStyle = (categoryIdOrName) => {
   grid-template-columns: 1fr 1fr;
   gap: 2rem;
   width: 100%;
+  align-items: stretch;
 }
 
 .dashboard-column {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  min-width: 0;
+}
+
+/* Colonne droite : bloc intro + calendrier cycle + légende, même hauteur utile que la gauche (desktop) */
+.right-column-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+  width: 100%;
+}
+
+@media (min-width: 769px) {
+  .left-column .today-events-container {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .right-column .right-column-stack {
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* Même largeur utile que la colonne grille (évite le cap à 320px qui déséquilibre) */
+  .right-column-stack .mini-calendar-wrapper {
+    max-width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .dashboard-menstruation-wrap :deep(.cycle-calendar) {
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
 }
 
 /* Hidden by default on desktop */
@@ -598,11 +557,19 @@ const getCategoryStyle = (categoryIdOrName) => {
     flex-direction: column;
     width: 100%;
     max-width: 100%;
+    /* Ne pas étirer le bloc sur toute la hauteur restante (évite une zone « fantôme » énorme sur mobile) */
+    flex: 0 0 auto;
+    min-height: 0;
   }
 
   /* Viewport: horizontal scroll with snap (one column at a time) */
   .dashboard-content {
+    container-type: inline-size;
+    container-name: dash-carousel;
     display: flex;
+    align-items: flex-start;
+    height: fit-content;
+    min-height: 0;
     overflow-x: auto;
     overflow-y: hidden;
     width: 100%;
@@ -618,31 +585,48 @@ const getCategoryStyle = (categoryIdOrName) => {
     display: none;
   }
 
+  /* Piste = N × largeur du conteneur (cqi) ; ne pas hériter du width:100% desktop */
   .carousel-track {
     display: flex;
     grid-template-columns: none;
     gap: 0;
     flex: 0 0 auto;
+    width: max-content;
     min-width: 100%;
+    height: fit-content;
+    align-items: flex-start;
+    align-content: flex-start;
+    box-sizing: border-box;
   }
 
   .dashboard-column {
-    flex: 0 0 100%;
-    width: 100%;
-    min-width: 100%;
-    max-width: 100%;
+    align-self: flex-start;
+    height: auto;
+    min-height: 0;
     box-sizing: border-box;
     padding: 0;
     scroll-snap-align: start;
     scroll-snap-stop: always;
+    /* Repli sans unités conteneur */
+    flex: 0 0 100%;
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
   }
 
-  .column-title {
-    flex-wrap: wrap;
+  @supports (width: 1cqi) {
+    .dashboard-content .carousel-track .dashboard-column {
+      flex: 0 0 100cqi;
+      width: 100cqi;
+      min-width: 100cqi;
+      max-width: 100cqi;
+    }
   }
 
+  .right-column-stack,
   .today-events-container,
   .mini-calendar-wrapper,
+  .dashboard-menstruation-wrap,
   .dashboard-legend {
     width: 100%;
     max-width: 100%;
@@ -651,6 +635,36 @@ const getCategoryStyle = (categoryIdOrName) => {
 
   .dashboard-event-card {
     max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  /* Sans flex:1, l'état vide ne « remplit » pas une carte étirée par erreur */
+  .today-events-container > .empty-state,
+  .today-events-container > .loading-state {
+    flex: 0 0 auto;
+    flex-grow: 0;
+  }
+
+  .left-column .today-events-container {
+    flex: 0 1 auto;
+    flex-grow: 0;
+  }
+
+  .column-title {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .column-title > span:first-of-type {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .column-date {
+    flex-shrink: 0;
+    max-width: 100%;
+    white-space: normal;
+    text-align: right;
     overflow-wrap: anywhere;
   }
 
@@ -733,6 +747,7 @@ const getCategoryStyle = (categoryIdOrName) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.5rem;
   padding-bottom: 0.5rem;
   border-bottom: 2px solid rgba(213, 181, 234, 0.2);
@@ -903,10 +918,22 @@ const getCategoryStyle = (categoryIdOrName) => {
   margin: 0 auto;
 }
 
+.calendar-placeholder-text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: #5d6d7e;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 @media (prefers-color-scheme: dark) {
   .mini-calendar-wrapper {
     background: rgba(25, 20, 35, 0.65);
     border-color: rgba(213, 181, 234, 0.15);
+  }
+  .calendar-placeholder-text {
+    color: #c5b8d2;
   }
 }
 

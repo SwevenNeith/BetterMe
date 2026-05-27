@@ -74,8 +74,7 @@ onUnmounted(() => {
 @media (max-width: 768px) {
   .app-content {
     margin-left: 0;
-    /* Push content down a bit so it's not behind the hamburger */
-    padding-top: 3.5rem;
+    padding-top: 0;
   }
 }
 </style>
