@@ -346,29 +346,11 @@ const getCategoryStyle = (categoryIdOrName) => {
           <!-- Right Column -->
           <div class="dashboard-column right-column">
             <div class="right-column-stack">
-              <div class="mini-calendar-wrapper">
-                <p class="calendar-placeholder-text">
-                  Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor
-                  incididunt ut labore et dolore magna aliqua.
-                </p>
-              </div>
-
               <div class="mini-calendar-wrapper dashboard-menstruation-wrap">
                 <MenstruationCycleCalendar
                   :cycles="menstruationCycles"
                   :compact="true"
                 />
-              </div>
-
-              <!-- Legend -->
-              <div v-if="userCategories.length > 0" class="dashboard-legend">
-                <h4 class="legend-title">Mes Activités</h4>
-                <div class="legend-items">
-                  <div v-for="cat in userCategories.slice(0, 5)" :key="cat.id" class="legend-item">
-                    <span class="legend-color" :style="{ background: cat.color }"></span>
-                    <span class="legend-label">{{ cat.name }}</span>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
