@@ -1,12 +1,15 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
+import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
 import {
   countMenstruationCyclesPilule,
   createEmptyOnboardingForm,
   createMenstruationCyclePilule,
+  listCyclesPilule,
+  refreshAllCyclesSpmDatesEstimees,
 } from '../services/menstruationCycles.js'
 
 const router = useRouter()
@@ -16,6 +19,7 @@ const userId = ref(null)
 const isLoading = ref(true)
 const loadError = ref('')
 const hasCycleData = ref(false)
+const cycles = ref([])
 
 const form = ref(createEmptyOnboardingForm(localToday))
 
@@ -30,14 +34,29 @@ const cycleLengthDaysModel = computed({
 const isSaving = ref(false)
 const saveError = ref('')
 
+let isPageActive = true
+onBeforeUnmount(() => {
+  isPageActive = false
+})
+
 const loadPage = async () => {
   isLoading.value = true
   loadError.value = ''
   saveError.value = ''
   try {
     const count = await countMenstruationCyclesPilule(supabase, userId.value)
+    if (!isPageActive) return
+
     hasCycleData.value = count > 0
+    if (hasCycleData.value) {
+      await refreshAllCyclesSpmDatesEstimees(supabase, userId.value)
+      if (!isPageActive) return
+      cycles.value = await listCyclesPilule(supabase, userId.value)
+    } else {
+      cycles.value = []
+    }
   } catch (err) {
+    if (!isPageActive) return
     console.error(err)
     const msg = err.message || ''
     loadError.value =
@@ -45,7 +64,7 @@ const loadPage = async () => {
         ? 'Table menstruation_cycles_pilule introuvable. Exécute la migration Supabase (supabase/migrations/20250520120000_menstruation_cycles.sql).'
         : msg || 'Impossible de charger tes données.'
   } finally {
-    isLoading.value = false
+    if (isPageActive) isLoading.value = false
   }
 }
 
@@ -92,6 +111,7 @@ const onSubmit = async () => {
     })
 
     hasCycleData.value = true
+    cycles.value = await listCyclesPilule(supabase, userId.value)
   } catch (err) {
     console.error(err)
     saveError.value = err.message || 'Impossible d’enregistrer cette configuration.'
@@ -114,7 +134,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="menstruation-wrapper">
+  <div class="menstruation-wrapper" :class="{ 'menstruation-wrapper--wide': hasCycleData }">
     <header class="menstruation-header">
       <h1 class="menstruation-title">Menstruation</h1>
       <p class="menstruation-subtitle">
@@ -126,11 +146,15 @@ onMounted(async () => {
 
     <div v-if="isLoading" class="menstruation-loading">Chargement…</div>
 
-    <section v-else-if="hasCycleData" class="menstruation-card">
+    <section v-else-if="hasCycleData" class="menstruation-card menstruation-card--calendar">
       <div class="card-head card-head--left">
-        <h2>Ton profil cycle</h2>
-        <p>Tu as déjà renseigné tes informations. Le tableau de bord cycle arrive bientôt.</p>
+        <h2>Ton calendrier cycle</h2>
+        <p>
+          Dates estimées et réelles, comprimés actifs, SPM et règles. Survole une case pour le
+          détail.
+        </p>
       </div>
+      <MenstruationCycleCalendar :cycles="cycles" />
     </section>
 
     <section v-else class="menstruation-card">
@@ -267,6 +291,10 @@ onMounted(async () => {
   margin: 0 auto;
   padding: 1.5rem 1.25rem 3rem;
   box-sizing: border-box;
+}
+
+.menstruation-wrapper--wide {
+  max-width: 920px;
 }
 
 .menstruation-header {

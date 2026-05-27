@@ -148,6 +148,17 @@ export function computeDateFinSpmEstimee(dateDebutRegles) {
   return addDaysToISODate(dateDebutRegles, JOURS_FIN_SPM_APRES_DEBUT_REGLES)
 }
 
+/** Applique les règles SPM estimées sur un enregistrement cycle. */
+export function applySpmDatesEstimees(record) {
+  const finComprimes = record[COL.dateFinComprimesActifs]
+  const dureeSpm = record[COL.dureeSpmEstimee] ?? DUREE_SPM_DEFAUT
+  const debutRegles = getEffectiveDebutRegles(record)
+
+  record[COL.dateDebutSpmEstimee] = computeDateDebutSpmEstimee(finComprimes, dureeSpm)
+  record[COL.dateFinSpmEstimee] = computeDateFinSpmEstimee(debutRegles)
+  return record
+}
+
 export function resolveDureeReglesFromForm(dureeReglesDays, dureeReglesUnknown) {
   if (dureeReglesUnknown) return DUREE_REGLES_DEFAUT
   const n = Number(dureeReglesDays)
@@ -178,12 +189,6 @@ function buildCycle1Record(userId, numeroCycle, payload) {
   )
 
   const dureeSpmEstimee = DUREE_SPM_DEFAUT
-  const dateDebutSpmEstimee = computeDateDebutSpmEstimee(dateFinComprimesActifs, dureeSpmEstimee)
-  const debutReglesPourSpm = getEffectiveDebutRegles({
-    [COL.dateDebutReglesReelle]: dateDebutReglesReelle,
-    [COL.dateDebutReglesEstimee]: dateDebutReglesEstimee,
-  })
-  const dateFinSpmEstimee = computeDateFinSpmEstimee(debutReglesPourSpm)
 
   const record = {
     user_id: userId,
@@ -195,8 +200,6 @@ function buildCycle1Record(userId, numeroCycle, payload) {
     [COL.dateDebutReglesEstimee]: dateDebutReglesEstimee,
     [COL.dateFinReglesReelle]: dateFinReglesReelle,
     [COL.dateFinReglesEstimee]: dateFinReglesEstimee,
-    [COL.dateDebutSpmEstimee]: dateDebutSpmEstimee,
-    [COL.dateFinSpmEstimee]: dateFinSpmEstimee,
     [COL.delaiRegles]: computeDelaiRegles({
       [COL.dateFinComprimesActifs]: dateFinComprimesActifs,
       [COL.dateDebutReglesReelle]: dateDebutReglesReelle,
@@ -204,14 +207,12 @@ function buildCycle1Record(userId, numeroCycle, payload) {
     }),
     [COL.dureeCycle]: DUREE_CYCLE_JOURS,
     [COL.dureeSpmEstimee]: dureeSpmEstimee,
-    [COL.dureeSpmReelle]: computeDureeSpmReelle({
-      [COL.dateFinComprimesActifs]: dateFinComprimesActifs,
-      [COL.dateDebutSpmEstimee]: dateDebutSpmEstimee,
-    }),
   }
 
   const cycle1UnknownEnd = lastPeriodEndUnknown && !dateFinReglesReelle
   applyDureeReglesFields(record, { cycle1UnknownEnd })
+  applySpmDatesEstimees(record)
+  record[COL.dureeSpmReelle] = computeDureeSpmReelle(record)
 
   if (!cycle1UnknownEnd && record[COL.dureeReglesEstimee] == null) {
     record[COL.dureeReglesEstimee] = resolveDureeReglesFromForm(
@@ -259,11 +260,6 @@ function buildForecastCycleRecord(userId, numeroCycle, prev, previousCycles) {
       ? addDaysToISODate(dateDebutReglesEstimee, dureeReglesPrev)
       : null
 
-  const dateDebutSpmEstimee = computeDateDebutSpmEstimee(dateFinComprimesActifs, dureeSpmEstimee)
-  const dateFinSpmEstimee = computeDateFinSpmEstimee(
-    pickDate(null, dateDebutReglesEstimee),
-  )
-
   const record = {
     user_id: userId,
     [COL.numeroCycle]: numeroCycle,
@@ -274,19 +270,15 @@ function buildForecastCycleRecord(userId, numeroCycle, prev, previousCycles) {
     [COL.dateDebutReglesEstimee]: dateDebutReglesEstimee,
     [COL.dateFinReglesReelle]: null,
     [COL.dateFinReglesEstimee]: dateFinReglesEstimee,
-    [COL.dateDebutSpmEstimee]: dateDebutSpmEstimee,
-    [COL.dateFinSpmEstimee]: dateFinSpmEstimee,
     [COL.delaiRegles]: delaiRegles,
     [COL.dureeCycle]: DUREE_CYCLE_JOURS,
     [COL.dureeSpmEstimee]: dureeSpmEstimee,
-    [COL.dureeSpmReelle]: computeDureeSpmReelle({
-      [COL.dateFinComprimesActifs]: dateFinComprimesActifs,
-      [COL.dateDebutSpmEstimee]: dateDebutSpmEstimee,
-    }),
   }
 
   // Cycles > 1 : durée_règles_estimée = date_fin − date_début (réelle si dispo)
   applyDureeReglesFields(record)
+  applySpmDatesEstimees(record)
+  record[COL.dureeSpmReelle] = computeDureeSpmReelle(record)
 
   return record
 }
@@ -316,7 +308,7 @@ export async function countMenstruationCyclesPilule(supabase, userId) {
   return count ?? 0
 }
 
-async function listCyclesPilule(supabase, userId) {
+export async function listCyclesPilule(supabase, userId) {
   const { data, error } = await supabase
     .from(TABLE)
     .select('*')
@@ -341,9 +333,37 @@ async function getNextNumeroCycle(supabase, userId) {
   return typeof last === 'number' ? last + 1 : 1
 }
 
+/** Recalcule et persiste les dates SPM estimées pour tous les cycles existants. */
+export async function refreshAllCyclesSpmDatesEstimees(supabase, userId) {
+  const cycles = await listCyclesPilule(supabase, userId)
+  for (const cycle of cycles) {
+    if (!cycle.id) continue
+    const temp = { ...cycle }
+    applySpmDatesEstimees(temp)
+    const debut = temp[COL.dateDebutSpmEstimee]
+    const fin = temp[COL.dateFinSpmEstimee]
+    if (
+      debut !== cycle[COL.dateDebutSpmEstimee] ||
+      fin !== cycle[COL.dateFinSpmEstimee]
+    ) {
+      const { error } = await supabase
+        .from(TABLE)
+        .update({
+          [COL.dateDebutSpmEstimee]: debut,
+          [COL.dateFinSpmEstimee]: fin,
+        })
+        .eq('id', cycle.id)
+      if (error) throw error
+    }
+  }
+}
+
 export async function syncForecastCyclesPilule(supabase, userId) {
   let cycles = await listCyclesPilule(supabase, userId)
   if (!cycles.length) return
+
+  await refreshAllCyclesSpmDatesEstimees(supabase, userId)
+  cycles = await listCyclesPilule(supabase, userId)
 
   const maxN = Math.max(...cycles.map((c) => c[COL.numeroCycle]))
   const targetMax = maxN + FORECAST_CYCLES_AHEAD
