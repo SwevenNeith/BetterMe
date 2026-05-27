@@ -4,7 +4,7 @@ import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { useRouter } from 'vue-router'
 import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
-import { listCyclesPilule } from '../services/menstruationCycles.js'
+import { listCyclesPilule, countMenstruationCyclesPilule } from '../services/menstruationCycles.js'
 const router = useRouter()
 const userName = ref('')
 
@@ -30,6 +30,8 @@ const userEvents = ref([])
 const userCategories = ref([])
 const isLoadingEvents = ref(true)
 const menstruationCycles = ref([])
+const isLoadingMenstruationBoard = ref(true)
+const hasMenstruationCycleData = ref(false)
 
 // Carousel mobile (scroll-snap)
 const activePage = ref(0)
@@ -202,10 +204,19 @@ onMounted(async () => {
   await fetchTodayEvents(user.id)
 
   try {
-    menstruationCycles.value = await listCyclesPilule(supabase, user.id)
+    const count = await countMenstruationCyclesPilule(supabase, user.id)
+    hasMenstruationCycleData.value = count > 0
+    if (hasMenstruationCycleData.value) {
+      menstruationCycles.value = await listCyclesPilule(supabase, user.id)
+    } else {
+      menstruationCycles.value = []
+    }
   } catch (err) {
     console.error('Erreur chargement cycles menstruation:', err)
+    hasMenstruationCycleData.value = false
     menstruationCycles.value = []
+  } finally {
+    isLoadingMenstruationBoard.value = false
   }
 
   await nextTick()
@@ -347,7 +358,29 @@ const getCategoryStyle = (categoryIdOrName) => {
           <div class="dashboard-column right-column">
             <div class="right-column-stack">
               <div class="mini-calendar-wrapper dashboard-menstruation-wrap">
+                <div
+                  v-if="isLoadingMenstruationBoard"
+                  class="dashboard-menstruation-loading"
+                  aria-live="polite"
+                >
+                  <span class="spinner"></span>
+                  Chargement de ton suivi cycle…
+                </div>
+                <div
+                  v-else-if="!hasMenstruationCycleData"
+                  class="dashboard-menstruation-empty"
+                >
+                  <p class="dashboard-menstruation-empty-text">
+                    Tu n’as pas encore renseigné ton suivi cycle. Configure la
+                    <strong>première configuration</strong> sur la page Menstruation pour afficher
+                    ton calendrier ici.
+                  </p>
+                  <router-link class="dashboard-menstruation-empty-link" :to="{ name: 'menstruation' }">
+                    Compléter la configuration
+                  </router-link>
+                </div>
                 <MenstruationCycleCalendar
+                  v-else
                   :cycles="menstruationCycles"
                   :compact="true"
                 />
@@ -957,6 +990,76 @@ const getCategoryStyle = (categoryIdOrName) => {
     overflow-wrap: break-word;
     word-break: normal;
     min-width: 0;
+  }
+}
+
+.dashboard-menstruation-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  min-height: 200px;
+  text-align: center;
+  font-weight: 600;
+  color: #8c98a4;
+}
+
+.dashboard-menstruation-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  min-height: 220px;
+  text-align: center;
+  padding: 0.25rem 0;
+}
+
+.dashboard-menstruation-empty-text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: #5d6d7e;
+  max-width: 36rem;
+}
+
+.dashboard-menstruation-empty-text strong {
+  color: #ad81be;
+  font-weight: 700;
+}
+
+.dashboard-menstruation-empty-link {
+  display: inline-block;
+  padding: 0.6rem 1.1rem;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #fff;
+  text-decoration: none;
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  box-shadow: 0 4px 14px rgba(173, 129, 190, 0.25);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.dashboard-menstruation-empty-link:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(173, 129, 190, 0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  .dashboard-menstruation-loading {
+    color: #adb5bd;
+  }
+
+  .dashboard-menstruation-empty-text {
+    color: #c5b8d2;
+  }
+
+  .dashboard-menstruation-empty-text strong {
+    color: #d5b5ea;
   }
 }
 
