@@ -75,14 +75,20 @@ const onSubmit = async () => {
 
   isSaving.value = true
   try {
+    const rulesDurationUnknown =
+      form.value.rulesDurationUnknown ||
+      form.value.rulesDurationDays == null ||
+      form.value.rulesDurationDays === ''
+
     await createMenstruationCyclePilule(supabase, userId.value, {
       dateDebutPlaquette: form.value.dateDebutPlaquette,
       dateDebutReglesReelle: form.value.lastPeriodStartUnknown
         ? null
         : form.value.lastPeriodStartDate,
       dateFinReglesReelle: form.value.lastPeriodEndUnknown ? null : form.value.lastPeriodEndDate,
-      dureeCycleDays: form.value.cycleLengthUnknown ? null : form.value.cycleLengthDays,
-      dureeReglesDays: form.value.rulesDurationDays,
+      lastPeriodEndUnknown: form.value.lastPeriodEndUnknown,
+      dureeReglesDays: rulesDurationUnknown ? null : form.value.rulesDurationDays,
+      dureeReglesUnknown: rulesDurationUnknown,
     })
 
     hasCycleData.value = true
@@ -204,8 +210,23 @@ onMounted(async () => {
             </label>
           </fieldset>
 
-          <!-- Durée du cycle -->
+          <!-- Durée des règles -->
           <fieldset class="form-block">
+            <legend class="form-question">Quelle est la durée de tes règles (en jours) ?</legend>
+            <label class="field field--inline">
+              <span class="sr-only">Nombre de jours</span>
+              <input
+                v-model.number="form.rulesDurationDays"
+                type="number"
+                min="1"
+                max="20"
+              />
+            </label>
+            <span class="cycle-length-suffix">jours</span>
+          </fieldset>
+
+          <!-- Durée du cycle (uniquement si contraception = Non) -->
+          <fieldset v-if="form.hormonalContraception === false" class="form-block">
             <legend class="form-question">Combien de temps dure ton cycle habituellement ?</legend>
             <div class="cycle-length-row" :class="{ 'cycle-length-row--disabled': form.cycleLengthUnknown }">
               <label class="field field--inline">
@@ -224,21 +245,6 @@ onMounted(async () => {
               <input v-model="form.cycleLengthUnknown" type="checkbox" />
               <span>Je ne sais pas</span>
             </label>
-          </fieldset>
-
-          <!-- Durée des règles -->
-          <fieldset class="form-block">
-            <legend class="form-question">Quelle est la durée de tes règles (en jours) ?</legend>
-            <label class="field field--inline">
-              <span class="sr-only">Nombre de jours</span>
-              <input
-                v-model.number="form.rulesDurationDays"
-                type="number"
-                min="1"
-                max="20"
-              />
-            </label>
-            <span class="cycle-length-suffix">jours</span>
           </fieldset>
 
         <p v-if="saveError" class="menstruation-feedback menstruation-feedback--error">{{ saveError }}</p>

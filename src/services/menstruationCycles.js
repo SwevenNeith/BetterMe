@@ -1,21 +1,34 @@
 const TABLE = 'menstruation_cycles_pilule'
 
 /** Noms de colonnes Supabase (avec accents, comme en base) */
-const COL = {
+export const COL = {
   numeroCycle: 'numéro_cycle',
   dateDebutPlaquette: 'date_début_plaquette',
   dateFinComprimesActifs: 'date_fin_comprimés_actifs',
   dateProchainePlaquette: 'date_prochaine_plaquette',
   dateDebutReglesReelle: 'date_début_règles_réelle',
+  dateDebutReglesEstimee: 'date_début_règles_estimée',
   dateFinReglesReelle: 'date_fin_règles_réelle',
+  dateFinReglesEstimee: 'date_fin_règles_estimée',
+  dateDebutSpmEstimee: 'date_début_spm_estimée',
+  dateFinSpmEstimee: 'date_fin_spm_estimée',
+  delaiRegles: 'délai_règles',
   dureeCycle: 'durée_cycle',
-  dureeRegles: 'durée_règles',
+  dureeReglesEstimee: 'durée_règles_estimée',
+  dureeReglesReelle: 'durée_règles_réelle',
+  dureeSpmEstimee: 'durée_spm_estimée',
+  dureeSpmReelle: 'durée_spm_réelle',
 }
 
+const DUREE_CYCLE_JOURS = 28
 const JOURS_COMPRIMES_ACTIFS = 21
-const JOURS_PROCHAINE_PLAQUETTE = 28
+const JOURS_PROCHAINE_PLAQUETTE = DUREE_CYCLE_JOURS
+const JOURS_FIN_REGLES_ESTIMEE = 5
+const JOURS_FIN_SPM_APRES_DEBUT_REGLES = 2
+const DUREE_REGLES_DEFAUT = 5
+const DUREE_SPM_DEFAUT = 7
+const FORECAST_CYCLES_AHEAD = 5
 
-/** YYYY-MM-DD + n jours (calendrier local) */
 export function addDaysToISODate(isoDate, days) {
   const [y, m, d] = isoDate.split('-').map(Number)
   const date = new Date(y, m - 1, d)
@@ -24,6 +37,90 @@ export function addDaysToISODate(isoDate, days) {
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   const dd = String(date.getDate()).padStart(2, '0')
   return `${yy}-${mm}-${dd}`
+}
+
+/** Nombre de jours entre deux dates (fin − début), ex. 1→6 = 5 */
+export function daysBetweenISO(fromDate, toDate) {
+  if (!fromDate || !toDate) return null
+  const [y1, m1, d1] = fromDate.split('-').map(Number)
+  const [y2, m2, d2] = toDate.split('-').map(Number)
+  const t1 = Date.UTC(y1, m1 - 1, d1)
+  const t2 = Date.UTC(y2, m2 - 1, d2)
+  return Math.round((t2 - t1) / 86_400_000)
+}
+
+function averageRounded(values) {
+  const nums = values.filter((v) => typeof v === 'number' && !Number.isNaN(v))
+  if (!nums.length) return null
+  return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length)
+}
+
+export function pickDate(reelle, estimee) {
+  return reelle || estimee || null
+}
+
+export function getEffectiveDebutRegles(row) {
+  return pickDate(row[COL.dateDebutReglesReelle], row[COL.dateDebutReglesEstimee])
+}
+
+export function getEffectiveFinRegles(row) {
+  return pickDate(row[COL.dateFinReglesReelle], row[COL.dateFinReglesEstimee])
+}
+
+export function getEffectiveDebutSpm(row) {
+  return row[COL.dateDebutSpmEstimee] || null
+}
+
+/** durée_règles_réelle : uniquement si les deux dates réelles sont connues */
+export function computeDureeReglesReelleFromDates(row) {
+  const debut = row[COL.dateDebutReglesReelle]
+  const fin = row[COL.dateFinReglesReelle]
+  if (!debut || !fin) return null
+  const diff = daysBetweenISO(debut, fin)
+  return diff != null && diff >= 0 ? diff : null
+}
+
+/** durée_règles_estimée : date_fin − date_début (réelle si dispo, sinon estimée) */
+export function computeDureeReglesEstimeeFromDates(row) {
+  const debut = getEffectiveDebutRegles(row)
+  const fin = getEffectiveFinRegles(row)
+  if (!debut || !fin) return null
+  const diff = daysBetweenISO(debut, fin)
+  return diff != null && diff >= 0 ? diff : null
+}
+
+export function getDureeReglesForCalcul(row) {
+  return row[COL.dureeReglesReelle] ?? row[COL.dureeReglesEstimee] ?? DUREE_REGLES_DEFAUT
+}
+
+function applyDureeReglesFields(record, { cycle1UnknownEnd = false } = {}) {
+  const reelle = computeDureeReglesReelleFromDates(record)
+
+  let estimée
+  if (cycle1UnknownEnd) {
+    estimée = DUREE_REGLES_DEFAUT
+  } else {
+    estimée = computeDureeReglesEstimeeFromDates(record)
+  }
+
+  record[COL.dureeReglesReelle] = reelle
+  record[COL.dureeReglesEstimee] = estimée
+  return record
+}
+
+export function computeDelaiRegles(row) {
+  const finComprimes = row[COL.dateFinComprimesActifs]
+  const debutRegles = getEffectiveDebutRegles(row)
+  if (!finComprimes || !debutRegles) return null
+  return daysBetweenISO(finComprimes, debutRegles)
+}
+
+export function computeDureeSpmReelle(row) {
+  const finComprimes = row[COL.dateFinComprimesActifs]
+  const debutSpm = getEffectiveDebutSpm(row)
+  if (!finComprimes || !debutSpm) return null
+  const diff = daysBetweenISO(debutSpm, finComprimes)
+  return diff != null && diff >= 0 ? diff : null
 }
 
 export function computeDateFinComprimesActifs(dateDebutPlaquette) {
@@ -36,22 +133,176 @@ export function computeDateProchainePlaquette(dateDebutPlaquette) {
   return addDaysToISODate(dateDebutPlaquette, JOURS_PROCHAINE_PLAQUETTE)
 }
 
+export function computeDateFinReglesEstimeeFromStart(dateDebutRegles, lastPeriodEndUnknown) {
+  if (!dateDebutRegles || !lastPeriodEndUnknown) return null
+  return addDaysToISODate(dateDebutRegles, JOURS_FIN_REGLES_ESTIMEE)
+}
+
+export function computeDateDebutSpmEstimee(dateFinComprimesActifs, dureeSpm) {
+  if (!dateFinComprimesActifs || dureeSpm == null) return null
+  return addDaysToISODate(dateFinComprimesActifs, -dureeSpm)
+}
+
+export function computeDateFinSpmEstimee(dateDebutRegles) {
+  if (!dateDebutRegles) return null
+  return addDaysToISODate(dateDebutRegles, JOURS_FIN_SPM_APRES_DEBUT_REGLES)
+}
+
+export function resolveDureeReglesFromForm(dureeReglesDays, dureeReglesUnknown) {
+  if (dureeReglesUnknown) return DUREE_REGLES_DEFAUT
+  const n = Number(dureeReglesDays)
+  if (!Number.isFinite(n) || n <= 0) return DUREE_REGLES_DEFAUT
+  return Math.round(n)
+}
+
+function getDureeSpmForCalcul(row) {
+  return row[COL.dureeSpmReelle] ?? row[COL.dureeSpmEstimee] ?? DUREE_SPM_DEFAUT
+}
+
+function buildCycle1Record(userId, numeroCycle, payload) {
+  const dateDebutPlaquette = payload.dateDebutPlaquette || null
+  const dateFinComprimesActifs = computeDateFinComprimesActifs(dateDebutPlaquette)
+  const dateProchainePlaquette = computeDateProchainePlaquette(dateDebutPlaquette)
+
+  const dateDebutReglesReelle = payload.dateDebutReglesReelle || null
+  const dateDebutReglesEstimee = dateDebutReglesReelle
+  const dateFinReglesReelle = payload.dateFinReglesReelle || null
+  const lastPeriodEndUnknown = Boolean(payload.lastPeriodEndUnknown)
+
+  const dateFinReglesEstimee = computeDateFinReglesEstimeeFromStart(
+    getEffectiveDebutRegles({
+      [COL.dateDebutReglesReelle]: dateDebutReglesReelle,
+      [COL.dateDebutReglesEstimee]: dateDebutReglesEstimee,
+    }),
+    lastPeriodEndUnknown,
+  )
+
+  const dureeSpmEstimee = DUREE_SPM_DEFAUT
+  const dateDebutSpmEstimee = computeDateDebutSpmEstimee(dateFinComprimesActifs, dureeSpmEstimee)
+  const debutReglesPourSpm = getEffectiveDebutRegles({
+    [COL.dateDebutReglesReelle]: dateDebutReglesReelle,
+    [COL.dateDebutReglesEstimee]: dateDebutReglesEstimee,
+  })
+  const dateFinSpmEstimee = computeDateFinSpmEstimee(debutReglesPourSpm)
+
+  const record = {
+    user_id: userId,
+    [COL.numeroCycle]: numeroCycle,
+    [COL.dateDebutPlaquette]: dateDebutPlaquette,
+    [COL.dateFinComprimesActifs]: dateFinComprimesActifs,
+    [COL.dateProchainePlaquette]: dateProchainePlaquette,
+    [COL.dateDebutReglesReelle]: dateDebutReglesReelle,
+    [COL.dateDebutReglesEstimee]: dateDebutReglesEstimee,
+    [COL.dateFinReglesReelle]: dateFinReglesReelle,
+    [COL.dateFinReglesEstimee]: dateFinReglesEstimee,
+    [COL.dateDebutSpmEstimee]: dateDebutSpmEstimee,
+    [COL.dateFinSpmEstimee]: dateFinSpmEstimee,
+    [COL.delaiRegles]: computeDelaiRegles({
+      [COL.dateFinComprimesActifs]: dateFinComprimesActifs,
+      [COL.dateDebutReglesReelle]: dateDebutReglesReelle,
+      [COL.dateDebutReglesEstimee]: dateDebutReglesEstimee,
+    }),
+    [COL.dureeCycle]: DUREE_CYCLE_JOURS,
+    [COL.dureeSpmEstimee]: dureeSpmEstimee,
+    [COL.dureeSpmReelle]: computeDureeSpmReelle({
+      [COL.dateFinComprimesActifs]: dateFinComprimesActifs,
+      [COL.dateDebutSpmEstimee]: dateDebutSpmEstimee,
+    }),
+  }
+
+  const cycle1UnknownEnd = lastPeriodEndUnknown && !dateFinReglesReelle
+  applyDureeReglesFields(record, { cycle1UnknownEnd })
+
+  if (!cycle1UnknownEnd && record[COL.dureeReglesEstimee] == null) {
+    record[COL.dureeReglesEstimee] = resolveDureeReglesFromForm(
+      payload.dureeReglesDays,
+      payload.dureeReglesUnknown,
+    )
+  }
+
+  return record
+}
+
+function buildForecastCycleRecord(userId, numeroCycle, prev, previousCycles) {
+  const dateDebutPlaquette = prev[COL.dateProchainePlaquette]
+  if (!dateDebutPlaquette) return null
+
+  const dateFinComprimesActifs = computeDateFinComprimesActifs(dateDebutPlaquette)
+  const dateProchainePlaquette = computeDateProchainePlaquette(dateDebutPlaquette)
+
+  const delaiRegles =
+    numeroCycle === 2
+      ? (prev[COL.delaiRegles] ?? computeDelaiRegles(prev))
+      : averageRounded(previousCycles.map((c) => c[COL.delaiRegles] ?? computeDelaiRegles(c)))
+
+  const dureeReglesPrev = getDureeReglesForCalcul(prev)
+
+  const dureeSpmReellesConnues = previousCycles
+    .map((c) => c[COL.dureeSpmReelle])
+    .filter((v) => v != null)
+  const dureeSpmEstimee =
+    numeroCycle === 2
+      ? getDureeSpmForCalcul(prev)
+      : averageRounded(
+          dureeSpmReellesConnues.length
+            ? dureeSpmReellesConnues
+            : previousCycles.map(getDureeSpmForCalcul),
+        ) ?? DUREE_SPM_DEFAUT
+
+  const dateDebutReglesEstimee =
+    delaiRegles != null && dateFinComprimesActifs
+      ? addDaysToISODate(dateFinComprimesActifs, delaiRegles)
+      : null
+
+  const dateFinReglesEstimee =
+    dateDebutReglesEstimee != null
+      ? addDaysToISODate(dateDebutReglesEstimee, dureeReglesPrev)
+      : null
+
+  const dateDebutSpmEstimee = computeDateDebutSpmEstimee(dateFinComprimesActifs, dureeSpmEstimee)
+  const dateFinSpmEstimee = computeDateFinSpmEstimee(
+    pickDate(null, dateDebutReglesEstimee),
+  )
+
+  const record = {
+    user_id: userId,
+    [COL.numeroCycle]: numeroCycle,
+    [COL.dateDebutPlaquette]: dateDebutPlaquette,
+    [COL.dateFinComprimesActifs]: dateFinComprimesActifs,
+    [COL.dateProchainePlaquette]: dateProchainePlaquette,
+    [COL.dateDebutReglesReelle]: null,
+    [COL.dateDebutReglesEstimee]: dateDebutReglesEstimee,
+    [COL.dateFinReglesReelle]: null,
+    [COL.dateFinReglesEstimee]: dateFinReglesEstimee,
+    [COL.dateDebutSpmEstimee]: dateDebutSpmEstimee,
+    [COL.dateFinSpmEstimee]: dateFinSpmEstimee,
+    [COL.delaiRegles]: delaiRegles,
+    [COL.dureeCycle]: DUREE_CYCLE_JOURS,
+    [COL.dureeSpmEstimee]: dureeSpmEstimee,
+    [COL.dureeSpmReelle]: computeDureeSpmReelle({
+      [COL.dateFinComprimesActifs]: dateFinComprimesActifs,
+      [COL.dateDebutSpmEstimee]: dateDebutSpmEstimee,
+    }),
+  }
+
+  // Cycles > 1 : durée_règles_estimée = date_fin − date_début (réelle si dispo)
+  applyDureeReglesFields(record)
+
+  return record
+}
+
 export function createEmptyOnboardingForm(localToday) {
   return {
     hormonalContraception: null,
-
     dateDebutPlaquette: localToday,
-
     lastPeriodStartUnknown: false,
     lastPeriodStartDate: localToday,
-
     lastPeriodEndUnknown: false,
     lastPeriodEndDate: localToday,
-
     cycleLengthUnknown: false,
     cycleLengthDays: 28,
-
     rulesDurationDays: null,
+    rulesDurationUnknown: false,
   }
 }
 
@@ -65,6 +316,17 @@ export async function countMenstruationCyclesPilule(supabase, userId) {
   return count ?? 0
 }
 
+async function listCyclesPilule(supabase, userId) {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select('*')
+    .eq('user_id', userId)
+    .order(COL.numeroCycle, { ascending: true })
+
+  if (error) throw error
+  return data ?? []
+}
+
 async function getNextNumeroCycle(supabase, userId) {
   const { data, error } = await supabase
     .from(TABLE)
@@ -76,29 +338,59 @@ async function getNextNumeroCycle(supabase, userId) {
   if (error) throw error
 
   const last = data?.[0]?.[COL.numeroCycle]
-  const next = typeof last === 'number' ? last + 1 : 1
-  return next
+  return typeof last === 'number' ? last + 1 : 1
+}
+
+export async function syncForecastCyclesPilule(supabase, userId) {
+  let cycles = await listCyclesPilule(supabase, userId)
+  if (!cycles.length) return
+
+  const maxN = Math.max(...cycles.map((c) => c[COL.numeroCycle]))
+  const targetMax = maxN + FORECAST_CYCLES_AHEAD
+
+  await supabase.from(TABLE).delete().eq('user_id', userId).gt(COL.numeroCycle, targetMax)
+
+  cycles = await listCyclesPilule(supabase, userId)
+  const byNum = new Map(cycles.map((c) => [c[COL.numeroCycle], c]))
+
+  for (let n = 2; n <= targetMax; n++) {
+    const prev = byNum.get(n - 1)
+    if (!prev) break
+
+    const previousAll = cycles.filter((c) => c[COL.numeroCycle] < n)
+    const record = buildForecastCycleRecord(userId, n, prev, previousAll)
+
+    if (!record) continue
+
+    const existing = byNum.get(n)
+    if (existing?.id) {
+      const { data, error } = await supabase
+        .from(TABLE)
+        .update(record)
+        .eq('id', existing.id)
+        .select()
+        .single()
+      if (error) throw error
+      byNum.set(n, data)
+      const idx = cycles.findIndex((c) => c.id === existing.id)
+      if (idx >= 0) cycles[idx] = data
+    } else {
+      const { data, error } = await supabase.from(TABLE).insert(record).select().single()
+      if (error) throw error
+      byNum.set(n, data)
+      cycles.push(data)
+    }
+  }
 }
 
 export async function createMenstruationCyclePilule(supabase, userId, payload) {
   const nextNumero = await getNextNumeroCycle(supabase, userId)
-  const dateDebutPlaquette = payload.dateDebutPlaquette || null
-  const dateFinComprimesActifs = computeDateFinComprimesActifs(dateDebutPlaquette)
-  const dateProchainePlaquette = computeDateProchainePlaquette(dateDebutPlaquette)
-
-  const record = {
-    user_id: userId,
-    [COL.numeroCycle]: nextNumero,
-    [COL.dateDebutPlaquette]: dateDebutPlaquette,
-    [COL.dateFinComprimesActifs]: dateFinComprimesActifs,
-    [COL.dateProchainePlaquette]: dateProchainePlaquette,
-    [COL.dateDebutReglesReelle]: payload.dateDebutReglesReelle || null,
-    [COL.dateFinReglesReelle]: payload.dateFinReglesReelle || null,
-    [COL.dureeCycle]: payload.dureeCycleDays ?? null,
-    [COL.dureeRegles]: payload.dureeReglesDays ?? null,
-  }
+  const record = buildCycle1Record(userId, nextNumero, payload)
 
   const { data, error } = await supabase.from(TABLE).insert(record).select().single()
   if (error) throw error
+
+  await syncForecastCyclesPilule(supabase, userId)
+
   return data
 }

@@ -8,9 +8,17 @@ create table if not exists public.menstruation_cycles_pilule (
   "date_fin_comprimés_actifs" date,
   "date_prochaine_plaquette" date,
   "date_début_règles_réelle" date,
+  "date_début_règles_estimée" date,
   "date_fin_règles_réelle" date,
+  "date_fin_règles_estimée" date,
+  "date_début_spm_estimée" date,
+  "date_fin_spm_estimée" date,
   "durée_cycle" integer,
-  "durée_règles" integer,
+  "durée_règles_estimée" integer,
+  "durée_règles_réelle" integer,
+  "délai_règles" integer,
+  "durée_spm_estimée" integer,
+  "durée_spm_réelle" integer,
   created_at timestamptz not null default now()
 );
 
@@ -25,11 +33,27 @@ alter table public.menstruation_cycles_pilule
 alter table public.menstruation_cycles_pilule
   add column if not exists "date_début_règles_réelle" date;
 alter table public.menstruation_cycles_pilule
+  add column if not exists "date_début_règles_estimée" date;
+alter table public.menstruation_cycles_pilule
   add column if not exists "date_fin_règles_réelle" date;
+alter table public.menstruation_cycles_pilule
+  add column if not exists "date_fin_règles_estimée" date;
+alter table public.menstruation_cycles_pilule
+  add column if not exists "date_début_spm_estimée" date;
+alter table public.menstruation_cycles_pilule
+  add column if not exists "date_fin_spm_estimée" date;
 alter table public.menstruation_cycles_pilule
   add column if not exists "durée_cycle" integer;
 alter table public.menstruation_cycles_pilule
-  add column if not exists "durée_règles" integer;
+  add column if not exists "durée_règles_estimée" integer;
+alter table public.menstruation_cycles_pilule
+  add column if not exists "durée_règles_réelle" integer;
+alter table public.menstruation_cycles_pilule
+  add column if not exists "délai_règles" integer;
+alter table public.menstruation_cycles_pilule
+  add column if not exists "durée_spm_estimée" integer;
+alter table public.menstruation_cycles_pilule
+  add column if not exists "durée_spm_réelle" integer;
 
 create index if not exists menstruation_cycles_pilule_user_id_idx
   on public.menstruation_cycles_pilule (user_id);
