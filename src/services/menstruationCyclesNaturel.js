@@ -27,10 +27,10 @@ const DEFAULT_CYCLE_LEN = 28
 const DEFAULT_RULES_LEN = 5
 
 // Hypothèses (constantes)
-const DUREE_PHASE_LUTEALE = 14
-const JOURS_AVANT_OVULATION = 5
-const JOURS_APRES_OVULATION = 1
-const DUREE_OVULATION = 1
+export const DUREE_PHASE_LUTEALE = 14
+export const JOURS_AVANT_OVULATION = 5
+export const JOURS_APRES_OVULATION = 1
+export const DUREE_OVULATION = 1
 
 function clampInt(n, min, max, fallback) {
   const parsed = parseInt(String(n), 10)
@@ -246,5 +246,20 @@ export function determinePhaseNaturel({ dateDebutRegles, dureeCycle, dureeRegles
   if (dayInCycle > rulesLen && dayInCycle <= follicularEnd) return 'folliculaire'
   if (dayInCycle > follicularEnd && dayInCycle <= follicularEnd + DUREE_OVULATION) return 'ovulatoire'
   return 'lutéale'
+}
+
+export function computeNaturalPhaseStartDates(row) {
+  if (!row) return { folliculaire: null, ovulatoire: null, luteale: null }
+  const dateDebutRegles = row[COL_NATUREL.dateDebutRegles]
+  const cycleLen = clampInt(row[COL_NATUREL.dureeCycle], 15, 60, DEFAULT_CYCLE_LEN)
+  const rulesLen = clampInt(row[COL_NATUREL.dureeRegles], 1, 20, DEFAULT_RULES_LEN)
+  if (!dateDebutRegles) return { folliculaire: null, ovulatoire: null, luteale: null }
+
+  const follicularEnd = cycleLen - DUREE_PHASE_LUTEALE
+  return {
+    folliculaire: addDaysToISODate(dateDebutRegles, rulesLen + 1),
+    ovulatoire: addDaysToISODate(dateDebutRegles, follicularEnd + 1),
+    luteale: addDaysToISODate(dateDebutRegles, follicularEnd + DUREE_OVULATION + 1),
+  }
 }
 

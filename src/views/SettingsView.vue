@@ -25,11 +25,13 @@ import {
   declencherCronNotifications,
 } from '../services/notifications.js'
 import { listCyclesPilule } from '../services/menstruationCycles.js'
+import { listCyclesNaturel } from '../services/menstruationCyclesNaturel.js'
 import {
   createDefaultMenstruationNotifSettings,
   loadMenstruationNotifSettings,
   saveMenstruationNotifSettings,
   rescheduleMenstruationEstimatedNotifications,
+  rescheduleMenstruationNaturalPhaseNotifications,
 } from '../services/menstruationNotifications.js'
 
 const router = useRouter()
@@ -324,12 +326,12 @@ const onSaveMenstruationSettings = async () => {
   menstruationNotifMessage.value = ''
   try {
     await saveMenstruationNotifSettings(userId.value, menstruationNotifSettings.value)
-    const cycles = await listCyclesPilule(supabase, userId.value)
-    await rescheduleMenstruationEstimatedNotifications(
-      userId.value,
-      cycles,
-      menstruationNotifSettings.value,
-    )
+    const [cyclesPilule, cyclesNaturel] = await Promise.all([
+      listCyclesPilule(supabase, userId.value),
+      listCyclesNaturel(supabase, userId.value),
+    ])
+    await rescheduleMenstruationEstimatedNotifications(userId.value, cyclesPilule, menstruationNotifSettings.value)
+    await rescheduleMenstruationNaturalPhaseNotifications(userId.value, cyclesNaturel, menstruationNotifSettings.value)
     menstruationNotifMessage.value = 'Réglages menstruation enregistrés.'
     setTimeout(() => {
       menstruationNotifMessage.value = ''
@@ -475,7 +477,7 @@ onUnmounted(() => {
     <section class="settings-card settings-card--spaced">
       <div class="card-head">
         <h2>Menstruation</h2>
-        <p>Notifications estimées de début SPM et début règles.</p>
+        <p>Notifications cycle (pilule et naturel).</p>
       </div>
 
       <div class="reminder-row">
@@ -492,6 +494,27 @@ onUnmounted(() => {
             type="checkbox"
           />
           <span>Notifier le début estimé des règles</span>
+        </label>
+        <label class="choice-check choice-check--card">
+          <input
+            v-model="menstruationNotifSettings.menstruation_notify_phase_folliculaire"
+            type="checkbox"
+          />
+          <span>Notifier le début de la phase folliculaire (cycle naturel)</span>
+        </label>
+        <label class="choice-check choice-check--card">
+          <input
+            v-model="menstruationNotifSettings.menstruation_notify_phase_ovulatoire"
+            type="checkbox"
+          />
+          <span>Notifier le début de la phase ovulatoire (cycle naturel)</span>
+        </label>
+        <label class="choice-check choice-check--card">
+          <input
+            v-model="menstruationNotifSettings.menstruation_notify_phase_luteale"
+            type="checkbox"
+          />
+          <span>Notifier le début de la phase lutéale (cycle naturel)</span>
         </label>
         <label class="field">
           <span>Heure d’envoi</span>
