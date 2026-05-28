@@ -80,6 +80,12 @@ export async function listCyclesNaturel(supabase, userId) {
   return data ?? []
 }
 
+function computeDureeReglesFromDates(debutISO, finISO) {
+  if (!debutISO || !finISO) return null
+  const diff = daysBetweenISO(debutISO, finISO)
+  return diff != null && diff >= 1 && diff <= 20 ? diff : null
+}
+
 function averageRounded(values) {
   const nums = values.filter((v) => typeof v === 'number' && !Number.isNaN(v))
   if (!nums.length) return null
@@ -110,7 +116,14 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
   }
 
   const rulesLens = cycles
-    .map((c) => c[COL_NATUREL.dureeRegles])
+    .map((c) => {
+      // Si on a une fin réelle, elle devient la source de vérité de la durée
+      const realLen = computeDureeReglesFromDates(
+        c[COL_NATUREL.dateDebutRegles],
+        c[COL_NATUREL.dateFinReglesReelle],
+      )
+      return realLen ?? c[COL_NATUREL.dureeRegles]
+    })
     .filter((v) => typeof v === 'number' && !Number.isNaN(v) && v >= 1 && v <= 20)
 
   const avgCycleLen = averageRounded(cycleRealLens) ?? DEFAULT_CYCLE_LEN
@@ -119,6 +132,10 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
   // On met à jour chaque cycle avec des champs estimés cohérents.
   const updates = cycles.map((c, idx) => {
     const dateDebutRegles = c[COL_NATUREL.dateDebutRegles]
+    const realRulesLen = computeDureeReglesFromDates(
+      c[COL_NATUREL.dateDebutRegles],
+      c[COL_NATUREL.dateFinReglesReelle],
+    )
     const effectiveCycleLen =
       idx >= 1
         ? (() => {
@@ -131,7 +148,7 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
     const derived = computeNaturalCycleDerivedFields({
       dateDebutRegles,
       dureeCycle: effectiveCycleLen,
-      dureeRegles: c[COL_NATUREL.dureeRegles] ?? avgRulesLen,
+      dureeRegles: realRulesLen ?? c[COL_NATUREL.dureeRegles] ?? avgRulesLen,
     })
 
     const patch = {
@@ -188,6 +205,32 @@ export async function createMenstruationCycleNaturel(supabase, userId, payload) 
   await refreshAllCyclesNaturelEstimees(supabase, userId)
 
   return data
+}
+
+export async function saveMenstruationRulesDatesNaturel(supabase, userId, payload) {
+  const cycleId = payload?.cycleId
+  if (!cycleId) throw new Error('cycleId manquant')
+
+  const dateDebutRegles = payload.dateDebutRegles || null
+  const dateFinReglesReelle = payload.dateFinReglesReelle || null
+
+  if (!dateDebutRegles) {
+    throw new Error('Indique une date de début des règles.')
+  }
+  if (dateFinReglesReelle && dateFinReglesReelle < dateDebutRegles) {
+    throw new Error('La date de fin ne peut pas être avant la date de début.')
+  }
+
+  const patch = {
+    [COL_NATUREL.dateDebutRegles]: dateDebutRegles,
+    [COL_NATUREL.dateFinReglesReelle]: dateFinReglesReelle,
+  }
+
+  const { error } = await supabase.from(TABLE).update(patch).eq('id', cycleId).eq('user_id', userId)
+  if (error) throw error
+
+  await refreshAllCyclesNaturelEstimees(supabase, userId)
+  return await listCyclesNaturel(supabase, userId)
 }
 
 export function determinePhaseNaturel({ dateDebutRegles, dureeCycle, dureeRegles }, nowISO) {

@@ -18,6 +18,7 @@ import {
   createMenstruationCycleNaturel,
   listCyclesNaturel,
   refreshAllCyclesNaturelEstimees,
+  saveMenstruationRulesDatesNaturel,
 } from '../services/menstruationCyclesNaturel.js'
 import {
   createDefaultMenstruationNotifSettings,
@@ -50,6 +51,8 @@ const isSaving = ref(false)
 const saveError = ref('')
 const isSavingRulesDates = ref(false)
 const rulesDatesError = ref('')
+const isSavingRulesDatesNat = ref(false)
+const rulesDatesErrorNat = ref('')
 const menstruationNotifSettings = ref(createDefaultMenstruationNotifSettings())
 
 let isPageActive = true
@@ -126,6 +129,20 @@ const onSubmitRulesDates = async (payload) => {
     rulesDatesError.value = err.message || 'Impossible de valider ces dates.'
   } finally {
     isSavingRulesDates.value = false
+  }
+}
+
+const onSubmitRulesDatesNat = async (payload) => {
+  if (!userId.value) return
+  rulesDatesErrorNat.value = ''
+  isSavingRulesDatesNat.value = true
+  try {
+    cyclesNaturel.value = await saveMenstruationRulesDatesNaturel(supabase, userId.value, payload)
+  } catch (err) {
+    console.error(err)
+    rulesDatesErrorNat.value = err.message || 'Impossible de valider ces dates.'
+  } finally {
+    isSavingRulesDatesNat.value = false
   }
 }
 
@@ -263,6 +280,10 @@ onMounted(async () => {
       <MenstruationNaturalCycleCalendar
         v-else
         :cycles="cyclesNaturel"
+        :show-rules-form="true"
+        :is-submitting-rules="isSavingRulesDatesNat"
+        :rules-error="rulesDatesErrorNat"
+        @submit-rules-dates="onSubmitRulesDatesNat"
       />
     </section>
 

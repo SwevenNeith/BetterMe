@@ -20,7 +20,21 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  showRulesForm: {
+    type: Boolean,
+    default: false,
+  },
+  isSubmittingRules: {
+    type: Boolean,
+    default: false,
+  },
+  rulesError: {
+    type: String,
+    default: '',
+  },
 })
+
+const emit = defineEmits(['submit-rules-dates'])
 
 const WEEKDAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
 const todayISO = getLocalTodayISO()
@@ -38,6 +52,35 @@ const monthTitle = computed(() => {
 
 const gridCells = computed(() => getMonthGrid(viewYear.value, viewMonth.value))
 const legendGroups = computed(() => legendForNatural())
+
+const editableCycle = computed(() => {
+  if (!props.cycles?.length) return null
+  return props.cycles[props.cycles.length - 1]
+})
+
+const rulesForm = ref({
+  dateDebutRegles: '',
+  dateFinReglesReelle: '',
+})
+
+watch(
+  () => editableCycle.value,
+  (c) => {
+    if (!c) return
+    rulesForm.value.dateDebutRegles = c[COL_NATUREL.dateDebutRegles] || ''
+    rulesForm.value.dateFinReglesReelle = c[COL_NATUREL.dateFinReglesReelle] || ''
+  },
+  { immediate: true },
+)
+
+function onSubmitRulesDates() {
+  if (!editableCycle.value) return
+  emit('submit-rules-dates', {
+    cycleId: editableCycle.value.id,
+    dateDebutRegles: rulesForm.value.dateDebutRegles || null,
+    dateFinReglesReelle: rulesForm.value.dateFinReglesReelle || null,
+  })
+}
 
 function phaseLabel(phase) {
   if (phase === 'folliculaire') return 'Folliculaire'
@@ -212,6 +255,33 @@ watch(
         </div>
       </div>
     </div>
+
+    <form
+      v-if="showRulesForm && !compact && editableCycle"
+      class="nat-calendar__rules-form"
+      @submit.prevent="onSubmitRulesDates"
+    >
+      <h4 class="nat-legend__title">Renseigner le réel</h4>
+      <p class="nat-calendar__rules-hint">
+        Ces dates remplaceront l’estimé pour tes calculs (durée des règles, phases, etc.).
+      </p>
+      <div class="nat-calendar__field">
+        <label>
+          <span>Début des règles</span>
+          <input v-model="rulesForm.dateDebutRegles" type="date" required />
+        </label>
+      </div>
+      <div class="nat-calendar__field">
+        <label>
+          <span>Fin des règles</span>
+          <input v-model="rulesForm.dateFinReglesReelle" type="date" />
+        </label>
+      </div>
+      <p v-if="rulesError" class="nat-calendar__rules-error">{{ rulesError }}</p>
+      <button type="submit" class="nat-calendar__rules-btn" :disabled="isSubmittingRules">
+        {{ isSubmittingRules ? 'Validation…' : 'Valider les dates' }}
+      </button>
+    </form>
   </div>
 </template>
 
@@ -401,6 +471,66 @@ watch(
   container-name: nat-legend;
 }
 
+.nat-calendar__rules-form {
+  border-top: 1px solid rgba(213, 181, 234, 0.25);
+  padding-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.nat-calendar__rules-hint {
+  margin: -0.25rem 0 0.4rem;
+  font-size: 0.82rem;
+  color: #6c757d;
+}
+
+.nat-calendar__field label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.nat-calendar__field span {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #ad81be;
+}
+
+.nat-calendar__field input {
+  padding: 0.45rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.8);
+  color: #2c3e50;
+  font-family: inherit;
+}
+
+.nat-calendar__rules-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  cursor: pointer;
+}
+
+.nat-calendar__rules-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.nat-calendar__rules-error {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #c0392b;
+}
+
 .nat-legend__title {
   margin: 0 0 0.6rem;
   font-size: 0.9rem;
@@ -564,6 +694,14 @@ watch(
   }
   .nat-calendar__weekday {
     color: #adb5bd;
+  }
+  .nat-calendar__rules-hint {
+    color: #adb5bd;
+  }
+  .nat-calendar__field input {
+    background: rgba(0, 0, 0, 0.2);
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.2);
   }
 }
 </style>
