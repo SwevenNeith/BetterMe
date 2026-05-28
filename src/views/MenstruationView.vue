@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
+import MenstruationNaturalCycleCalendar from '../components/MenstruationNaturalCycleCalendar.vue'
 import {
   countMenstruationCyclesPilule,
   createEmptyOnboardingForm,
@@ -12,6 +13,12 @@ import {
   refreshAllCyclesSpmDatesEstimees,
   saveMenstruationRulesDates,
 } from '../services/menstruationCycles.js'
+import {
+  countMenstruationCyclesNaturel,
+  createMenstruationCycleNaturel,
+  listCyclesNaturel,
+  refreshAllCyclesNaturelEstimees,
+} from '../services/menstruationCyclesNaturel.js'
 import {
   createDefaultMenstruationNotifSettings,
   loadMenstruationNotifSettings,
@@ -26,6 +33,8 @@ const isLoading = ref(true)
 const loadError = ref('')
 const hasCycleData = ref(false)
 const cycles = ref([])
+const cyclesNaturel = ref([])
+const cycleMode = ref(null) // 'pilule' | 'naturel' | null
 
 const form = ref(createEmptyOnboardingForm(localToday))
 
@@ -53,11 +62,15 @@ const loadPage = async () => {
   loadError.value = ''
   saveError.value = ''
   try {
-    const count = await countMenstruationCyclesPilule(supabase, userId.value)
+    const [countPilule, countNaturel] = await Promise.all([
+      countMenstruationCyclesPilule(supabase, userId.value),
+      countMenstruationCyclesNaturel(supabase, userId.value),
+    ])
     if (!isPageActive) return
 
-    hasCycleData.value = count > 0
-    if (hasCycleData.value) {
+    if (countPilule > 0) {
+      cycleMode.value = 'pilule'
+      hasCycleData.value = true
       menstruationNotifSettings.value = await loadMenstruationNotifSettings(userId.value)
       await refreshAllCyclesSpmDatesEstimees(supabase, userId.value)
       if (!isPageActive) return
@@ -67,8 +80,19 @@ const loadPage = async () => {
         cycles.value,
         menstruationNotifSettings.value,
       )
-    } else {
+      cyclesNaturel.value = []
+    } else if (countNaturel > 0) {
+      cycleMode.value = 'naturel'
+      hasCycleData.value = true
       cycles.value = []
+      await refreshAllCyclesNaturelEstimees(supabase, userId.value)
+      if (!isPageActive) return
+      cyclesNaturel.value = await listCyclesNaturel(supabase, userId.value)
+    } else {
+      cycleMode.value = null
+      hasCycleData.value = false
+      cycles.value = []
+      cyclesNaturel.value = []
     }
   } catch (err) {
     if (!isPageActive) return
@@ -77,6 +101,8 @@ const loadPage = async () => {
     loadError.value =
       msg && msg.includes('menstruation_cycles_pilule')
         ? 'Table menstruation_cycles_pilule introuvable. Exécute la migration Supabase (supabase/migrations/20250520120000_menstruation_cycles.sql).'
+        : msg && msg.includes('menstruation_cycles_naturel')
+          ? 'Table menstruation_cycles_naturel introuvable. Vérifie la migration/SQL Supabase pour le cycle naturel.'
         : msg || 'Impossible de charger tes données.'
   } finally {
     if (isPageActive) isLoading.value = false
@@ -120,8 +146,43 @@ const onSubmit = async () => {
     return
   }
 
-  // Non : aucune insertion en base pour l'instant
+  // Non : cycle naturel
   if (form.value.hormonalContraception === false) {
+    if (!userId.value) return
+    if (form.value.lastPeriodStartUnknown || !form.value.lastPeriodStartDate) {
+      saveError.value = 'Pour un cycle naturel, indique la date du début de tes dernières règles.'
+      return
+    }
+
+    isSaving.value = true
+    try {
+      const rulesDurationUnknown =
+        form.value.rulesDurationUnknown ||
+        form.value.rulesDurationDays == null ||
+        form.value.rulesDurationDays === ''
+
+      const cycleLengthUnknown = form.value.cycleLengthUnknown
+      const cycleLen = cycleLengthUnknown ? 28 : form.value.cycleLengthDays
+      const rulesLen = rulesDurationUnknown ? 5 : form.value.rulesDurationDays
+
+      await createMenstruationCycleNaturel(supabase, userId.value, {
+        numeroCycle: 1,
+        dateDebutRegles: form.value.lastPeriodStartDate,
+        dateFinReglesReelle: form.value.lastPeriodEndUnknown ? null : form.value.lastPeriodEndDate,
+        dureeCycle: cycleLen,
+        dureeRegles: rulesLen,
+      })
+
+      hasCycleData.value = true
+      cycleMode.value = 'naturel'
+      cycles.value = []
+      cyclesNaturel.value = await listCyclesNaturel(supabase, userId.value)
+    } catch (err) {
+      console.error(err)
+      saveError.value = err.message || 'Impossible d’enregistrer cette configuration.'
+    } finally {
+      isSaving.value = false
+    }
     return
   }
 
@@ -146,7 +207,9 @@ const onSubmit = async () => {
     })
 
     hasCycleData.value = true
+    cycleMode.value = 'pilule'
     cycles.value = await listCyclesPilule(supabase, userId.value)
+    cyclesNaturel.value = []
   } catch (err) {
     console.error(err)
     saveError.value = err.message || 'Impossible d’enregistrer cette configuration.'
@@ -190,11 +253,16 @@ onMounted(async () => {
         </p>
       </div>
       <MenstruationCycleCalendar
+        v-if="cycleMode === 'pilule'"
         :cycles="cycles"
         :show-rules-form="true"
         :is-submitting-rules="isSavingRulesDates"
         :rules-error="rulesDatesError"
         @submit-rules-dates="onSubmitRulesDates"
+      />
+      <MenstruationNaturalCycleCalendar
+        v-else
+        :cycles="cyclesNaturel"
       />
     </section>
 

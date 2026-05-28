@@ -5,6 +5,11 @@ import { supabase } from '../lib/supabase.js'
 import { useRouter } from 'vue-router'
 import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
 import { listCyclesPilule, countMenstruationCyclesPilule } from '../services/menstruationCycles.js'
+import MenstruationNaturalCycleCalendar from '../components/MenstruationNaturalCycleCalendar.vue'
+import {
+  countMenstruationCyclesNaturel,
+  listCyclesNaturel,
+} from '../services/menstruationCyclesNaturel.js'
 const router = useRouter()
 const userName = ref('')
 
@@ -32,6 +37,8 @@ const isLoadingEvents = ref(true)
 const menstruationCycles = ref([])
 const isLoadingMenstruationBoard = ref(true)
 const hasMenstruationCycleData = ref(false)
+const menstruationCyclesNaturel = ref([])
+const menstruationMode = ref(null) // 'pilule' | 'naturel' | null
 
 // Carousel mobile (scroll-snap)
 const activePage = ref(0)
@@ -204,17 +211,33 @@ onMounted(async () => {
   await fetchTodayEvents(user.id)
 
   try {
-    const count = await countMenstruationCyclesPilule(supabase, user.id)
-    hasMenstruationCycleData.value = count > 0
-    if (hasMenstruationCycleData.value) {
+    const [countPilule, countNaturel] = await Promise.all([
+      countMenstruationCyclesPilule(supabase, user.id),
+      countMenstruationCyclesNaturel(supabase, user.id),
+    ])
+
+    if (countPilule > 0) {
+      menstruationMode.value = 'pilule'
+      hasMenstruationCycleData.value = true
       menstruationCycles.value = await listCyclesPilule(supabase, user.id)
-    } else {
+      menstruationCyclesNaturel.value = []
+    } else if (countNaturel > 0) {
+      menstruationMode.value = 'naturel'
+      hasMenstruationCycleData.value = true
       menstruationCycles.value = []
+      menstruationCyclesNaturel.value = await listCyclesNaturel(supabase, user.id)
+    } else {
+      menstruationMode.value = null
+      menstruationCycles.value = []
+      menstruationCyclesNaturel.value = []
+      hasMenstruationCycleData.value = false
     }
   } catch (err) {
     console.error('Erreur chargement cycles menstruation:', err)
     hasMenstruationCycleData.value = false
     menstruationCycles.value = []
+    menstruationCyclesNaturel.value = []
+    menstruationMode.value = null
   } finally {
     isLoadingMenstruationBoard.value = false
   }
@@ -380,8 +403,13 @@ const getCategoryStyle = (categoryIdOrName) => {
                   </router-link>
                 </div>
                 <MenstruationCycleCalendar
-                  v-else
+                  v-else-if="menstruationMode === 'pilule'"
                   :cycles="menstruationCycles"
+                  :compact="true"
+                />
+                <MenstruationNaturalCycleCalendar
+                  v-else
+                  :cycles="menstruationCyclesNaturel"
                   :compact="true"
                 />
               </div>
