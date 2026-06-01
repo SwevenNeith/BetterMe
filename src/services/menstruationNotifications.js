@@ -21,6 +21,11 @@ export function createDefaultMenstruationNotifSettings() {
     menstruation_notify_phase_ovulatoire: true,
     menstruation_notify_phase_luteale: true,
     menstruation_notification_time: '09:00',
+    menstruation_notify_patterns_simple: true,
+    menstruation_notify_patterns_intensite: true,
+    menstruation_notify_patterns_duree: true,
+    menstruation_notify_patterns_combine: true,
+    menstruation_pattern_notification_time: '20:00',
   }
 }
 
@@ -35,6 +40,11 @@ export async function loadMenstruationNotifSettings(userId) {
         'menstruation_notify_phase_ovulatoire',
         'menstruation_notify_phase_luteale',
         'menstruation_notification_time',
+        'menstruation_notify_patterns_simple',
+        'menstruation_notify_patterns_intensite',
+        'menstruation_notify_patterns_duree',
+        'menstruation_notify_patterns_combine',
+        'menstruation_pattern_notification_time',
       ].join(', '),
     )
     .eq('user_id', userId)
@@ -53,6 +63,13 @@ export async function saveMenstruationNotifSettings(userId, settings) {
     menstruation_notify_phase_luteale: Boolean(settings.menstruation_notify_phase_luteale),
     menstruation_notification_time: String(
       settings.menstruation_notification_time || '09:00',
+    ).slice(0, 5),
+    menstruation_notify_patterns_simple: Boolean(settings.menstruation_notify_patterns_simple),
+    menstruation_notify_patterns_intensite: Boolean(settings.menstruation_notify_patterns_intensite),
+    menstruation_notify_patterns_duree: Boolean(settings.menstruation_notify_patterns_duree),
+    menstruation_notify_patterns_combine: Boolean(settings.menstruation_notify_patterns_combine),
+    menstruation_pattern_notification_time: String(
+      settings.menstruation_pattern_notification_time || '20:00',
     ).slice(0, 5),
   }
 

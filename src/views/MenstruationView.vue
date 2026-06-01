@@ -27,6 +27,7 @@ import {
   loadMenstruationNotifSettings,
   rescheduleMenstruationEstimatedNotifications,
 } from '../services/menstruationNotifications.js'
+import { rescheduleMenstruationPatternNotifications } from '../services/menstruationPatternNotifications.js'
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
 import {
   maybeRecalculateMenstruationPatterns,
@@ -82,6 +83,19 @@ async function loadPatterns(forceRecalc = false) {
     menstruationPatterns.value = forceRecalc
       ? await recalculateMenstruationPatterns(supabase, userId.value, typeCycle, cycleList)
       : await maybeRecalculateMenstruationPatterns(supabase, userId.value, typeCycle, cycleList)
+
+    const notifSettings =
+      menstruationNotifSettings.value?.menstruation_pattern_notification_time != null
+        ? menstruationNotifSettings.value
+        : await loadMenstruationNotifSettings(userId.value)
+    menstruationNotifSettings.value = notifSettings
+    await rescheduleMenstruationPatternNotifications(
+      userId.value,
+      typeCycle,
+      cycleList,
+      menstruationPatterns.value,
+      notifSettings,
+    )
   } catch (err) {
     console.error(err)
     const msg = err.message || ''
@@ -121,6 +135,7 @@ const loadPage = async () => {
     } else if (countNaturel > 0) {
       cycleMode.value = 'naturel'
       hasCycleData.value = true
+      menstruationNotifSettings.value = await loadMenstruationNotifSettings(userId.value)
       cycles.value = []
       cyclesNaturel.value = await syncForecastCyclesNaturel(supabase, userId.value)
       if (!isPageActive) return

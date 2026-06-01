@@ -33,6 +33,9 @@ import {
   rescheduleMenstruationEstimatedNotifications,
   rescheduleMenstruationNaturalPhaseNotifications,
 } from '../services/menstruationNotifications.js'
+import { rescheduleMenstruationPatternNotifications } from '../services/menstruationPatternNotifications.js'
+import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
+import { listMenstruationPatterns } from '../services/menstruationPatterns.js'
 
 const router = useRouter()
 
@@ -332,6 +335,22 @@ const onSaveMenstruationSettings = async () => {
     ])
     await rescheduleMenstruationEstimatedNotifications(userId.value, cyclesPilule, menstruationNotifSettings.value)
     await rescheduleMenstruationNaturalPhaseNotifications(userId.value, cyclesNaturel, menstruationNotifSettings.value)
+
+    const typeCycle = cyclesPilule.length > 0 ? TYPE_CYCLE.PILULE : TYPE_CYCLE.NATUREL
+    const cycleList = cyclesPilule.length > 0 ? cyclesPilule : cyclesNaturel
+    if (cycleList.length) {
+      const patterns = await listMenstruationPatterns(supabase, userId.value, typeCycle, {
+        actifOnly: false,
+      })
+      await rescheduleMenstruationPatternNotifications(
+        userId.value,
+        typeCycle,
+        cycleList,
+        patterns.filter((p) => p.actif !== false),
+        menstruationNotifSettings.value,
+      )
+    }
+
     menstruationNotifMessage.value = 'Réglages menstruation enregistrés.'
     setTimeout(() => {
       menstruationNotifMessage.value = ''
@@ -537,6 +556,57 @@ onUnmounted(() => {
           {{ isSavingMenstruationNotif ? 'Enregistrement…' : 'Enregistrer menstruation' }}
         </button>
       </div>
+    </section>
+
+    <section class="settings-card settings-card--spaced">
+      <div class="card-head">
+        <h2>Tendances & patterns</h2>
+        <p>
+          Prévoyance (anticipation) et alarmes (symptômes intenses ou inhabituels). Les alertes du
+          jour sont envoyées le soir à l’heure choisie, pas à la saisie.
+        </p>
+      </div>
+
+      <div class="reminder-row">
+        <label class="choice-check choice-check--card">
+          <input
+            v-model="menstruationNotifSettings.menstruation_notify_patterns_simple"
+            type="checkbox"
+          />
+          <span>Pattern simple (récurrence & symptôme inhabituel)</span>
+        </label>
+        <label class="choice-check choice-check--card">
+          <input
+            v-model="menstruationNotifSettings.menstruation_notify_patterns_intensite"
+            type="checkbox"
+          />
+          <span>Pattern d’intensité</span>
+        </label>
+        <label class="choice-check choice-check--card">
+          <input
+            v-model="menstruationNotifSettings.menstruation_notify_patterns_duree"
+            type="checkbox"
+          />
+          <span>Pattern de durée</span>
+        </label>
+        <label class="choice-check choice-check--card">
+          <input
+            v-model="menstruationNotifSettings.menstruation_notify_patterns_combine"
+            type="checkbox"
+          />
+          <span>Pattern combiné (clusters)</span>
+        </label>
+        <label class="field">
+          <span>Heure d’envoi (prévoyance & alarmes du jour)</span>
+          <input
+            v-model="menstruationNotifSettings.menstruation_pattern_notification_time"
+            type="time"
+          />
+        </label>
+      </div>
+      <p class="settings-feedback">
+        Enregistre aussi la section « Menstruation » ci-dessus pour les dates de cycle (SPM, phases).
+      </p>
     </section>
 
     <section class="settings-card settings-card--spaced">
