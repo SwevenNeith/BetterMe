@@ -29,7 +29,51 @@ export function createDefaultMenstruationNotifSettings() {
   }
 }
 
+function buildSettingsInsertPayload(userId) {
+  const d = createDefaultMenstruationNotifSettings()
+  return {
+    user_id: userId,
+    menstruation_notify_spm_estimee: d.menstruation_notify_spm_estimee,
+    menstruation_notify_regles_estimees: d.menstruation_notify_regles_estimees,
+    menstruation_notify_phase_folliculaire: d.menstruation_notify_phase_folliculaire,
+    menstruation_notify_phase_ovulatoire: d.menstruation_notify_phase_ovulatoire,
+    menstruation_notify_phase_luteale: d.menstruation_notify_phase_luteale,
+    menstruation_notification_time: d.menstruation_notification_time,
+    menstruation_notify_patterns_simple: d.menstruation_notify_patterns_simple,
+    menstruation_notify_patterns_intensite: d.menstruation_notify_patterns_intensite,
+    menstruation_notify_patterns_duree: d.menstruation_notify_patterns_duree,
+    menstruation_notify_patterns_combine: d.menstruation_notify_patterns_combine,
+    menstruation_pattern_notification_time: d.menstruation_pattern_notification_time,
+  }
+}
+
+/**
+ * Crée la ligne settings si absente (toutes les notifs activées par défaut).
+ */
+export async function ensureUserSettings(userId) {
+  if (!userId) return
+
+  const { data: existing, error: readError } = await supabase
+    .from(SETTINGS_TABLE)
+    .select('user_id')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (readError) throw readError
+  if (existing?.user_id) return
+
+  const { error: insertError } = await supabase
+    .from(SETTINGS_TABLE)
+    .insert(buildSettingsInsertPayload(userId))
+
+  if (insertError && insertError.code !== '23505') throw insertError
+}
+
 export async function loadMenstruationNotifSettings(userId) {
+  if (!userId) return createDefaultMenstruationNotifSettings()
+
+  await ensureUserSettings(userId)
+
   const { data, error } = await supabase
     .from(SETTINGS_TABLE)
     .select(

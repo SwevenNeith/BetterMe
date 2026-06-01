@@ -3,11 +3,13 @@ import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { RouterView } from 'vue-router'
 import { supabase } from './lib/supabase.js'
+import { ensureUserSettings } from './services/menstruationNotifications.js'
 
 const router = useRouter()
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
 
 let activityInterval = null
+let authSubscription = null
 let lastWrite = 0
 
 const updateActivity = () => {
@@ -45,6 +47,30 @@ const checkIdleTime = async () => {
 }
 
 onMounted(async () => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  if (session?.user?.id) {
+    try {
+      await ensureUserSettings(session.user.id)
+    } catch (err) {
+      console.error('Impossible de créer les réglages par défaut:', err)
+    }
+  }
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_IN' && session?.user?.id) {
+      try {
+        await ensureUserSettings(session.user.id)
+      } catch (err) {
+        console.error('Impossible de créer les réglages par défaut:', err)
+      }
+    }
+  })
+  authSubscription = subscription
+
   // Check immediately on load
   await checkIdleTime()
 
@@ -60,6 +86,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  authSubscription?.unsubscribe()
   window.removeEventListener('mousemove', updateActivity)
   window.removeEventListener('keydown', updateActivity)
   window.removeEventListener('click', updateActivity)
