@@ -25,6 +25,7 @@ export const COL_NATUREL = {
 
 const DEFAULT_CYCLE_LEN = 28
 const DEFAULT_RULES_LEN = 5
+const FORECAST_CYCLES_AHEAD = 5
 
 // Hypothèses (constantes)
 export const DUREE_PHASE_LUTEALE = 14
@@ -90,6 +91,130 @@ function averageRounded(values) {
   const nums = values.filter((v) => typeof v === 'number' && !Number.isNaN(v))
   if (!nums.length) return null
   return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length)
+}
+
+function getDureeReglesForForecast(numeroCycle, prev, previousCycles) {
+  if (numeroCycle === 2) {
+    return prev[COL_NATUREL.dureeRegles] ?? DEFAULT_RULES_LEN
+  }
+  const lens = previousCycles.map((c) => {
+    const realLen = computeDureeReglesFromDates(
+      c[COL_NATUREL.dateDebutRegles],
+      c[COL_NATUREL.dateFinReglesReelle],
+    )
+    return realLen ?? c[COL_NATUREL.dureeRegles]
+  })
+  return averageRounded(lens) ?? DEFAULT_RULES_LEN
+}
+
+function getDureeCycleForForecast(numeroCycle, prev, previousCycles) {
+  if (numeroCycle === 2) {
+    return prev[COL_NATUREL.dureeCycle] ?? DEFAULT_CYCLE_LEN
+  }
+  const realLens = previousCycles
+    .map((c) => c[COL_NATUREL.dureeCycleReelle])
+    .filter((v) => v != null)
+  if (realLens.length) {
+    return averageRounded(realLens) ?? DEFAULT_CYCLE_LEN
+  }
+  return averageRounded(previousCycles.map((c) => c[COL_NATUREL.dureeCycle])) ?? DEFAULT_CYCLE_LEN
+}
+
+function copyKnownRealFieldsNaturel(fromRow, toRow) {
+  if (!fromRow || !toRow) return
+  if (fromRow[COL_NATUREL.dateFinReglesReelle]) {
+    toRow[COL_NATUREL.dateFinReglesReelle] = fromRow[COL_NATUREL.dateFinReglesReelle]
+    if (fromRow[COL_NATUREL.dateDebutRegles]) {
+      toRow[COL_NATUREL.dateDebutRegles] = fromRow[COL_NATUREL.dateDebutRegles]
+    }
+  }
+}
+
+function buildForecastCycleRecordNaturel(userId, numeroCycle, prev, previousCycles) {
+  const dateDebutRegles = prev[COL_NATUREL.dateProchainesReglesEstimee]
+  if (!dateDebutRegles) return null
+
+  const dureeRegles = getDureeReglesForForecast(numeroCycle, prev, previousCycles)
+  const dureeCycle = getDureeCycleForForecast(numeroCycle, prev, previousCycles)
+
+  const derived = computeNaturalCycleDerivedFields({
+    dateDebutRegles,
+    dureeCycle,
+    dureeRegles,
+  })
+
+  return {
+    user_id: userId,
+    [COL_NATUREL.numeroCycle]: numeroCycle,
+    [COL_NATUREL.dateDebutRegles]: dateDebutRegles,
+    [COL_NATUREL.dateFinReglesReelle]: null,
+    ...derived,
+    [COL_NATUREL.dureeCycleReelle]: null,
+  }
+}
+
+/**
+ * Maintient toujours les cycles projetés jusqu'à n+5 (ex. cycle 1 → lignes 2…6).
+ */
+export async function syncForecastCyclesNaturel(supabase, userId) {
+  let cycles = await listCyclesNaturel(supabase, userId)
+  if (!cycles.length) return []
+
+  await refreshAllCyclesNaturelEstimees(supabase, userId)
+  cycles = await listCyclesNaturel(supabase, userId)
+
+  const maxN = Math.max(...cycles.map((c) => c[COL_NATUREL.numeroCycle]))
+  const targetMax = maxN + FORECAST_CYCLES_AHEAD
+
+  await supabase.from(TABLE).delete().eq('user_id', userId).gt(COL_NATUREL.numeroCycle, targetMax)
+
+  cycles = await listCyclesNaturel(supabase, userId)
+  const byNum = new Map(cycles.map((c) => [c[COL_NATUREL.numeroCycle], c]))
+
+  for (let n = 2; n <= targetMax; n++) {
+    const prev = byNum.get(n - 1)
+    if (!prev) break
+
+    const previousAll = cycles.filter((c) => c[COL_NATUREL.numeroCycle] < n)
+    const record = buildForecastCycleRecordNaturel(userId, n, prev, previousAll)
+    if (!record) continue
+
+    const existing = byNum.get(n)
+    if (existing?.id) {
+      copyKnownRealFieldsNaturel(existing, record)
+      const realRulesLen = computeDureeReglesFromDates(
+        record[COL_NATUREL.dateDebutRegles],
+        record[COL_NATUREL.dateFinReglesReelle],
+      )
+      if (realRulesLen != null) {
+        record[COL_NATUREL.dureeRegles] = realRulesLen
+      }
+      const derived = computeNaturalCycleDerivedFields({
+        dateDebutRegles: record[COL_NATUREL.dateDebutRegles],
+        dureeCycle: record[COL_NATUREL.dureeCycle],
+        dureeRegles: record[COL_NATUREL.dureeRegles],
+      })
+      Object.assign(record, derived)
+
+      const { data, error } = await supabase
+        .from(TABLE)
+        .update(record)
+        .eq('id', existing.id)
+        .select()
+        .single()
+      if (error) throw error
+      byNum.set(n, data)
+      const idx = cycles.findIndex((c) => c.id === existing.id)
+      if (idx >= 0) cycles[idx] = data
+    } else {
+      const { data, error } = await supabase.from(TABLE).insert(record).select().single()
+      if (error) throw error
+      byNum.set(n, data)
+      cycles.push(data)
+    }
+  }
+
+  return await refreshAllCyclesNaturelEstimees(supabase, userId)
 }
 
 /**
@@ -201,8 +326,7 @@ export async function createMenstruationCycleNaturel(supabase, userId, payload) 
   const { data, error } = await supabase.from(TABLE).insert(record).select('*').single()
   if (error) throw error
 
-  // Recalcule les estimations (pour tenir compte des durées moyennes à partir du cycle 2+)
-  await refreshAllCyclesNaturelEstimees(supabase, userId)
+  await syncForecastCyclesNaturel(supabase, userId)
 
   return data
 }
@@ -229,8 +353,7 @@ export async function saveMenstruationRulesDatesNaturel(supabase, userId, payloa
   const { error } = await supabase.from(TABLE).update(patch).eq('id', cycleId).eq('user_id', userId)
   if (error) throw error
 
-  await refreshAllCyclesNaturelEstimees(supabase, userId)
-  return await listCyclesNaturel(supabase, userId)
+  return await syncForecastCyclesNaturel(supabase, userId)
 }
 
 export function determinePhaseNaturel({ dateDebutRegles, dureeCycle, dureeRegles }, nowISO) {

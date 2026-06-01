@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
 import MenstruationNaturalCycleCalendar from '../components/MenstruationNaturalCycleCalendar.vue'
+import MenstruationPiluleSymptoms from '../components/MenstruationPiluleSymptoms.vue'
+import MenstruationNaturelSymptoms from '../components/MenstruationNaturelSymptoms.vue'
 import {
   countMenstruationCyclesPilule,
   createEmptyOnboardingForm,
@@ -17,7 +19,7 @@ import {
   countMenstruationCyclesNaturel,
   createMenstruationCycleNaturel,
   listCyclesNaturel,
-  refreshAllCyclesNaturelEstimees,
+  syncForecastCyclesNaturel,
   saveMenstruationRulesDatesNaturel,
 } from '../services/menstruationCyclesNaturel.js'
 import {
@@ -25,6 +27,12 @@ import {
   loadMenstruationNotifSettings,
   rescheduleMenstruationEstimatedNotifications,
 } from '../services/menstruationNotifications.js'
+import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
+import {
+  maybeRecalculateMenstruationPatterns,
+  recalculateMenstruationPatterns,
+} from '../services/menstruationPatterns.js'
+import MenstruationPatternsPanel from '../components/MenstruationPatternsPanel.vue'
 
 const router = useRouter()
 const localToday = getLocalTodayISO()
@@ -54,11 +62,37 @@ const rulesDatesError = ref('')
 const isSavingRulesDatesNat = ref(false)
 const rulesDatesErrorNat = ref('')
 const menstruationNotifSettings = ref(createDefaultMenstruationNotifSettings())
+const menstruationPatterns = ref([])
+const patternsLoading = ref(false)
+const patternsError = ref('')
 
 let isPageActive = true
 onBeforeUnmount(() => {
   isPageActive = false
 })
+
+async function loadPatterns(forceRecalc = false) {
+  if (!userId.value || !cycleMode.value) return
+  patternsLoading.value = true
+  patternsError.value = ''
+  try {
+    const typeCycle =
+      cycleMode.value === 'pilule' ? TYPE_CYCLE.PILULE : TYPE_CYCLE.NATUREL
+    const cycleList = cycleMode.value === 'pilule' ? cycles.value : cyclesNaturel.value
+    menstruationPatterns.value = forceRecalc
+      ? await recalculateMenstruationPatterns(supabase, userId.value, typeCycle, cycleList)
+      : await maybeRecalculateMenstruationPatterns(supabase, userId.value, typeCycle, cycleList)
+  } catch (err) {
+    console.error(err)
+    const msg = err.message || ''
+    patternsError.value = msg.includes('menstruation_patterns')
+      ? 'Table menstruation_patterns introuvable. Applique la migration Supabase.'
+      : msg || 'Impossible d’analyser les tendances.'
+    menstruationPatterns.value = []
+  } finally {
+    patternsLoading.value = false
+  }
+}
 
 const loadPage = async () => {
   isLoading.value = true
@@ -88,14 +122,17 @@ const loadPage = async () => {
       cycleMode.value = 'naturel'
       hasCycleData.value = true
       cycles.value = []
-      await refreshAllCyclesNaturelEstimees(supabase, userId.value)
+      cyclesNaturel.value = await syncForecastCyclesNaturel(supabase, userId.value)
       if (!isPageActive) return
-      cyclesNaturel.value = await listCyclesNaturel(supabase, userId.value)
     } else {
       cycleMode.value = null
       hasCycleData.value = false
       cycles.value = []
       cyclesNaturel.value = []
+    }
+
+    if (hasCycleData.value && isPageActive) {
+      await loadPatterns()
     }
   } catch (err) {
     if (!isPageActive) return
@@ -124,6 +161,7 @@ const onSubmitRulesDates = async (payload) => {
       cycles.value,
       menstruationNotifSettings.value,
     )
+    await loadPatterns(true)
   } catch (err) {
     console.error(err)
     rulesDatesError.value = err.message || 'Impossible de valider ces dates.'
@@ -138,6 +176,7 @@ const onSubmitRulesDatesNat = async (payload) => {
   isSavingRulesDatesNat.value = true
   try {
     cyclesNaturel.value = await saveMenstruationRulesDatesNaturel(supabase, userId.value, payload)
+    await loadPatterns(true)
   } catch (err) {
     console.error(err)
     rulesDatesErrorNat.value = err.message || 'Impossible de valider ces dates.'
@@ -277,6 +316,11 @@ onMounted(async () => {
         :rules-error="rulesDatesError"
         @submit-rules-dates="onSubmitRulesDates"
       />
+      <MenstruationPiluleSymptoms
+        v-if="cycleMode === 'pilule'"
+        :cycles="cycles"
+        :user-id="userId"
+      />
       <MenstruationNaturalCycleCalendar
         v-else
         :cycles="cyclesNaturel"
@@ -284,6 +328,18 @@ onMounted(async () => {
         :is-submitting-rules="isSavingRulesDatesNat"
         :rules-error="rulesDatesErrorNat"
         @submit-rules-dates="onSubmitRulesDatesNat"
+      />
+      <MenstruationNaturelSymptoms
+        v-if="cycleMode === 'naturel'"
+        :cycles="cyclesNaturel"
+        :user-id="userId"
+      />
+      <MenstruationPatternsPanel
+        v-if="userId"
+        :patterns="menstruationPatterns"
+        :is-loading="patternsLoading"
+        :error="patternsError"
+        @refresh="loadPatterns(true)"
       />
     </section>
 

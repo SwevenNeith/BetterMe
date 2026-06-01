@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed } from 'vue'
 import {
   buildCalendarDataFromCycles,
   buildDayIndex,
@@ -8,8 +8,12 @@ import {
   buildVisibleLegendGroups,
   legendSwatchClasses,
 } from '../services/menstruationCalendar.js'
-import { COL } from '../services/menstruationCycles.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
+
+function getTodayViewParts() {
+  const [y, m] = getLocalTodayISO().split('-').map(Number)
+  return { year: y, month: m - 1 }
+}
 
 const props = defineProps({
   cycles: {
@@ -38,8 +42,9 @@ const emit = defineEmits(['submit-rules-dates'])
 const WEEKDAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
 
 const todayISO = getLocalTodayISO()
-const viewYear = ref(new Date().getFullYear())
-const viewMonth = ref(new Date().getMonth())
+const todayView = getTodayViewParts()
+const viewYear = ref(todayView.year)
+const viewMonth = ref(todayView.month)
 
 const calendarData = computed(() => buildCalendarDataFromCycles(props.cycles))
 const dayIndex = computed(() =>
@@ -86,9 +91,9 @@ function nextMonth() {
 }
 
 function goToToday() {
-  const now = new Date()
-  viewYear.value = now.getFullYear()
-  viewMonth.value = now.getMonth()
+  const { year, month } = getTodayViewParts()
+  viewYear.value = year
+  viewMonth.value = month
 }
 
 function onSubmitRulesDates() {
@@ -132,25 +137,6 @@ function dayCircleClasses(iso) {
   }
 }
 
-let isMounted = true
-onBeforeUnmount(() => {
-  isMounted = false
-})
-
-watch(
-  () => props.cycles,
-  () => {
-    if (!isMounted || !props.cycles?.length) return
-    const first = props.cycles[0]
-    const start = first[COL.dateDebutPlaquette]
-    if (start) {
-      const [y, m] = start.split('-').map(Number)
-      viewYear.value = y
-      viewMonth.value = m - 1
-    }
-  },
-  { immediate: true },
-)
 </script>
 
 <template>

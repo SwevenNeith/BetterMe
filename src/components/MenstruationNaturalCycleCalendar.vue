@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import { determinePhaseNaturel, COL_NATUREL } from '../services/menstruationCyclesNaturel.js'
 import { addDaysToISODate } from '../services/menstruationCycles.js'
@@ -39,8 +39,14 @@ const emit = defineEmits(['submit-rules-dates'])
 const WEEKDAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
 const todayISO = getLocalTodayISO()
 
-const viewYear = ref(new Date().getFullYear())
-const viewMonth = ref(new Date().getMonth())
+function getTodayViewParts() {
+  const [y, m] = getLocalTodayISO().split('-').map(Number)
+  return { year: y, month: m - 1 }
+}
+
+const todayView = getTodayViewParts()
+const viewYear = ref(todayView.year)
+const viewMonth = ref(todayView.month)
 
 const calendarData = computed(() => buildCalendarDataFromNaturalCycles(props.cycles))
 const dayIndex = computed(() => buildDayIndex(calendarData.value.segments, calendarData.value.markers))
@@ -133,9 +139,9 @@ function nextMonth() {
 }
 
 function goToToday() {
-  const now = new Date()
-  viewYear.value = now.getFullYear()
-  viewMonth.value = now.getMonth()
+  const { year, month } = getTodayViewParts()
+  viewYear.value = year
+  viewMonth.value = month
 }
 
 function cellLayers(iso) {
@@ -172,26 +178,6 @@ function dayCircleClasses(iso) {
   }
 }
 
-let isMounted = true
-onBeforeUnmount(() => {
-  isMounted = false
-})
-
-watch(
-  () => props.cycles,
-  () => {
-    if (!isMounted || !props.cycles?.length) return
-    // Se caler sur le premier cycle
-    const first = props.cycles[0]
-    const start = first?.['date_début_règles']
-    if (start) {
-      const [y, m] = start.split('-').map(Number)
-      viewYear.value = y
-      viewMonth.value = m - 1
-    }
-  },
-  { immediate: true },
-)
 </script>
 
 <template>

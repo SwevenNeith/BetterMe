@@ -8,7 +8,7 @@ import { listCyclesPilule, countMenstruationCyclesPilule } from '../services/men
 import MenstruationNaturalCycleCalendar from '../components/MenstruationNaturalCycleCalendar.vue'
 import {
   countMenstruationCyclesNaturel,
-  listCyclesNaturel,
+  syncForecastCyclesNaturel,
 } from '../services/menstruationCyclesNaturel.js'
 const router = useRouter()
 const userName = ref('')
@@ -225,7 +225,7 @@ onMounted(async () => {
       menstruationMode.value = 'naturel'
       hasMenstruationCycleData.value = true
       menstruationCycles.value = []
-      menstruationCyclesNaturel.value = await listCyclesNaturel(supabase, user.id)
+      menstruationCyclesNaturel.value = await syncForecastCyclesNaturel(supabase, user.id)
     } else {
       menstruationMode.value = null
       menstruationCycles.value = []
@@ -389,16 +389,16 @@ const getCategoryStyle = (categoryIdOrName) => {
                   <span class="spinner"></span>
                   Chargement de ton suivi cycle…
                 </div>
-                <div
-                  v-else-if="!hasMenstruationCycleData"
-                  class="dashboard-menstruation-empty"
-                >
+                <div v-else-if="!hasMenstruationCycleData" class="dashboard-menstruation-empty">
                   <p class="dashboard-menstruation-empty-text">
                     Tu n’as pas encore renseigné ton suivi cycle. Configure la
                     <strong>première configuration</strong> sur la page Menstruation pour afficher
                     ton calendrier ici.
                   </p>
-                  <router-link class="dashboard-menstruation-empty-link" :to="{ name: 'menstruation' }">
+                  <router-link
+                    class="dashboard-menstruation-empty-link"
+                    :to="{ name: 'menstruation' }"
+                  >
                     Compléter la configuration
                   </router-link>
                 </div>
