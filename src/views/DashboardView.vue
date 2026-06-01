@@ -6,6 +6,7 @@ import { useRouter } from 'vue-router'
 import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
 import { listCyclesPilule, countMenstruationCyclesPilule } from '../services/menstruationCycles.js'
 import MenstruationNaturalCycleCalendar from '../components/MenstruationNaturalCycleCalendar.vue'
+import MoodScale from '../components/MoodScale.vue'
 import {
   countMenstruationCyclesNaturel,
   syncForecastCyclesNaturel,
@@ -313,6 +314,10 @@ const getCategoryStyle = (categoryIdOrName) => {
       <p class="welcome-subtitle">Voici ton aperçu de la journée.</p>
     </div>
 
+    <section class="dashboard-mood-section" aria-label="Humeur du moment">
+      <MoodScale compact :show-title="false" :show-hint="false" />
+    </section>
+
     <!-- 2 columns layout -->
     <div class="dashboard-carousel-wrapper">
       <!-- Navigation Arrows for mobile (outside the sliding track) -->
@@ -498,7 +503,27 @@ const getCategoryStyle = (categoryIdOrName) => {
   font-size: 1.05rem;
   color: #6c757d;
   margin-top: 0.5rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0;
+}
+
+.dashboard-mood-section {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1000px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .dashboard-mood-section {
+    max-width: 100%;
+    padding: 0 0.15rem;
+  }
+
+  .welcome-subtitle {
+    margin-bottom: 0.25rem;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
