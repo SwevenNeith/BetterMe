@@ -1,3 +1,5 @@
+/// <reference path="./deno-shims.d.ts" />
+
 import webpush from 'npm:web-push'
 import { createClient } from 'npm:@supabase/supabase-js'
 
@@ -169,20 +171,31 @@ async function runCronJob() {
 
   if (rappelErr) throw rappelErr
 
-  const rappelsDue = (allRappels ?? []).filter((r) => {
+  const rappelsDue = (allRappels ?? []).filter((r: any) => {
     const sameTime = normalizeTime(r.reminder_time) === heureParis
     const notSentToday = r.last_sent_on !== dateParis
     return sameTime && notSentToday
   })
 
   for (const rappel of rappelsDue) {
-    const { sent } = await sendPushToUser(rappel.user_id, rappel.title, rappel.body)
+    // Claim atomique : évite double envoi si le cron est déclenché en parallèle
+    const { data: claimedDaily, error: claimDailyErr } = await supabase
+      .from('daily_reminders')
+      .update({ last_sent_on: dateParis })
+      .eq('id', rappel.id)
+      .neq('last_sent_on', dateParis)
+      .select('id, user_id, title, body')
+
+    if (claimDailyErr) throw claimDailyErr
+    if (!claimedDaily?.length) continue
+
+    const claimed = claimedDaily[0]
+    const { sent } = await sendPushToUser(claimed.user_id, claimed.title, claimed.body)
     if (sent > 0) {
       dailySent++
-      await supabase
-        .from('daily_reminders')
-        .update({ last_sent_on: dateParis })
-        .eq('id', rappel.id)
+    } else {
+      // Aucun device : on ré-autorise l'envoi (sinon le rappel serait "consommé" pour la journée)
+      await supabase.from('daily_reminders').update({ last_sent_on: null }).eq('id', claimed.id)
     }
   }
 
@@ -195,7 +208,7 @@ async function runCronJob() {
   }
 }
 
-Deno.serve(async (req) => {
+Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
