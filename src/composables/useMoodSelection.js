@@ -10,10 +10,15 @@ export function useMoodSelection() {
     selectedMoodId.value = id
   }
 
+  function resetMood() {
+    selectedMoodId.value = null
+  }
+
   return {
     MOODS,
     selectedMoodId,
     selectedMood,
     selectMood,
+    resetMood,
   }
 }

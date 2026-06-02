@@ -1,7 +1,7 @@
 <script setup>
 import { useMoodSelection } from '../composables/useMoodSelection.js'
 
-defineProps({
+const props = defineProps({
   compact: {
     type: Boolean,
     default: false,
@@ -14,9 +14,21 @@ defineProps({
     type: Boolean,
     default: true,
   },
+  disabled: {
+    type: Boolean,
+    default: false,
+  },
 })
 
+const emit = defineEmits(['select'])
+
 const { MOODS, selectedMoodId, selectedMood, selectMood } = useMoodSelection()
+
+function onSelectMood(id) {
+  if (props.disabled) return
+  selectMood(id)
+  emit('select', id)
+}
 </script>
 
 <template>
@@ -47,7 +59,8 @@ const { MOODS, selectedMoodId, selectedMood, selectMood } = useMoodSelection()
         role="radio"
         :aria-checked="selectedMoodId === mood.id"
         :aria-label="mood.label"
-        @click="selectMood(mood.id)"
+        :disabled="disabled"
+        @click="onSelectMood(mood.id)"
       >
         <span class="mood-scale__emoji" aria-hidden="true">{{ mood.emoji }}</span>
         <span class="mood-scale__label">{{ mood.label }}</span>
@@ -125,6 +138,18 @@ const { MOODS, selectedMoodId, selectedMood, selectMood } = useMoodSelection()
     border-color 0.2s ease,
     transform 0.15s ease,
     box-shadow 0.2s ease;
+}
+
+.mood-scale__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+  transform: none;
+}
+
+.mood-scale__btn:disabled:hover {
+  background: rgba(255, 255, 255, 0.55);
+  border-color: rgba(213, 181, 234, 0.4);
+  transform: none;
 }
 
 .mood-scale-panel--compact .mood-scale__btn {

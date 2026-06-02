@@ -1,5 +1,21 @@
 <script setup>
+import { ref } from 'vue'
 import MoodScale from '../components/MoodScale.vue'
+import MoodDetailsModal from '../components/MoodDetailsModal.vue'
+import { useMoodSelection } from '../composables/useMoodSelection.js'
+
+const { selectedMood, resetMood } = useMoodSelection()
+
+const isModalOpen = ref(false)
+
+function onMoodSelected() {
+  isModalOpen.value = true
+}
+
+function onCancelModal() {
+  isModalOpen.value = false
+  resetMood()
+}
 </script>
 
 <template>
@@ -10,8 +26,10 @@ import MoodScale from '../components/MoodScale.vue'
     </header>
 
     <section class="mood-card" aria-labelledby="mood-scale-heading">
-      <MoodScale />
+      <MoodScale :disabled="isModalOpen" @select="onMoodSelected" />
     </section>
+
+    <MoodDetailsModal :open="isModalOpen" :mood="selectedMood" @cancel="onCancelModal" />
   </div>
 </template>
 

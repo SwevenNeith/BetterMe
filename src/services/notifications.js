@@ -210,6 +210,21 @@ async function enregistrerSubscription(supabase, userId) {
       }
     }
 
+    // IMPORTANT: évite les notifications en double.
+    // Si l'utilisateur a plusieurs subscriptions actives (réinstall PWA / anciennes sessions),
+    // on conserve uniquement l'endpoint courant.
+    const idsToDelete = (rows ?? [])
+      .filter((row) => row.subscription?.endpoint && row.subscription.endpoint !== endpoint)
+      .map((row) => row.id)
+
+    if (idsToDelete.length) {
+      const { error } = await supabase.from('push_subscriptions').delete().in('id', idsToDelete)
+      if (error) {
+        // Non bloquant : on préfère garder l'abonnement OK même si le cleanup échoue
+        console.error('Cleanup push_subscriptions (doublons):', error)
+      }
+    }
+
     return true
   } catch (err) {
     console.error('enregistrerSubscription:', err)

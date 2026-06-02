@@ -6,13 +6,30 @@ import { useRouter } from 'vue-router'
 import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
 import { listCyclesPilule, countMenstruationCyclesPilule } from '../services/menstruationCycles.js'
 import MenstruationNaturalCycleCalendar from '../components/MenstruationNaturalCycleCalendar.vue'
-import MoodScale from '../components/MoodScale.vue'
 import {
   countMenstruationCyclesNaturel,
   syncForecastCyclesNaturel,
 } from '../services/menstruationCyclesNaturel.js'
+import DashboardEmotionalCheckin from '../components/DashboardEmotionalCheckin.vue'
+import { useDashboardEmotionalCheckin } from '../composables/useDashboardEmotionalCheckin.js'
+import {
+  computeCycleContext,
+  computeScoreGlobal,
+  detectEmotionPatterns,
+  getEmotionLogForDate,
+  listEmotionLogs,
+  upsertEmotionLog,
+} from '../services/emotionLogs.js'
 const router = useRouter()
 const userName = ref('')
+const userId = ref(null)
+const patternMessage = ref('')
+const saveMessage = ref('')
+const savedToday = ref(false)
+const isCheckinSaving = ref(false)
+let saveMessageTimeoutId = null
+
+const { setCheckinPayload } = useDashboardEmotionalCheckin()
 
 // Helpers
 const formatDateToLocalISO = (date) => {
@@ -207,6 +224,7 @@ onMounted(async () => {
     router.push('/')
     return
   }
+  userId.value = user.id
   userName.value = user.user_metadata?.nom ?? user.email
 
   await fetchTodayEvents(user.id)
@@ -243,6 +261,24 @@ onMounted(async () => {
     isLoadingMenstruationBoard.value = false
   }
 
+  // Pré-remplit le check-in si une saisie existe déjà aujourd'hui
+  try {
+    const row = await getEmotionLogForDate(supabase, user.id, todayStr)
+    if (row) {
+      savedToday.value = true
+      setCheckinPayload({
+        humeurGenerale: row['humeur_générale'],
+        energieEmotionnelle: row['énergie_émotionnelle'],
+        besoinReassurance: row['besoin_réassurance'],
+        sentimentGeneral: row['sentiment_général'],
+      })
+      const logs = await listEmotionLogs(supabase, user.id, { limit: 180 })
+      patternMessage.value = detectEmotionPatterns(logs) || ''
+    }
+  } catch (err) {
+    console.error('Chargement emotion_logs du jour:', err)
+  }
+
   await nextTick()
   setupCarouselObserver()
   requestAnimationFrame(() => {
@@ -260,6 +296,7 @@ onUnmounted(() => {
   mobileMediaQuery?.removeEventListener('change', updateCarouselLayout)
   window.removeEventListener('resize', updateCarouselLayout)
   if (scrollSyncRaf) cancelAnimationFrame(scrollSyncRaf)
+  if (saveMessageTimeoutId) window.clearTimeout(saveMessageTimeoutId)
 })
 
 // Category properties generators
@@ -302,6 +339,75 @@ const getCategoryStyle = (categoryIdOrName) => {
     borderLeft: `4px solid ${color}`,
   }
 }
+
+const onSaveEmotionalCheckin = async (values) => {
+  if (!userId.value || isCheckinSaving.value) return
+
+  const wasSaved = savedToday.value
+  isCheckinSaving.value = true
+
+  try {
+    const score_global = computeScoreGlobal({
+      humeurGenerale: values.humeurGenerale,
+      energieEmotionnelle: values.energieEmotionnelle,
+      sentimentGeneral: values.sentimentGeneral,
+      besoinReassurance: values.besoinReassurance,
+    })
+
+    const { cycle, typeCycle, jourRelatif } = computeCycleContext({
+      dateJour: todayStr,
+      menstruationMode: menstruationMode.value,
+      cyclesPilule: menstruationCycles.value,
+      cyclesNaturel: menstruationCyclesNaturel.value,
+    })
+
+    const payload = {
+      user_id: userId.value,
+      date_jour: todayStr,
+      'humeur_générale': Number(values.humeurGenerale),
+      'énergie_émotionnelle': Number(values.energieEmotionnelle),
+      besoin_réassurance: Boolean(values.besoinReassurance),
+      sentiment_général: Number(values.sentimentGeneral),
+      score_global,
+      jour_relatif: jourRelatif,
+      cycle_id: cycle?.id ?? null,
+      type_cycle: typeCycle,
+    }
+
+    await upsertEmotionLog(supabase, userId.value, payload)
+    savedToday.value = true
+
+    if (saveMessageTimeoutId) window.clearTimeout(saveMessageTimeoutId)
+    saveMessage.value = wasSaved
+      ? 'Données mises à jour.'
+      : 'Données du jour enregistrées.'
+    saveMessageTimeoutId = window.setTimeout(() => {
+      saveMessage.value = ''
+      saveMessageTimeoutId = null
+    }, 3500)
+
+    try {
+      const logs = await listEmotionLogs(supabase, userId.value, { limit: 180 })
+      patternMessage.value = detectEmotionPatterns(logs) || ''
+    } catch (patternErr) {
+      console.error('Détection patterns emotion_logs:', patternErr)
+    }
+  } catch (err) {
+    console.error('Enregistrement emotion_logs:', err)
+    patternMessage.value =
+      "Impossible d'enregistrer pour l'instant. Vérifie ta connexion ou réessaie dans quelques instants."
+    saveMessage.value = ''
+  } finally {
+    isCheckinSaving.value = false
+  }
+}
+
+const onCancelEmotionalCheckin = () => {
+  patternMessage.value = ''
+  // Si déjà enregistré aujourd'hui, on ne permet pas de reset via UI (bouton désactivé),
+  // mais on garde cette sécurité au cas où.
+  if (!savedToday.value) return
+}
 </script>
 
 <template>
@@ -313,10 +419,6 @@ const getCategoryStyle = (categoryIdOrName) => {
       </h1>
       <p class="welcome-subtitle">Voici ton aperçu de la journée.</p>
     </div>
-
-    <section class="dashboard-mood-section" aria-label="Humeur du moment">
-      <MoodScale compact :show-title="false" :show-hint="false" />
-    </section>
 
     <!-- 2 columns layout -->
     <div class="dashboard-carousel-wrapper">
@@ -382,6 +484,21 @@ const getCategoryStyle = (categoryIdOrName) => {
             </div>
           </div>
 
+          <!-- Mobile uniquement : slide entre Emploi du temps et Menstruation -->
+          <div v-if="isMobileCarousel" class="dashboard-column checkin-column">
+            <DashboardEmotionalCheckin
+              compact
+              show-footer
+              show-note
+              :pattern-message="patternMessage"
+              :saved-today="savedToday"
+              :status-message="saveMessage"
+              :saving="isCheckinSaving"
+              @save="onSaveEmotionalCheckin"
+              @cancel="onCancelEmotionalCheckin"
+            />
+          </div>
+
           <!-- Right Column -->
           <div class="dashboard-column right-column">
             <div class="right-column-stack">
@@ -440,6 +557,24 @@ const getCategoryStyle = (categoryIdOrName) => {
         ></span>
       </div>
     </div>
+
+    <!-- Desktop : check-in puis message + boutons, sous les 2 colonnes -->
+    <section
+      v-if="!isMobileCarousel"
+      class="dashboard-checkin-desktop"
+      aria-label="Check-in émotionnel (desktop)"
+    >
+      <DashboardEmotionalCheckin
+        show-footer
+        show-note
+        :pattern-message="patternMessage"
+        :saved-today="savedToday"
+        :status-message="saveMessage"
+        :saving="isCheckinSaving"
+        @save="onSaveEmotionalCheckin"
+        @cancel="onCancelEmotionalCheckin"
+      />
+    </section>
   </div>
 </template>
 
@@ -506,23 +641,24 @@ const getCategoryStyle = (categoryIdOrName) => {
   margin-bottom: 0;
 }
 
-.dashboard-mood-section {
+.dashboard-checkin-desktop {
   position: relative;
   z-index: 1;
   width: 100%;
   max-width: 1000px;
   box-sizing: border-box;
   flex-shrink: 0;
+  margin-top: 0.25rem;
 }
 
 @media (max-width: 768px) {
-  .dashboard-mood-section {
-    max-width: 100%;
-    padding: 0 0.15rem;
-  }
-
   .welcome-subtitle {
     margin-bottom: 0.25rem;
+  }
+
+  /* Desktop uniquement : ne pas afficher hors carrousel sur mobile */
+  .dashboard-checkin-desktop {
+    display: none;
   }
 }
 
