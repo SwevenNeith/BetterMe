@@ -18,7 +18,6 @@ import { useEmotionalCheckinPersistence } from '../composables/useEmotionalCheck
 const router = useRouter()
 const userName = ref('')
 const userId = ref(null)
-const isRefreshing = ref(false)
 let saveMessageTimeoutId = null
 let dashboardLoadGen = 0
 
@@ -268,15 +267,13 @@ function cancelDashboardLoads() {
   dashboardLoadGen++
   isLoadingEvents.value = false
   isLoadingMenstruationBoard.value = false
-  isRefreshing.value = false
 }
 
 const dashboardCache = useDashboardCacheStore()
 useViewLoadGuard(cancelDashboardLoads)
 
-const loadDashboard = async ({ showRefreshSpinner = false, silent = false } = {}) => {
+const loadDashboard = async ({ silent = false } = {}) => {
   const gen = ++dashboardLoadGen
-  if (showRefreshSpinner) isRefreshing.value = true
   if (!silent) {
     isLoadingEvents.value = true
     isLoadingMenstruationBoard.value = true
@@ -314,15 +311,7 @@ const loadDashboard = async ({ showRefreshSpinner = false, silent = false } = {}
     if (gen === dashboardLoadGen) {
       isLoadingEvents.value = false
       isLoadingMenstruationBoard.value = false
-      isRefreshing.value = false
     }
-  }
-}
-
-const refreshDashboard = async () => {
-  await loadDashboard({ showRefreshSpinner: true })
-  if (!isCheckinSaving.value) {
-    await loadEmotionCheckinFromDb({ applyToForm: true })
   }
 }
 
@@ -433,35 +422,9 @@ const onCancelEmotionalCheckin = () => {
   <div class="dashboard-wrapper">
     <div class="bg-blob"></div>
     <div class="mini-header">
-      <div class="mini-header__row">
-        <h1 class="welcome-title">
-          Bonjour, <span class="highlight">{{ userName }}</span> 👋
-        </h1>
-        <button
-          type="button"
-          class="refresh-btn"
-          :disabled="isRefreshing"
-          aria-label="Rafraîchir le dashboard"
-          title="Rafraîchir"
-          @click="refreshDashboard"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            class="refresh-btn__icon"
-            :class="{ 'refresh-btn__icon--spin': isRefreshing }"
-            aria-hidden="true"
-          >
-            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-            <path d="M21 3v6h-6" />
-          </svg>
-        </button>
-      </div>
+      <h1 class="welcome-title">
+        Bonjour, <span class="highlight">{{ userName }}</span> 👋
+      </h1>
       <p class="welcome-subtitle">Voici ton aperçu de la journée.</p>
     </div>
 
@@ -657,60 +620,6 @@ const onCancelEmotionalCheckin = () => {
   width: 100%;
   text-align: center;
   margin-top: 1rem;
-}
-
-.mini-header__row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-}
-
-.refresh-btn {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border: 1px solid rgba(213, 181, 234, 0.45);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.7);
-  color: #ad81be;
-  cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease;
-}
-
-.refresh-btn:hover:not(:disabled) {
-  background: rgba(213, 181, 234, 0.25);
-  transform: rotate(-20deg);
-}
-
-.refresh-btn:disabled {
-  opacity: 0.55;
-  cursor: wait;
-}
-
-.refresh-btn__icon {
-  width: 1.2rem;
-  height: 1.2rem;
-}
-
-.refresh-btn__icon--spin {
-  animation: dashboard-spin 0.8s linear infinite;
-}
-
-@keyframes dashboard-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  .refresh-btn {
-    background: rgba(35, 30, 48, 0.85);
-    border-color: rgba(213, 181, 234, 0.25);
-  }
 }
 
 .welcome-title {
