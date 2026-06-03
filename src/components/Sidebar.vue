@@ -1,6 +1,6 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 
@@ -11,6 +11,7 @@ const baseUrl = import.meta.env.BASE_URL || '/'
 
 const userName = ref('')
 const isOpen = ref(false)
+const exercicesExpanded = ref(false)
 
 onMounted(async () => {
   const {
@@ -21,7 +22,7 @@ onMounted(async () => {
   }
 })
 
-const navLinks = [
+const navLinksTop = [
   {
     name: 'Dashboard',
     path: '/dashboard',
@@ -32,17 +33,26 @@ const navLinks = [
     path: '/timetable',
     icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`,
   },
-  {
-    name: 'Humeurs',
-    path: '/mood',
-    icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>`,
-  },
-  {
-    name: 'Menstruation',
-    path: '/menstruation',
-    icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M12 22a7 7 0 0 0 7-7c0-5-7-13-7-13S5 10 5 15a7 7 0 0 0 7 7z"></path></svg>`,
-  },
 ]
+
+const menstruationLink = {
+  name: 'Menstruation',
+  path: '/menstruation',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M12 22a7 7 0 0 0 7-7c0-5-7-13-7-13S5 10 5 15a7 7 0 0 0 7 7z"></path></svg>`,
+}
+
+const exercicesGroup = {
+  name: 'Exercices',
+  path: '/exercices',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M6.5 6a2.5 2.5 0 0 0 0 5H8"></path><path d="M17.5 13a2.5 2.5 0 0 0 0-5H16"></path><line x1="8" y1="8.5" x2="16" y2="15.5"></line><line x1="16" y1="8.5" x2="8" y2="15.5"></line></svg>`,
+  children: [
+    {
+      name: 'Humeurs',
+      path: '/mood',
+      icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>`,
+    },
+  ],
+}
 
 const settingsLink = {
   name: 'Réglages',
@@ -51,6 +61,27 @@ const settingsLink = {
 }
 
 const isActive = (path) => route.path === path
+
+function isInExercicesSection(path) {
+  if (path === exercicesGroup.path) return true
+  return exercicesGroup.children.some((child) => path === child.path)
+}
+
+watch(
+  () => route.path,
+  (path) => {
+    exercicesExpanded.value = isInExercicesSection(path)
+  },
+  { immediate: true },
+)
+
+const toggleExercicesChevron = () => {
+  exercicesExpanded.value = !exercicesExpanded.value
+}
+
+const goToExercices = () => {
+  navigate(exercicesGroup.path)
+}
 
 const navigate = (path) => {
   router.push(path)
@@ -101,8 +132,9 @@ const toggleSidebar = () => {
     <!-- Navigation -->
     <nav class="sidebar-nav">
       <button
-        v-for="link in navLinks"
+        v-for="link in navLinksTop"
         :key="link.path"
+        type="button"
         class="nav-link"
         :class="{ 'nav-link--active': isActive(link.path) }"
         @click="navigate(link.path)"
@@ -110,6 +142,84 @@ const toggleSidebar = () => {
         <span class="nav-icon" v-html="link.icon"></span>
         <span class="nav-label">{{ link.name }}</span>
         <span class="nav-indicator" v-if="isActive(link.path)"></span>
+      </button>
+
+      <!-- Exercices (menu dépliant) — après Emploi du temps -->
+      <div class="nav-group">
+        <div
+          class="nav-group__header"
+          :class="{
+            'nav-group__header--active': isActive(exercicesGroup.path),
+            'nav-group__header--open': exercicesExpanded,
+          }"
+        >
+          <button
+            type="button"
+            class="nav-group__main"
+            :class="{ 'nav-group__main--active': isActive(exercicesGroup.path) }"
+            @click="goToExercices"
+          >
+            <span class="nav-icon" v-html="exercicesGroup.icon"></span>
+            <span class="nav-label">{{ exercicesGroup.name }}</span>
+            <span class="nav-indicator" v-if="isActive(exercicesGroup.path)"></span>
+          </button>
+          <button
+            type="button"
+            class="nav-chevron-btn"
+            :class="{ 'nav-chevron-btn--open': exercicesExpanded }"
+            :aria-expanded="exercicesExpanded"
+            aria-controls="exercices-submenu"
+            aria-label="Ouvrir ou fermer le sous-menu Exercices"
+            @click.stop="toggleExercicesChevron"
+          >
+            <span class="nav-chevron" :class="{ 'nav-chevron--open': exercicesExpanded }">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </span>
+          </button>
+        </div>
+
+        <div
+          id="exercices-submenu"
+          class="nav-group__children"
+          :class="{ 'nav-group__children--open': exercicesExpanded }"
+        >
+          <div class="nav-group__children-inner">
+            <button
+              v-for="child in exercicesGroup.children"
+              :key="child.path"
+              type="button"
+              class="nav-link nav-link--child"
+              :class="{ 'nav-link--active': isActive(child.path) }"
+              @click="navigate(child.path)"
+            >
+              <span class="nav-icon" v-html="child.icon"></span>
+              <span class="nav-label">{{ child.name }}</span>
+              <span class="nav-indicator" v-if="isActive(child.path)"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        class="nav-link"
+        :class="{ 'nav-link--active': isActive(menstruationLink.path) }"
+        @click="navigate(menstruationLink.path)"
+      >
+        <span class="nav-icon" v-html="menstruationLink.icon"></span>
+        <span class="nav-label">{{ menstruationLink.name }}</span>
+        <span class="nav-indicator" v-if="isActive(menstruationLink.path)"></span>
       </button>
     </nav>
 
@@ -306,6 +416,155 @@ const toggleSidebar = () => {
   flex-shrink: 0;
 }
 
+/* ─── Menu dépliant Exercices ─── */
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.nav-group__header {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  transition: background 0.2s ease;
+}
+
+.nav-group__header--open {
+  background: rgba(213, 181, 234, 0.08);
+}
+
+.nav-group__header--active {
+  background: linear-gradient(135deg, rgba(213, 181, 234, 0.2), rgba(149, 209, 170, 0.1));
+  border: 1px solid rgba(213, 181, 234, 0.3);
+}
+
+.nav-group__main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.75rem 0.5rem 0.75rem 1rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #6c757d;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  .nav-group__main {
+    color: #adb5bd;
+  }
+}
+
+.nav-group__main:hover {
+  color: #ad81be;
+}
+
+.nav-group__main--active,
+.nav-group__header--active .nav-group__main {
+  color: #ad81be;
+  font-weight: 700;
+}
+
+.nav-group__main:hover {
+  transform: translateX(3px);
+}
+
+.nav-chevron-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  padding: 0;
+  border: none;
+  border-left: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: #6c757d;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  .nav-chevron-btn {
+    color: #adb5bd;
+  }
+}
+
+.nav-group__header--active .nav-chevron-btn {
+  border-left-color: rgba(213, 181, 234, 0.25);
+}
+
+.nav-chevron-btn:hover {
+  background: rgba(213, 181, 234, 0.15);
+  color: #ad81be;
+}
+
+.nav-chevron-btn--open {
+  color: #ad81be;
+}
+
+.nav-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  transition: transform 0.25s ease;
+}
+
+.nav-chevron svg {
+  width: 1rem;
+  height: 1rem;
+  stroke: currentColor;
+}
+
+.nav-chevron--open {
+  transform: rotate(180deg);
+}
+
+.nav-group__children {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+  overflow: hidden;
+}
+
+.nav-group__children--open {
+  grid-template-rows: 1fr;
+}
+
+.nav-group__children-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.nav-link--child {
+  margin-left: 0.5rem;
+  padding-left: 2.25rem;
+  font-size: 0.9rem;
+}
+
+.nav-link--child:hover {
+  transform: translateX(2px);
+}
+
 /* ─── Footer ─── */
 .sidebar-footer {
   padding: 0 0.75rem 1.5rem;
@@ -413,7 +672,6 @@ const toggleSidebar = () => {
   .hamburger {
     display: flex;
   }
-  /* Pas de croix quand le menu est ouvert : fermeture via l'overlay */
   .hamburger.is-open {
     display: none;
   }

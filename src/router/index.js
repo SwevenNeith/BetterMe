@@ -6,6 +6,7 @@ import TimeTableView from '../views/TimeTableView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import MenstruationView from '../views/MenstruationView.vue'
 import MoodView from '../views/MoodView.vue'
+import ExercicesView from '../views/ExercicesView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -29,6 +30,11 @@ const router = createRouter({
           path: 'timetable',
           name: 'timetable',
           component: TimeTableView
+        },
+        {
+          path: 'exercices',
+          name: 'exercices',
+          component: ExercicesView,
         },
         {
           path: 'mood',

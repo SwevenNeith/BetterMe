@@ -9,7 +9,8 @@ const MIN_HIDDEN_MS = 800
 /** Pages connectées (compatible base Vite ex. /BetterMe/). */
 function isAuthenticatedAppPath() {
   const path = window.location.pathname
-  return ['/dashboard', '/menstruation', '/timetable', '/mood', '/settings'].some((seg) =>
+  return ['/dashboard', '/menstruation', '/timetable', '/exercices', '/mood', '/settings'].some(
+    (seg) =>
     path.includes(seg),
   )
 }
