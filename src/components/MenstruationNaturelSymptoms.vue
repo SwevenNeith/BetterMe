@@ -45,15 +45,6 @@ const formattedDate = computed(() => {
 
 const canSave = computed(() => Boolean(props.userId && phaseContext.value.cycle?.id))
 
-const saveStatusText = computed(() => {
-  if (!props.userId) return ''
-  if (isLoading.value) return 'Chargement…'
-  if (isSaving.value) return 'Enregistrement…'
-  if (saveError.value) return saveError.value
-  if (lastSavedAt.value) return 'Enregistré'
-  return ''
-})
-
 const {
   values,
   entries,
@@ -75,6 +66,22 @@ const {
   context: phaseContext,
   symptomDefs,
   createEmptyValues: createEmptySymptomValues,
+})
+
+const hasInteractableData = computed(() => {
+  if (entries.value.length > 0 || activeEntryId.value) return true
+  return Object.values(values.value).some((v) => v != null && v !== '')
+})
+
+const showLoadingOverlay = computed(() => isLoading.value && !hasInteractableData.value)
+
+const saveStatusText = computed(() => {
+  if (!props.userId) return ''
+  if (showLoadingOverlay.value) return 'Chargement…'
+  if (isSaving.value) return 'Enregistrement…'
+  if (saveError.value) return saveError.value
+  if (lastSavedAt.value) return 'Enregistré'
+  return ''
 })
 
 function scaleRange(def) {
@@ -116,7 +123,7 @@ async function onBoolean(def, v) {
     </header>
 
     <MenstruationSymptomEntriesNav
-      v-if="!isLoading && canSave"
+      v-if="!showLoadingOverlay && canSave"
       :entries="entries"
       :active-entry-id="activeEntryId"
       :entry-label="entryLabel"
@@ -124,7 +131,7 @@ async function onBoolean(def, v) {
       @new="startNewEntry"
     />
 
-    <div v-if="isLoading" class="nat-symptoms__loading">Chargement des symptômes…</div>
+    <div v-if="showLoadingOverlay" class="nat-symptoms__loading">Chargement des symptômes…</div>
 
     <div v-else class="nat-symptoms__list">
       <div

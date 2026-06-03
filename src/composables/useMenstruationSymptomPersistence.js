@@ -1,5 +1,7 @@
-import { ref, watch } from 'vue'
+import { ref, watch, unref, onMounted, onUnmounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
+import { TAB_HIDDEN_EVENT } from './useAppTabResume.js'
+import { withTimeout } from '../utils/asyncTimeout.js'
 import {
   fetchSymptomEntriesForDate,
   fetchSymptomEntryById,
@@ -7,6 +9,9 @@ import {
   rowToSymptomValues,
   saveSymptomField,
 } from '../services/menstruationSymptoms.js'
+
+const SAVE_TIMEOUT_MS = 25_000
+const LOAD_TIMEOUT_MS = 20_000
 
 /**
  * Charge / enregistre les symptômes : plusieurs saisies possibles par jour.
@@ -27,6 +32,8 @@ export function useMenstruationSymptomPersistence({
   const lastSavedAt = ref(null)
 
   let loadToken = 0
+  let saveToken = 0
+  let lastContextKey = ''
 
   function applyRowToValues(row, phase) {
     values.value = row
@@ -34,8 +41,15 @@ export function useMenstruationSymptomPersistence({
       : createEmptyValues(phase)
   }
 
-  async function loadFromDb() {
-    const uid = userId.value ?? userId
+  function cancelPendingWork() {
+    loadToken++
+    saveToken++
+    isLoading.value = false
+    isSaving.value = false
+  }
+
+  async function loadFromDb({ silent = false } = {}) {
+    const uid = unref(userId)
     const ctx = context.value
     const phase = ctx?.phase ?? ctx?.period
 
@@ -43,15 +57,19 @@ export function useMenstruationSymptomPersistence({
       entries.value = []
       activeEntryId.value = null
       values.value = createEmptyValues(phase)
+      isLoading.value = false
       return
     }
 
     const token = ++loadToken
-    isLoading.value = true
+    if (!silent) isLoading.value = true
     saveError.value = ''
 
     try {
-      const list = await fetchSymptomEntriesForDate(supabase, uid, ctx.iso, typeCycle)
+      const list = await withTimeout(
+        fetchSymptomEntriesForDate(supabase, uid, ctx.iso, typeCycle),
+        LOAD_TIMEOUT_MS,
+      )
       if (token !== loadToken) return
 
       entries.value = list
@@ -83,34 +101,56 @@ export function useMenstruationSymptomPersistence({
 
   watch(
     () => {
-      const uid = userId.value ?? userId
+      const uid = unref(userId)
       const ctx = context.value
-      return [uid, ctx?.iso, ctx?.phase ?? ctx?.period, ctx?.cycle?.id, typeCycle]
+      const phase = ctx?.phase ?? ctx?.period
+      return `${uid ?? ''}|${ctx?.iso ?? ''}|${phase ?? ''}|${ctx?.cycle?.id ?? ''}|${typeCycle}`
     },
-    () => {
-      activeEntryId.value = null
-      loadFromDb()
+    (key) => {
+      const contextChanged = lastContextKey && key !== lastContextKey
+      const silent = Boolean(lastContextKey)
+      lastContextKey = key
+      if (contextChanged) {
+        activeEntryId.value = null
+      }
+      loadFromDb({ silent })
     },
     { immediate: true },
   )
 
+  function onTabHidden() {
+    cancelPendingWork()
+  }
+
+  onMounted(() => {
+    window.addEventListener(TAB_HIDDEN_EVENT, onTabHidden)
+  })
+
+  onUnmounted(() => {
+    window.removeEventListener(TAB_HIDDEN_EVENT, onTabHidden)
+    cancelPendingWork()
+  })
+
   async function selectEntry(entryId) {
-    const uid = userId.value ?? userId
+    const uid = unref(userId)
     const ctx = context.value
     const phase = ctx?.phase ?? ctx?.period
     if (!uid || !entryId) return
 
+    const token = ++loadToken
     isLoading.value = true
     saveError.value = ''
     try {
       const row = await fetchSymptomEntryById(supabase, uid, entryId)
+      if (token !== loadToken) return
       activeEntryId.value = entryId
       applyRowToValues(row, phase)
     } catch (err) {
+      if (token !== loadToken) return
       console.error(err)
       saveError.value = err.message || 'Impossible de charger cette saisie.'
     } finally {
-      isLoading.value = false
+      if (token === loadToken) isLoading.value = false
     }
   }
 
@@ -127,42 +167,58 @@ export function useMenstruationSymptomPersistence({
   }
 
   async function persistField(fieldKey, value) {
-    const uid = userId.value ?? userId
+    const uid = unref(userId)
     const ctx = context.value
     const phase = ctx?.phase ?? ctx?.period
     const cycleId = ctx?.cycle?.id
 
     if (!uid || !ctx?.iso || !phase || !cycleId) return
+    if (document.visibilityState === 'hidden') {
+      saveError.value = 'Reviens sur l’onglet BetterMe pour enregistrer.'
+      return
+    }
 
+    const token = ++saveToken
     isSaving.value = true
     saveError.value = ''
 
     try {
-      const { entryId } = await saveSymptomField(
-        supabase,
-        uid,
-        {
-          dateJour: ctx.iso,
-          phase,
-          typeCycle,
-          cycleId,
-          cycle: ctx.cycle,
-          entryId: activeEntryId.value,
-        },
-        fieldKey,
-        value,
+      const { entryId } = await withTimeout(
+        saveSymptomField(
+          supabase,
+          uid,
+          {
+            dateJour: ctx.iso,
+            phase,
+            typeCycle,
+            cycleId,
+            cycle: ctx.cycle,
+            entryId: activeEntryId.value,
+          },
+          fieldKey,
+          value,
+        ),
+        SAVE_TIMEOUT_MS,
+        'Délai dépassé. Reviens sur l’onglet BetterMe puis réessaie.',
       )
+      if (token !== saveToken) return
+
       if (entryId) {
         activeEntryId.value = entryId
-        const list = await fetchSymptomEntriesForDate(supabase, uid, ctx.iso, typeCycle)
+        const list = await withTimeout(
+          fetchSymptomEntriesForDate(supabase, uid, ctx.iso, typeCycle),
+          LOAD_TIMEOUT_MS,
+        )
+        if (token !== saveToken) return
         entries.value = list
       }
       lastSavedAt.value = Date.now()
     } catch (err) {
+      if (token !== saveToken) return
       console.error(err)
       saveError.value = err.message || 'Impossible d’enregistrer ce symptôme.'
     } finally {
-      isSaving.value = false
+      if (token === saveToken) isSaving.value = false
     }
   }
 

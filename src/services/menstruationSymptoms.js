@@ -161,9 +161,15 @@ export async function saveSymptomField(supabase, userId, meta, fieldKey, value) 
       .eq('id', entryId)
       .eq('user_id', userId)
       .select()
-      .single()
+
     if (error) throw error
-    return { row: data, entryId: data.id }
+    const row = data?.[0]
+    if (!row?.id) {
+      throw new Error(
+        'UPDATE menstruation_symptomes : aucune ligne mise à jour (vérifie la policy RLS UPDATE).',
+      )
+    }
+    return { row, entryId: row.id }
   }
 
   if (dbValue === null) {
@@ -180,7 +186,13 @@ export async function saveSymptomField(supabase, userId, meta, fieldKey, value) 
     [col]: dbValue,
   }
 
-  const { data, error } = await supabase.from(TABLE).insert(insert).select().single()
+  const { data, error } = await supabase.from(TABLE).insert(insert).select()
   if (error) throw error
-  return { row: data, entryId: data.id }
+  const row = data?.[0]
+  if (!row?.id) {
+    throw new Error(
+      'INSERT menstruation_symptomes : aucune ligne créée (vérifie la policy RLS INSERT).',
+    )
+  }
+  return { row, entryId: row.id }
 }

@@ -2,8 +2,11 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { RouterView } from 'vue-router'
+import { useAppTabResume } from './composables/useAppTabResume.js'
 import { supabase } from './lib/supabase.js'
 import { ensureUserSettings } from './services/menstruationNotifications.js'
+
+useAppTabResume()
 
 const router = useRouter()
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes

@@ -58,55 +58,55 @@ export function computeCycleContext({ dateJour, menstruationMode, cyclesPilule, 
   return { cycle: null, typeCycle: null, jourRelatif: null }
 }
 
-async function findEmotionLogIdForDate(supabase, userId, dateJour) {
+async function listEmotionLogIdsForDate(supabase, userId, dateJour) {
   const { data: rows, error } = await supabase
     .from(TABLE)
     .select('id')
     .eq('user_id', userId)
     .eq('date_jour', dateJour)
     .order('id', { ascending: false })
-    .limit(1)
 
   if (error) throw error
-  return rows?.[0]?.id ?? null
+  return (rows ?? []).map((r) => r.id).filter(Boolean)
 }
 
-async function updateEmotionLogForDate(supabase, userId, dateJour, fields) {
-  const existingId = await findEmotionLogIdForDate(supabase, userId, dateJour)
-
-  if (existingId) {
-    const { error: updateError } = await supabase.from(TABLE).update(fields).eq('id', existingId)
-    if (updateError) throw updateError
-    return { id: existingId, updated: true }
-  }
-
-  const { data, error: insertError } = await supabase
-    .from(TABLE)
-    .insert({ user_id: userId, date_jour: dateJour, ...fields })
-    .select('id')
-
-  if (insertError?.code === '23505') {
-    const retryId = await findEmotionLogIdForDate(supabase, userId, dateJour)
-    if (retryId) {
-      const { error: updateError } = await supabase.from(TABLE).update(fields).eq('id', retryId)
-      if (updateError) throw updateError
-      return { id: retryId, updated: true }
-    }
-  }
-
-  if (insertError) throw insertError
-  return { id: data?.[0]?.id ?? null, updated: false }
-}
-
-/** Insert ou update du log du jour — modifiable autant de fois que nécessaire */
-export async function upsertEmotionLog(supabase, userId, payload, knownId = null) {
+/**
+ * Log du jour : si une ligne existe pour (user_id, date_jour) → UPDATE, sinon INSERT.
+ * Re-vérifie en base à chaque appel (modifications illimitées le même jour).
+ */
+export async function saveEmotionLogForDate(supabase, userId, payload, knownId = null) {
   const { user_id, date_jour, ...fields } = payload
-  const rowId = knownId ?? (await findEmotionLogIdForDate(supabase, user_id, date_jour))
+  if (!user_id || !date_jour) {
+    throw new Error('user_id et date_jour sont requis pour enregistrer le check-in.')
+  }
 
-  if (rowId) {
-    const { error: updateError } = await supabase.from(TABLE).update(fields).eq('id', rowId)
+  const ids = await listEmotionLogIdsForDate(supabase, user_id, date_jour)
+  const keepId = knownId || (ids.length > 0 ? ids[0] : null)
+
+  if (keepId) {
+    const duplicateIds = ids.filter((id) => id !== keepId)
+
+    if (duplicateIds.length > 0) {
+      const { error: dedupeError } = await supabase.from(TABLE).delete().in('id', duplicateIds)
+      if (dedupeError) console.error('Dedupe emotion_logs:', dedupeError)
+    }
+
+    const { data, error: updateError } = await supabase
+      .from(TABLE)
+      .update(fields)
+      .eq('id', keepId)
+      .select('id')
+
     if (updateError) throw updateError
-    return { id: rowId, updated: true }
+
+    const updatedId = data?.[0]?.id ?? keepId
+    if (!updatedId) {
+      throw new Error(
+        'UPDATE emotion_logs : aucune ligne mise à jour (vérifie la policy RLS UPDATE).',
+      )
+    }
+
+    return { id: updatedId, updated: true }
   }
 
   const { data, error: insertError } = await supabase
@@ -115,11 +115,24 @@ export async function upsertEmotionLog(supabase, userId, payload, knownId = null
     .select('id')
 
   if (insertError?.code === '23505') {
-    return updateEmotionLogForDate(supabase, user_id, date_jour, fields)
+    return saveEmotionLogForDate(supabase, userId, payload)
   }
 
   if (insertError) throw insertError
-  return { id: data?.[0]?.id ?? null, updated: false }
+
+  const insertedId = data?.[0]?.id
+  if (!insertedId) {
+    throw new Error(
+      'INSERT emotion_logs : aucune ligne créée (vérifie la policy RLS INSERT).',
+    )
+  }
+
+  return { id: insertedId, updated: false }
+}
+
+/** @alias saveEmotionLogForDate */
+export async function upsertEmotionLog(supabase, userId, payload, knownId = null) {
+  return saveEmotionLogForDate(supabase, userId, payload, knownId)
 }
 
 export async function listEmotionLogs(supabase, userId, { limit = 180 } = {}) {

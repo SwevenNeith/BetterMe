@@ -2,6 +2,8 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
+import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
+import { useTimetableCacheStore } from '../stores/timetableCache.js'
 import {
   notificationsActives,
   planifierNotificationActivite,
@@ -77,7 +79,7 @@ const openModalWithDefaultDate = async () => {
   newEventDetail.value = ''
   resetReminderFields()
   resetTimerFields()
-  await fetchTimetableMeta()
+  await fetchEvents()
   isModalOpen.value = true
 }
 
@@ -87,6 +89,7 @@ const userCategories = ref([])
 const hobbyQuickPicks = ref([])
 const isLoading = ref(true)
 const isMetaLoading = ref(false)
+let timetableLoadGen = 0
 
 const categoriesForPills = computed(() =>
   userCategories.value.filter((c) => c?.name),
@@ -303,7 +306,7 @@ const getPillStyle = (cat) => {
 }
 
 /** Catégories (timetable_categories) + titres hobbies (timetable_events) */
-const fetchTimetableMeta = async () => {
+const fetchTimetableMeta = async (gen) => {
   try {
     isMetaLoading.value = true
     const {
@@ -316,6 +319,7 @@ const fetchTimetableMeta = async () => {
     }
 
     const { categories, hobbyPicks } = await loadTimetableMeta(supabase, user.id)
+    if (gen !== timetableLoadGen) return
     userCategories.value = categories
     hobbyQuickPicks.value = hobbyPicks
   } catch (err) {
@@ -332,20 +336,20 @@ const fetchTimetableMeta = async () => {
     }
     hobbyQuickPicks.value = []
   } finally {
-    isMetaLoading.value = false
+    if (gen === timetableLoadGen) {
+      isMetaLoading.value = false
+    }
   }
 }
 
 // Événements de la semaine affichée (timetable_events)
-const fetchWeekEvents = async () => {
+const fetchWeekEvents = async (gen) => {
   try {
-    isLoading.value = true
     const {
       data: { user },
     } = await supabase.auth.getUser()
     if (!user) {
-      userEvents.value = []
-      isLoading.value = false
+      if (gen === timetableLoadGen) userEvents.value = []
       return
     }
 
@@ -360,26 +364,54 @@ const fetchWeekEvents = async () => {
       .lte('date_start', sundayStr)
 
     if (error) throw error
-    userEvents.value = data || []
+    if (gen === timetableLoadGen) {
+      userEvents.value = data || []
+    }
   } catch (err) {
     console.error('Error fetching events:', err)
-  } finally {
-    isLoading.value = false
+    if (gen === timetableLoadGen) {
+      userEvents.value = []
+    }
   }
 }
 
-const fetchEvents = async () => {
-  await Promise.all([fetchTimetableMeta(), fetchWeekEvents()])
+function cancelTimetableLoads() {
+  timetableLoadGen++
+  isLoading.value = false
+  isMetaLoading.value = false
 }
 
-// Watch currentDate changes to fetch events dynamically for the new week
-watch(
-  currentDate,
-  () => {
-    fetchEvents()
-  },
-  { immediate: true },
-)
+const timetableCache = useTimetableCacheStore()
+useViewLoadGuard(cancelTimetableLoads)
+
+const fetchEvents = async ({ silent = false } = {}) => {
+  const gen = ++timetableLoadGen
+  if (!silent) isLoading.value = true
+  try {
+    await Promise.all([fetchTimetableMeta(gen), fetchWeekEvents(gen)])
+    if (gen === timetableLoadGen) {
+      timetableCache.publish({
+        userEvents: userEvents.value,
+        userCategories: userCategories.value,
+        hobbyQuickPicks: hobbyQuickPicks.value,
+      })
+    }
+  } finally {
+    if (gen === timetableLoadGen) {
+      isLoading.value = false
+    }
+  }
+}
+
+watch(currentDate, () => {
+  fetchEvents()
+})
+
+onMounted(() => {
+  const cached = timetableCache.applyToView({ userEvents, userCategories, hobbyQuickPicks })
+  if (cached) isLoading.value = false
+  fetchEvents({ silent: cached })
+})
 
 // Watch to automatically maintain end time > start time (with a 1 hour default buffer)
 watch(newEventStartTime, (newStart) => {
@@ -667,7 +699,7 @@ const handleAddEvent = async () => {
     }
 
     if (categoryName.toLowerCase() === 'hobbies') {
-      await fetchTimetableMeta()
+      await fetchEvents()
     }
 
     if (notificationsActives() && reminderActive && createdEvent) {

@@ -1,6 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
+import { useMenstruationCacheStore } from '../stores/menstruationCache.js'
+import { withTimeout } from '../utils/asyncTimeout.js'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
@@ -39,7 +42,8 @@ const router = useRouter()
 const localToday = getLocalTodayISO()
 
 const userId = ref(null)
-const isLoading = ref(true)
+const isLoading = ref(false)
+const LOAD_TIMEOUT_MS = 20_000
 const loadError = ref('')
 const hasCycleData = ref(false)
 const cycles = ref([])
@@ -67,13 +71,11 @@ const menstruationPatterns = ref([])
 const patternsLoading = ref(false)
 const patternsError = ref('')
 
-let isPageActive = true
-onBeforeUnmount(() => {
-  isPageActive = false
-})
+let pageLoadGen = 0
 
 async function loadPatterns(forceRecalc = false) {
   if (!userId.value || !cycleMode.value) return
+  const gen = pageLoadGen
   patternsLoading.value = true
   patternsError.value = ''
   try {
@@ -104,41 +106,99 @@ async function loadPatterns(forceRecalc = false) {
       : msg || 'Impossible d’analyser les tendances.'
     menstruationPatterns.value = []
   } finally {
-    patternsLoading.value = false
+    if (gen === pageLoadGen) patternsLoading.value = false
   }
 }
 
-const loadPage = async () => {
-  isLoading.value = true
-  loadError.value = ''
-  saveError.value = ''
-  try {
-    const [countPilule, countNaturel] = await Promise.all([
-      countMenstruationCyclesPilule(supabase, userId.value),
-      countMenstruationCyclesNaturel(supabase, userId.value),
-    ])
-    if (!isPageActive) return
+/** Sync lourd (prévisions, SPM, notifs, patterns) — ne bloque pas l’affichage initial. */
+async function runMenstruationBackgroundSync(gen) {
+  if (!userId.value || !hasCycleData.value || gen !== pageLoadGen) return
 
-    if (countPilule > 0) {
-      cycleMode.value = 'pilule'
-      hasCycleData.value = true
-      menstruationNotifSettings.value = await loadMenstruationNotifSettings(userId.value)
+  try {
+    if (cycleMode.value === 'pilule') {
       await refreshAllCyclesSpmDatesEstimees(supabase, userId.value)
-      if (!isPageActive) return
+      if (gen !== pageLoadGen) return
       cycles.value = await listCyclesPilule(supabase, userId.value)
+      if (gen !== pageLoadGen) return
       await rescheduleMenstruationEstimatedNotifications(
         userId.value,
         cycles.value,
         menstruationNotifSettings.value,
       )
+    } else if (cycleMode.value === 'naturel') {
+      cyclesNaturel.value = await syncForecastCyclesNaturel(supabase, userId.value)
+      if (gen !== pageLoadGen) return
+    }
+
+    if (gen === pageLoadGen) {
+      await loadPatterns()
+    }
+  } catch (err) {
+    console.error('Menstruation background sync:', err)
+  }
+}
+
+function cancelMenstruationLoads() {
+  pageLoadGen++
+  isLoading.value = false
+  patternsLoading.value = false
+}
+
+function endPageLoad(gen) {
+  if (gen === pageLoadGen) isLoading.value = false
+}
+
+const menstruationCache = useMenstruationCacheStore()
+const { scheduleBackground } = useViewLoadGuard(cancelMenstruationLoads)
+
+const loadPage = async ({ silent = false } = {}) => {
+  if (!userId.value) {
+    isLoading.value = false
+    return
+  }
+
+  const gen = ++pageLoadGen
+  if (!silent) isLoading.value = true
+  loadError.value = ''
+  saveError.value = ''
+
+  try {
+    const [countPilule, countNaturel] = await withTimeout(
+      Promise.all([
+        countMenstruationCyclesPilule(supabase, userId.value),
+        countMenstruationCyclesNaturel(supabase, userId.value),
+      ]),
+      LOAD_TIMEOUT_MS,
+      'Le chargement a pris trop de temps. Réessaie dans un instant.',
+    )
+    if (gen !== pageLoadGen) return
+
+    if (countPilule > 0) {
+      cycleMode.value = 'pilule'
+      hasCycleData.value = true
+      menstruationNotifSettings.value = await withTimeout(
+        loadMenstruationNotifSettings(userId.value),
+        LOAD_TIMEOUT_MS,
+      )
+      if (gen !== pageLoadGen) return
+      cycles.value = await withTimeout(
+        listCyclesPilule(supabase, userId.value),
+        LOAD_TIMEOUT_MS,
+      )
       cyclesNaturel.value = []
     } else if (countNaturel > 0) {
       cycleMode.value = 'naturel'
       hasCycleData.value = true
-      menstruationNotifSettings.value = await loadMenstruationNotifSettings(userId.value)
+      menstruationNotifSettings.value = await withTimeout(
+        loadMenstruationNotifSettings(userId.value),
+        LOAD_TIMEOUT_MS,
+      )
+      if (gen !== pageLoadGen) return
       cycles.value = []
-      cyclesNaturel.value = await syncForecastCyclesNaturel(supabase, userId.value)
-      if (!isPageActive) return
+      cyclesNaturel.value = await withTimeout(
+        listCyclesNaturel(supabase, userId.value),
+        LOAD_TIMEOUT_MS,
+      )
     } else {
       cycleMode.value = null
       hasCycleData.value = false
@@ -146,11 +206,16 @@ const loadPage = async () => {
       cyclesNaturel.value = []
     }
 
-    if (hasCycleData.value && isPageActive) {
-      await loadPatterns()
+    if (gen === pageLoadGen) {
+      menstruationCache.publish({
+        cycles: cycles.value,
+        cyclesNaturel: cyclesNaturel.value,
+        cycleMode: cycleMode.value,
+        hasCycleData: hasCycleData.value,
+      })
     }
   } catch (err) {
-    if (!isPageActive) return
+    if (gen !== pageLoadGen) return
     console.error(err)
     const msg = err.message || ''
     loadError.value =
@@ -158,10 +223,52 @@ const loadPage = async () => {
         ? 'Table menstruation_cycles_pilule introuvable. Exécute la migration Supabase (supabase/migrations/20250520120000_menstruation_cycles.sql).'
         : msg && msg.includes('menstruation_cycles_naturel')
           ? 'Table menstruation_cycles_naturel introuvable. Vérifie la migration/SQL Supabase pour le cycle naturel.'
-        : msg || 'Impossible de charger tes données.'
+          : msg || 'Impossible de charger tes données.'
   } finally {
-    if (isPageActive) isLoading.value = false
+    endPageLoad(gen)
   }
+
+  if (gen === pageLoadGen && hasCycleData.value) {
+    scheduleBackground(() => {
+      if (gen === pageLoadGen) void runMenstruationBackgroundSync(gen)
+    })
+  }
+}
+
+async function initMenstruationPage() {
+  loadError.value = ''
+
+  const cached = menstruationCache.applyToView({
+    cycles,
+    cyclesNaturel,
+    cycleMode,
+    hasCycleData,
+  })
+
+  if (!userId.value) {
+    try {
+      const {
+        data: { user },
+      } = await withTimeout(
+        supabase.auth.getUser(),
+        LOAD_TIMEOUT_MS,
+        'Connexion lente. Réessaie.',
+      )
+      if (!user) {
+        isLoading.value = false
+        router.push('/')
+        return
+      }
+      userId.value = user.id
+    } catch (err) {
+      console.error(err)
+      isLoading.value = false
+      loadError.value = err.message || 'Impossible de vérifier la session.'
+      return
+    }
+  }
+
+  await loadPage({ silent: cached })
 }
 
 const onSubmitRulesDates = async (payload) => {
@@ -289,16 +396,8 @@ const onSubmit = async () => {
   }
 }
 
-onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    router.push('/')
-    return
-  }
-  userId.value = user.id
-  await loadPage()
+onMounted(() => {
+  void initMenstruationPage()
 })
 </script>
 
@@ -313,7 +412,7 @@ onMounted(async () => {
 
     <p v-if="loadError" class="menstruation-feedback menstruation-feedback--error">{{ loadError }}</p>
 
-    <div v-if="isLoading" class="menstruation-loading">Chargement…</div>
+    <div v-if="isLoading && !hasCycleData" class="menstruation-loading">Chargement…</div>
 
     <section v-else-if="hasCycleData" class="menstruation-card menstruation-card--calendar">
       <div class="card-head card-head--left">

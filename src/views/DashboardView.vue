@@ -3,53 +3,26 @@
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { useRouter } from 'vue-router'
+import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
+import { useDashboardCacheStore } from '../stores/dashboardCache.js'
 import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
 import { listCyclesPilule, countMenstruationCyclesPilule } from '../services/menstruationCycles.js'
 import MenstruationNaturalCycleCalendar from '../components/MenstruationNaturalCycleCalendar.vue'
 import {
   countMenstruationCyclesNaturel,
-  syncForecastCyclesNaturel,
+  listCyclesNaturel,
 } from '../services/menstruationCyclesNaturel.js'
 import DashboardEmotionalCheckin from '../components/DashboardEmotionalCheckin.vue'
 import { useDashboardEmotionalCheckin } from '../composables/useDashboardEmotionalCheckin.js'
-import {
-  computeCycleContext,
-  computeScoreGlobal,
-  detectEmotionPatterns,
-  getEmotionLogForDate,
-  listEmotionLogs,
-  upsertEmotionLog,
-} from '../services/emotionLogs.js'
+import { useEmotionalCheckinPersistence } from '../composables/useEmotionalCheckinPersistence.js'
 const router = useRouter()
 const userName = ref('')
 const userId = ref(null)
-const patternMessage = ref('')
-const saveMessage = ref('')
-const savedToday = ref(false)
-const isCheckinSaving = ref(false)
-const todayEmotionLogId = ref(null)
-const savedCheckinSnapshot = ref(null)
+const isRefreshing = ref(false)
 let saveMessageTimeoutId = null
+let dashboardLoadGen = 0
 
 const { setCheckinPayload, resetCheckin } = useDashboardEmotionalCheckin()
-
-function snapshotCheckinFromRow(row) {
-  return {
-    humeurGenerale: row['humeur_générale'],
-    energieEmotionnelle: row['énergie_émotionnelle'],
-    besoinReassurance: row['besoin_réassurance'],
-    sentimentGeneral: row['sentiment_général'],
-  }
-}
-
-function snapshotCheckinFromValues(values) {
-  return {
-    humeurGenerale: values.humeurGenerale,
-    energieEmotionnelle: values.energieEmotionnelle,
-    besoinReassurance: values.besoinReassurance,
-    sentimentGeneral: values.sentimentGeneral,
-  }
-}
 
 // Helpers
 const formatDateToLocalISO = (date) => {
@@ -60,7 +33,7 @@ const formatDateToLocalISO = (date) => {
 }
 
 const todayDate = new Date()
-const todayStr = formatDateToLocalISO(todayDate)
+const todayStr = computed(() => formatDateToLocalISO(new Date()))
 
 const formattedTodayRaw = todayDate.toLocaleDateString('fr-FR', {
   weekday: 'long',
@@ -77,6 +50,23 @@ const isLoadingMenstruationBoard = ref(true)
 const hasMenstruationCycleData = ref(false)
 const menstruationCyclesNaturel = ref([])
 const menstruationMode = ref(null) // 'pilule' | 'naturel' | null
+
+const {
+  savedToday,
+  patternMessage,
+  isSaving: isCheckinSaving,
+  saveMessage,
+  loadFromDb: loadEmotionCheckinFromDb,
+  saveCheckin,
+  cancelToSaved,
+} = useEmotionalCheckinPersistence({
+  userId,
+  dateJour: todayStr,
+  menstruationMode,
+  cyclesPilule: menstruationCycles,
+  cyclesNaturel: menstruationCyclesNaturel,
+  setCheckinPayload,
+})
 
 // Carousel mobile (scroll-snap)
 const activePage = ref(0)
@@ -171,11 +161,46 @@ const setupCarouselObserver = () => {
   }
 }
 
-// Fetch Events & Categories from Supabase
-const fetchTodayEvents = async (userId) => {
+const loadMenstruationBoard = async (uid, gen) => {
   try {
-    isLoadingEvents.value = true
+    const [countPilule, countNaturel] = await Promise.all([
+      countMenstruationCyclesPilule(supabase, uid),
+      countMenstruationCyclesNaturel(supabase, uid),
+    ])
+    if (gen !== dashboardLoadGen) return
 
+    if (countPilule > 0) {
+      menstruationMode.value = 'pilule'
+      hasMenstruationCycleData.value = true
+      menstruationCycles.value = await listCyclesPilule(supabase, uid)
+      if (gen !== dashboardLoadGen) return
+      menstruationCyclesNaturel.value = []
+    } else if (countNaturel > 0) {
+      menstruationMode.value = 'naturel'
+      hasMenstruationCycleData.value = true
+      menstruationCycles.value = []
+      menstruationCyclesNaturel.value = await listCyclesNaturel(supabase, uid)
+      if (gen !== dashboardLoadGen) return
+    } else {
+      menstruationMode.value = null
+      menstruationCycles.value = []
+      menstruationCyclesNaturel.value = []
+      hasMenstruationCycleData.value = false
+    }
+  } catch (err) {
+    console.error('Erreur chargement cycles menstruation:', err)
+    if (gen === dashboardLoadGen) {
+      hasMenstruationCycleData.value = false
+      menstruationCycles.value = []
+      menstruationCyclesNaturel.value = []
+      menstruationMode.value = null
+    }
+  }
+}
+
+// Fetch Events & Categories from Supabase
+const fetchTodayEvents = async (userId, gen) => {
+  try {
     // Fetch categories
     const { data: catData, error: catError } = await supabase
       .from('timetable_categories')
@@ -210,7 +235,7 @@ const fetchTodayEvents = async (userId) => {
       .from('timetable_events')
       .select('*')
       .eq('user_id', userId)
-      .or(`date_start.eq.${todayStr},and(date_start.lte.${todayStr},date_end.gte.${todayStr})`)
+      .or(`date_start.eq.${todayStr.value},and(date_start.lte.${todayStr.value},date_end.gte.${todayStr.value})`)
 
     if (evError) throw evError
 
@@ -228,85 +253,110 @@ const fetchTodayEvents = async (userId) => {
     })
 
     parsedEvents.sort((a, b) => a.startDecimal - b.startDecimal)
-    userEvents.value = parsedEvents
+    if (gen === dashboardLoadGen) {
+      userEvents.value = parsedEvents
+    }
   } catch (err) {
     console.error('Error fetching today events:', err)
-  } finally {
-    isLoadingEvents.value = false
+    if (gen === dashboardLoadGen) {
+      userEvents.value = []
+    }
   }
 }
 
-onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    router.push('/')
-    return
-  }
-  userId.value = user.id
-  userName.value = user.user_metadata?.nom ?? user.email
+function cancelDashboardLoads() {
+  dashboardLoadGen++
+  isLoadingEvents.value = false
+  isLoadingMenstruationBoard.value = false
+  isRefreshing.value = false
+}
 
-  await fetchTodayEvents(user.id)
+const dashboardCache = useDashboardCacheStore()
+useViewLoadGuard(cancelDashboardLoads)
+
+const loadDashboard = async ({ showRefreshSpinner = false, silent = false } = {}) => {
+  const gen = ++dashboardLoadGen
+  if (showRefreshSpinner) isRefreshing.value = true
+  if (!silent) {
+    isLoadingEvents.value = true
+    isLoadingMenstruationBoard.value = true
+  }
 
   try {
-    const [countPilule, countNaturel] = await Promise.all([
-      countMenstruationCyclesPilule(supabase, user.id),
-      countMenstruationCyclesNaturel(supabase, user.id),
-    ])
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (gen !== dashboardLoadGen) return
 
-    if (countPilule > 0) {
-      menstruationMode.value = 'pilule'
-      hasMenstruationCycleData.value = true
-      menstruationCycles.value = await listCyclesPilule(supabase, user.id)
-      menstruationCyclesNaturel.value = []
-    } else if (countNaturel > 0) {
-      menstruationMode.value = 'naturel'
-      hasMenstruationCycleData.value = true
-      menstruationCycles.value = []
-      menstruationCyclesNaturel.value = await syncForecastCyclesNaturel(supabase, user.id)
-    } else {
-      menstruationMode.value = null
-      menstruationCycles.value = []
-      menstruationCyclesNaturel.value = []
-      hasMenstruationCycleData.value = false
+    if (!user) {
+      isLoadingEvents.value = false
+      isLoadingMenstruationBoard.value = false
+      router.push('/')
+      return
     }
-  } catch (err) {
-    console.error('Erreur chargement cycles menstruation:', err)
-    hasMenstruationCycleData.value = false
-    menstruationCycles.value = []
-    menstruationCyclesNaturel.value = []
-    menstruationMode.value = null
+
+    userId.value = user.id
+    userName.value = user.user_metadata?.nom ?? user.email
+
+    await Promise.all([fetchTodayEvents(user.id, gen), loadMenstruationBoard(user.id, gen)])
+
+    if (gen === dashboardLoadGen) {
+      dashboardCache.publish({
+        userEvents: userEvents.value,
+        userCategories: userCategories.value,
+        menstruationCycles: menstruationCycles.value,
+        menstruationCyclesNaturel: menstruationCyclesNaturel.value,
+        menstruationMode: menstruationMode.value,
+        hasMenstruationCycleData: hasMenstruationCycleData.value,
+      })
+    }
   } finally {
-    isLoadingMenstruationBoard.value = false
-  }
-
-  // Pré-remplit le check-in si une saisie existe déjà aujourd'hui
-  try {
-    const row = await getEmotionLogForDate(supabase, user.id, todayStr)
-    if (row) {
-      savedToday.value = true
-      todayEmotionLogId.value = row.id ?? null
-      const snapshot = snapshotCheckinFromRow(row)
-      savedCheckinSnapshot.value = snapshot
-      setCheckinPayload(snapshot)
-      const logs = await listEmotionLogs(supabase, user.id, { limit: 180 })
-      patternMessage.value = detectEmotionPatterns(logs) || ''
+    if (gen === dashboardLoadGen) {
+      isLoadingEvents.value = false
+      isLoadingMenstruationBoard.value = false
+      isRefreshing.value = false
     }
-  } catch (err) {
-    console.error('Chargement emotion_logs du jour:', err)
   }
+}
 
+const refreshDashboard = async () => {
+  await loadDashboard({ showRefreshSpinner: true })
+  if (!isCheckinSaving.value) {
+    await loadEmotionCheckinFromDb({ applyToForm: true })
+  }
+}
+
+const setupDashboardChrome = async () => {
   await nextTick()
   setupCarouselObserver()
   requestAnimationFrame(() => {
     updateCarouselLayout()
     requestAnimationFrame(() => updateCarouselLayout())
   })
+}
 
+onMounted(async () => {
+  const cached = dashboardCache.applyToView({
+    userEvents,
+    userCategories,
+    menstruationCycles,
+    menstruationCyclesNaturel,
+    menstruationMode,
+    hasMenstruationCycleData,
+  })
+  if (cached) {
+    isLoadingEvents.value = false
+    isLoadingMenstruationBoard.value = false
+  }
+
+  await loadDashboard({ silent: cached })
+  setupDashboardChrome()
   mobileMediaQuery = window.matchMedia(MOBILE_MEDIA)
   mobileMediaQuery.addEventListener('change', updateCarouselLayout)
   window.addEventListener('resize', updateCarouselLayout)
+  if (!isCheckinSaving.value) {
+    await loadEmotionCheckinFromDb({ applyToForm: true })
+  }
 })
 
 onUnmounted(() => {
@@ -359,77 +409,20 @@ const getCategoryStyle = (categoryIdOrName) => {
 }
 
 const onSaveEmotionalCheckin = async (values) => {
-  if (!userId.value || isCheckinSaving.value) return
-
-  const wasSaved = savedToday.value
-  isCheckinSaving.value = true
-
-  try {
-    const score_global = computeScoreGlobal({
-      humeurGenerale: values.humeurGenerale,
-      energieEmotionnelle: values.energieEmotionnelle,
-      sentimentGeneral: values.sentimentGeneral,
-      besoinReassurance: values.besoinReassurance,
-    })
-
-    const { cycle, typeCycle, jourRelatif } = computeCycleContext({
-      dateJour: todayStr,
-      menstruationMode: menstruationMode.value,
-      cyclesPilule: menstruationCycles.value,
-      cyclesNaturel: menstruationCyclesNaturel.value,
-    })
-
-    const payload = {
-      user_id: userId.value,
-      date_jour: todayStr,
-      'humeur_générale': Number(values.humeurGenerale),
-      'énergie_émotionnelle': Number(values.energieEmotionnelle),
-      besoin_réassurance: Boolean(values.besoinReassurance),
-      sentiment_général: Number(values.sentimentGeneral),
-      score_global,
-      jour_relatif: jourRelatif,
-      cycle_id: cycle?.id ?? null,
-      type_cycle: typeCycle,
-    }
-
-    const result = await upsertEmotionLog(
-      supabase,
-      userId.value,
-      payload,
-      todayEmotionLogId.value,
-    )
-    if (result?.id) todayEmotionLogId.value = result.id
-    savedToday.value = true
-    savedCheckinSnapshot.value = snapshotCheckinFromValues(values)
-
+  if (isCheckinSaving.value) return
+  const ok = await saveCheckin(values)
+  if (ok) {
     if (saveMessageTimeoutId) window.clearTimeout(saveMessageTimeoutId)
-    saveMessage.value = wasSaved
-      ? 'Données mises à jour.'
-      : 'Données du jour enregistrées.'
     saveMessageTimeoutId = window.setTimeout(() => {
       saveMessage.value = ''
       saveMessageTimeoutId = null
     }, 3500)
-
-    try {
-      const logs = await listEmotionLogs(supabase, userId.value, { limit: 180 })
-      patternMessage.value = detectEmotionPatterns(logs) || ''
-    } catch (patternErr) {
-      console.error('Détection patterns emotion_logs:', patternErr)
-    }
-  } catch (err) {
-    console.error('Enregistrement emotion_logs:', err)
-    saveMessage.value =
-      "Impossible d'enregistrer pour l'instant. Réessaie dans quelques instants."
-  } finally {
-    isCheckinSaving.value = false
   }
 }
 
 const onCancelEmotionalCheckin = () => {
-  saveMessage.value = ''
-  if (savedToday.value && savedCheckinSnapshot.value) {
-    setCheckinPayload(savedCheckinSnapshot.value)
+  if (savedToday.value) {
+    cancelToSaved()
     return
   }
   resetCheckin()
@@ -440,9 +433,35 @@ const onCancelEmotionalCheckin = () => {
   <div class="dashboard-wrapper">
     <div class="bg-blob"></div>
     <div class="mini-header">
-      <h1 class="welcome-title">
-        Bonjour, <span class="highlight">{{ userName }}</span> 👋
-      </h1>
+      <div class="mini-header__row">
+        <h1 class="welcome-title">
+          Bonjour, <span class="highlight">{{ userName }}</span> 👋
+        </h1>
+        <button
+          type="button"
+          class="refresh-btn"
+          :disabled="isRefreshing"
+          aria-label="Rafraîchir le dashboard"
+          title="Rafraîchir"
+          @click="refreshDashboard"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="refresh-btn__icon"
+            :class="{ 'refresh-btn__icon--spin': isRefreshing }"
+            aria-hidden="true"
+          >
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+            <path d="M21 3v6h-6" />
+          </svg>
+        </button>
+      </div>
       <p class="welcome-subtitle">Voici ton aperçu de la journée.</p>
     </div>
 
@@ -638,6 +657,60 @@ const onCancelEmotionalCheckin = () => {
   width: 100%;
   text-align: center;
   margin-top: 1rem;
+}
+
+.mini-header__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.refresh-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #ad81be;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: rgba(213, 181, 234, 0.25);
+  transform: rotate(-20deg);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.refresh-btn__icon {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.refresh-btn__icon--spin {
+  animation: dashboard-spin 0.8s linear infinite;
+}
+
+@keyframes dashboard-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .refresh-btn {
+    background: rgba(35, 30, 48, 0.85);
+    border-color: rgba(213, 181, 234, 0.25);
+  }
 }
 
 .welcome-title {

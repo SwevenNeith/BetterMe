@@ -48,15 +48,6 @@ const formattedDate = computed(() => {
 
 const canSave = computed(() => Boolean(props.userId && periodContext.value.cycle?.id))
 
-const saveStatusText = computed(() => {
-  if (!props.userId) return ''
-  if (isLoading.value) return 'Chargement…'
-  if (isSaving.value) return 'Enregistrement…'
-  if (saveError.value) return saveError.value
-  if (lastSavedAt.value) return 'Enregistré'
-  return ''
-})
-
 const {
   values,
   entries,
@@ -77,6 +68,22 @@ const {
   context: periodContext,
   symptomDefs,
   createEmptyValues: createEmptySymptomValues,
+})
+
+const hasInteractableData = computed(() => {
+  if (entries.value.length > 0 || activeEntryId.value) return true
+  return Object.values(values.value).some((v) => v != null && v !== '')
+})
+
+const showLoadingOverlay = computed(() => isLoading.value && !hasInteractableData.value)
+
+const saveStatusText = computed(() => {
+  if (!props.userId) return ''
+  if (showLoadingOverlay.value) return 'Chargement…'
+  if (isSaving.value) return 'Enregistrement…'
+  if (saveError.value) return saveError.value
+  if (lastSavedAt.value) return 'Enregistré'
+  return ''
 })
 
 function scaleRange(def) {
@@ -110,7 +117,7 @@ function scaleRange(def) {
     </header>
 
     <MenstruationSymptomEntriesNav
-      v-if="!isLoading && canSave"
+      v-if="!showLoadingOverlay && canSave"
       :entries="entries"
       :active-entry-id="activeEntryId"
       :entry-label="entryLabel"
@@ -118,7 +125,7 @@ function scaleRange(def) {
       @new="startNewEntry"
     />
 
-    <div v-if="isLoading" class="pilule-symptoms__loading">Chargement des symptômes…</div>
+    <div v-if="showLoadingOverlay" class="pilule-symptoms__loading">Chargement des symptômes…</div>
 
     <div v-else class="pilule-symptoms__list">
       <div
