@@ -85,77 +85,134 @@ function parseSubscription(raw: unknown) {
   return raw
 }
 
-async function getSubscriptionsForUser(userId: string | undefined) {
-  let query = supabase.from('push_subscriptions').select('subscription')
+async function getLatestSubscriptionForUser(userId: string | undefined) {
+  let query = supabase
+    .from('push_subscriptions')
+    .select('id, subscription')
+    .order('id', { ascending: false })
+    .limit(5)
+
   if (userId) {
     query = query.eq('user_id', userId)
   }
+
   const { data, error } = await query
   if (error) throw error
-  return data ?? []
-}
 
-async function sendPushToUser(
-  userId: string | undefined,
-  title: string,
-  body: string,
-) {
-  const rows = await getSubscriptionsForUser(userId)
-  const payload = JSON.stringify({ title, body })
-  let sent = 0
-  const errors: string[] = []
   const seenEndpoints = new Set<string>()
-
-  for (const row of rows) {
+  for (const row of data ?? []) {
     try {
       const subscription = parseSubscription(row.subscription)
       const endpoint =
         typeof subscription?.endpoint === 'string' ? subscription.endpoint : ''
       if (!endpoint || seenEndpoints.has(endpoint)) continue
       seenEndpoints.add(endpoint)
-
-      await webpush.sendNotification(subscription, payload)
-      sent++
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      errors.push(msg)
-      console.error('webpush error:', msg)
+      return { subscription, endpoint, rowId: row.id }
+    } catch {
+      continue
     }
   }
 
-  return { sent, errors, deviceCount: rows.length }
+  return null
+}
+
+async function sendPushToUser(
+  userId: string | undefined,
+  title: string,
+  body: string,
+  notificationTag?: string,
+) {
+  const latest = await getLatestSubscriptionForUser(userId)
+  if (!latest) {
+    return { sent: 0, errors: ['no_subscription'], deviceCount: 0 }
+  }
+
+  const payload = JSON.stringify({
+    title,
+    body,
+    tag: notificationTag ?? `betterme-${userId ?? 'anon'}`,
+  })
+
+  try {
+    await webpush.sendNotification(latest.subscription, payload)
+    return { sent: 1, errors: [] as string[], deviceCount: 1 }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('webpush error:', msg)
+    return { sent: 0, errors: [msg], deviceCount: 1 }
+  }
+}
+
+async function deletePendingScheduledDuplicates(
+  userId: string,
+  scheduledAt: string,
+  kind: string,
+  eventId?: string | null,
+) {
+  let query = supabase
+    .from('scheduled_notifications')
+    .delete()
+    .eq('user_id', userId)
+    .eq('sent', false)
+    .eq('kind', kind)
+    .eq('scheduled_at', scheduledAt)
+
+  if (eventId) {
+    query = query.eq('event_id', eventId)
+  } else {
+    query = query.is('event_id', null)
+  }
+
+  const { error } = await query
+  if (error) throw error
 }
 
 async function runCronJob() {
+  const { data: lockAcquired, error: lockErr } = await supabase.rpc(
+    'try_notification_cron_lock',
+  )
+  if (lockErr) throw lockErr
+  if (!lockAcquired) {
+    return {
+      skipped: true,
+      reason: 'cron_already_running',
+      heureParis: getParisTimeHHMM(),
+      dateParis: getParisDateISO(),
+      scheduledSent: 0,
+      dailySent: 0,
+      rappelsMatched: 0,
+    }
+  }
+
+  try {
+    return await runCronJobLocked()
+  } finally {
+    await supabase.rpc('release_notification_cron_lock')
+  }
+}
+
+async function runCronJobLocked() {
   const maintenant = new Date().toISOString()
   const heureParis = getParisTimeHHMM()
   const dateParis = getParisDateISO()
   let scheduledSent = 0
   let dailySent = 0
 
-  const { data: notificationsAEnvoyer, error: schedErr } = await supabase
-    .from('scheduled_notifications')
-    .select('*')
-    .lte('scheduled_at', maintenant)
-    .eq('sent', false)
+  const { data: claimedRows, error: schedErr } = await supabase.rpc(
+    'claim_due_scheduled_notifications',
+    { p_now: maintenant },
+  )
 
   if (schedErr) throw schedErr
 
-  for (const notif of notificationsAEnvoyer ?? []) {
-    // Réserve la ligne (évite double envoi si cron app + pg_cron en parallèle)
-    const { data: claimed, error: claimErr } = await supabase
-      .from('scheduled_notifications')
-      .update({ sent: true })
-      .eq('id', notif.id)
-      .eq('sent', false)
-      .select('id, user_id, title, body, kind')
-
-    if (claimErr) throw claimErr
-    if (!claimed?.length) continue
-
-    const row = claimed[0]
+  for (const row of claimedRows ?? []) {
     const pushBody = pushBodyFromStored(row.body, row.kind)
-    const { sent } = await sendPushToUser(row.user_id, row.title, pushBody)
+    const { sent } = await sendPushToUser(
+      row.user_id,
+      row.title,
+      pushBody,
+      `scheduled-${row.id}`,
+    )
 
     if (sent > 0) {
       scheduledSent++
@@ -190,7 +247,12 @@ async function runCronJob() {
     if (!claimedDaily?.length) continue
 
     const claimed = claimedDaily[0]
-    const { sent } = await sendPushToUser(claimed.user_id, claimed.title, claimed.body)
+    const { sent } = await sendPushToUser(
+      claimed.user_id,
+      claimed.title,
+      claimed.body,
+      `daily-${claimed.id}-${dateParis}`,
+    )
     if (sent > 0) {
       dailySent++
     } else {
@@ -303,6 +365,8 @@ Deno.serve(async (req: Request) => {
             .eq('kind', 'timer')
         }
       }
+
+      await deletePendingScheduledDuplicates(userId, scheduledAt, rowKind, eventId ?? null)
 
       const row: Record<string, unknown> = {
         user_id: userId,

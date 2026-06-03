@@ -2,6 +2,7 @@
 import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase.js'
 import {
   dateTimeLocalToDate,
+  deletePendingScheduledDuplicate,
   deletePendingTimerEndNotifications,
   deletePendingTimerStartNotifications,
   SCHEDULED_KIND,
@@ -189,6 +190,7 @@ async function enregistrerSubscription(supabase, userId) {
     }
 
     const existing = (rows ?? []).find((row) => row.subscription?.endpoint === endpoint)
+    let keptId = existing?.id ?? null
 
     if (existing) {
       const { error } = await supabase
@@ -200,27 +202,29 @@ async function enregistrerSubscription(supabase, userId) {
         return false
       }
     } else {
-      const { error } = await supabase.from('push_subscriptions').insert({
-        user_id: userId,
-        subscription: subscriptionJson,
-      })
+      const { data: inserted, error } = await supabase
+        .from('push_subscriptions')
+        .insert({
+          user_id: userId,
+          subscription: subscriptionJson,
+        })
+        .select('id')
+        .single()
       if (error) {
         console.error('Sauvegarde subscription:', error)
         return false
       }
+      keptId = inserted?.id ?? null
     }
 
-    // IMPORTANT: évite les notifications en double.
-    // Si l'utilisateur a plusieurs subscriptions actives (réinstall PWA / anciennes sessions),
-    // on conserve uniquement l'endpoint courant.
+    // Un seul abonnement actif par compte (évite 2 push pour le même rappel)
     const idsToDelete = (rows ?? [])
-      .filter((row) => row.subscription?.endpoint && row.subscription.endpoint !== endpoint)
+      .filter((row) => row.id && row.id !== keptId)
       .map((row) => row.id)
 
     if (idsToDelete.length) {
       const { error } = await supabase.from('push_subscriptions').delete().in('id', idsToDelete)
       if (error) {
-        // Non bloquant : on préfère garder l'abonnement OK même si le cleanup échoue
         console.error('Cleanup push_subscriptions (doublons):', error)
       }
     }
@@ -322,6 +326,10 @@ export async function planifierNotificationActivite(userId, activite) {
   const minutesAvant = activite.minutesAvant ?? 15
   if (minutesAvant <= 0) return false
 
+  if (activite.eventId) {
+    await supprimerRappelsEvenement(activite.eventId)
+  }
+
   const heureActivite =
     activite.dateStart && activite.timeStart
       ? dateTimeParisToUtc(activite.dateStart, activite.timeStart)
@@ -385,12 +393,19 @@ export async function planifierNotificationDebutEvenement(
   await deletePendingTimerStartNotifications(supabase, { eventId, userId })
 
   const scheduledAtMs = Math.max(startMs, Date.now())
+  const scheduledAtIso = new Date(scheduledAtMs).toISOString()
+  await deletePendingScheduledDuplicate(supabase, userId, {
+    scheduledAt: scheduledAtIso,
+    kind: SCHEDULED_KIND.TIMER_START,
+    eventId: eventId ?? null,
+  })
+
   const { error } = await supabase.from('scheduled_notifications').insert({
     user_id: userId,
     event_id: eventId ?? null,
     title,
     body,
-    scheduled_at: new Date(scheduledAtMs).toISOString(),
+    scheduled_at: scheduledAtIso,
     kind: SCHEDULED_KIND.TIMER_START,
   })
 

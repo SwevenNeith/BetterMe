@@ -27,9 +27,29 @@ const patternMessage = ref('')
 const saveMessage = ref('')
 const savedToday = ref(false)
 const isCheckinSaving = ref(false)
+const todayEmotionLogId = ref(null)
+const savedCheckinSnapshot = ref(null)
 let saveMessageTimeoutId = null
 
-const { setCheckinPayload } = useDashboardEmotionalCheckin()
+const { setCheckinPayload, resetCheckin } = useDashboardEmotionalCheckin()
+
+function snapshotCheckinFromRow(row) {
+  return {
+    humeurGenerale: row['humeur_générale'],
+    energieEmotionnelle: row['énergie_émotionnelle'],
+    besoinReassurance: row['besoin_réassurance'],
+    sentimentGeneral: row['sentiment_général'],
+  }
+}
+
+function snapshotCheckinFromValues(values) {
+  return {
+    humeurGenerale: values.humeurGenerale,
+    energieEmotionnelle: values.energieEmotionnelle,
+    besoinReassurance: values.besoinReassurance,
+    sentimentGeneral: values.sentimentGeneral,
+  }
+}
 
 // Helpers
 const formatDateToLocalISO = (date) => {
@@ -266,12 +286,10 @@ onMounted(async () => {
     const row = await getEmotionLogForDate(supabase, user.id, todayStr)
     if (row) {
       savedToday.value = true
-      setCheckinPayload({
-        humeurGenerale: row['humeur_générale'],
-        energieEmotionnelle: row['énergie_émotionnelle'],
-        besoinReassurance: row['besoin_réassurance'],
-        sentimentGeneral: row['sentiment_général'],
-      })
+      todayEmotionLogId.value = row.id ?? null
+      const snapshot = snapshotCheckinFromRow(row)
+      savedCheckinSnapshot.value = snapshot
+      setCheckinPayload(snapshot)
       const logs = await listEmotionLogs(supabase, user.id, { limit: 180 })
       patternMessage.value = detectEmotionPatterns(logs) || ''
     }
@@ -374,8 +392,15 @@ const onSaveEmotionalCheckin = async (values) => {
       type_cycle: typeCycle,
     }
 
-    await upsertEmotionLog(supabase, userId.value, payload)
+    const result = await upsertEmotionLog(
+      supabase,
+      userId.value,
+      payload,
+      todayEmotionLogId.value,
+    )
+    if (result?.id) todayEmotionLogId.value = result.id
     savedToday.value = true
+    savedCheckinSnapshot.value = snapshotCheckinFromValues(values)
 
     if (saveMessageTimeoutId) window.clearTimeout(saveMessageTimeoutId)
     saveMessage.value = wasSaved
@@ -394,19 +419,20 @@ const onSaveEmotionalCheckin = async (values) => {
     }
   } catch (err) {
     console.error('Enregistrement emotion_logs:', err)
-    patternMessage.value =
-      "Impossible d'enregistrer pour l'instant. Vérifie ta connexion ou réessaie dans quelques instants."
-    saveMessage.value = ''
+    saveMessage.value =
+      "Impossible d'enregistrer pour l'instant. Réessaie dans quelques instants."
   } finally {
     isCheckinSaving.value = false
   }
 }
 
 const onCancelEmotionalCheckin = () => {
-  patternMessage.value = ''
-  // Si déjà enregistré aujourd'hui, on ne permet pas de reset via UI (bouton désactivé),
-  // mais on garde cette sécurité au cas où.
-  if (!savedToday.value) return
+  saveMessage.value = ''
+  if (savedToday.value && savedCheckinSnapshot.value) {
+    setCheckinPayload(savedCheckinSnapshot.value)
+    return
+  }
+  resetCheckin()
 }
 </script>
 

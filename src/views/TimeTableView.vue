@@ -11,6 +11,11 @@ import {
   supprimerRappelsEvenement,
 } from '../services/notifications.js'
 import { getDurationMinutes, addMinutesToTimeString } from '../services/durationUtils.js'
+import {
+  loadTimetableMeta,
+  loadUserCategories,
+  normalizeCategory,
+} from '../services/timetableCategories.js'
 
 // State
 const currentDate = ref(new Date())
@@ -63,7 +68,7 @@ const syncEndTimeFromTimer = () => {
   }
 }
 
-const openModalWithDefaultDate = () => {
+const openModalWithDefaultDate = async () => {
   if (weekDays.value && weekDays.value[selectedDayIndex.value]) {
     newEventDay.value = formatDateToLocalISO(weekDays.value[selectedDayIndex.value].date)
   }
@@ -72,35 +77,20 @@ const openModalWithDefaultDate = () => {
   newEventDetail.value = ''
   resetReminderFields()
   resetTimerFields()
+  await fetchTimetableMeta()
   isModalOpen.value = true
 }
 
 // User-created events list, loaded from Supabase
 const userEvents = ref([])
 const userCategories = ref([])
+const hobbyQuickPicks = ref([])
 const isLoading = ref(true)
+const isMetaLoading = ref(false)
 
-// Computed property to extract unique Hobbies events from the loaded list
-const uniqueHobbyEvents = computed(() => {
-  const hobbyCat = userCategories.value.find(
-    (c) => c.name.toLowerCase() === 'hobbies',
-  )
-  if (!hobbyCat) return []
-
-  const filtered = userEvents.value.filter(
-    (event) => event.category === hobbyCat.id || event.category === 'Hobbies',
-  )
-
-  const seen = new Set()
-  const result = []
-  for (const ev of filtered) {
-    if (!seen.has(ev.title.toLowerCase())) {
-      seen.add(ev.title.toLowerCase())
-      result.push(ev)
-    }
-  }
-  return result
-})
+const categoriesForPills = computed(() =>
+  userCategories.value.filter((c) => c?.name),
+)
 
 const openModalWithHobby = (hobbyTitle) => {
   newEventTitle.value = hobbyTitle
@@ -294,7 +284,7 @@ const getCategoryStyle = (categoryIdOrName) => {
 // Generate premium interactive pill styles for category selection
 const getPillStyle = (cat) => {
   if (!cat) return {}
-  const color = cat.color
+  const color = cat.color || '#d5b5ea'
   const isActive = newEventCategory.value.toLowerCase() === cat.name.toLowerCase()
 
   let bg = ''
@@ -312,8 +302,42 @@ const getPillStyle = (cat) => {
   }
 }
 
-// Fetch Events & Categories from Supabase
-const fetchEvents = async () => {
+/** Catégories (timetable_categories) + titres hobbies (timetable_events) */
+const fetchTimetableMeta = async () => {
+  try {
+    isMetaLoading.value = true
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      userCategories.value = []
+      hobbyQuickPicks.value = []
+      return
+    }
+
+    const { categories, hobbyPicks } = await loadTimetableMeta(supabase, user.id)
+    userCategories.value = categories
+    hobbyQuickPicks.value = hobbyPicks
+  } catch (err) {
+    console.error('Erreur chargement catégories / hobbies:', err)
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (user) {
+        userCategories.value = await loadUserCategories(supabase, user.id)
+      }
+    } catch {
+      userCategories.value = []
+    }
+    hobbyQuickPicks.value = []
+  } finally {
+    isMetaLoading.value = false
+  }
+}
+
+// Événements de la semaine affichée (timetable_events)
+const fetchWeekEvents = async () => {
   try {
     isLoading.value = true
     const {
@@ -321,41 +345,10 @@ const fetchEvents = async () => {
     } = await supabase.auth.getUser()
     if (!user) {
       userEvents.value = []
-      userCategories.value = []
       isLoading.value = false
       return
     }
 
-    // Fetch categories first
-    const { data: catData, error: catError } = await supabase
-      .from('timetable_categories')
-      .select('*')
-      .eq('user_id', user.id)
-
-    if (catError) throw catError
-    userCategories.value = catData || []
-
-    const defaultCategories = [
-      { name: 'Travail', color: 'hsl(280, 65%, 72%)', icon: '💼' },
-      { name: 'Hobbies', color: 'hsl(25, 75%, 72%)', icon: '🎨' },
-    ]
-
-    for (const defCat of defaultCategories) {
-      const exists = userCategories.value.some(
-        (c) => c.name.toLowerCase() === defCat.name.toLowerCase(),
-      )
-      if (!exists) {
-        userCategories.value.push({
-          id: `temp-${defCat.name.toLowerCase()}`,
-          name: defCat.name,
-          color: defCat.color,
-          icon: defCat.icon,
-          is_temp: true,
-        })
-      }
-    }
-
-    // Fetch events
     const mondayStr = formatDateToLocalISO(weekDays.value[0].date)
     const sundayStr = formatDateToLocalISO(weekDays.value[6].date)
 
@@ -373,6 +366,10 @@ const fetchEvents = async () => {
   } finally {
     isLoading.value = false
   }
+}
+
+const fetchEvents = async () => {
+  await Promise.all([fetchTimetableMeta(), fetchWeekEvents()])
 }
 
 // Watch currentDate changes to fetch events dynamically for the new week
@@ -631,12 +628,11 @@ const handleAddEvent = async () => {
 
       if (catError) throw catError
       if (catData && catData.length > 0) {
-        // Remove temporary one
         userCategories.value = userCategories.value.filter(
           (c) => c.name.toLowerCase() !== categoryName.toLowerCase(),
         )
-        existingCat = catData[0]
-        userCategories.value.push(existingCat)
+        existingCat = normalizeCategory(catData[0])
+        if (existingCat) userCategories.value.push(existingCat)
       }
     }
 
@@ -668,6 +664,10 @@ const handleAddEvent = async () => {
     // Insert locally to update UI immediately
     if (createdEvent) {
       userEvents.value.push(createdEvent)
+    }
+
+    if (categoryName.toLowerCase() === 'hobbies') {
+      await fetchTimetableMeta()
     }
 
     if (notificationsActives() && reminderActive && createdEvent) {
@@ -943,12 +943,12 @@ const getPositionedEventsForDay = (dayIdx) => {
       </div>
     </div>
 
-    <!-- Hobbies quick reference pills -->
-    <div class="hobbies-quick-reference" v-if="uniqueHobbyEvents.length > 0">
+    <!-- Hobbies quick reference pills (au-dessus de l'EDT) -->
+    <div class="hobbies-quick-reference" v-if="hobbyQuickPicks.length > 0">
       <span class="hobbies-ref-label">Mes Hobbies :</span>
       <div class="hobbies-ref-pills">
         <button
-          v-for="hobby in uniqueHobbyEvents"
+          v-for="hobby in hobbyQuickPicks"
           :key="hobby.id"
           class="hobby-ref-pill"
           draggable="true"
@@ -1372,17 +1372,19 @@ const getPositionedEventsForDay = (dayIdx) => {
           <div class="form-group">
             <label for="event-category">Catégorie</label>
 
-            <!-- Dynamic interactive pills for existing categories -->
-            <div class="category-selectors" v-if="userCategories.length > 0">
+            <!-- Pills depuis timetable_categories -->
+            <div v-if="isMetaLoading" class="category-loading">Chargement des catégories…</div>
+            <div v-else class="category-selectors">
               <button
-                v-for="cat in userCategories"
+                v-for="cat in categoriesForPills"
                 :key="cat.id"
                 type="button"
                 class="category-pill-btn"
+                :class="{ 'category-pill-btn--active': newEventCategory.toLowerCase() === cat.name.toLowerCase() }"
                 :style="getPillStyle(cat)"
                 @click="newEventCategory = cat.name"
               >
-                <span class="category-pill-icon">{{ cat.icon }}</span>
+                <span class="category-pill-icon">{{ cat.icon || '📌' }}</span>
                 {{ cat.name }}
               </button>
             </div>
@@ -2658,11 +2660,18 @@ const getPositionedEventsForDay = (dayIdx) => {
   box-shadow: 0 0 0 3px rgba(213, 181, 234, 0.3);
 }
 
+.category-loading {
+  font-size: 0.82rem;
+  color: #6c757d;
+  margin-bottom: 0.35rem;
+}
+
 .category-selectors {
   display: flex;
   gap: 0.6rem;
   flex-wrap: wrap;
   margin-bottom: 0.4rem;
+  min-height: 2.25rem;
 }
 
 .category-pill-btn {
@@ -2670,9 +2679,11 @@ const getPositionedEventsForDay = (dayIdx) => {
   align-items: center;
   gap: 0.4rem;
   padding: 0.5rem 0.95rem;
+  border: none;
   border-radius: 12px;
   font-size: 0.82rem;
   font-weight: 700;
+  font-family: inherit;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   user-select: none;
@@ -2685,6 +2696,10 @@ const getPositionedEventsForDay = (dayIdx) => {
 
 .category-pill-btn:active {
   transform: translateY(0);
+}
+
+.category-pill-btn--active {
+  transform: translateY(-1px);
 }
 
 .category-pill-icon {

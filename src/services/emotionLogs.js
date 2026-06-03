@@ -58,47 +58,68 @@ export function computeCycleContext({ dateJour, menstruationMode, cyclesPilule, 
   return { cycle: null, typeCycle: null, jourRelatif: null }
 }
 
-async function updateEmotionLogForDate(supabase, userId, dateJour, fields) {
-  const { data: rows, error: selectError } = await supabase
+async function findEmotionLogIdForDate(supabase, userId, dateJour) {
+  const { data: rows, error } = await supabase
     .from(TABLE)
     .select('id')
     .eq('user_id', userId)
     .eq('date_jour', dateJour)
-    .order('updated_at', { ascending: false })
+    .order('id', { ascending: false })
     .limit(1)
-  if (selectError) throw selectError
 
-  if (rows?.[0]?.id) {
-    const { error: updateError } = await supabase.from(TABLE).update(fields).eq('id', rows[0].id)
+  if (error) throw error
+  return rows?.[0]?.id ?? null
+}
+
+async function updateEmotionLogForDate(supabase, userId, dateJour, fields) {
+  const existingId = await findEmotionLogIdForDate(supabase, userId, dateJour)
+
+  if (existingId) {
+    const { error: updateError } = await supabase.from(TABLE).update(fields).eq('id', existingId)
     if (updateError) throw updateError
-    return { id: rows[0].id, updated: true }
+    return { id: existingId, updated: true }
   }
 
   const { data, error: insertError } = await supabase
     .from(TABLE)
     .insert({ user_id: userId, date_jour: dateJour, ...fields })
     .select('id')
+
+  if (insertError?.code === '23505') {
+    const retryId = await findEmotionLogIdForDate(supabase, userId, dateJour)
+    if (retryId) {
+      const { error: updateError } = await supabase.from(TABLE).update(fields).eq('id', retryId)
+      if (updateError) throw updateError
+      return { id: retryId, updated: true }
+    }
+  }
+
   if (insertError) throw insertError
   return { id: data?.[0]?.id ?? null, updated: false }
 }
 
-export async function upsertEmotionLog(supabase, userId, payload) {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .upsert(payload, { onConflict: 'user_id,date_jour' })
-    .select('id')
+/** Insert ou update du log du jour — modifiable autant de fois que nécessaire */
+export async function upsertEmotionLog(supabase, userId, payload, knownId = null) {
+  const { user_id, date_jour, ...fields } = payload
+  const rowId = knownId ?? (await findEmotionLogIdForDate(supabase, user_id, date_jour))
 
-  if (!error) {
-    return { id: data?.[0]?.id ?? null, updated: true }
+  if (rowId) {
+    const { error: updateError } = await supabase.from(TABLE).update(fields).eq('id', rowId)
+    if (updateError) throw updateError
+    return { id: rowId, updated: true }
   }
 
-  // Index unique absent ou upsert non supporté : mise à jour explicite par jour
-  if (error.code === '42P10') {
-    const { user_id, date_jour, ...fields } = payload
+  const { data, error: insertError } = await supabase
+    .from(TABLE)
+    .insert({ user_id, date_jour, ...fields })
+    .select('id')
+
+  if (insertError?.code === '23505') {
     return updateEmotionLogForDate(supabase, user_id, date_jour, fields)
   }
 
-  throw error
+  if (insertError) throw insertError
+  return { id: data?.[0]?.id ?? null, updated: false }
 }
 
 export async function listEmotionLogs(supabase, userId, { limit = 180 } = {}) {
@@ -129,6 +150,7 @@ export async function getEmotionLogForDate(supabase, userId, dateJour) {
     .from(TABLE)
     .select(
       [
+        'id',
         'date_jour',
         'humeur_générale',
         'énergie_émotionnelle',
@@ -142,7 +164,7 @@ export async function getEmotionLogForDate(supabase, userId, dateJour) {
     )
     .eq('user_id', userId)
     .eq('date_jour', dateJour)
-    .order('updated_at', { ascending: false })
+    .order('id', { ascending: false })
     .limit(1)
 
   if (error) throw error

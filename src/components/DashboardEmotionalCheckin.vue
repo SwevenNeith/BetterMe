@@ -150,8 +150,8 @@ function onSave() {
         >
           {{ saving ? 'Enregistrement…' : savedToday ? 'Modifier' : 'Enregistrer' }}
         </button>
-        <button type="button" class="btn btn--secondary" :disabled="savedToday" @click="onCancel">
-          Annuler
+        <button type="button" class="btn btn--secondary" @click="onCancel">
+          {{ savedToday ? 'Annuler les changements' : 'Annuler' }}
         </button>
       </div>
 

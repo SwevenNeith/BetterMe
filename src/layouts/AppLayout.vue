@@ -8,12 +8,13 @@ import {
   notificationsActives,
 } from '../services/notifications.js';
 
+/** Secours si pg_cron Supabase indisponible — le verrou serveur évite le double envoi avec pg_cron */
 const CRON_INTERVAL_MS = 60_000;
 let cronIntervalId = null;
 
 const startNotificationCron = () => {
   if (!notificationsActives() || cronIntervalId) return;
-  declencherCronNotifications();
+  // Pas d'appel immédiat : évite 2 déclenchements la même seconde que pg_cron au chargement
   cronIntervalId = window.setInterval(declencherCronNotifications, CRON_INTERVAL_MS);
 };
 

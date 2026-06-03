@@ -136,6 +136,30 @@ const MENSTRUATION_KIND_PREFIX = 'menstruation_'
 /** Marge après l’heure prévue pour laisser le cron envoyer avant d’afficher l’échec */
 const OVERDUE_GRACE_MS = 90 * 1000
 
+/** Supprime les planifications en attente identiques (évite doublons en base) */
+export async function deletePendingScheduledDuplicate(
+  supabase,
+  userId,
+  { scheduledAt, kind, eventId = null },
+) {
+  let query = supabase
+    .from('scheduled_notifications')
+    .delete()
+    .eq('user_id', userId)
+    .eq('sent', false)
+    .eq('kind', kind)
+    .eq('scheduled_at', scheduledAt)
+
+  if (eventId) {
+    query = query.eq('event_id', eventId)
+  } else {
+    query = query.is('event_id', null)
+  }
+
+  const { error } = await query
+  if (error) throw error
+}
+
 /** Supprime les rappels ponctuels déjà envoyés (nettoyage) */
 export async function purgeSentOneTimeReminders(supabase, userId) {
   const { error } = await supabase
@@ -224,13 +248,19 @@ export async function createOneTimeReminder(supabase, userId, { title, body, sch
     throw new Error('La date et l’heure doivent être dans le futur.')
   }
 
+  const scheduledAtIso = scheduledAt.toISOString()
+  await deletePendingScheduledDuplicate(supabase, userId, {
+    scheduledAt: scheduledAtIso,
+    kind: SCHEDULED_KIND.PONCTUEL,
+  })
+
   const { data, error } = await supabase
     .from('scheduled_notifications')
     .insert({
       user_id: userId,
       title: trimmedTitle,
       body: (body || '').trim() || null,
-      scheduled_at: scheduledAt.toISOString(),
+      scheduled_at: scheduledAtIso,
       event_id: null,
       kind: SCHEDULED_KIND.PONCTUEL,
     })
@@ -336,9 +366,14 @@ export async function createStandaloneTimer(supabase, userId, { title, body, dur
   }
 
   const scheduledAt = new Date(Date.now() + totalMinutes * 60 * 1000)
+  const scheduledAtIso = scheduledAt.toISOString()
   const userBody = (body || '').trim() || null
 
   await deletePendingTimerEndNotifications(supabase, { userId })
+  await deletePendingScheduledDuplicate(supabase, userId, {
+    scheduledAt: scheduledAtIso,
+    kind: SCHEDULED_KIND.TIMER,
+  })
 
   const { data, error } = await supabase
     .from('scheduled_notifications')
@@ -346,7 +381,7 @@ export async function createStandaloneTimer(supabase, userId, { title, body, dur
       user_id: userId,
       title: trimmedTitle,
       body: userBody,
-      scheduled_at: scheduledAt.toISOString(),
+      scheduled_at: scheduledAtIso,
       event_id: null,
       kind: SCHEDULED_KIND.TIMER,
     })
