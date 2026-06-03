@@ -19,12 +19,14 @@ self.addEventListener('push', (event) => {
   const iconUrl = new URL('icon-192.png', self.registration.scope).href
   let title = 'BetterMe'
   let body = ''
+  let tag = 'betterme-default'
 
   try {
     if (event.data) {
       const data = event.data.json()
       title = data.title ?? title
       body = cleanNotificationBody(data.body ?? body)
+      if (data.tag) tag = String(data.tag)
     }
   } catch {
     /* corps vide ou invalide */
@@ -34,6 +36,8 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(title, {
       body,
       icon: iconUrl,
+      tag,
+      renotify: false,
     }),
   )
 })
