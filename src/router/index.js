@@ -1,12 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '../views/LoginView.vue'
 import AppLayout from '../layouts/AppLayout.vue'
-import DashboardView from '../views/DashboardView.vue'
-import TimeTableView from '../views/TimeTableView.vue'
-import SettingsView from '../views/SettingsView.vue'
-import MenstruationView from '../views/MenstruationView.vue'
-import MoodView from '../views/MoodView.vue'
-import ExercicesView from '../views/ExercicesView.vue'
+
+const DashboardView = () => import('../views/DashboardView.vue')
+const TimeTableView = () => import('../views/TimeTableView.vue')
+const SettingsView = () => import('../views/SettingsView.vue')
+const MenstruationView = () => import('../views/MenstruationView.vue')
+const MoodView = () => import('../views/MoodView.vue')
+const ExercicesView = () => import('../views/ExercicesView.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),

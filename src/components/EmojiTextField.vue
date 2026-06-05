@@ -1,10 +1,23 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import 'emoji-picker-element'
-import fr from 'emoji-picker-element/i18n/fr.js'
 
 const FRENCH_EMOJI_DATA =
   'https://cdn.jsdelivr.net/npm/emoji-picker-element-data@^1/fr/emojibase/data.json'
+
+let frI18n = null
+let pickerImportPromise = null
+
+function loadEmojiPicker() {
+  if (!pickerImportPromise) {
+    pickerImportPromise = Promise.all([
+      import('emoji-picker-element'),
+      import('emoji-picker-element/i18n/fr.js'),
+    ]).then(([, frModule]) => {
+      frI18n = frModule.default
+    })
+  }
+  return pickerImportPromise
+}
 
 const props = defineProps({
   modelValue: {
@@ -35,12 +48,23 @@ const inputRef = ref(null)
 const rootRef = ref(null)
 const pickerRef = ref(null)
 const showPicker = ref(false)
+const pickerReady = ref(false)
+const isLoadingPicker = ref(false)
 
 function onInput(event) {
   emit('update:modelValue', event.target.value)
 }
 
-function togglePicker() {
+async function togglePicker() {
+  if (!showPicker.value) {
+    isLoadingPicker.value = true
+    try {
+      await loadEmojiPicker()
+      pickerReady.value = true
+    } finally {
+      isLoadingPicker.value = false
+    }
+  }
   showPicker.value = !showPicker.value
 }
 
@@ -71,8 +95,8 @@ function onEmojiClick(event) {
 
 function configurePicker() {
   const picker = pickerRef.value
-  if (!picker) return
-  picker.i18n = fr
+  if (!picker || !frI18n) return
+  picker.i18n = frI18n
 }
 
 watch(showPicker, async (open) => {
@@ -109,9 +133,10 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
       class="emoji-text-field__btn"
       aria-label="Ajouter un emoji"
       :aria-expanded="showPicker"
+      :disabled="isLoadingPicker"
       @click.stop="togglePicker"
     >
-      <span aria-hidden="true">😀</span>
+      <span aria-hidden="true">{{ isLoadingPicker ? '…' : '😀' }}</span>
     </button>
     <div
       v-if="showPicker"
@@ -120,7 +145,9 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
       aria-label="Choisir un emoji"
       @click.stop
     >
+      <p v-if="!pickerReady" class="emoji-text-field__loading">Chargement des emojis…</p>
       <emoji-picker
+        v-else
         ref="pickerRef"
         class="emoji-text-field__picker-el"
         locale="fr"
@@ -180,6 +207,15 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   overflow: hidden;
   border: 1px solid rgba(213, 181, 234, 0.35);
   box-shadow: 0 8px 24px rgba(44, 62, 80, 0.12);
+}
+
+.emoji-text-field__loading {
+  margin: 0;
+  padding: 1.25rem 0.75rem;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #7f8c8d;
 }
 
 .emoji-text-field__picker-el {

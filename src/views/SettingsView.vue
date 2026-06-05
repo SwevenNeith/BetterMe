@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import {
@@ -44,7 +44,9 @@ import {
   listReconfortMessages,
 } from '../services/reconfortMessages.js'
 import { sendRandomReconfortNotificationNow } from '../services/reconfortNotifications.js'
-import EmojiTextField from '../components/EmojiTextField.vue'
+const EmojiTextField = defineAsyncComponent(
+  () => import('../components/EmojiTextField.vue'),
+)
 
 const router = useRouter()
 
