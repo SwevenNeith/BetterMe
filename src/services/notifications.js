@@ -13,7 +13,7 @@ import {
 // ============================================
 
 const VAPID_PUBLIC_KEY =
-  'BBhVBoaApvqEOSFlmunhMwXCeZXr-k2HNi8faBumTBtws8Kq8r8EnPDP2bOMZ_s_tNOpABLdCHwPRn6vIWjDouc'
+  'BKvZPw-S8r8BlluoH1wV3Q_YqIFBk-eBQ3TBjdAGlYMq5A5jn38Cg-Rxi7Hz0nHYJBlzdZXV5HYJUVyBWYH9j14'
 
 const EDGE_FUNCTION_URL = `${supabaseUrl}/functions/v1/send-notification`
 const APP_TIMEZONE = 'Europe/Paris'
@@ -190,7 +190,6 @@ async function enregistrerSubscription(supabase, userId) {
     }
 
     const existing = (rows ?? []).find((row) => row.subscription?.endpoint === endpoint)
-    let keptId = existing?.id ?? null
 
     if (existing) {
       const { error } = await supabase
@@ -202,30 +201,13 @@ async function enregistrerSubscription(supabase, userId) {
         return false
       }
     } else {
-      const { data: inserted, error } = await supabase
-        .from('push_subscriptions')
-        .insert({
-          user_id: userId,
-          subscription: subscriptionJson,
-        })
-        .select('id')
-        .single()
+      const { error } = await supabase.from('push_subscriptions').insert({
+        user_id: userId,
+        subscription: subscriptionJson,
+      })
       if (error) {
         console.error('Sauvegarde subscription:', error)
         return false
-      }
-      keptId = inserted?.id ?? null
-    }
-
-    // Un seul abonnement actif par compte (évite 2 push pour le même rappel)
-    const idsToDelete = (rows ?? [])
-      .filter((row) => row.id && row.id !== keptId)
-      .map((row) => row.id)
-
-    if (idsToDelete.length) {
-      const { error } = await supabase.from('push_subscriptions').delete().in('id', idsToDelete)
-      if (error) {
-        console.error('Cleanup push_subscriptions (doublons):', error)
       }
     }
 
