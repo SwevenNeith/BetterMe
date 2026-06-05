@@ -44,6 +44,7 @@ import {
   listReconfortMessages,
 } from '../services/reconfortMessages.js'
 import { sendRandomReconfortNotificationNow } from '../services/reconfortNotifications.js'
+import EmojiTextField from '../components/EmojiTextField.vue'
 
 const router = useRouter()
 
@@ -1371,9 +1372,8 @@ onUnmounted(() => {
         <form class="reconfort-form__body" @submit.prevent="onSaveReconfortForm">
           <label class="field field--full">
             <span>Qui es-tu ?</span>
-            <input
+            <EmojiTextField
               v-model="reconfortForm.who"
-              type="text"
               maxlength="120"
               required
               placeholder="Ex. Maman, Toi-même, Une amie…"
@@ -1382,9 +1382,8 @@ onUnmounted(() => {
 
           <label class="field field--full">
             <span>Quel est ton message ?</span>
-            <input
+            <EmojiTextField
               v-model="reconfortForm.message"
-              type="text"
               maxlength="500"
               required
               placeholder="Ton message de réconfort"
