@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import {
@@ -36,8 +36,266 @@ import {
 import { rescheduleMenstruationPatternNotifications } from '../services/menstruationPatternNotifications.js'
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
 import { listMenstruationPatterns } from '../services/menstruationPatterns.js'
+import { RECONFORT_CONDITION_GROUPS } from '../constants/reconfortConditions.js'
+import {
+  createReconfortMessage,
+  updateReconfortMessage,
+  deleteReconfortMessage,
+  listReconfortMessages,
+} from '../services/reconfortMessages.js'
+import { sendRandomReconfortNotificationNow } from '../services/reconfortNotifications.js'
 
 const router = useRouter()
+
+const SETTINGS_TABS = {
+  RAPPELS: 'rappels',
+  MENSTRUATION: 'menstruation',
+  RECONFORT: 'reconfort',
+}
+
+const activeTab = ref(SETTINGS_TABS.RAPPELS)
+
+const COLLAPSIBLE_SECTIONS = {
+  DAILY: 'daily',
+  ONE_TIME: 'oneTime',
+  TIMER: 'timer',
+  MENSTRUATION: 'menstruation',
+  PATTERNS: 'patterns',
+}
+
+const expandedSections = ref({
+  [COLLAPSIBLE_SECTIONS.DAILY]: false,
+  [COLLAPSIBLE_SECTIONS.ONE_TIME]: false,
+  [COLLAPSIBLE_SECTIONS.TIMER]: false,
+  [COLLAPSIBLE_SECTIONS.MENSTRUATION]: false,
+  [COLLAPSIBLE_SECTIONS.PATTERNS]: false,
+})
+
+function toggleSection(section) {
+  expandedSections.value[section] = !expandedSections.value[section]
+}
+
+const showReconfortForm = ref(false)
+const editingReconfortId = ref(null)
+const deletingReconfortId = ref(null)
+const isSavingReconfort = ref(false)
+const isSendingReconfortTest = ref(false)
+const isLoadingReconfort = ref(false)
+const reconfortFormError = ref('')
+const reconfortSaveMessage = ref('')
+const reconfortLoadError = ref('')
+const reconfortMessages = ref([])
+const expandedReconfortSenders = ref({})
+const reconfortForm = ref({
+  who: '',
+  message: '',
+  conditions: [],
+})
+
+const reconfortConditionLabels = (() => {
+  const map = new Map()
+  for (const group of RECONFORT_CONDITION_GROUPS) {
+    for (const option of group.options) {
+      map.set(option.id, option.label)
+    }
+  }
+  return map
+})()
+
+const reconfortGroupsBySender = computed(() => {
+  const bySender = new Map()
+
+  for (const msg of reconfortMessages.value) {
+    const qui = msg.qui?.trim() || 'Sans nom'
+    if (!bySender.has(qui)) {
+      bySender.set(qui, [])
+    }
+    bySender.get(qui).push(msg)
+  }
+
+  return [...bySender.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0], 'fr', { sensitivity: 'base' }))
+    .map(([qui, messages]) => ({
+      qui,
+      messages: [...messages].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      ),
+    }))
+})
+
+function getReconfortConditionLabel(conditionId) {
+  return reconfortConditionLabels.get(conditionId) ?? conditionId
+}
+
+function isReconfortSenderExpanded(qui) {
+  return Boolean(expandedReconfortSenders.value[qui])
+}
+
+function toggleReconfortSender(qui) {
+  expandedReconfortSenders.value = {
+    ...expandedReconfortSenders.value,
+    [qui]: !expandedReconfortSenders.value[qui],
+  }
+}
+
+const loadReconfortMessages = async () => {
+  if (!userId.value) return
+  isLoadingReconfort.value = true
+  reconfortLoadError.value = ''
+  try {
+    reconfortMessages.value = await listReconfortMessages(supabase, userId.value)
+  } catch (err) {
+    console.error(err)
+    reconfortLoadError.value = err.message || 'Impossible de charger les messages.'
+    reconfortMessages.value = []
+  } finally {
+    isLoadingReconfort.value = false
+  }
+}
+
+function createEmptyReconfortForm() {
+  return {
+    who: '',
+    message: '',
+    conditions: [],
+  }
+}
+
+function openReconfortForm() {
+  reconfortFormError.value = ''
+  editingReconfortId.value = null
+  reconfortForm.value = createEmptyReconfortForm()
+  showReconfortForm.value = true
+}
+
+function openReconfortFormForEdit(msg) {
+  if (!msg?.id) return
+  reconfortFormError.value = ''
+  editingReconfortId.value = msg.id
+  reconfortForm.value = {
+    who: msg.qui ?? '',
+    message: msg.message ?? '',
+    conditions: Array.isArray(msg.conditions) ? [...msg.conditions] : [],
+  }
+  showReconfortForm.value = true
+}
+
+function closeReconfortForm() {
+  showReconfortForm.value = false
+  editingReconfortId.value = null
+  reconfortFormError.value = ''
+  reconfortForm.value = createEmptyReconfortForm()
+}
+
+function isReconfortConditionSelected(conditionId) {
+  return reconfortForm.value.conditions.includes(conditionId)
+}
+
+function toggleReconfortCondition(conditionId) {
+  const conditions = [...reconfortForm.value.conditions]
+  const index = conditions.indexOf(conditionId)
+  if (index >= 0) {
+    conditions.splice(index, 1)
+  } else {
+    conditions.push(conditionId)
+  }
+  reconfortForm.value.conditions = conditions
+  if (conditions.length > 0) {
+    reconfortFormError.value = ''
+  }
+}
+
+function onCancelReconfortForm() {
+  closeReconfortForm()
+}
+
+const onSaveReconfortForm = async () => {
+  reconfortFormError.value = ''
+  reconfortSaveMessage.value = ''
+
+  if (!userId.value) {
+    reconfortFormError.value = 'Utilisateur non connecté.'
+    return
+  }
+
+  isSavingReconfort.value = true
+  try {
+    const payload = {
+      who: reconfortForm.value.who,
+      message: reconfortForm.value.message,
+      conditions: [...reconfortForm.value.conditions],
+    }
+
+    if (editingReconfortId.value) {
+      await updateReconfortMessage(supabase, userId.value, editingReconfortId.value, payload)
+      reconfortSaveMessage.value = 'Message de réconfort modifié.'
+    } else {
+      await createReconfortMessage(supabase, userId.value, payload)
+      reconfortSaveMessage.value = 'Message de réconfort enregistré.'
+    }
+
+    closeReconfortForm()
+    await loadReconfortMessages()
+    setTimeout(() => {
+      reconfortSaveMessage.value = ''
+    }, 3000)
+  } catch (err) {
+    console.error(err)
+    reconfortFormError.value = err.message || 'Impossible d’enregistrer le message.'
+  } finally {
+    isSavingReconfort.value = false
+  }
+}
+
+const onSendRandomReconfortNotification = async () => {
+  if (!userId.value) {
+    reconfortLoadError.value = 'Utilisateur non connecté.'
+    return
+  }
+  if (!notificationsActives()) {
+    reconfortLoadError.value = 'Active les notifications push pour recevoir un message de réconfort.'
+    return
+  }
+
+  isSendingReconfortTest.value = true
+  reconfortLoadError.value = ''
+  try {
+    await sendRandomReconfortNotificationNow(supabase, userId.value)
+    reconfortSaveMessage.value = 'Notification de réconfort envoyée.'
+    setTimeout(() => {
+      reconfortSaveMessage.value = ''
+    }, 3000)
+  } catch (err) {
+    console.error(err)
+    reconfortLoadError.value = err.message || 'Impossible d’envoyer la notification.'
+  } finally {
+    isSendingReconfortTest.value = false
+  }
+}
+
+const onDeleteReconfortMessage = async (msg) => {
+  if (!userId.value || !msg?.id) return
+  if (!window.confirm('Supprimer ce message de réconfort ?')) return
+
+  deletingReconfortId.value = msg.id
+  reconfortLoadError.value = ''
+  try {
+    await deleteReconfortMessage(supabase, userId.value, msg.id)
+    if (editingReconfortId.value === msg.id) {
+      closeReconfortForm()
+    }
+    await loadReconfortMessages()
+    reconfortSaveMessage.value = 'Message de réconfort supprimé.'
+    setTimeout(() => {
+      reconfortSaveMessage.value = ''
+    }, 3000)
+  } catch (err) {
+    console.error(err)
+    reconfortLoadError.value = err.message || 'Impossible de supprimer le message.'
+  } finally {
+    deletingReconfortId.value = null
+  }
+}
 
 const ONE_TIME_REFRESH_MS = 30_000
 let oneTimeRefreshIntervalId = null
@@ -372,9 +630,20 @@ onMounted(async () => {
     return
   }
   userId.value = user.id
-  await Promise.all([loadReminders(), loadOneTimeReminders(), loadMenstruationSettings()])
+  await Promise.all([
+    loadReminders(),
+    loadOneTimeReminders(),
+    loadMenstruationSettings(),
+    loadReconfortMessages(),
+  ])
   window.addEventListener('betterme-notifications-granted', onNotificationsGranted)
   oneTimeRefreshIntervalId = window.setInterval(loadStandaloneScheduled, ONE_TIME_REFRESH_MS)
+})
+
+watch(activeTab, (tab) => {
+  if (tab === SETTINGS_TABS.RECONFORT) {
+    loadReconfortMessages()
+  }
 })
 
 onUnmounted(() => {
@@ -393,14 +662,82 @@ onUnmounted(() => {
       <p class="settings-subtitle">Gère tes rappels, tes timers et tes notifications.</p>
     </header>
 
-    <section class="settings-card">
-      <div class="card-head">
-        <h2>Rappels quotidiens</h2>
-        <p>
-          Chaque rappel envoie une notification push à l'heure choisie (plusieurs par jour
-          possibles).
-        </p>
-      </div>
+    <nav class="settings-tabs" role="tablist" aria-label="Sections des réglages">
+      <button
+        type="button"
+        role="tab"
+        class="settings-tab"
+        :class="{ 'settings-tab--active': activeTab === SETTINGS_TABS.RAPPELS }"
+        :aria-selected="activeTab === SETTINGS_TABS.RAPPELS"
+        @click="activeTab = SETTINGS_TABS.RAPPELS"
+      >
+        Rappels
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="settings-tab"
+        :class="{ 'settings-tab--active': activeTab === SETTINGS_TABS.MENSTRUATION }"
+        :aria-selected="activeTab === SETTINGS_TABS.MENSTRUATION"
+        @click="activeTab = SETTINGS_TABS.MENSTRUATION"
+      >
+        Menstruation
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="settings-tab"
+        :class="{ 'settings-tab--active': activeTab === SETTINGS_TABS.RECONFORT }"
+        :aria-selected="activeTab === SETTINGS_TABS.RECONFORT"
+        @click="activeTab = SETTINGS_TABS.RECONFORT"
+      >
+        Réconfort
+      </button>
+    </nav>
+
+    <div
+      v-show="activeTab === SETTINGS_TABS.RAPPELS"
+      role="tabpanel"
+      class="settings-tab-panel"
+      aria-label="Rappels"
+    >
+    <section class="settings-card settings-card--collapsible">
+      <button
+        type="button"
+        class="card-toggle"
+        :aria-expanded="expandedSections[COLLAPSIBLE_SECTIONS.DAILY]"
+        aria-controls="settings-section-daily"
+        @click="toggleSection(COLLAPSIBLE_SECTIONS.DAILY)"
+      >
+        <h2 class="card-toggle__title">Rappels quotidiens</h2>
+        <span
+          class="card-toggle__chevron"
+          :class="{ 'card-toggle__chevron--open': expandedSections[COLLAPSIBLE_SECTIONS.DAILY] }"
+          aria-hidden="true"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
+      </button>
+
+      <div
+        v-show="expandedSections[COLLAPSIBLE_SECTIONS.DAILY]"
+        id="settings-section-daily"
+        class="card-body"
+      >
+      <p class="card-body__desc">
+        Chaque rappel envoie une notification push à l'heure choisie (plusieurs par jour
+        possibles).
+      </p>
 
       <div v-if="!notificationsSupportees()" class="settings-alert settings-alert--warn">
         Ton navigateur ne supporte pas les notifications push sur cet appareil.
@@ -491,132 +828,46 @@ onUnmounted(() => {
           {{ isSaving ? 'Enregistrement…' : 'Enregistrer' }}
         </button>
       </div>
+      </div>
     </section>
 
-    <section class="settings-card settings-card--spaced">
-      <div class="card-head">
-        <h2>Menstruation</h2>
-        <p>Notifications cycle (pilule et naturel).</p>
-      </div>
-
-      <div class="reminder-row">
-        <label class="choice-check choice-check--card">
-          <input
-            v-model="menstruationNotifSettings.menstruation_notify_spm_estimee"
-            type="checkbox"
-          />
-          <span>Notifier le début estimé du SPM</span>
-        </label>
-        <label class="choice-check choice-check--card">
-          <input
-            v-model="menstruationNotifSettings.menstruation_notify_regles_estimees"
-            type="checkbox"
-          />
-          <span>Notifier le début estimé des règles</span>
-        </label>
-        <label class="choice-check choice-check--card">
-          <input
-            v-model="menstruationNotifSettings.menstruation_notify_phase_folliculaire"
-            type="checkbox"
-          />
-          <span>Notifier le début de la phase folliculaire (cycle naturel)</span>
-        </label>
-        <label class="choice-check choice-check--card">
-          <input
-            v-model="menstruationNotifSettings.menstruation_notify_phase_ovulatoire"
-            type="checkbox"
-          />
-          <span>Notifier le début de la phase ovulatoire (cycle naturel)</span>
-        </label>
-        <label class="choice-check choice-check--card">
-          <input
-            v-model="menstruationNotifSettings.menstruation_notify_phase_luteale"
-            type="checkbox"
-          />
-          <span>Notifier le début de la phase lutéale (cycle naturel)</span>
-        </label>
-        <label class="field">
-          <span>Heure d’envoi</span>
-          <input v-model="menstruationNotifSettings.menstruation_notification_time" type="time" />
-        </label>
-      </div>
-      <p v-if="menstruationNotifError" class="settings-feedback settings-feedback--error">
-        {{ menstruationNotifError }}
-      </p>
-      <p v-if="menstruationNotifMessage" class="settings-feedback settings-feedback--ok">
-        {{ menstruationNotifMessage }}
-      </p>
-      <div class="settings-actions">
-        <button
-          type="button"
-          class="btn btn--primary"
-          :disabled="isSavingMenstruationNotif"
-          @click="onSaveMenstruationSettings"
+    <section class="settings-card settings-card--spaced settings-card--collapsible">
+      <button
+        type="button"
+        class="card-toggle"
+        :aria-expanded="expandedSections[COLLAPSIBLE_SECTIONS.ONE_TIME]"
+        aria-controls="settings-section-one-time"
+        @click="toggleSection(COLLAPSIBLE_SECTIONS.ONE_TIME)"
+      >
+        <h2 class="card-toggle__title">Rappels ponctuels</h2>
+        <span
+          class="card-toggle__chevron"
+          :class="{ 'card-toggle__chevron--open': expandedSections[COLLAPSIBLE_SECTIONS.ONE_TIME] }"
+          aria-hidden="true"
         >
-          {{ isSavingMenstruationNotif ? 'Enregistrement…' : 'Enregistrer menstruation' }}
-        </button>
-      </div>
-    </section>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
+      </button>
 
-    <section class="settings-card settings-card--spaced">
-      <div class="card-head">
-        <h2>Tendances & patterns</h2>
-        <p>
-          Prévoyance (anticipation) et alarmes (symptômes intenses ou inhabituels). Les alertes du
-          jour sont envoyées le soir à l’heure choisie, pas à la saisie.
-        </p>
-      </div>
-
-      <div class="reminder-row">
-        <label class="choice-check choice-check--card">
-          <input
-            v-model="menstruationNotifSettings.menstruation_notify_patterns_simple"
-            type="checkbox"
-          />
-          <span>Pattern simple (récurrence & symptôme inhabituel)</span>
-        </label>
-        <label class="choice-check choice-check--card">
-          <input
-            v-model="menstruationNotifSettings.menstruation_notify_patterns_intensite"
-            type="checkbox"
-          />
-          <span>Pattern d’intensité</span>
-        </label>
-        <label class="choice-check choice-check--card">
-          <input
-            v-model="menstruationNotifSettings.menstruation_notify_patterns_duree"
-            type="checkbox"
-          />
-          <span>Pattern de durée</span>
-        </label>
-        <label class="choice-check choice-check--card">
-          <input
-            v-model="menstruationNotifSettings.menstruation_notify_patterns_combine"
-            type="checkbox"
-          />
-          <span>Pattern combiné (clusters)</span>
-        </label>
-        <label class="field">
-          <span>Heure d’envoi (prévoyance & alarmes du jour)</span>
-          <input
-            v-model="menstruationNotifSettings.menstruation_pattern_notification_time"
-            type="time"
-          />
-        </label>
-      </div>
-      <p class="settings-feedback">
-        Enregistre aussi la section « Menstruation » ci-dessus pour les dates de cycle (SPM, phases).
+      <div
+        v-show="expandedSections[COLLAPSIBLE_SECTIONS.ONE_TIME]"
+        id="settings-section-one-time"
+        class="card-body"
+      >
+      <p class="card-body__desc">
+        Une notification unique à la date et l’heure de ton appareil. Envoyée automatiquement si
+        l’app est ouverte ou via le cron Supabase.
       </p>
-    </section>
-
-    <section class="settings-card settings-card--spaced">
-      <div class="card-head">
-        <h2>Rappels ponctuels</h2>
-        <p>
-          Une notification unique à la date et l’heure de ton appareil. Envoyée automatiquement si
-          l’app est ouverte ou via le cron Supabase.
-        </p>
-      </div>
 
       <div v-if="!notificationsSupportees()" class="settings-alert settings-alert--warn">
         Les rappels ponctuels nécessitent les notifications push sur cet appareil.
@@ -752,13 +1003,43 @@ onUnmounted(() => {
       <p v-if="oneTimeMessage" class="settings-feedback settings-feedback--ok">
         {{ oneTimeMessage }}
       </p>
+      </div>
     </section>
 
-    <section class="settings-card settings-card--spaced">
-      <div class="card-head">
-        <h2>Timer seul</h2>
-        <p>Compte a rebours : notification a la fin de la duree choisie.</p>
-      </div>
+    <section class="settings-card settings-card--spaced settings-card--collapsible">
+      <button
+        type="button"
+        class="card-toggle"
+        :aria-expanded="expandedSections[COLLAPSIBLE_SECTIONS.TIMER]"
+        aria-controls="settings-section-timer"
+        @click="toggleSection(COLLAPSIBLE_SECTIONS.TIMER)"
+      >
+        <h2 class="card-toggle__title">Timer seul</h2>
+        <span
+          class="card-toggle__chevron"
+          :class="{ 'card-toggle__chevron--open': expandedSections[COLLAPSIBLE_SECTIONS.TIMER] }"
+          aria-hidden="true"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
+      </button>
+
+      <div
+        v-show="expandedSections[COLLAPSIBLE_SECTIONS.TIMER]"
+        id="settings-section-timer"
+        class="card-body"
+      >
+      <p class="card-body__desc">Compte a rebours : notification a la fin de la duree choisie.</p>
 
       <form class="one-time-form" @submit.prevent="onStartStandaloneTimer">
         <div class="reminder-fields">
@@ -859,7 +1140,406 @@ onUnmounted(() => {
 
       <p v-if="timerError" class="settings-feedback settings-feedback--error">{{ timerError }}</p>
       <p v-if="timerMessage" class="settings-feedback settings-feedback--ok">{{ timerMessage }}</p>
+      </div>
     </section>
+    </div>
+
+    <div
+      v-show="activeTab === SETTINGS_TABS.MENSTRUATION"
+      role="tabpanel"
+      class="settings-tab-panel"
+      aria-label="Menstruation"
+    >
+      <section class="settings-card settings-card--collapsible">
+        <button
+          type="button"
+          class="card-toggle"
+          :aria-expanded="expandedSections[COLLAPSIBLE_SECTIONS.MENSTRUATION]"
+          aria-controls="settings-section-menstruation"
+          @click="toggleSection(COLLAPSIBLE_SECTIONS.MENSTRUATION)"
+        >
+          <h2 class="card-toggle__title">Menstruation</h2>
+          <span
+            class="card-toggle__chevron"
+            :class="{
+              'card-toggle__chevron--open': expandedSections[COLLAPSIBLE_SECTIONS.MENSTRUATION],
+            }"
+            aria-hidden="true"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </span>
+        </button>
+
+        <div
+          v-show="expandedSections[COLLAPSIBLE_SECTIONS.MENSTRUATION]"
+          id="settings-section-menstruation"
+          class="card-body"
+        >
+        <p class="card-body__desc">Notifications cycle (pilule et naturel).</p>
+
+        <div class="reminder-row">
+          <label class="choice-check choice-check--card">
+            <input
+              v-model="menstruationNotifSettings.menstruation_notify_spm_estimee"
+              type="checkbox"
+            />
+            <span>Notifier le début estimé du SPM</span>
+          </label>
+          <label class="choice-check choice-check--card">
+            <input
+              v-model="menstruationNotifSettings.menstruation_notify_regles_estimees"
+              type="checkbox"
+            />
+            <span>Notifier le début estimé des règles</span>
+          </label>
+          <label class="choice-check choice-check--card">
+            <input
+              v-model="menstruationNotifSettings.menstruation_notify_phase_folliculaire"
+              type="checkbox"
+            />
+            <span>Notifier le début de la phase folliculaire (cycle naturel)</span>
+          </label>
+          <label class="choice-check choice-check--card">
+            <input
+              v-model="menstruationNotifSettings.menstruation_notify_phase_ovulatoire"
+              type="checkbox"
+            />
+            <span>Notifier le début de la phase ovulatoire (cycle naturel)</span>
+          </label>
+          <label class="choice-check choice-check--card">
+            <input
+              v-model="menstruationNotifSettings.menstruation_notify_phase_luteale"
+              type="checkbox"
+            />
+            <span>Notifier le début de la phase lutéale (cycle naturel)</span>
+          </label>
+          <label class="field">
+            <span>Heure d’envoi</span>
+            <input v-model="menstruationNotifSettings.menstruation_notification_time" type="time" />
+          </label>
+        </div>
+        </div>
+      </section>
+
+      <section class="settings-card settings-card--spaced settings-card--collapsible">
+        <button
+          type="button"
+          class="card-toggle"
+          :aria-expanded="expandedSections[COLLAPSIBLE_SECTIONS.PATTERNS]"
+          aria-controls="settings-section-patterns"
+          @click="toggleSection(COLLAPSIBLE_SECTIONS.PATTERNS)"
+        >
+          <h2 class="card-toggle__title">Tendances & patterns</h2>
+          <span
+            class="card-toggle__chevron"
+            :class="{ 'card-toggle__chevron--open': expandedSections[COLLAPSIBLE_SECTIONS.PATTERNS] }"
+            aria-hidden="true"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </span>
+        </button>
+
+        <div
+          v-show="expandedSections[COLLAPSIBLE_SECTIONS.PATTERNS]"
+          id="settings-section-patterns"
+          class="card-body"
+        >
+        <p class="card-body__desc">
+          Prévoyance (anticipation) et alarmes (symptômes intenses ou inhabituels). Les alertes du
+          jour sont envoyées le soir à l’heure choisie, pas à la saisie.
+        </p>
+
+        <div class="reminder-row">
+          <label class="choice-check choice-check--card">
+            <input
+              v-model="menstruationNotifSettings.menstruation_notify_patterns_simple"
+              type="checkbox"
+            />
+            <span>Pattern simple (récurrence & symptôme inhabituel)</span>
+          </label>
+          <label class="choice-check choice-check--card">
+            <input
+              v-model="menstruationNotifSettings.menstruation_notify_patterns_intensite"
+              type="checkbox"
+            />
+            <span>Pattern d’intensité</span>
+          </label>
+          <label class="choice-check choice-check--card">
+            <input
+              v-model="menstruationNotifSettings.menstruation_notify_patterns_duree"
+              type="checkbox"
+            />
+            <span>Pattern de durée</span>
+          </label>
+          <label class="choice-check choice-check--card">
+            <input
+              v-model="menstruationNotifSettings.menstruation_notify_patterns_combine"
+              type="checkbox"
+            />
+            <span>Pattern combiné (clusters)</span>
+          </label>
+          <label class="field">
+            <span>Heure d’envoi (prévoyance & alarmes du jour)</span>
+            <input
+              v-model="menstruationNotifSettings.menstruation_pattern_notification_time"
+              type="time"
+            />
+          </label>
+        </div>
+
+        <p v-if="menstruationNotifError" class="settings-feedback settings-feedback--error">
+          {{ menstruationNotifError }}
+        </p>
+        <p v-if="menstruationNotifMessage" class="settings-feedback settings-feedback--ok">
+          {{ menstruationNotifMessage }}
+        </p>
+        <div class="settings-actions">
+          <button
+            type="button"
+            class="btn btn--primary"
+            :disabled="isSavingMenstruationNotif"
+            @click="onSaveMenstruationSettings"
+          >
+            {{ isSavingMenstruationNotif ? 'Enregistrement…' : 'Enregistrer' }}
+          </button>
+        </div>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-show="activeTab === SETTINGS_TABS.RECONFORT"
+      role="tabpanel"
+      class="settings-tab-panel"
+      aria-label="Réconfort"
+    >
+      <section v-if="!showReconfortForm" class="settings-card">
+        <div class="settings-actions settings-actions--form reconfort-actions">
+          <button
+            type="button"
+            class="btn btn--primary"
+            :disabled="isSendingReconfortTest || isLoadingReconfort"
+            @click="onSendRandomReconfortNotification"
+          >
+            {{
+              isSendingReconfortTest
+                ? 'Envoi…'
+                : 'Envoyer une notification de réconfort'
+            }}
+          </button>
+          <button
+            type="button"
+            class="btn btn--primary reconfort-actions__add"
+            @click="openReconfortForm"
+          >
+            Ajouter un message de réconfort
+          </button>
+        </div>
+        <p v-if="reconfortSaveMessage" class="settings-feedback settings-feedback--ok">
+          {{ reconfortSaveMessage }}
+        </p>
+        <p v-if="reconfortLoadError && !showReconfortForm" class="settings-feedback settings-feedback--error">
+          {{ reconfortLoadError }}
+        </p>
+      </section>
+
+      <section v-else class="settings-card reconfort-form">
+        <h2 class="reconfort-form__title">
+          {{ editingReconfortId ? 'Modifier le message de réconfort' : 'Nouveau message de réconfort' }}
+        </h2>
+
+        <form class="reconfort-form__body" @submit.prevent="onSaveReconfortForm">
+          <label class="field field--full">
+            <span>Qui es-tu ?</span>
+            <input
+              v-model="reconfortForm.who"
+              type="text"
+              maxlength="120"
+              required
+              placeholder="Ex. Maman, Toi-même, Une amie…"
+            />
+          </label>
+
+          <label class="field field--full">
+            <span>Quel est ton message ?</span>
+            <input
+              v-model="reconfortForm.message"
+              type="text"
+              maxlength="500"
+              required
+              placeholder="Ton message de réconfort"
+            />
+          </label>
+
+          <fieldset class="reconfort-conditions">
+            <legend class="reconfort-conditions__legend">Condition(s) ?</legend>
+            <p class="reconfort-conditions__hint">
+              Sélectionne au moins une condition (plusieurs possibles).
+            </p>
+
+            <div
+              v-for="group in RECONFORT_CONDITION_GROUPS"
+              :key="group.id"
+              class="reconfort-conditions__group"
+            >
+              <h3 class="reconfort-conditions__group-title">{{ group.label }}</h3>
+              <div class="reconfort-conditions__grid">
+                <label
+                  v-for="option in group.options"
+                  :key="option.id"
+                  class="choice-check choice-check--card"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="isReconfortConditionSelected(option.id)"
+                    @change="toggleReconfortCondition(option.id)"
+                  />
+                  <span>{{ option.label }}</span>
+                </label>
+              </div>
+            </div>
+          </fieldset>
+
+          <p v-if="reconfortFormError" class="settings-feedback settings-feedback--error">
+            {{ reconfortFormError }}
+          </p>
+
+          <div class="settings-actions">
+            <button
+              type="button"
+              class="btn btn--secondary"
+              :disabled="isSavingReconfort"
+              @click="onCancelReconfortForm"
+            >
+              Annuler
+            </button>
+            <button type="submit" class="btn btn--primary" :disabled="isSavingReconfort">
+              {{ isSavingReconfort ? 'Enregistrement…' : 'Enregistrer' }}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="settings-card settings-card--spaced reconfort-list">
+        <h2 class="reconfort-list__title">Mes messages de réconfort</h2>
+
+        <div v-if="isLoadingReconfort" class="settings-loading">Chargement…</div>
+
+        <p v-else-if="reconfortLoadError" class="settings-feedback settings-feedback--error">
+          {{ reconfortLoadError }}
+        </p>
+
+        <p v-else-if="reconfortGroupsBySender.length === 0" class="settings-empty">
+          Aucun message enregistré pour l'instant.
+        </p>
+
+        <div v-else class="reconfort-list__groups">
+          <section
+            v-for="(senderGroup, senderIndex) in reconfortGroupsBySender"
+            :key="senderGroup.qui"
+            class="settings-card settings-card--collapsible reconfort-sender-card"
+          >
+            <button
+              type="button"
+              class="card-toggle"
+              :aria-expanded="isReconfortSenderExpanded(senderGroup.qui)"
+              :aria-controls="`reconfort-sender-${senderIndex}`"
+              @click="toggleReconfortSender(senderGroup.qui)"
+            >
+              <div class="reconfort-sender-card__head">
+                <h3 class="card-toggle__title">{{ senderGroup.qui }}</h3>
+                <span class="reconfort-sender-card__count">
+                  {{ senderGroup.messages.length }}
+                  message{{ senderGroup.messages.length > 1 ? 's' : '' }}
+                </span>
+              </div>
+              <span
+                class="card-toggle__chevron"
+                :class="{ 'card-toggle__chevron--open': isReconfortSenderExpanded(senderGroup.qui) }"
+                aria-hidden="true"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </span>
+            </button>
+
+            <div
+              v-show="isReconfortSenderExpanded(senderGroup.qui)"
+              :id="`reconfort-sender-${senderIndex}`"
+              class="card-body"
+            >
+              <article
+                v-for="msg in senderGroup.messages"
+                :key="msg.id"
+                class="reconfort-message"
+              >
+                <div class="reconfort-message__row">
+                  <div class="reconfort-message__content">
+                    <p class="reconfort-message__text">{{ msg.message }}</p>
+                    <ul v-if="msg.conditions?.length" class="reconfort-message__conditions">
+                      <li
+                        v-for="conditionId in msg.conditions"
+                        :key="`${msg.id}-${conditionId}`"
+                        class="reconfort-message__condition"
+                      >
+                        {{ getReconfortConditionLabel(conditionId) }}
+                      </li>
+                    </ul>
+                  </div>
+                  <div class="reconfort-message__actions">
+                    <button
+                      type="button"
+                      class="btn btn--ghost reconfort-message__action"
+                      :disabled="deletingReconfortId === msg.id || isSavingReconfort"
+                      @click="openReconfortFormForEdit(msg)"
+                    >
+                      Modifier
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn--ghost reconfort-message__action reconfort-message__action--danger"
+                      :disabled="deletingReconfortId === msg.id || isSavingReconfort"
+                      @click="onDeleteReconfortMessage(msg)"
+                    >
+                      {{ deletingReconfortId === msg.id ? 'Suppression…' : 'Supprimer' }}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -867,15 +1547,77 @@ onUnmounted(() => {
 .settings-wrapper {
   flex: 1;
   width: 100%;
-  max-width: 720px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
   padding: 1.5rem 1.25rem 3rem;
   box-sizing: border-box;
 }
 
 .settings-header {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
   text-align: center;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  padding: 0.35rem;
+  border-radius: 14px;
+  background: rgba(213, 181, 234, 0.12);
+  border: 1px solid rgba(213, 181, 234, 0.25);
+}
+
+.settings-tab {
+  flex: 1;
+  border: none;
+  border-radius: 10px;
+  padding: 0.65rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #6c757d;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.settings-tab:hover {
+  color: #ad81be;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.settings-tab--active {
+  color: #ad81be;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 2px 8px rgba(173, 129, 190, 0.15);
+}
+
+.settings-tab-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (prefers-color-scheme: dark) {
+  .settings-tabs {
+    background: rgba(35, 30, 48, 0.6);
+    border-color: rgba(213, 181, 234, 0.15);
+  }
+  .settings-tab {
+    color: #adb5bd;
+  }
+  .settings-tab:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .settings-tab--active {
+    background: rgba(45, 38, 58, 0.95);
+    color: #d5b5ea;
+  }
 }
 
 .settings-title {
@@ -917,14 +1659,65 @@ onUnmounted(() => {
   }
 }
 
-.card-head h2 {
-  margin: 0 0 0.35rem;
+.card-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.card-toggle__title {
+  margin: 0;
   font-size: 1.25rem;
   font-weight: 800;
   color: #ad81be;
 }
 
-.card-head p {
+.card-toggle:hover .card-toggle__title {
+  color: #9a6dad;
+}
+
+.card-toggle__chevron {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  color: #ad81be;
+  background: rgba(213, 181, 234, 0.15);
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease;
+}
+
+.card-toggle:hover .card-toggle__chevron {
+  background: rgba(213, 181, 234, 0.28);
+}
+
+.card-toggle__chevron svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.card-toggle__chevron--open {
+  transform: rotate(180deg);
+}
+
+.card-body {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.2);
+}
+
+.card-body__desc {
   margin: 0 0 1.25rem;
   font-size: 0.9rem;
   color: #6c757d;
@@ -932,8 +1725,20 @@ onUnmounted(() => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .card-head p {
+  .card-body {
+    border-top-color: rgba(213, 181, 234, 0.12);
+  }
+
+  .card-body__desc {
     color: #adb5bd;
+  }
+
+  .card-toggle__chevron {
+    background: rgba(213, 181, 234, 0.1);
+  }
+
+  .card-toggle:hover .card-toggle__chevron {
+    background: rgba(213, 181, 234, 0.2);
   }
 }
 
@@ -1160,6 +1965,224 @@ onUnmounted(() => {
 
 .settings-card--spaced {
   margin-top: 1.5rem;
+}
+
+.reconfort-form__title {
+  margin: 0 0 1.25rem;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #ad81be;
+}
+
+.reconfort-form__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.reconfort-conditions {
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.reconfort-conditions__legend {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #5d6d7e;
+  margin-bottom: 0.35rem;
+}
+
+.reconfort-conditions__hint {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: #8c98a4;
+  line-height: 1.45;
+}
+
+.reconfort-conditions__group + .reconfort-conditions__group {
+  margin-top: 1.25rem;
+}
+
+.reconfort-conditions__group-title {
+  margin: 0 0 0.65rem;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #ad81be;
+}
+
+.reconfort-conditions__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.55rem;
+}
+
+.reconfort-actions.settings-actions--form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.reconfort-actions .btn {
+  padding: 0.65rem 1.15rem;
+  font-size: 0.9rem;
+  border-radius: 12px;
+}
+
+.reconfort-actions__add {
+  margin-left: auto;
+}
+
+.reconfort-list__title {
+  margin: 0 0 1rem;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #ad81be;
+}
+
+.reconfort-list__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.reconfort-sender-card {
+  padding: 1rem 1.25rem;
+  box-shadow: none;
+}
+
+.reconfort-sender-card__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.reconfort-sender-card__count {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #8c98a4;
+}
+
+.reconfort-message + .reconfort-message {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.2);
+}
+
+.reconfort-message__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.reconfort-message__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.reconfort-message__actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.reconfort-message__action {
+  padding: 0.65rem 1.15rem;
+  font-size: 0.9rem;
+  border-radius: 12px;
+}
+
+.reconfort-message__action--danger {
+  background: rgba(192, 57, 43, 0.12);
+  color: #c0392b;
+  border: 1px solid rgba(192, 57, 43, 0.22);
+}
+
+.reconfort-message__action--danger:hover:not(:disabled) {
+  background: rgba(192, 57, 43, 0.18);
+  transform: translateY(-1px);
+}
+
+.reconfort-message__action--danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.reconfort-message__text {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #2c3e50;
+  line-height: 1.5;
+}
+
+.reconfort-message__conditions {
+  margin: 0.65rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.reconfort-message__condition {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #6c757d;
+  padding: 0.3rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(213, 181, 234, 0.12);
+  border: 1px solid rgba(213, 181, 234, 0.22);
+}
+
+@media (prefers-color-scheme: dark) {
+  .reconfort-form__title,
+  .reconfort-list__title,
+  .reconfort-conditions__group-title {
+    color: #d5b5ea;
+  }
+
+  .reconfort-conditions__legend {
+    color: #adb5bd;
+  }
+
+  .reconfort-conditions__hint {
+    color: #8c98a4;
+  }
+
+  .reconfort-message__text {
+    color: #f0e8f8;
+  }
+
+  .reconfort-message__condition {
+    color: #adb5bd;
+    background: rgba(213, 181, 234, 0.08);
+    border-color: rgba(213, 181, 234, 0.15);
+  }
+
+  .reconfort-message + .reconfort-message {
+    border-top-color: rgba(213, 181, 234, 0.12);
+  }
+}
+
+@media (max-width: 560px) {
+  .reconfort-message__row {
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .reconfort-message__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 .one-time-form {

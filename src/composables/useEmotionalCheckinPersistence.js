@@ -10,6 +10,7 @@ import {
   listEmotionLogs,
   saveEmotionLogForDate,
 } from '../services/emotionLogs.js'
+import { maybeScheduleReconfortNotification } from '../services/reconfortNotifications.js'
 
 const SAVE_TIMEOUT_MS = 25_000
 const LOAD_TIMEOUT_MS = 20_000
@@ -207,6 +208,10 @@ export function useEmotionalCheckinPersistence({
         : 'Données du jour enregistrées.'
 
       await loadPatterns(uid)
+      void maybeScheduleReconfortNotification(supabase, uid, {
+        dateISO: day,
+        checkinPartial: snapshotFromValues(values),
+      })
       return true
     } catch (err) {
       if (token !== saveToken) return false

@@ -30,6 +30,7 @@ export const PILULE_SYMPTOMS_BY_PERIOD = {
   [PILULE_SYMPTOM_PERIOD.ACTIVE]: [
     { key: 'humeur', label: 'Humeur', type: 'scale', min: 1, max: 5 },
     { key: 'energie', label: 'Énergie', type: 'scale', min: 0, max: 5 },
+    { key: 'anxiete', label: 'Anxiété', type: 'scale', min: 0, max: 5 },
     { key: 'libido', label: 'Libido', type: 'scale', min: 0, max: 3 },
     { key: 'acne', label: 'Acné', type: 'scale', min: 0, max: 3 },
     { key: 'nausees', label: 'Nausées', type: 'scale', min: 0, max: 5 },
@@ -136,7 +137,9 @@ export function getPilulePeriodContext(cycles, iso = getLocalTodayISO()) {
     }
   }
 
-  const started = sorted.filter((r) => r[COL.dateDebutPlaquette] && r[COL.dateDebutPlaquette] <= iso)
+  const started = sorted.filter(
+    (r) => r[COL.dateDebutPlaquette] && r[COL.dateDebutPlaquette] <= iso,
+  )
   const cycle = started[0] ?? sorted[sorted.length - 1] ?? null
 
   return {

@@ -7,6 +7,7 @@ export const SCHEDULED_KIND = {
   PONCTUEL: 'ponctuel',
   TIMER: 'timer',
   TIMER_START: 'timer_start',
+  RECONFORT: 'reconfort',
 }
 
 export function isStandaloneTimer(row) {
@@ -210,6 +211,9 @@ export async function loadStandaloneScheduledGrouped(supabase, userId) {
 
   for (const row of data ?? []) {
     if (String(row?.kind || '').startsWith(MENSTRUATION_KIND_PREFIX)) {
+      continue
+    }
+    if (row?.kind === SCHEDULED_KIND.RECONFORT) {
       continue
     }
     if (isStandaloneTimer(row)) {
