@@ -8,6 +8,8 @@ const SettingsView = () => import('../views/SettingsView.vue')
 const MenstruationView = () => import('../views/MenstruationView.vue')
 const MoodView = () => import('../views/MoodView.vue')
 const ExercicesView = () => import('../views/ExercicesView.vue')
+const ProjetsView = () => import('../views/ProjetsView.vue')
+const HabitTrackerView = () => import('../views/HabitTrackerView.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -33,6 +35,21 @@ const router = createRouter({
           component: TimeTableView
         },
         {
+          path: 'projets',
+          name: 'projets',
+          component: ProjetsView,
+        },
+        {
+          path: 'habit-tracker',
+          name: 'habit-tracker',
+          component: HabitTrackerView,
+        },
+        {
+          path: 'menstruation',
+          name: 'menstruation',
+          component: MenstruationView,
+        },
+        {
           path: 'exercices',
           name: 'exercices',
           component: ExercicesView,
@@ -41,11 +58,6 @@ const router = createRouter({
           path: 'mood',
           name: 'mood',
           component: MoodView,
-        },
-        {
-          path: 'menstruation',
-          name: 'menstruation',
-          component: MenstruationView,
         },
         {
           path: 'settings',

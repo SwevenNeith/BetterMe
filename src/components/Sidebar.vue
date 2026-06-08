@@ -35,6 +35,18 @@ const navLinksTop = [
   },
 ]
 
+const projetsLink = {
+  name: 'Projets',
+  path: '/projets',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
+}
+
+const habitTrackerLink = {
+  name: 'Habit Tracker',
+  path: '/habit-tracker',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
+}
+
 const menstruationLink = {
   name: 'Menstruation',
   path: '/menstruation',
@@ -144,7 +156,40 @@ const toggleSidebar = () => {
         <span class="nav-indicator" v-if="isActive(link.path)"></span>
       </button>
 
-      <!-- Exercices (menu dépliant) — après Emploi du temps -->
+      <button
+        type="button"
+        class="nav-link"
+        :class="{ 'nav-link--active': isActive(projetsLink.path) }"
+        @click="navigate(projetsLink.path)"
+      >
+        <span class="nav-icon" v-html="projetsLink.icon"></span>
+        <span class="nav-label">{{ projetsLink.name }}</span>
+        <span class="nav-indicator" v-if="isActive(projetsLink.path)"></span>
+      </button>
+
+      <button
+        type="button"
+        class="nav-link"
+        :class="{ 'nav-link--active': isActive(habitTrackerLink.path) }"
+        @click="navigate(habitTrackerLink.path)"
+      >
+        <span class="nav-icon" v-html="habitTrackerLink.icon"></span>
+        <span class="nav-label">{{ habitTrackerLink.name }}</span>
+        <span class="nav-indicator" v-if="isActive(habitTrackerLink.path)"></span>
+      </button>
+
+      <button
+        type="button"
+        class="nav-link"
+        :class="{ 'nav-link--active': isActive(menstruationLink.path) }"
+        @click="navigate(menstruationLink.path)"
+      >
+        <span class="nav-icon" v-html="menstruationLink.icon"></span>
+        <span class="nav-label">{{ menstruationLink.name }}</span>
+        <span class="nav-indicator" v-if="isActive(menstruationLink.path)"></span>
+      </button>
+
+      <!-- Exercices (menu dépliant) — en dernier avant le footer -->
       <div class="nav-group">
         <div
           class="nav-group__header"
@@ -210,17 +255,6 @@ const toggleSidebar = () => {
           </div>
         </div>
       </div>
-
-      <button
-        type="button"
-        class="nav-link"
-        :class="{ 'nav-link--active': isActive(menstruationLink.path) }"
-        @click="navigate(menstruationLink.path)"
-      >
-        <span class="nav-icon" v-html="menstruationLink.icon"></span>
-        <span class="nav-label">{{ menstruationLink.name }}</span>
-        <span class="nav-indicator" v-if="isActive(menstruationLink.path)"></span>
-      </button>
     </nav>
 
     <!-- Réglages + déconnexion (footer) -->
