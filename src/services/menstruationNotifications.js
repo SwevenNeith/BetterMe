@@ -1,6 +1,10 @@
 import { supabase } from '../lib/supabase.js'
 import { COL } from './menstruationCycles.js'
-import { dateTimeLocalToDate } from './scheduledReminders.js'
+import {
+  dateTimeLocalToDate,
+  deletePendingByKinds,
+  insertPendingNotifications,
+} from './scheduledReminders.js'
 import { computeNaturalPhaseStartDates } from './menstruationCyclesNaturel.js'
 
 export const MENSTRUATION_KIND = {
@@ -121,25 +125,26 @@ export async function saveMenstruationNotifSettings(userId, settings) {
   if (error) throw error
 }
 
+async function syncMenstruationKindNotifications(userId, kind, enabled, buildRows) {
+  await deletePendingByKinds(supabase, userId, [kind])
+  if (!enabled) return
+  await insertPendingNotifications(supabase, userId, buildRows())
+}
+
 export async function rescheduleMenstruationEstimatedNotifications(userId, cycles, settings) {
-  const kinds = [MENSTRUATION_KIND.SPM_ESTIMEE, MENSTRUATION_KIND.REGLES_ESTIMEES]
-
-  const { error: delError } = await supabase
-    .from('scheduled_notifications')
-    .delete()
-    .eq('user_id', userId)
-    .in('kind', kinds)
-    .eq('sent', false)
-  if (delError) throw delError
-
-  const rows = []
   const now = Date.now()
   const hhmm = String(settings.menstruation_notification_time || '09:00').slice(0, 5)
 
-  for (const cycle of cycles || []) {
-    if (settings.menstruation_notify_spm_estimee && cycle[COL.dateDebutSpmEstimee]) {
-      const when = dateTimeLocalToDate(cycle[COL.dateDebutSpmEstimee], hhmm)
-      if (when.getTime() > now) {
+  await syncMenstruationKindNotifications(
+    userId,
+    MENSTRUATION_KIND.SPM_ESTIMEE,
+    settings.menstruation_notify_spm_estimee,
+    () => {
+      const rows = []
+      for (const cycle of cycles || []) {
+        if (!cycle[COL.dateDebutSpmEstimee]) continue
+        const when = dateTimeLocalToDate(cycle[COL.dateDebutSpmEstimee], hhmm)
+        if (when.getTime() <= now) continue
         rows.push({
           user_id: userId,
           event_id: null,
@@ -149,11 +154,20 @@ export async function rescheduleMenstruationEstimatedNotifications(userId, cycle
           scheduled_at: when.toISOString(),
         })
       }
-    }
+      return rows
+    },
+  )
 
-    if (settings.menstruation_notify_regles_estimees && cycle[COL.dateDebutReglesEstimee]) {
-      const when = dateTimeLocalToDate(cycle[COL.dateDebutReglesEstimee], hhmm)
-      if (when.getTime() > now) {
+  await syncMenstruationKindNotifications(
+    userId,
+    MENSTRUATION_KIND.REGLES_ESTIMEES,
+    settings.menstruation_notify_regles_estimees,
+    () => {
+      const rows = []
+      for (const cycle of cycles || []) {
+        if (!cycle[COL.dateDebutReglesEstimee]) continue
+        const when = dateTimeLocalToDate(cycle[COL.dateDebutReglesEstimee], hhmm)
+        if (when.getTime() <= now) continue
         rows.push({
           user_id: userId,
           event_id: null,
@@ -163,39 +177,26 @@ export async function rescheduleMenstruationEstimatedNotifications(userId, cycle
           scheduled_at: when.toISOString(),
         })
       }
-    }
-  }
-
-  if (!rows.length) return
-  const { error } = await supabase.from('scheduled_notifications').insert(rows)
-  if (error) throw error
+      return rows
+    },
+  )
 }
 
 export async function rescheduleMenstruationNaturalPhaseNotifications(userId, naturalCycles, settings) {
-  const kinds = [
-    MENSTRUATION_KIND.PHASE_FOLLICULAIRE,
-    MENSTRUATION_KIND.PHASE_OVULATOIRE,
-    MENSTRUATION_KIND.PHASE_LUTEALE,
-  ]
-
-  const { error: delError } = await supabase
-    .from('scheduled_notifications')
-    .delete()
-    .eq('user_id', userId)
-    .in('kind', kinds)
-    .eq('sent', false)
-  if (delError) throw delError
-
-  const rows = []
   const now = Date.now()
   const hhmm = String(settings.menstruation_notification_time || '09:00').slice(0, 5)
 
-  for (const cycle of naturalCycles || []) {
-    const starts = computeNaturalPhaseStartDates(cycle)
-
-    if (settings.menstruation_notify_phase_folliculaire && starts.folliculaire) {
-      const when = dateTimeLocalToDate(starts.folliculaire, hhmm)
-      if (when.getTime() > now) {
+  await syncMenstruationKindNotifications(
+    userId,
+    MENSTRUATION_KIND.PHASE_FOLLICULAIRE,
+    settings.menstruation_notify_phase_folliculaire,
+    () => {
+      const rows = []
+      for (const cycle of naturalCycles || []) {
+        const starts = computeNaturalPhaseStartDates(cycle)
+        if (!starts.folliculaire) continue
+        const when = dateTimeLocalToDate(starts.folliculaire, hhmm)
+        if (when.getTime() <= now) continue
         rows.push({
           user_id: userId,
           event_id: null,
@@ -205,11 +206,21 @@ export async function rescheduleMenstruationNaturalPhaseNotifications(userId, na
           scheduled_at: when.toISOString(),
         })
       }
-    }
+      return rows
+    },
+  )
 
-    if (settings.menstruation_notify_phase_ovulatoire && starts.ovulatoire) {
-      const when = dateTimeLocalToDate(starts.ovulatoire, hhmm)
-      if (when.getTime() > now) {
+  await syncMenstruationKindNotifications(
+    userId,
+    MENSTRUATION_KIND.PHASE_OVULATOIRE,
+    settings.menstruation_notify_phase_ovulatoire,
+    () => {
+      const rows = []
+      for (const cycle of naturalCycles || []) {
+        const starts = computeNaturalPhaseStartDates(cycle)
+        if (!starts.ovulatoire) continue
+        const when = dateTimeLocalToDate(starts.ovulatoire, hhmm)
+        if (when.getTime() <= now) continue
         rows.push({
           user_id: userId,
           event_id: null,
@@ -219,11 +230,21 @@ export async function rescheduleMenstruationNaturalPhaseNotifications(userId, na
           scheduled_at: when.toISOString(),
         })
       }
-    }
+      return rows
+    },
+  )
 
-    if (settings.menstruation_notify_phase_luteale && starts.luteale) {
-      const when = dateTimeLocalToDate(starts.luteale, hhmm)
-      if (when.getTime() > now) {
+  await syncMenstruationKindNotifications(
+    userId,
+    MENSTRUATION_KIND.PHASE_LUTEALE,
+    settings.menstruation_notify_phase_luteale,
+    () => {
+      const rows = []
+      for (const cycle of naturalCycles || []) {
+        const starts = computeNaturalPhaseStartDates(cycle)
+        if (!starts.luteale) continue
+        const when = dateTimeLocalToDate(starts.luteale, hhmm)
+        if (when.getTime() <= now) continue
         rows.push({
           user_id: userId,
           event_id: null,
@@ -233,10 +254,7 @@ export async function rescheduleMenstruationNaturalPhaseNotifications(userId, na
           scheduled_at: when.toISOString(),
         })
       }
-    }
-  }
-
-  if (!rows.length) return
-  const { error } = await supabase.from('scheduled_notifications').insert(rows)
-  if (error) throw error
+      return rows
+    },
+  )
 }

@@ -1231,6 +1231,23 @@ onUnmounted(() => {
             <input v-model="menstruationNotifSettings.menstruation_notification_time" type="time" />
           </label>
         </div>
+
+        <p v-if="menstruationNotifError" class="settings-feedback settings-feedback--error">
+          {{ menstruationNotifError }}
+        </p>
+        <p v-if="menstruationNotifMessage" class="settings-feedback settings-feedback--ok">
+          {{ menstruationNotifMessage }}
+        </p>
+        <div class="settings-actions">
+          <button
+            type="button"
+            class="btn btn--primary"
+            :disabled="isSavingMenstruationNotif"
+            @click="onSaveMenstruationSettings"
+          >
+            {{ isSavingMenstruationNotif ? 'Enregistrement…' : 'Enregistrer' }}
+          </button>
+        </div>
         </div>
       </section>
 

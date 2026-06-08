@@ -1,6 +1,11 @@
 import { supabase } from '../lib/supabase.js'
 import { addDaysToISODate, daysBetweenISO } from './menstruationCycles.js'
-import { dateTimeLocalToDate, getLocalTodayISO } from './scheduledReminders.js'
+import {
+  dateTimeLocalToDate,
+  deletePendingByKindPrefix,
+  getLocalTodayISO,
+  insertPendingNotifications,
+} from './scheduledReminders.js'
 import { TYPE_CYCLE } from './menstruationSymptoms.js'
 import {
   ANALYZED_SYMPTOM_KEYS,
@@ -356,6 +361,47 @@ export function dedupePatternCandidates(candidates) {
   return [...byDayPattern.values()]
 }
 
+const PATTERN_KIND_PREFIX = {
+  simple: `${PATTERN_NOTIF_KIND_ROOT}:simple:`,
+  intensite: `${PATTERN_NOTIF_KIND_ROOT}:intensite:`,
+  duree: `${PATTERN_NOTIF_KIND_ROOT}:duree:`,
+  combine: `${PATTERN_NOTIF_KIND_ROOT}:combine:`,
+}
+
+const PATTERN_SETTING_BY_PREFIX = {
+  [PATTERN_KIND_PREFIX.simple]: 'menstruation_notify_patterns_simple',
+  [PATTERN_KIND_PREFIX.intensite]: 'menstruation_notify_patterns_intensite',
+  [PATTERN_KIND_PREFIX.duree]: 'menstruation_notify_patterns_duree',
+  [PATTERN_KIND_PREFIX.combine]: 'menstruation_notify_patterns_combine',
+}
+
+function candidatesToRows(userId, candidates, now = Date.now()) {
+  const rows = []
+  for (const candidate of candidates) {
+    const when = new Date(candidate.scheduled_at)
+    if (when.getTime() <= now) continue
+    rows.push({
+      user_id: userId,
+      event_id: null,
+      kind: candidate.kind,
+      title: candidate.title,
+      body: candidate.body,
+      scheduled_at: candidate.scheduled_at,
+    })
+  }
+  return rows
+}
+
+async function syncPatternPrefixNotifications(userId, prefix, enabled, candidates) {
+  await deletePendingByKindPrefix(supabase, userId, prefix)
+  if (!enabled) return
+  const rows = candidatesToRows(
+    userId,
+    candidates.filter((candidate) => candidate.kind.startsWith(prefix)),
+  )
+  await insertPendingNotifications(supabase, userId, rows)
+}
+
 export async function rescheduleMenstruationPatternNotifications(
   userId,
   typeCycle,
@@ -372,39 +418,8 @@ export async function rescheduleMenstruationPatternNotifications(
     settings,
   })
   const candidates = dedupePatternCandidates(raw)
-  const now = Date.now()
 
-  const { data: pending, error: fetchErr } = await supabase
-    .from('scheduled_notifications')
-    .select('id, kind')
-    .eq('user_id', userId)
-    .eq('sent', false)
-    .like('kind', `${PATTERN_NOTIF_KIND_ROOT}:%`)
-
-  if (fetchErr) throw fetchErr
-
-  if (pending?.length) {
-    const ids = pending.map((r) => r.id)
-    const { error: delErr } = await supabase.from('scheduled_notifications').delete().in('id', ids)
-    if (delErr) throw delErr
+  for (const [prefix, settingKey] of Object.entries(PATTERN_SETTING_BY_PREFIX)) {
+    await syncPatternPrefixNotifications(userId, prefix, settings[settingKey], candidates)
   }
-
-  const rows = []
-  for (const c of candidates) {
-    const when = new Date(c.scheduled_at)
-    if (when.getTime() <= now) continue
-    rows.push({
-      user_id: userId,
-      event_id: null,
-      kind: c.kind,
-      title: c.title,
-      body: c.body,
-      scheduled_at: c.scheduled_at,
-    })
-  }
-
-  if (!rows.length) return
-
-  const { error: insErr } = await supabase.from('scheduled_notifications').insert(rows)
-  if (insErr) throw insErr
 }

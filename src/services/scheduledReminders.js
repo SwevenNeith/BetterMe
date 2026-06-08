@@ -161,6 +161,71 @@ export async function deletePendingScheduledDuplicate(
   if (error) throw error
 }
 
+/** Supprime les notifications en attente pour une liste de kinds. */
+export async function deletePendingByKinds(supabase, userId, kinds) {
+  if (!kinds?.length) return
+
+  const { error } = await supabase
+    .from('scheduled_notifications')
+    .delete()
+    .eq('user_id', userId)
+    .eq('sent', false)
+    .in('kind', kinds)
+
+  if (error) throw error
+}
+
+/** Supprime les notifications en attente dont le kind commence par un préfixe. */
+export async function deletePendingByKindPrefix(supabase, userId, prefix) {
+  if (!prefix) return
+
+  const { data: pending, error: fetchErr } = await supabase
+    .from('scheduled_notifications')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('sent', false)
+    .like('kind', `${prefix}%`)
+
+  if (fetchErr) throw fetchErr
+  if (!pending?.length) return
+
+  const { error: delErr } = await supabase
+    .from('scheduled_notifications')
+    .delete()
+    .in(
+      'id',
+      pending.map((row) => row.id),
+    )
+
+  if (delErr) throw delErr
+}
+
+/** Insère des planifications en évitant les doublons (contrainte pending_uq). */
+export async function insertPendingNotifications(supabase, userId, rows) {
+  if (!rows?.length) return
+
+  const seen = new Set()
+  const unique = []
+
+  for (const row of rows) {
+    const key = `${row.kind}|${row.scheduled_at}|${row.event_id ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(row)
+  }
+
+  for (const row of unique) {
+    await deletePendingScheduledDuplicate(supabase, userId, {
+      scheduledAt: row.scheduled_at,
+      kind: row.kind,
+      eventId: row.event_id ?? null,
+    })
+  }
+
+  const { error } = await supabase.from('scheduled_notifications').insert(unique)
+  if (error) throw error
+}
+
 /** Supprime les rappels ponctuels déjà envoyés (nettoyage) */
 export async function purgeSentOneTimeReminders(supabase, userId) {
   const { error } = await supabase
