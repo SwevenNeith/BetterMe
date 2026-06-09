@@ -12,6 +12,8 @@ export const PILULE_SYMPTOM_PERIOD = {
   ACTIVE: 'active',
   SPM: 'spm',
   RULES: 'regles',
+  /** Prise active + SPM regroupés (affichage & persistance unifiés). */
+  CYCLE: 'cycle',
 }
 
 /** @typedef {'scale'|'boolean'|'enum'} SymptomFieldType */
@@ -73,9 +75,34 @@ export const PILULE_SYMPTOMS_BY_PERIOD = {
 }
 
 export const PILULE_SYMPTOM_PERIOD_LABELS = {
-  [PILULE_SYMPTOM_PERIOD.ACTIVE]: 'Prise active (hors SPM)',
-  [PILULE_SYMPTOM_PERIOD.SPM]: 'Fenêtre SPM',
+  [PILULE_SYMPTOM_PERIOD.ACTIVE]: 'Symptômes du cycle pilule',
+  [PILULE_SYMPTOM_PERIOD.SPM]: 'Symptômes du cycle pilule',
+  [PILULE_SYMPTOM_PERIOD.CYCLE]: 'Symptômes du cycle pilule',
   [PILULE_SYMPTOM_PERIOD.RULES]: 'Règles',
+}
+
+function mergeSymptomDefs(periodKeys) {
+  const byKey = new Map()
+  for (const periodKey of periodKeys) {
+    for (const def of PILULE_SYMPTOMS_BY_PERIOD[periodKey] ?? []) {
+      if (!byKey.has(def.key)) {
+        byKey.set(def.key, def)
+      }
+    }
+  }
+  return [...byKey.values()]
+}
+
+export function getCombinedActiveAndSpmSymptoms() {
+  return mergeSymptomDefs([PILULE_SYMPTOM_PERIOD.ACTIVE, PILULE_SYMPTOM_PERIOD.SPM])
+}
+
+/** Phase utilisée pour charger / enregistrer les symptômes (hors règles = liste unifiée). */
+export function getPiluleSymptomPersistencePeriod(periodKey) {
+  if (periodKey === PILULE_SYMPTOM_PERIOD.RULES) {
+    return PILULE_SYMPTOM_PERIOD.RULES
+  }
+  return PILULE_SYMPTOM_PERIOD.CYCLE
 }
 
 function isoInRange(iso, start, end) {
@@ -150,6 +177,16 @@ export function getPilulePeriodContext(cycles, iso = getLocalTodayISO()) {
 }
 
 export function getSymptomsForPeriod(periodKey) {
+  if (periodKey === PILULE_SYMPTOM_PERIOD.RULES) {
+    return PILULE_SYMPTOMS_BY_PERIOD[PILULE_SYMPTOM_PERIOD.RULES]
+  }
+  if (
+    periodKey === PILULE_SYMPTOM_PERIOD.ACTIVE ||
+    periodKey === PILULE_SYMPTOM_PERIOD.SPM ||
+    periodKey === PILULE_SYMPTOM_PERIOD.CYCLE
+  ) {
+    return getCombinedActiveAndSpmSymptoms()
+  }
   return PILULE_SYMPTOMS_BY_PERIOD[periodKey] ?? []
 }
 

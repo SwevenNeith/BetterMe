@@ -4,6 +4,8 @@ import {
   getPilulePeriodContext,
   getSymptomsForPeriod,
   createEmptySymptomValues,
+  getPiluleSymptomPersistencePeriod,
+  PILULE_SYMPTOM_PERIOD,
   PILULE_SYMPTOM_PERIOD_LABELS,
 } from '../services/menstruationSymptomsPilule.js'
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
@@ -25,15 +27,21 @@ const periodContext = computed(() => getPilulePeriodContext(props.cycles))
 
 const periodKey = computed(() => periodContext.value.period)
 
-const periodLabel = computed(() => PILULE_SYMPTOM_PERIOD_LABELS[periodKey.value] ?? '')
+const persistencePeriodKey = computed(() => getPiluleSymptomPersistencePeriod(periodKey.value))
+
+const symptomContext = computed(() => ({
+  ...periodContext.value,
+  period: persistencePeriodKey.value,
+}))
+
+const periodLabel = computed(() => PILULE_SYMPTOM_PERIOD_LABELS[persistencePeriodKey.value] ?? '')
 
 const periodEmoji = computed(() => {
-  if (periodKey.value === 'regles') return '🔴'
-  if (periodKey.value === 'spm') return '⚠️'
+  if (periodKey.value === PILULE_SYMPTOM_PERIOD.RULES) return '🔴'
   return '💊'
 })
 
-const symptomDefs = computed(() => getSymptomsForPeriod(periodKey.value))
+const symptomDefs = computed(() => getSymptomsForPeriod(persistencePeriodKey.value))
 
 const formattedDate = computed(() => {
   const iso = periodContext.value.iso
@@ -65,7 +73,7 @@ const {
 } = useMenstruationSymptomPersistence({
   userId: toRef(props, 'userId'),
   typeCycle: TYPE_CYCLE.PILULE,
-  context: periodContext,
+  context: symptomContext,
   symptomDefs,
   createEmptyValues: createEmptySymptomValues,
 })
