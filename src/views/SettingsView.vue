@@ -1574,9 +1574,6 @@ onUnmounted(() => {
 .settings-header {
   margin-bottom: 1.25rem;
   text-align: center;
-  max-width: 720px;
-  margin-left: auto;
-  margin-right: auto;
 }
 
 .settings-tabs {

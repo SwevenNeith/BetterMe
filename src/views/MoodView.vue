@@ -46,9 +46,6 @@ function onCancelModal() {
 .mood-header {
   margin-bottom: 1.5rem;
   text-align: center;
-  max-width: 720px;
-  margin-left: auto;
-  margin-right: auto;
 }
 
 .mood-title {

@@ -33,9 +33,6 @@
 .exercices-header {
   margin-bottom: 1.5rem;
   text-align: center;
-  max-width: 720px;
-  margin-left: auto;
-  margin-right: auto;
 }
 
 .exercices-title {
@@ -52,8 +49,7 @@
 }
 
 .exercices-card {
-  max-width: 720px;
-  margin: 0 auto;
+  width: 100%;
   background: rgba(255, 255, 255, 0.65);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(213, 181, 234, 0.35);

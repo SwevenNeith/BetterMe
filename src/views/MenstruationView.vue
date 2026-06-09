@@ -402,7 +402,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="menstruation-wrapper" :class="{ 'menstruation-wrapper--wide': hasCycleData }">
+  <div class="menstruation-wrapper">
     <header class="menstruation-header">
       <h1 class="menstruation-title">Menstruation</h1>
       <p class="menstruation-subtitle">
@@ -587,14 +587,10 @@ onMounted(() => {
 <style scoped>
 .menstruation-wrapper {
   width: 100%;
-  max-width: 720px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
   padding: 1.5rem 1.25rem 3rem;
   box-sizing: border-box;
-}
-
-.menstruation-wrapper--wide {
-  max-width: 920px;
 }
 
 .menstruation-header {

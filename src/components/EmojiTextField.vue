@@ -1,23 +1,10 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-
-const FRENCH_EMOJI_DATA =
-  'https://cdn.jsdelivr.net/npm/emoji-picker-element-data@^1/fr/emojibase/data.json'
-
-let frI18n = null
-let pickerImportPromise = null
-
-function loadEmojiPicker() {
-  if (!pickerImportPromise) {
-    pickerImportPromise = Promise.all([
-      import('emoji-picker-element'),
-      import('emoji-picker-element/i18n/fr.js'),
-    ]).then(([, frModule]) => {
-      frI18n = frModule.default
-    })
-  }
-  return pickerImportPromise
-}
+import {
+  configureEmojiPickerElement,
+  FRENCH_EMOJI_DATA,
+  loadEmojiPickerElement,
+} from '../composables/useEmojiPickerElement.js'
 
 const props = defineProps({
   modelValue: {
@@ -59,7 +46,7 @@ async function togglePicker() {
   if (!showPicker.value) {
     isLoadingPicker.value = true
     try {
-      await loadEmojiPicker()
+      await loadEmojiPickerElement()
       pickerReady.value = true
     } finally {
       isLoadingPicker.value = false
@@ -94,9 +81,7 @@ function onEmojiClick(event) {
 }
 
 function configurePicker() {
-  const picker = pickerRef.value
-  if (!picker || !frI18n) return
-  picker.i18n = frI18n
+  configureEmojiPickerElement(pickerRef.value)
 }
 
 watch(showPicker, async (open) => {

@@ -6,13 +6,19 @@ export const TAB_HIDDEN_EVENT = 'betterme-tab-hidden'
 const RELOAD_FLAG = 'betterme-tab-reload-pending'
 const MIN_HIDDEN_MS = 800
 
-/** Pages connectées (compatible base Vite ex. /BetterMe/). */
+/** Chemin app relatif à la base Vite (ex. /BetterMe/dashboard → /dashboard). */
+function getAppRelativePath(pathname = window.location.pathname) {
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+  let path = pathname.replace(/\/$/, '') || '/'
+  if (base && base !== '/' && path.startsWith(base)) {
+    path = path.slice(base.length) || '/'
+  }
+  return path.replace(/\/$/, '') || '/'
+}
+
+/** Toute route authentifiée (AppLayout) : tout sauf la page de connexion à /. */
 function isAuthenticatedAppPath() {
-  const path = window.location.pathname
-  return ['/dashboard', '/menstruation', '/timetable', '/exercices', '/mood', '/settings'].some(
-    (seg) =>
-    path.includes(seg),
-  )
+  return getAppRelativePath() !== '/'
 }
 
 let hiddenSince = 0
