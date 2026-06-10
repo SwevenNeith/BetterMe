@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { supabase } from '../lib/supabase.js'
-import { HABIT_VALUE_TYPE } from '../constants/habitOptions.js'
+import { HABIT_VALUE_TYPE, normalizeHabitValueType } from '../constants/habitOptions.js'
 import { listHabitLogsForRange } from '../services/habitLogs.js'
 import {
   HABIT_VIEW_MODE,
@@ -80,8 +80,15 @@ function isCellInactive(date) {
   return !isHabitScheduledOnDate(props.habit, date)
 }
 
+function isBooleanHabit() {
+  return normalizeHabitValueType(props.habit.type_valeur) === HABIT_VALUE_TYPE.BOOLEAN
+}
+
 function getCellTier(date) {
   const log = getLog(date)
+  if (isBooleanHabit()) {
+    return log?.fait === true ? 100 : 0
+  }
   const intensity = getDayIntensity(log, date, logsByDate.value)
   return getIntensityTier(intensity, log?.fait ?? false)
 }

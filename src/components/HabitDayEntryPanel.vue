@@ -264,12 +264,12 @@ watch(selectedDate, (date) => {
           <dt>Série en cours</dt>
           <dd>{{ stats.streak }} jour{{ stats.streak > 1 ? 's' : '' }}</dd>
         </div>
-        <div class="habit-entry__stat">
+        <div v-if="!isBoolean" class="habit-entry__stat">
           <dt>Taux 30 jours</dt>
           <dd>{{ formatStatNumber(stats.rate30Days, 2) }}</dd>
         </div>
       </dl>
-      <p class="habit-entry__stats-hint">
+      <p v-if="!isBoolean" class="habit-entry__stats-hint">
         Taux du jour = valeur du jour ÷ max enregistré sur les 30 derniers jours (entre 0 et 1).
       </p>
     </section>
