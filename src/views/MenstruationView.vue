@@ -37,7 +37,7 @@ import {
   recalculateMenstruationPatterns,
 } from '../services/menstruationPatterns.js'
 import MenstruationPatternsPanel from '../components/MenstruationPatternsPanel.vue'
-import { seedCycleForModeSwitch } from '../services/menstruationCycleModeSwitch.js'
+import { switchMenstruationCycleMode } from '../services/menstruationCycleModeSwitch.js'
 
 const router = useRouter()
 const localToday = getLocalTodayISO()
@@ -328,26 +328,23 @@ async function switchCycleMode(target) {
 
   const sourceMode = cycleMode.value
   const sourceCycles = sourceMode === 'pilule' ? cycles.value : cyclesNaturel.value
-  const needsSeed =
-    (target === 'naturel' && !hasNaturelCycles.value) ||
-    (target === 'pilule' && !hasPiluleCycles.value)
 
   isSwitchingMode.value = true
   loadError.value = ''
   try {
-    if (needsSeed) {
-      await seedCycleForModeSwitch(supabase, userId.value, {
-        sourceMode,
-        sourceCycles,
-        targetMode: target,
-        todayISO: localToday,
-      })
-      if (target === 'pilule') {
-        hasPiluleCycles.value = true
-      } else {
-        hasNaturelCycles.value = true
-      }
-    }
+    await switchMenstruationCycleMode(supabase, userId.value, {
+      sourceMode,
+      sourceCycles,
+      targetMode: target,
+      todayISO: localToday,
+    })
+
+    const [countPilule, countNaturel] = await Promise.all([
+      countMenstruationCyclesPilule(supabase, userId.value),
+      countMenstruationCyclesNaturel(supabase, userId.value),
+    ])
+    hasPiluleCycles.value = countPilule > 0
+    hasNaturelCycles.value = countNaturel > 0
 
     if (target === 'pilule') {
       menstruationNotifSettings.value = await loadMenstruationNotifSettings(userId.value)

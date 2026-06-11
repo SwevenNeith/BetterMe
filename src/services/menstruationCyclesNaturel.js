@@ -305,28 +305,33 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
   return await listCyclesNaturel(supabase, userId)
 }
 
-export async function createMenstruationCycleNaturel(supabase, userId, payload) {
+export function buildMenstruationCycleNaturelRecord(userId, payload) {
   const numeroCycle = payload.numeroCycle ?? 1
   const dateDebutRegles = payload.dateDebutRegles
-
   const derived = computeNaturalCycleDerivedFields({
     dateDebutRegles,
     dureeCycle: payload.dureeCycle ?? DEFAULT_CYCLE_LEN,
     dureeRegles: payload.dureeRegles ?? DEFAULT_RULES_LEN,
   })
 
-  const record = {
+  return {
     user_id: userId,
     [COL_NATUREL.numeroCycle]: numeroCycle,
     [COL_NATUREL.dateDebutRegles]: dateDebutRegles,
     [COL_NATUREL.dateFinReglesReelle]: payload.dateFinReglesReelle ?? null,
     ...derived,
   }
+}
+
+export async function createMenstruationCycleNaturel(supabase, userId, payload, options = {}) {
+  const record = buildMenstruationCycleNaturelRecord(userId, payload)
 
   const { data, error } = await supabase.from(TABLE).insert(record).select('*').single()
   if (error) throw error
 
-  await syncForecastCyclesNaturel(supabase, userId)
+  if (options.sync !== false) {
+    await syncForecastCyclesNaturel(supabase, userId)
+  }
 
   return data
 }

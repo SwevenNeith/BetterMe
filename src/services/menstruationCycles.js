@@ -224,6 +224,10 @@ function buildCycle1Record(userId, numeroCycle, payload) {
   return record
 }
 
+export function buildMenstruationCyclePiluleRecord(userId, numeroCycle, payload) {
+  return buildCycle1Record(userId, numeroCycle, payload)
+}
+
 function buildForecastCycleRecord(userId, numeroCycle, prev, previousCycles) {
   const dateDebutPlaquette = prev[COL.dateProchainePlaquette]
   if (!dateDebutPlaquette) return null
@@ -503,14 +507,19 @@ export async function saveMenstruationRulesDates(supabase, userId, payload) {
   await syncForecastCyclesPilule(supabase, userId)
 }
 
-export async function createMenstruationCyclePilule(supabase, userId, payload) {
-  const nextNumero = await getNextNumeroCycle(supabase, userId)
+export async function createMenstruationCyclePilule(supabase, userId, payload, options = {}) {
+  const nextNumero =
+    typeof payload.numeroCycle === 'number'
+      ? payload.numeroCycle
+      : await getNextNumeroCycle(supabase, userId)
   const record = buildCycle1Record(userId, nextNumero, payload)
 
   const { data, error } = await supabase.from(TABLE).insert(record).select().single()
   if (error) throw error
 
-  await syncForecastCyclesPilule(supabase, userId)
+  if (options.sync !== false) {
+    await syncForecastCyclesPilule(supabase, userId)
+  }
 
   return data
 }
