@@ -37,6 +37,7 @@ import {
   recalculateMenstruationPatterns,
 } from '../services/menstruationPatterns.js'
 import MenstruationPatternsPanel from '../components/MenstruationPatternsPanel.vue'
+import { seedCycleForModeSwitch } from '../services/menstruationCycleModeSwitch.js'
 
 const router = useRouter()
 const localToday = getLocalTodayISO()
@@ -49,6 +50,9 @@ const hasCycleData = ref(false)
 const cycles = ref([])
 const cyclesNaturel = ref([])
 const cycleMode = ref(null) // 'pilule' | 'naturel' | null
+const hasPiluleCycles = ref(false)
+const hasNaturelCycles = ref(false)
+const isSwitchingMode = ref(false)
 
 const form = ref(createEmptyOnboardingForm(localToday))
 
@@ -172,6 +176,9 @@ const loadPage = async ({ silent = false } = {}) => {
       'Le chargement a pris trop de temps. Réessaie dans un instant.',
     )
     if (gen !== pageLoadGen) return
+
+    hasPiluleCycles.value = countPilule > 0
+    hasNaturelCycles.value = countNaturel > 0
 
     if (countPilule > 0) {
       cycleMode.value = 'pilule'
@@ -316,6 +323,62 @@ const onCancel = () => {
   saveError.value = ''
 }
 
+async function switchCycleMode(target) {
+  if (!userId.value || cycleMode.value === target || isSwitchingMode.value) return
+
+  const sourceMode = cycleMode.value
+  const sourceCycles = sourceMode === 'pilule' ? cycles.value : cyclesNaturel.value
+  const needsSeed =
+    (target === 'naturel' && !hasNaturelCycles.value) ||
+    (target === 'pilule' && !hasPiluleCycles.value)
+
+  isSwitchingMode.value = true
+  loadError.value = ''
+  try {
+    if (needsSeed) {
+      await seedCycleForModeSwitch(supabase, userId.value, {
+        sourceMode,
+        sourceCycles,
+        targetMode: target,
+        todayISO: localToday,
+      })
+      if (target === 'pilule') {
+        hasPiluleCycles.value = true
+      } else {
+        hasNaturelCycles.value = true
+      }
+    }
+
+    if (target === 'pilule') {
+      menstruationNotifSettings.value = await loadMenstruationNotifSettings(userId.value)
+      cycles.value = await listCyclesPilule(supabase, userId.value)
+    } else {
+      cyclesNaturel.value = await listCyclesNaturel(supabase, userId.value)
+    }
+
+    cycleMode.value = target
+    hasCycleData.value = true
+    menstruationPatterns.value = []
+    menstruationCache.publish({
+      cycles: cycles.value,
+      cyclesNaturel: cyclesNaturel.value,
+      cycleMode: cycleMode.value,
+      hasCycleData: hasCycleData.value,
+    })
+
+    const gen = pageLoadGen
+    await loadPatterns()
+    scheduleBackground(() => {
+      if (gen === pageLoadGen) void runMenstruationBackgroundSync(gen)
+    })
+  } catch (err) {
+    console.error(err)
+    loadError.value = err.message || 'Impossible de changer de mode de cycle.'
+  } finally {
+    isSwitchingMode.value = false
+  }
+}
+
 const onSubmit = async () => {
   saveError.value = ''
 
@@ -352,6 +415,7 @@ const onSubmit = async () => {
       })
 
       hasCycleData.value = true
+      hasNaturelCycles.value = true
       cycleMode.value = 'naturel'
       cycles.value = []
       cyclesNaturel.value = await listCyclesNaturel(supabase, userId.value)
@@ -385,6 +449,7 @@ const onSubmit = async () => {
     })
 
     hasCycleData.value = true
+    hasPiluleCycles.value = true
     cycleMode.value = 'pilule'
     cycles.value = await listCyclesPilule(supabase, userId.value)
     cyclesNaturel.value = []
@@ -416,11 +481,33 @@ onMounted(() => {
 
     <section v-else-if="hasCycleData" class="menstruation-card menstruation-card--calendar">
       <div class="card-head card-head--left">
-        <h2>Ton calendrier cycle</h2>
-        <p>
-          Dates estimées et réelles, comprimés actifs, SPM et règles. Survole une case pour le
-          détail.
-        </p>
+        <div class="card-head__row">
+          <div class="card-head__intro">
+            <h2>Ton calendrier cycle</h2>
+            <p>
+              Dates estimées et réelles, comprimés actifs, SPM et règles. Survole une case pour le
+              détail.
+            </p>
+          </div>
+          <button
+            v-if="cycleMode === 'pilule'"
+            type="button"
+            class="btn btn--ghost btn--cycle-switch"
+            :disabled="isSwitchingMode"
+            @click="switchCycleMode('naturel')"
+          >
+            {{ isSwitchingMode ? 'Changement…' : 'Passer au cycle naturel' }}
+          </button>
+          <button
+            v-else-if="cycleMode === 'naturel'"
+            type="button"
+            class="btn btn--ghost btn--cycle-switch"
+            :disabled="isSwitchingMode"
+            @click="switchCycleMode('pilule')"
+          >
+            {{ isSwitchingMode ? 'Changement…' : 'Passer au cycle pilule' }}
+          </button>
+        </div>
       </div>
       <MenstruationCycleCalendar
         v-if="cycleMode === 'pilule'"
@@ -660,6 +747,24 @@ onMounted(() => {
 .card-head--left {
   text-align: left;
   margin-bottom: 1.25rem;
+}
+
+.card-head__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+}
+
+.card-head__intro {
+  flex: 1;
+  min-width: min(100%, 16rem);
+}
+
+.btn--cycle-switch {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .card-head h2 {
