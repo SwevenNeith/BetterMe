@@ -43,9 +43,7 @@ function normalizeHabitPayload(payload) {
   const couleur = (payload.couleur || '').trim() || '#ad81be'
   const type_valeur = normalizeHabitValueType(payload.type_valeur)
   const unite =
-    type_valeur === HABIT_VALUE_TYPE.BOOLEAN
-      ? null
-      : (payload.unite || '').trim() || null
+    type_valeur === HABIT_VALUE_TYPE.BOOLEAN ? null : (payload.unite || '').trim() || null
   const frequence = payload.frequence
   const date_debut = (payload.date_debut || '').trim()
 
@@ -88,10 +86,12 @@ export async function listHabits(supabase, userId) {
       'id, user_id, nom, description, icone, couleur, type_valeur, unite, frequence, jours_actifs, date_debut, created_at, updated_at',
     )
     .eq('user_id', userId)
-    .order('created_at', { ascending: false })
+    .order('nom', { ascending: true })
 
   if (error) throw error
-  return data ?? []
+  return (data ?? []).sort((a, b) =>
+    (a.nom ?? '').localeCompare(b.nom ?? '', 'fr', { sensitivity: 'base' }),
+  )
 }
 
 /**
