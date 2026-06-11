@@ -80,17 +80,29 @@ defineEmits(['select', 'new'])
 }
 
 .symptom-entries__chip--on {
-  background: #ad81be;
-  border-color: #ad81be;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+  border-color: var(--color-primary-dark);
   color: #fff;
   border-style: solid;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary-dark) 30%, transparent);
 }
 
 @media (prefers-color-scheme: dark) {
+  .symptom-entries__label {
+    color: #adb5bd;
+  }
+
   .symptom-entries__chip {
     background: rgba(40, 32, 52, 0.9);
     border-color: rgba(213, 181, 234, 0.25);
     color: #e8dff0;
+  }
+
+  .symptom-entries__chip--on {
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+    border-color: var(--color-primary-dark);
+    color: #fff;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary-dark) 45%, transparent);
   }
 }
 </style>

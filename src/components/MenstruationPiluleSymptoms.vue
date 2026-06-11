@@ -323,14 +323,16 @@ function scaleRange(def) {
 }
 
 .pilule-symptoms__chip--on {
-  background: #ad81be;
-  border-color: #ad81be;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+  border-color: var(--color-primary-dark);
   color: #fff;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary-dark) 30%, transparent);
 }
 
 .pilule-symptoms__chip--on:hover:not(:disabled) {
-  background: #9a6fad;
-  border-color: #9a6fad;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+  border-color: var(--color-primary-dark);
+  color: #fff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -354,6 +356,14 @@ function scaleRange(def) {
 
   .pilule-symptoms__chip:hover:not(:disabled) {
     background: rgba(173, 129, 190, 0.25);
+  }
+
+  .pilule-symptoms__chip--on,
+  .pilule-symptoms__chip--on:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+    border-color: var(--color-primary-dark);
+    color: #fff;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary-dark) 45%, transparent);
   }
 }
 

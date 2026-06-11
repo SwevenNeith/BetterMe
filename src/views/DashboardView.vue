@@ -592,9 +592,13 @@ const onCancelEmotionalCheckin = () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: flex-start;
-  padding: 2rem 1.5rem;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 1.5rem 1.25rem 3rem;
+  box-sizing: border-box;
   min-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
@@ -653,7 +657,6 @@ const onCancelEmotionalCheckin = () => {
   position: relative;
   z-index: 1;
   width: 100%;
-  max-width: 1000px;
   box-sizing: border-box;
   flex-shrink: 0;
   margin-top: 0.25rem;
@@ -682,7 +685,6 @@ const onCancelEmotionalCheckin = () => {
 .dashboard-carousel-wrapper {
   position: relative;
   width: 100%;
-  max-width: 1000px;
   z-index: 1;
   flex: 1;
 }
@@ -690,7 +692,6 @@ const onCancelEmotionalCheckin = () => {
 /* On desktop: the content is just the grid */
 .dashboard-content {
   width: 100%;
-  max-width: 1000px;
 }
 
 .carousel-track {

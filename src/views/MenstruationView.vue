@@ -876,6 +876,13 @@ onMounted(() => {
     background: rgba(0, 0, 0, 0.2);
     color: #ced4da;
   }
+
+  .choice-pill input:checked + span {
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+    border-color: var(--color-primary-dark);
+    color: #fff;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary-dark) 45%, transparent);
+  }
 }
 
 .choice-check {
