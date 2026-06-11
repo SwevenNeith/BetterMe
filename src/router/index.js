@@ -11,6 +11,17 @@ const ExercicesView = () => import('../views/ExercicesView.vue')
 const ProjetsView = () => import('../views/ProjetsView.vue')
 const HabitTrackerView = () => import('../views/HabitTrackerView.vue')
 
+const CHUNK_RELOAD_KEY = 'betterme-chunk-reload'
+
+function isDynamicImportChunkError(error) {
+  const msg = error?.message ?? String(error)
+  return (
+    msg.includes('Failed to fetch dynamically imported module') ||
+    msg.includes('Importing a module script failed') ||
+    msg.includes('error loading dynamically imported module')
+  )
+}
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -66,7 +77,21 @@ const router = createRouter({
         },
       ]
     }
-  ]
+  ],
+})
+
+router.onError((error) => {
+  if (!isDynamicImportChunkError(error)) return
+  if (sessionStorage.getItem(CHUNK_RELOAD_KEY)) {
+    sessionStorage.removeItem(CHUNK_RELOAD_KEY)
+    return
+  }
+  sessionStorage.setItem(CHUNK_RELOAD_KEY, '1')
+  window.location.reload()
+})
+
+router.afterEach(() => {
+  sessionStorage.removeItem(CHUNK_RELOAD_KEY)
 })
 
 export default router
