@@ -6,8 +6,24 @@
     <link rel="apple-touch-icon" href="./icon-512.png" />
     <link rel="manifest" href="./manifest.json" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <title>BetterMe</title>
-    <script type="module" crossorigin src="/BetterMe/assets/index-BcHj-cFh.js"></script>
+    <!-- GitHub Pages : restaure l’URL après redirection 404 (refresh sur une route SPA) -->
+    <script>
+      ;(function (l) {
+        if (l.search[1] === '/') {
+          var decoded = l.search
+            .slice(1)
+            .split('&')
+            .map(function (s) {
+              return s.replace(/~and~/g, '&')
+            })
+            .join('?')
+          window.history.replaceState(null, null, l.pathname.slice(0, -1) + decoded + l.hash)
+        }
+      })(window.location)
+    </script>
+    <script type="module" crossorigin src="/BetterMe/assets/index-tlpcXK1J.js"></script>
     <link rel="stylesheet" crossorigin href="/BetterMe/assets/index-DZmgWDxo.css">
   </head>
   <body>
