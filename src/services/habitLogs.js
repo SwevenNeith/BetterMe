@@ -35,7 +35,7 @@ export function isHabitLogFilled(log, typeValeur) {
   if (typeValeur === HABIT_VALUE_TYPE.BOOLEAN) {
     return log.fait === true
   }
-  return log.valeur != null
+  return Number(log.valeur ?? 0) > 0
 }
 
 /**

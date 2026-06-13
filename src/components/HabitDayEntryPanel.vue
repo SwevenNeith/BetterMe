@@ -9,6 +9,7 @@ import {
   buildLogPayload,
   computeHabitStats,
   formatStatNumber,
+  isHabitDayDone,
 } from '../utils/habitStats.js'
 
 const props = defineProps({
@@ -64,7 +65,7 @@ const formattedSelectedDate = computed(() => {
 
 function syncInputFromLog() {
   const log = logsByDate.value[selectedDate.value]
-  if (!log || log.fait === false) {
+  if (!isHabitDayDone(log)) {
     inputValue.value = 0
     return
   }

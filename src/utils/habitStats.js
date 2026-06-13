@@ -1,11 +1,19 @@
 import { HABIT_VALUE_TYPE } from '../constants/habitOptions.js'
 import { addDaysISO, iterateISODateRange } from './habitCalendar.js'
 
+/** Jour compté comme fait : booléen coché ou valeur numérique strictement > 0. */
+export function isHabitDayDone(log) {
+  if (!log) return false
+  const valeur = Number(log.valeur ?? 0)
+  if (valeur > 0) return true
+  return log.fait === true
+}
+
 export function getEffectiveValeur(log) {
-  if (!log || log.fait === false) return 0
+  if (!isHabitDayDone(log)) return 0
   const raw = Number(log.valeur ?? 0)
-  if (log.fait === true && raw <= 0) return 1
-  return Math.max(0, raw)
+  if (raw > 0) return raw
+  return 1
 }
 
 /** Max valeur sur les 30 jours se terminant à endDate (inclus). */
@@ -21,7 +29,7 @@ export function getRollingMaxValeur(logsByDate, endDate) {
 
 /** Intensité normalisée 0–1 pour l’affichage du quadrillage. */
 export function getDayIntensity(log, date, logsByDate) {
-  if (!log || log.fait === false) return 0
+  if (!isHabitDayDone(log)) return 0
   const valeur = getEffectiveValeur(log)
   if (valeur <= 0) return 0
   const max = getRollingMaxValeur(logsByDate, date)
@@ -50,14 +58,14 @@ export function computeHabitStats(logsByDate, todayIso, referenceDate = todayIso
 
   for (const date of weekDates) {
     const log = logsByDate[date]
-    if (log?.fait === true) {
+    if (isHabitDayDone(log)) {
       weekValues.push(getEffectiveValeur(log))
     }
   }
 
   for (const date of monthDates) {
     const log = logsByDate[date]
-    if (log?.fait === true) {
+    if (isHabitDayDone(log)) {
       monthValues.push(getEffectiveValeur(log))
     }
   }
@@ -87,14 +95,15 @@ export function computeStreak(logsByDate, todayIso) {
   let streak = 0
   let current = todayIso
 
+  if (!isHabitDayDone(logsByDate[current])) {
+    current = addDaysISO(current, -1)
+  }
+
   while (true) {
     const log = logsByDate[current]
-    if (log?.fait === true) {
-      streak += 1
-      current = addDaysISO(current, -1)
-    } else {
-      break
-    }
+    if (!isHabitDayDone(log)) break
+    streak += 1
+    current = addDaysISO(current, -1)
   }
 
   return streak
