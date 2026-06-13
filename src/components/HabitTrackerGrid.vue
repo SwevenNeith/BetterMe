@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { supabase } from '../lib/supabase.js'
+import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import { HABIT_VALUE_TYPE, normalizeHabitValueType } from '../constants/habitOptions.js'
 import { listHabitLogsForRange } from '../services/habitLogs.js'
 import {
@@ -22,6 +23,7 @@ import {
   getDayIntensity,
   getEffectiveValeur,
   getIntensityTier,
+  isHabitDayDone,
 } from '../utils/habitStats.js'
 
 const props = defineProps({
@@ -51,6 +53,8 @@ const selectedMonth = ref(today.getMonth() + 1)
 const logsByDate = ref({})
 const isLoadingLogs = ref(false)
 const logsError = ref('')
+
+const todayIso = computed(() => getLocalTodayISO())
 
 const yearOptions = buildYearOptions()
 const monthOptions = buildMonthOptions()
@@ -87,15 +91,19 @@ function isBooleanHabit() {
 function getCellTier(date) {
   const log = getLog(date)
   if (isBooleanHabit()) {
-    return log?.fait === true ? 100 : 0
+    return isHabitDayDone(log) ? 100 : 0
   }
   const intensity = getDayIntensity(log, date, logsByDate.value)
-  return getIntensityTier(intensity, log?.fait ?? false)
+  return getIntensityTier(intensity, isHabitDayDone(log))
 }
 
 function getCellClass(date) {
   const tier = getCellTier(date)
-  return tier > 0 ? `habit-grid__cell--tier-${tier}` : 'habit-grid__cell--tier-0'
+  const classes = [tier > 0 ? `habit-grid__cell--tier-${tier}` : 'habit-grid__cell--tier-0']
+  if (date === todayIso.value) {
+    classes.push('habit-grid__cell--today')
+  }
+  return classes
 }
 
 function formatDateLong(dateIso) {
@@ -112,7 +120,7 @@ function getCellTooltip(date) {
   const label = formatDateLong(date)
   const log = getLog(date)
 
-  if (log?.fait === true) {
+  if (isHabitDayDone(log)) {
     if (props.habit.type_valeur === HABIT_VALUE_TYPE.BOOLEAN) {
       return `${label} — Fait`
     }
@@ -131,7 +139,8 @@ function getCellTooltip(date) {
 }
 
 function cellAriaLabel(date) {
-  return getCellTooltip(date)
+  const tooltip = getCellTooltip(date)
+  return date === todayIso.value ? `Aujourd'hui. ${tooltip}` : tooltip
 }
 
 function getLoadRange() {
@@ -319,6 +328,9 @@ watch(
   gap: 0.85rem;
   min-width: 0;
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .habit-grid__toolbar {
@@ -446,7 +458,8 @@ watch(
   flex-direction: column;
   gap: 0.35rem;
   min-width: 0;
-  overflow: visible;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .habit-grid__month-label {
@@ -464,7 +477,7 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 2px;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .habit-grid__monthly {
@@ -530,6 +543,21 @@ watch(
   background: var(--habit-color, #ad81be);
   border-color: color-mix(in srgb, var(--habit-color, #ad81be) 80%, transparent);
   box-shadow: 0 1px 5px color-mix(in srgb, var(--habit-color, #ad81be) 35%, transparent);
+}
+
+.habit-grid__cell--today {
+  z-index: 2;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.95),
+    0 0 0 3px var(--habit-color, #ad81be),
+    0 2px 8px color-mix(in srgb, var(--habit-color, #ad81be) 45%, transparent);
+}
+
+.habit-grid__cell--today.habit-grid__cell--tier-100 {
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.9),
+    0 0 0 3px #fff,
+    0 2px 10px color-mix(in srgb, var(--habit-color, #ad81be) 55%, transparent);
 }
 
 .habit-grid__cell:hover,
@@ -641,6 +669,97 @@ watch(
 
   .habit-grid__cell--tier-100 {
     background: color-mix(in srgb, var(--habit-color, #ad81be) 92%, #2d2638);
+  }
+
+  .habit-grid__cell--today {
+    box-shadow:
+      0 0 0 2px rgba(30, 25, 40, 0.95),
+      0 0 0 3px #d5b5ea,
+      0 2px 10px color-mix(in srgb, var(--habit-color, #ad81be) 50%, transparent);
+  }
+
+  .habit-grid__cell--today.habit-grid__cell--tier-100 {
+    box-shadow:
+      0 0 0 2px rgba(30, 25, 40, 0.9),
+      0 0 0 3px #fff,
+      0 2px 12px color-mix(in srgb, var(--habit-color, #ad81be) 60%, transparent);
+  }
+}
+
+@media (max-width: 768px) {
+  .habit-grid__toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .habit-grid__mode {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .habit-grid__mode-btn {
+    flex: 1;
+    text-align: center;
+  }
+
+  .habit-grid__period {
+    width: 100%;
+  }
+
+  .habit-grid__select-wrap {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .habit-grid__select {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .habit-grid__board {
+    padding: 0.4rem 0.25rem;
+    overflow: hidden;
+    max-width: 100%;
+  }
+
+  .habit-grid__annual {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 0.12rem;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .habit-grid__month-col {
+    gap: 0.15rem;
+  }
+
+  .habit-grid__month-label {
+    font-size: clamp(0.32rem, 2.5vw, 0.45rem);
+    padding: 0.05rem 0;
+    letter-spacing: 0;
+  }
+
+  .habit-grid__month-stack {
+    gap: 1px;
+  }
+
+  .habit-grid__cell {
+    border-radius: 2px;
+    border-width: 0.5px;
+  }
+}
+
+@media (hover: none) {
+  .habit-grid__cell:hover,
+  .habit-grid__cell:focus-visible {
+    transform: none;
+  }
+
+  .habit-grid__cell[data-tooltip]:hover::after,
+  .habit-grid__cell[data-tooltip]:hover::before,
+  .habit-grid__cell[data-tooltip]:focus-visible::after,
+  .habit-grid__cell[data-tooltip]:focus-visible::before {
+    display: none;
   }
 }
 </style>

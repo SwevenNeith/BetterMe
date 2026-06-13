@@ -9,6 +9,7 @@ import {
   buildLogPayload,
   computeHabitStats,
   formatStatNumber,
+  isHabitDayDone,
 } from '../utils/habitStats.js'
 
 const props = defineProps({
@@ -64,7 +65,7 @@ const formattedSelectedDate = computed(() => {
 
 function syncInputFromLog() {
   const log = logsByDate.value[selectedDate.value]
-  if (!log || log.fait === false) {
+  if (!isHabitDayDone(log)) {
     inputValue.value = 0
     return
   }
@@ -284,6 +285,8 @@ watch(selectedDate, (date) => {
   flex-direction: column;
   gap: 0.85rem;
   min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .habit-entry__field {
@@ -309,6 +312,9 @@ watch(selectedDate, (date) => {
   font-weight: 600;
   background: rgba(255, 255, 255, 0.9);
   color: #2c3e50;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .habit-entry__date-label {

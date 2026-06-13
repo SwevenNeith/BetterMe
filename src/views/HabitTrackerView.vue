@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
@@ -38,6 +38,9 @@ function onTrackerLogSaved(date) {
   gridFocusDate.value = date ?? null
 }
 
+const MOBILE_MEDIA = '(max-width: 768px)'
+let mobileMediaQuery = null
+
 const {
   activePage,
   carouselViewport,
@@ -48,7 +51,27 @@ const {
   goToSlide,
   onCarouselScroll,
   setupCarouselObserver,
+  updateCarouselLayout,
 } = useHorizontalCarousel({ columnSelector: '.habits-column' })
+
+async function setupHabitsCarousel() {
+  await nextTick()
+  setupCarouselObserver()
+  requestAnimationFrame(() => {
+    updateCarouselLayout()
+    if (carouselViewport.value) {
+      carouselViewport.value.scrollLeft = 0
+      activePage.value = 0
+    }
+    requestAnimationFrame(() => {
+      updateCarouselLayout()
+      if (carouselViewport.value) {
+        carouselViewport.value.scrollLeft = 0
+        activePage.value = 0
+      }
+    })
+  })
+}
 
 function createEmptyForm() {
   return {
@@ -90,10 +113,16 @@ watch(
   { immediate: true },
 )
 
-watch(activeHabitId, async () => {
-  await nextTick()
-  setupCarouselObserver()
+watch(activeHabitId, () => {
+  void setupHabitsCarousel()
 })
+
+watch(
+  () => [habits.value.length, showForm.value],
+  ([count, formOpen]) => {
+    if (count > 0 && !formOpen) void setupHabitsCarousel()
+  },
+)
 
 watch(
   () => habitForm.value.frequence,
@@ -187,6 +216,15 @@ onMounted(async () => {
   }
   userId.value = user.id
   await loadHabits()
+  mobileMediaQuery = window.matchMedia(MOBILE_MEDIA)
+  mobileMediaQuery.addEventListener('change', updateCarouselLayout)
+  window.addEventListener('resize', updateCarouselLayout)
+  await setupHabitsCarousel()
+})
+
+onUnmounted(() => {
+  mobileMediaQuery?.removeEventListener('change', updateCarouselLayout)
+  window.removeEventListener('resize', updateCarouselLayout)
 })
 </script>
 
@@ -195,27 +233,22 @@ onMounted(async () => {
     <header class="habits-page__header">
       <h1 class="habits-page__title">Habit Tracker</h1>
       <p class="habits-page__subtitle">Suis tes habitudes au quotidien.</p>
-    </header>
 
-    <section v-if="!showForm" class="habits-card">
-      <div class="habits-actions">
-        <button type="button" class="btn btn--primary" @click="openForm">
-          Ajouter une habitude
-        </button>
-      </div>
+      <template v-if="!showForm">
+        <div class="habits-page__toolbar">
+          <button type="button" class="btn btn--primary" @click="openForm">
+            Ajouter une habitude
+          </button>
+        </div>
 
-      <p v-if="saveMessage" class="habits-feedback habits-feedback--ok">{{ saveMessage }}</p>
+        <p v-if="saveMessage" class="habits-feedback habits-feedback--ok">{{ saveMessage }}</p>
 
-      <div v-if="isLoading" class="habits-loading">Chargement…</div>
-
-      <p v-else-if="loadError" class="habits-feedback habits-feedback--error">{{ loadError }}</p>
-
-      <p v-else-if="habits.length === 0" class="habits-empty">
-        Aucune habitude pour l'instant. Ajoute ta première habitude avec le bouton ci-dessus.
-      </p>
-
-      <template v-else>
-        <nav class="habits-tabs" role="tablist" aria-label="Habitudes">
+        <nav
+          v-if="!isLoading && !loadError && habits.length > 0"
+          class="habits-tabs"
+          role="tablist"
+          aria-label="Habitudes"
+        >
           <button
             v-for="habit in habits"
             :key="habit.id"
@@ -224,6 +257,7 @@ onMounted(async () => {
             class="habits-tab"
             :class="{ 'habits-tab--active': activeHabitId === habit.id }"
             :aria-selected="activeHabitId === habit.id"
+            :aria-label="habit.nom"
             :style="{ '--habit-color': habit.couleur }"
             @click="activeHabitId = habit.id"
           >
@@ -237,90 +271,10 @@ onMounted(async () => {
             <span class="habits-tab__name">{{ habit.nom }}</span>
           </button>
         </nav>
-
-        <div v-if="activeHabit" class="habits-tracker">
-          <div class="habits-carousel-wrapper">
-            <button
-              v-if="isMobileCarousel && activePage > 0"
-              type="button"
-              class="habits-carousel-arrow habits-carousel-arrow--prev"
-              aria-label="Colonne précédente"
-              @click="goToSlide(activePage - 1)"
-            >
-              ‹
-            </button>
-            <button
-              v-if="isMobileCarousel && activePage < lastSlideIndex"
-              type="button"
-              class="habits-carousel-arrow habits-carousel-arrow--next"
-              aria-label="Colonne suivante"
-              @click="goToSlide(activePage + 1)"
-            >
-              ›
-            </button>
-
-            <div
-              ref="carouselViewport"
-              class="habits-carousel-content"
-              @scroll.passive="onCarouselScroll"
-            >
-              <div ref="carouselTrack" class="habits-carousel-track">
-                <div class="habits-column habits-column--tracker">
-                  <h2 class="habits-column__title">
-                    <span>Suivi</span>
-                  </h2>
-                  <div class="habits-column__card">
-                    <HabitTrackerGrid
-                      :key="activeHabit.id"
-                      :habit="activeHabit"
-                      :user-id="userId"
-                      :refresh-key="trackerRefreshKey"
-                      :focus-date="gridFocusDate"
-                    />
-                  </div>
-                </div>
-
-                <div class="habits-column habits-column--entry">
-                  <h2 class="habits-column__title">
-                    <span>Aujourd'hui</span>
-                  </h2>
-                  <div class="habits-column__card">
-                    <HabitDayEntryPanel
-                      :key="activeHabit.id"
-                      :habit="activeHabit"
-                      :user-id="userId"
-                      :refresh-key="trackerRefreshKey"
-                      @saved="onTrackerLogSaved"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div
-              v-if="isMobileCarousel && slideCount > 1"
-              class="habits-carousel-indicators"
-              role="tablist"
-              aria-label="Navigation entre les colonnes"
-            >
-              <button
-                v-for="index in slideCount"
-                :key="index"
-                type="button"
-                role="tab"
-                class="habits-carousel-dot"
-                :class="{ 'habits-carousel-dot--active': activePage === index - 1 }"
-                :aria-label="`Colonne ${index}`"
-                :aria-selected="activePage === index - 1"
-                @click="goToSlide(index - 1)"
-              />
-            </div>
-          </div>
-        </div>
       </template>
-    </section>
+    </header>
 
-    <section v-else class="habits-card habits-form">
+    <section v-if="showForm" class="habits-card habits-form">
       <h2 class="habits-form__title">Nouvelle habitude</h2>
 
       <form class="habits-form__body" @submit.prevent="onSaveHabit">
@@ -457,22 +411,136 @@ onMounted(async () => {
         </div>
       </form>
     </section>
+
+    <template v-else>
+      <div v-if="isLoading" class="habits-loading">Chargement…</div>
+
+      <p v-else-if="loadError" class="habits-feedback habits-feedback--error">{{ loadError }}</p>
+
+      <section v-else-if="habits.length === 0" class="habits-card habits-card--empty">
+        <p class="habits-empty">
+          Aucune habitude pour l'instant. Ajoute ta première habitude avec le bouton ci-dessus.
+        </p>
+      </section>
+
+      <div v-else-if="activeHabit" class="habits-carousel-wrapper">
+        <button
+          v-if="isMobileCarousel && activePage > 0"
+          type="button"
+          class="habits-carousel-arrow habits-carousel-arrow--prev"
+          aria-label="Colonne précédente"
+          @click="goToSlide(activePage - 1)"
+        >
+          ‹
+        </button>
+        <button
+          v-if="isMobileCarousel && activePage < lastSlideIndex"
+          type="button"
+          class="habits-carousel-arrow habits-carousel-arrow--next"
+          aria-label="Colonne suivante"
+          @click="goToSlide(activePage + 1)"
+        >
+          ›
+        </button>
+
+        <div
+          ref="carouselViewport"
+          class="habits-carousel-content"
+          @scroll.passive="onCarouselScroll"
+        >
+          <div ref="carouselTrack" class="habits-carousel-track">
+            <div class="habits-column habits-column--tracker">
+              <h2 class="habits-column__title">
+                <span>Suivi</span>
+              </h2>
+              <div class="habits-column__card">
+                <HabitTrackerGrid
+                  :key="activeHabit.id"
+                  :habit="activeHabit"
+                  :user-id="userId"
+                  :refresh-key="trackerRefreshKey"
+                  :focus-date="gridFocusDate"
+                />
+              </div>
+            </div>
+
+            <div class="habits-column habits-column--entry">
+              <h2 class="habits-column__title">
+                <span>Aujourd'hui</span>
+              </h2>
+              <div class="habits-column__card">
+                <HabitDayEntryPanel
+                  :key="activeHabit.id"
+                  :habit="activeHabit"
+                  :user-id="userId"
+                  :refresh-key="trackerRefreshKey"
+                  @saved="onTrackerLogSaved"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="isMobileCarousel && slideCount > 1"
+          class="habits-carousel-indicators"
+          role="tablist"
+          aria-label="Navigation entre les colonnes"
+        >
+          <button
+            v-for="index in slideCount"
+            :key="index"
+            type="button"
+            role="tab"
+            class="habits-carousel-dot"
+            :class="{ 'habits-carousel-dot--active': activePage === index - 1 }"
+            :aria-label="`Colonne ${index}`"
+            :aria-selected="activePage === index - 1"
+            @click="goToSlide(index - 1)"
+          />
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .habits-page {
+  position: relative;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   width: 100%;
   max-width: none;
+  min-width: 0;
   margin: 0;
   padding: 1.5rem 1.25rem 3rem;
   box-sizing: border-box;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  gap: 1.25rem;
 }
 
 .habits-page__header {
-  margin-bottom: 1.5rem;
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
   text-align: center;
+}
+
+.habits-page__toolbar {
+  display: flex;
+  justify-content: center;
+  width: 100%;
 }
 
 .habits-page__title {
@@ -495,6 +563,10 @@ onMounted(async () => {
   border: 1px solid rgba(213, 181, 234, 0.35);
   border-radius: 16px;
   padding: 1.5rem 1.25rem;
+}
+
+.habits-card--empty {
+  text-align: center;
 }
 
 .habits-actions {
@@ -567,12 +639,15 @@ onMounted(async () => {
 .habits-tabs {
   display: flex;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   gap: 0.5rem;
-  margin-bottom: 1.25rem;
+  margin: 0;
   padding: 0.35rem;
   border-radius: 14px;
   background: rgba(213, 181, 234, 0.12);
   border: 1px solid rgba(213, 181, 234, 0.25);
+  box-sizing: border-box;
 }
 
 .habits-tab {
@@ -633,53 +708,71 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
-.habits-tracker {
-  margin-top: 0.25rem;
-}
-
 .habits-carousel-wrapper {
   position: relative;
   width: 100%;
+  max-width: 100%;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .habits-carousel-content {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .habits-carousel-track {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1.25rem;
+  gap: 2rem;
   width: 100%;
-  align-items: start;
+  align-items: stretch;
 }
 
 .habits-column {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 1.5rem;
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .habits-column__title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.4rem;
   font-weight: 800;
   color: #2c3e50;
-  padding-bottom: 0.45rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
   border-bottom: 2px solid rgba(213, 181, 234, 0.2);
 }
 
 .habits-column__card {
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(213, 181, 234, 0.25);
-  border-radius: 14px;
-  padding: 1rem;
+  border-radius: 20px;
+  padding: 1.5rem;
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
-.habits-column--tracker .habits-column__card {
-  overflow: visible;
+@media (min-width: 769px) {
+  .habits-column--tracker .habits-column__card {
+    overflow: visible;
+  }
 }
 
 .habits-details__desc {
@@ -733,11 +826,80 @@ onMounted(async () => {
   display: none;
 }
 
+.habits-carousel-indicators {
+  display: none;
+}
+
 @media (max-width: 768px) {
+  .habits-page {
+    overflow-x: clip;
+    padding: 1rem 0.75rem 2rem;
+    gap: 1rem;
+  }
+
+  .habits-page__header {
+    overflow: hidden;
+  }
+
+  .habits-page__title {
+    font-size: 1.45rem;
+  }
+
+  .habits-page__subtitle {
+    font-size: 0.9rem;
+    margin-bottom: 0;
+  }
+
+  .habits-page__toolbar {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .habits-page__toolbar .btn {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .habits-tabs {
+    flex-wrap: nowrap;
+    width: 100%;
+    gap: 0.35rem;
+    overflow: hidden;
+  }
+
+  .habits-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
+    max-width: none;
+    height: 2.75rem;
+    padding: 0.35rem;
+    gap: 0;
+  }
+
+  .habits-tab__name {
+    display: none;
+  }
+
+  .habits-tab__swatch {
+    width: 100%;
+    height: 100%;
+    max-width: 2.25rem;
+    max-height: 2.25rem;
+    margin: 0 auto;
+    border-radius: 7px;
+    font-size: clamp(0.85rem, 4.5vw, 1.1rem);
+  }
+
   .habits-carousel-wrapper {
     display: flex;
     flex-direction: column;
     width: 100%;
+    max-width: 100%;
+    flex: 0 0 auto;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .habits-carousel-content {
@@ -746,8 +908,11 @@ onMounted(async () => {
     display: flex;
     align-items: flex-start;
     height: fit-content;
+    min-height: 0;
     overflow-x: auto;
     overflow-y: hidden;
+    width: 100%;
+    max-width: 100%;
     scroll-snap-type: x mandatory;
     scroll-behavior: smooth;
     -webkit-overflow-scrolling: touch;
@@ -766,26 +931,58 @@ onMounted(async () => {
     flex: 0 0 auto;
     width: max-content;
     min-width: 100%;
+    height: fit-content;
     align-items: flex-start;
+    align-content: flex-start;
+    box-sizing: border-box;
   }
 
   .habits-column {
     scroll-snap-align: start;
     scroll-snap-stop: always;
+    align-self: flex-start;
+    height: auto;
+    min-height: 0;
+    min-width: 0;
+    padding: 0;
+    box-sizing: border-box;
     flex: 0 0 100%;
     width: 100%;
-    min-width: 100%;
     max-width: 100%;
-    box-sizing: border-box;
   }
 
   @supports (width: 1cqi) {
     .habits-carousel-content .habits-carousel-track .habits-column {
       flex: 0 0 100cqi;
       width: 100cqi;
-      min-width: 100cqi;
+      min-width: 0;
       max-width: 100cqi;
     }
+  }
+
+  .habits-column__title {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    font-size: 1.15rem;
+  }
+
+  .habits-column__card {
+    width: 100%;
+    max-width: 100%;
+    padding: 1rem 0.85rem;
+    overflow: hidden;
+  }
+
+  .habits-column--tracker .habits-column__card {
+    overflow: hidden;
+  }
+
+  .habits-column__card > * {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
 
   .habits-carousel-indicators {
@@ -794,7 +991,8 @@ onMounted(async () => {
     align-items: center;
     gap: 0.5rem;
     width: 100%;
-    padding-top: 0.85rem;
+    padding-top: 1rem;
+    margin-top: 0;
   }
 
   .habits-carousel-dot {
@@ -817,10 +1015,11 @@ onMounted(async () => {
   .habits-carousel-arrow {
     display: flex;
     position: absolute;
-    top: 42%;
+    top: 40%;
     transform: translateY(-50%);
     background: rgba(255, 255, 255, 0.75);
     backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border: 1px solid rgba(213, 181, 234, 0.3);
     color: #ad81be;
     width: 30px;
@@ -833,6 +1032,8 @@ onMounted(async () => {
     cursor: pointer;
     z-index: 20;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: all 0.2s ease;
+    pointer-events: all;
   }
 
   .habits-carousel-arrow--prev {
@@ -1015,6 +1216,16 @@ onMounted(async () => {
 
   .habits-column__card {
     background: rgba(40, 32, 52, 0.6);
+    border-color: rgba(213, 181, 234, 0.15);
+  }
+
+  .habits-column__title {
+    color: #f0e8f8;
+    border-bottom-color: rgba(213, 181, 234, 0.1);
+  }
+
+  .habits-column__card {
+    background: rgba(25, 20, 35, 0.65);
     border-color: rgba(213, 181, 234, 0.15);
   }
 

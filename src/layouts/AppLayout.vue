@@ -67,6 +67,7 @@ onUnmounted(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 100vh;
   transition: margin-left 0.3s ease;
 }
