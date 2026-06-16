@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import { HABIT_VALUE_TYPE, normalizeHabitValueType } from '../constants/habitOptions.js'
@@ -143,6 +143,54 @@ function cellAriaLabel(date) {
   return date === todayIso.value ? `Aujourd'hui. ${tooltip}` : tooltip
 }
 
+const activeTooltip = ref(null)
+const tooltipRef = ref(null)
+const tooltipStyle = ref({})
+
+function hideTooltip() {
+  activeTooltip.value = null
+  tooltipStyle.value = {}
+}
+
+async function showTooltip(event, date) {
+  if (event.type === 'mouseenter' && window.matchMedia('(hover: none)').matches) return
+
+  activeTooltip.value = { text: cellAriaLabel(date) }
+  tooltipStyle.value = {
+    position: 'fixed',
+    left: '-9999px',
+    top: '-9999px',
+    visibility: 'hidden',
+  }
+
+  await nextTick()
+
+  const cell = event.currentTarget
+  const tip = tooltipRef.value
+  if (!tip || !activeTooltip.value) return
+
+  const margin = 8
+  const tipWidth = tip.offsetWidth
+  const tipHeight = tip.offsetHeight
+  const rect = cell.getBoundingClientRect()
+
+  let left = rect.left + rect.width / 2 - tipWidth / 2
+  left = Math.max(margin, Math.min(window.innerWidth - tipWidth - margin, left))
+
+  let top = rect.top - tipHeight - margin
+  if (top < margin) {
+    top = rect.bottom + margin
+  }
+
+  tooltipStyle.value = {
+    position: 'fixed',
+    left: `${left}px`,
+    top: `${top}px`,
+    zIndex: '10000',
+    visibility: 'visible',
+  }
+}
+
 function getLoadRange() {
   const base =
     viewMode.value === HABIT_VIEW_MODE.ANNUAL
@@ -213,6 +261,8 @@ watch(
     selectedMonth.value = month
   },
 )
+
+watch(viewMode, hideTooltip)
 </script>
 
 <template>
@@ -270,7 +320,7 @@ watch(
 
     <div v-if="isLoadingLogs" class="habit-grid__loading">Chargement du suivi…</div>
 
-    <div v-else class="habit-grid__board">
+    <div v-else class="habit-grid__board" @mouseleave="hideTooltip">
       <div v-if="viewMode === HABIT_VIEW_MODE.ANNUAL" class="habit-grid__annual">
         <section
           v-for="column in annualColumns"
@@ -286,8 +336,11 @@ watch(
               class="habit-grid__cell"
               :class="getCellClass(cell.date)"
               :aria-label="cellAriaLabel(cell.date)"
-              :data-tooltip="getCellTooltip(cell.date)"
               tabindex="0"
+              @mouseenter="showTooltip($event, cell.date)"
+              @mouseleave="hideTooltip"
+              @focus="showTooltip($event, cell.date)"
+              @blur="hideTooltip"
             />
           </div>
         </section>
@@ -313,11 +366,26 @@ watch(
             gridColumn: cell.gridColumn,
           }"
           :aria-label="cellAriaLabel(cell.date)"
-          :data-tooltip="getCellTooltip(cell.date)"
           tabindex="0"
+          @mouseenter="showTooltip($event, cell.date)"
+          @mouseleave="hideTooltip"
+          @focus="showTooltip($event, cell.date)"
+          @blur="hideTooltip"
         />
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="activeTooltip"
+        ref="tooltipRef"
+        class="habit-grid-tooltip"
+        :style="tooltipStyle"
+        role="tooltip"
+      >
+        {{ activeTooltip.text }}
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -570,15 +638,7 @@ watch(
     0 4px 12px rgba(173, 129, 190, 0.2);
 }
 
-.habit-grid__cell[data-tooltip]:hover::after,
-.habit-grid__cell[data-tooltip]:focus-visible::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%);
-  z-index: 10;
-  width: max-content;
+.habit-grid-tooltip {
   max-width: 14rem;
   padding: 0.45rem 0.6rem;
   border-radius: 10px;
@@ -592,19 +652,6 @@ watch(
   white-space: normal;
   box-shadow: 0 6px 20px rgba(173, 129, 190, 0.25);
   border: 1px solid rgba(213, 181, 234, 0.25);
-}
-
-.habit-grid__cell[data-tooltip]:hover::before,
-.habit-grid__cell[data-tooltip]:focus-visible::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 3px);
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-  border-top-color: rgba(44, 38, 58, 0.94);
-  z-index: 10;
-  pointer-events: none;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -753,13 +800,6 @@ watch(
   .habit-grid__cell:hover,
   .habit-grid__cell:focus-visible {
     transform: none;
-  }
-
-  .habit-grid__cell[data-tooltip]:hover::after,
-  .habit-grid__cell[data-tooltip]:hover::before,
-  .habit-grid__cell[data-tooltip]:focus-visible::after,
-  .habit-grid__cell[data-tooltip]:focus-visible::before {
-    display: none;
   }
 }
 </style>
