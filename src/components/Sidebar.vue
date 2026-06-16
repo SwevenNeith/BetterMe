@@ -10,6 +10,7 @@ const route = useRoute()
 const baseUrl = import.meta.env.BASE_URL || '/'
 
 const userName = ref('')
+const userId = ref(null)
 const isOpen = ref(false)
 const exercicesExpanded = ref(false)
 
@@ -19,6 +20,7 @@ onMounted(async () => {
   } = await supabase.auth.getUser()
   if (user) {
     userName.value = user.user_metadata?.nom ?? user.email
+    userId.value = user.id
   }
 })
 
@@ -74,9 +76,405 @@ const settingsLink = {
 
 const isActive = (path) => route.path === path
 
+// --- Sidebar order persistence (Supabase) ---
+const POSITIONS_TABLE = 'positions'
+const SIDEBAR_SCOPE = 'Sidebar'
+const EXERCICES_SCOPE = 'Sidebar:Exercices'
+
+const SIDEBAR_ITEM_IDS = {
+  DASHBOARD: 'dashboard',
+  TIMETABLE: 'timetable',
+  HABIT: 'habit-tracker',
+  PROJETS: 'projets',
+  MENSTRUATION: 'menstruation',
+  EXERCICES_GROUP: 'exercices-group',
+}
+
+// Position par défaut demandée : Habit Tracker avant Projets
+const defaultSidebarOrder = [
+  SIDEBAR_ITEM_IDS.DASHBOARD,
+  SIDEBAR_ITEM_IDS.TIMETABLE,
+  SIDEBAR_ITEM_IDS.HABIT,
+  SIDEBAR_ITEM_IDS.PROJETS,
+  SIDEBAR_ITEM_IDS.MENSTRUATION,
+  SIDEBAR_ITEM_IDS.EXERCICES_GROUP,
+]
+
+const sidebarItemsById = {
+  [SIDEBAR_ITEM_IDS.DASHBOARD]: navLinksTop[0],
+  [SIDEBAR_ITEM_IDS.TIMETABLE]: navLinksTop[1],
+  [SIDEBAR_ITEM_IDS.PROJETS]: projetsLink,
+  [SIDEBAR_ITEM_IDS.HABIT]: habitTrackerLink,
+  [SIDEBAR_ITEM_IDS.MENSTRUATION]: menstruationLink,
+  [SIDEBAR_ITEM_IDS.EXERCICES_GROUP]: exercicesGroup,
+}
+
+const sidebarOrder = ref([...defaultSidebarOrder])
+const draggingId = ref(null)
+
+// --- Exercices tree (folders + reorder) ---
+// Node formats:
+// - link:   { type: 'link', id: 'mood' }
+// - folder: { type: 'folder', id: 'folder-xxx', name: '...', children: Node[] }
+const EXERCICES_ITEM_IDS = {
+  MOOD: 'mood',
+}
+
+const exercicesItemsById = {
+  [EXERCICES_ITEM_IDS.MOOD]: exercicesGroup.children[0],
+}
+
+const defaultExercicesTree = [{ type: 'link', id: EXERCICES_ITEM_IDS.MOOD }]
+const exercicesTree = ref(JSON.parse(JSON.stringify(defaultExercicesTree)))
+const draggingExercices = ref(null) // { path: number[] }
+
+function deepClone(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
+function isFolderNode(node) {
+  return node && node.type === 'folder' && Array.isArray(node.children)
+}
+
+function isLinkNode(node) {
+  return node && node.type === 'link' && typeof node.id === 'string'
+}
+
+function getListAtPath(tree, parentPath) {
+  let list = tree
+  for (const idx of parentPath) {
+    const node = list[idx]
+    if (!isFolderNode(node)) return null
+    list = node.children
+  }
+  return list
+}
+
+function getNodeAtPath(tree, path) {
+  if (!Array.isArray(path) || path.length === 0) return null
+  const parent = getListAtPath(tree, path.slice(0, -1))
+  if (!parent) return null
+  return parent[path[path.length - 1]] ?? null
+}
+
+function removeNodeAtPath(tree, path) {
+  const parent = getListAtPath(tree, path.slice(0, -1))
+  if (!parent) return null
+  const idx = path[path.length - 1]
+  if (idx < 0 || idx >= parent.length) return null
+  const [removed] = parent.splice(idx, 1)
+  return removed ?? null
+}
+
+function insertNodeAtPath(tree, parentPath, index, node) {
+  const parent = getListAtPath(tree, parentPath)
+  if (!parent) return false
+  const safeIndex = Math.max(0, Math.min(parent.length, index))
+  parent.splice(safeIndex, 0, node)
+  return true
+}
+
+function flattenLinkIds(nodes) {
+  const out = []
+  const visit = (list) => {
+    for (const n of list) {
+      if (isLinkNode(n)) out.push(n.id)
+      else if (isFolderNode(n)) visit(n.children)
+    }
+  }
+  visit(nodes)
+  return out
+}
+
+function normalizeExercicesTree(raw) {
+  const knownLinks = new Set(Object.keys(exercicesItemsById))
+  const safe = Array.isArray(raw) ? deepClone(raw) : []
+
+  const seen = new Set()
+  const normalizeList = (list) => {
+    const result = []
+    for (const node of list) {
+      if (isLinkNode(node) && knownLinks.has(node.id) && !seen.has(node.id)) {
+        seen.add(node.id)
+        result.push({ type: 'link', id: node.id })
+        continue
+      }
+      if (isFolderNode(node)) {
+        const children = normalizeList(node.children)
+        result.push({
+          type: 'folder',
+          id: typeof node.id === 'string' ? node.id : `folder-${Math.random().toString(16).slice(2)}`,
+          name: typeof node.name === 'string' ? node.name : 'Dossier',
+          children,
+        })
+      }
+    }
+    return result
+  }
+
+  const normalized = normalizeList(safe)
+
+  // Append any new exercices pages at the end (root) and persist.
+  for (const id of Object.keys(exercicesItemsById)) {
+    if (!seen.has(id)) normalized.push({ type: 'link', id })
+  }
+
+  return normalized
+}
+
+async function fetchPosition(scope) {
+  if (!userId.value) return { data: null, error: null }
+  return supabase
+    .from(POSITIONS_TABLE)
+    .select('scope, order')
+    .eq('user_id', userId.value)
+    .eq('scope', scope)
+    .maybeSingle()
+}
+
+async function upsertPosition(scope, orderValue) {
+  if (!userId.value) return
+  const { error } = await supabase
+    .from(POSITIONS_TABLE)
+    .upsert(
+      {
+        user_id: userId.value,
+        scope,
+        order: orderValue,
+      },
+      { onConflict: 'user_id,scope' },
+    )
+  if (error) console.error(error)
+}
+
+async function ensureExercicesPositionRow() {
+  const { data, error } = await fetchPosition(EXERCICES_SCOPE)
+  if (error) {
+    console.error(error)
+    return
+  }
+  const normalized = normalizeExercicesTree(data?.order)
+  exercicesTree.value = normalized
+  if (!data || JSON.stringify(normalized) !== JSON.stringify(data.order ?? [])) {
+    await upsertPosition(EXERCICES_SCOPE, normalized)
+  }
+}
+
+function normalizeOrder(rawIds) {
+  const known = new Set(Object.keys(sidebarItemsById))
+  const clean = Array.isArray(rawIds) ? rawIds.filter((id) => known.has(id)) : []
+  const deduped = []
+  const seen = new Set()
+  for (const id of clean) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    deduped.push(id)
+  }
+  for (const id of defaultSidebarOrder) {
+    if (!seen.has(id)) deduped.push(id)
+  }
+  return deduped
+}
+
+async function ensureSidebarPositionRow() {
+  if (!userId.value) return
+
+  const { data, error } = await fetchPosition(SIDEBAR_SCOPE)
+
+  if (error) {
+    console.error(error)
+    return
+  }
+
+  const normalized = normalizeOrder(data?.order)
+  sidebarOrder.value = normalized
+
+  // Si la ligne n'existe pas ou si elle est incomplète (nouvelle page ajoutée), on upsert.
+  if (!data || JSON.stringify(normalized) !== JSON.stringify(data.order ?? [])) {
+    await upsertPosition(SIDEBAR_SCOPE, normalized)
+  }
+}
+
+async function persistSidebarOrder() {
+  if (!userId.value) return
+  const normalized = normalizeOrder(sidebarOrder.value)
+  sidebarOrder.value = normalized
+
+  await upsertPosition(SIDEBAR_SCOPE, normalized)
+}
+
+watch(
+  userId,
+  (id) => {
+    if (!id) return
+    void ensureSidebarPositionRow()
+    void ensureExercicesPositionRow()
+  },
+  { immediate: true },
+)
+
+function sidebarLinkForId(id) {
+  return sidebarItemsById[id] ?? null
+}
+
+function onDragStart(id, event) {
+  draggingId.value = id
+  try {
+    event.dataTransfer?.setData('text/plain', id)
+    event.dataTransfer?.setDragImage?.(event.currentTarget, 16, 16)
+    event.dataTransfer.effectAllowed = 'move'
+  } catch {
+    // noop
+  }
+}
+
+function onDragOver(id, event) {
+  if (!draggingId.value || draggingId.value === id) return
+  event.preventDefault()
+  try {
+    event.dataTransfer.dropEffect = 'move'
+  } catch {
+    // noop
+  }
+}
+
+async function onDrop(id, event) {
+  event.preventDefault()
+  const source = draggingId.value || event.dataTransfer?.getData('text/plain')
+  if (!source || source === id) {
+    draggingId.value = null
+    return
+  }
+
+  const current = [...sidebarOrder.value]
+  const from = current.indexOf(source)
+  const to = current.indexOf(id)
+  if (from === -1 || to === -1) {
+    draggingId.value = null
+    return
+  }
+  current.splice(from, 1)
+  current.splice(to, 0, source)
+  sidebarOrder.value = current
+  draggingId.value = null
+  await persistSidebarOrder()
+}
+
+function onDragEnd() {
+  draggingId.value = null
+}
+
+function isGroupId(id) {
+  return id === SIDEBAR_ITEM_IDS.EXERCICES_GROUP
+}
+
+function getItemPath(id) {
+  const item = sidebarLinkForId(id)
+  return item?.path ?? null
+}
+
+function onItemClick(id) {
+  const path = getItemPath(id)
+  if (path) navigate(path)
+}
+
 function isInExercicesSection(path) {
   if (path === exercicesGroup.path) return true
-  return exercicesGroup.children.some((child) => path === child.path)
+  const ids = flattenLinkIds(exercicesTree.value)
+  return ids.some((id) => exercicesLinkForId(id)?.path === path)
+}
+
+function exercicesLinkForId(id) {
+  return exercicesItemsById[id] ?? null
+}
+
+function encodePath(path) {
+  return Array.isArray(path) ? path.join('.') : ''
+}
+
+function decodePath(value) {
+  if (!value) return null
+  const parts = String(value)
+    .split('.')
+    .map((n) => Number(n))
+    .filter((n) => Number.isInteger(n) && n >= 0)
+  return parts.length ? parts : null
+}
+
+function onExercicesDragStart(path, event) {
+  draggingExercices.value = { path }
+  try {
+    event.dataTransfer?.setData('text/plain', encodePath(path))
+    event.dataTransfer.effectAllowed = 'move'
+  } catch {
+    // noop
+  }
+}
+
+function onExercicesDragOver(event) {
+  if (!draggingExercices.value) return
+  event.preventDefault()
+  try {
+    event.dataTransfer.dropEffect = 'move'
+  } catch {
+    // noop
+  }
+}
+
+async function onExercicesDropOnNode(targetPath, event) {
+  event.preventDefault()
+  const sourcePath =
+    draggingExercices.value?.path ?? decodePath(event.dataTransfer?.getData('text/plain'))
+  if (!sourcePath) {
+    draggingExercices.value = null
+    return
+  }
+
+  const tree = deepClone(exercicesTree.value)
+  const sourceNode = removeNodeAtPath(tree, sourcePath)
+  if (!sourceNode) {
+    draggingExercices.value = null
+    return
+  }
+
+  const targetNode = getNodeAtPath(tree, targetPath)
+  if (isFolderNode(targetNode)) {
+    // Drop into folder (append)
+    targetNode.children.push(sourceNode)
+  } else {
+    // Drop before target within same parent list
+    const parentPath = targetPath.slice(0, -1)
+    const idx = targetPath[targetPath.length - 1]
+    insertNodeAtPath(tree, parentPath, idx, sourceNode)
+  }
+
+  exercicesTree.value = tree
+  draggingExercices.value = null
+  await upsertPosition(EXERCICES_SCOPE, tree)
+}
+
+async function onExercicesDropOnRoot(event) {
+  event.preventDefault()
+  const sourcePath =
+    draggingExercices.value?.path ?? decodePath(event.dataTransfer?.getData('text/plain'))
+  if (!sourcePath) {
+    draggingExercices.value = null
+    return
+  }
+  const tree = deepClone(exercicesTree.value)
+  const sourceNode = removeNodeAtPath(tree, sourcePath)
+  if (!sourceNode) {
+    draggingExercices.value = null
+    return
+  }
+  tree.push(sourceNode)
+  exercicesTree.value = tree
+  draggingExercices.value = null
+  await upsertPosition(EXERCICES_SCOPE, tree)
+}
+
+function onExercicesDragEnd() {
+  draggingExercices.value = null
 }
 
 watch(
@@ -143,54 +541,17 @@ const toggleSidebar = () => {
 
     <!-- Navigation -->
     <nav class="sidebar-nav">
-      <button
-        v-for="link in navLinksTop"
-        :key="link.path"
-        type="button"
-        class="nav-link"
-        :class="{ 'nav-link--active': isActive(link.path) }"
-        @click="navigate(link.path)"
-      >
-        <span class="nav-icon" v-html="link.icon"></span>
-        <span class="nav-label">{{ link.name }}</span>
-        <span class="nav-indicator" v-if="isActive(link.path)"></span>
-      </button>
-
-      <button
-        type="button"
-        class="nav-link"
-        :class="{ 'nav-link--active': isActive(projetsLink.path) }"
-        @click="navigate(projetsLink.path)"
-      >
-        <span class="nav-icon" v-html="projetsLink.icon"></span>
-        <span class="nav-label">{{ projetsLink.name }}</span>
-        <span class="nav-indicator" v-if="isActive(projetsLink.path)"></span>
-      </button>
-
-      <button
-        type="button"
-        class="nav-link"
-        :class="{ 'nav-link--active': isActive(habitTrackerLink.path) }"
-        @click="navigate(habitTrackerLink.path)"
-      >
-        <span class="nav-icon" v-html="habitTrackerLink.icon"></span>
-        <span class="nav-label">{{ habitTrackerLink.name }}</span>
-        <span class="nav-indicator" v-if="isActive(habitTrackerLink.path)"></span>
-      </button>
-
-      <button
-        type="button"
-        class="nav-link"
-        :class="{ 'nav-link--active': isActive(menstruationLink.path) }"
-        @click="navigate(menstruationLink.path)"
-      >
-        <span class="nav-icon" v-html="menstruationLink.icon"></span>
-        <span class="nav-label">{{ menstruationLink.name }}</span>
-        <span class="nav-indicator" v-if="isActive(menstruationLink.path)"></span>
-      </button>
-
-      <!-- Exercices (menu dépliant) — en dernier avant le footer -->
-      <div class="nav-group">
+      <template v-for="id in sidebarOrder" :key="id">
+        <div
+          v-if="isGroupId(id)"
+          class="nav-group nav-group--draggable"
+          :class="{ 'nav-link--dragging': draggingId === id }"
+          draggable="true"
+          @dragstart="onDragStart(id, $event)"
+          @dragover="onDragOver(id, $event)"
+          @drop="onDrop(id, $event)"
+          @dragend="onDragEnd"
+        >
         <div
           class="nav-group__header"
           :class="{
@@ -234,27 +595,95 @@ const toggleSidebar = () => {
           </button>
         </div>
 
-        <div
-          id="exercices-submenu"
-          class="nav-group__children"
-          :class="{ 'nav-group__children--open': exercicesExpanded }"
-        >
-          <div class="nav-group__children-inner">
-            <button
-              v-for="child in exercicesGroup.children"
-              :key="child.path"
-              type="button"
-              class="nav-link nav-link--child"
-              :class="{ 'nav-link--active': isActive(child.path) }"
-              @click="navigate(child.path)"
+          <div
+            id="exercices-submenu"
+            class="nav-group__children"
+            :class="{ 'nav-group__children--open': exercicesExpanded }"
+          >
+            <div
+              class="nav-group__children-inner"
+              @dragover="onExercicesDragOver"
+              @drop="onExercicesDropOnRoot"
+              @dragend="onExercicesDragEnd"
             >
-              <span class="nav-icon" v-html="child.icon"></span>
-              <span class="nav-label">{{ child.name }}</span>
-              <span class="nav-indicator" v-if="isActive(child.path)"></span>
-            </button>
+              <template v-for="(node, idx) in exercicesTree" :key="`${node.type}-${node.id}-${idx}`">
+                <div
+                  v-if="node.type === 'folder'"
+                  class="nav-folder"
+                  draggable="true"
+                  @dragstart="onExercicesDragStart([idx], $event)"
+                  @dragover="onExercicesDragOver"
+                  @drop="onExercicesDropOnNode([idx], $event)"
+                  @dragend="onExercicesDragEnd"
+                >
+                  <div class="nav-folder__header">
+                    <span class="nav-folder__name">{{ node.name }}</span>
+                  </div>
+                  <div class="nav-folder__children">
+                    <button
+                      v-for="(child, cIdx) in node.children"
+                      :key="`${child.type}-${child.id}-${cIdx}`"
+                      type="button"
+                      class="nav-link nav-link--child"
+                      :class="{ 'nav-link--active': isActive(exercicesLinkForId(child.id)?.path) }"
+                      draggable="true"
+                      @dragstart="onExercicesDragStart([idx, cIdx], $event)"
+                      @dragover="onExercicesDragOver"
+                      @drop="onExercicesDropOnNode([idx, cIdx], $event)"
+                      @dragend="onExercicesDragEnd"
+                      @click="navigate(exercicesLinkForId(child.id)?.path)"
+                    >
+                      <span class="nav-icon" v-html="exercicesLinkForId(child.id)?.icon"></span>
+                      <span class="nav-label">{{ exercicesLinkForId(child.id)?.name }}</span>
+                      <span
+                        class="nav-indicator"
+                        v-if="isActive(exercicesLinkForId(child.id)?.path)"
+                      ></span>
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  v-else
+                  type="button"
+                  class="nav-link nav-link--child"
+                  :class="{ 'nav-link--active': isActive(exercicesLinkForId(node.id)?.path) }"
+                  draggable="true"
+                  @dragstart="onExercicesDragStart([idx], $event)"
+                  @dragover="onExercicesDragOver"
+                  @drop="onExercicesDropOnNode([idx], $event)"
+                  @dragend="onExercicesDragEnd"
+                  @click="navigate(exercicesLinkForId(node.id)?.path)"
+                >
+                  <span class="nav-icon" v-html="exercicesLinkForId(node.id)?.icon"></span>
+                  <span class="nav-label">{{ exercicesLinkForId(node.id)?.name }}</span>
+                  <span class="nav-indicator" v-if="isActive(exercicesLinkForId(node.id)?.path)"></span>
+                </button>
+              </template>
+            </div>
           </div>
-        </div>
       </div>
+
+        <button
+          v-else
+          type="button"
+          class="nav-link nav-link--draggable"
+          :class="{
+            'nav-link--active': isActive(getItemPath(id)),
+            'nav-link--dragging': draggingId === id,
+          }"
+          draggable="true"
+          @dragstart="onDragStart(id, $event)"
+          @dragover="onDragOver(id, $event)"
+          @drop="onDrop(id, $event)"
+          @dragend="onDragEnd"
+          @click="onItemClick(id)"
+        >
+          <span class="nav-icon" v-html="sidebarLinkForId(id)?.icon"></span>
+          <span class="nav-label">{{ sidebarLinkForId(id)?.name }}</span>
+          <span class="nav-indicator" v-if="isActive(getItemPath(id))"></span>
+        </button>
+      </template>
     </nav>
 
     <!-- Réglages + déconnexion (footer) -->
@@ -271,6 +700,7 @@ const toggleSidebar = () => {
             stroke-linecap="round"
             stroke-linejoin="round"
             class="sidebar-svg-icon"
+            aria-hidden="true"
           >
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
             <polyline points="16 17 21 12 16 7"></polyline>
@@ -400,6 +830,15 @@ const toggleSidebar = () => {
   transition: all 0.2s ease;
 }
 
+.nav-link--draggable {
+  touch-action: manipulation;
+}
+
+.nav-link--dragging {
+  opacity: 0.6;
+  transform: none;
+}
+
 @media (prefers-color-scheme: dark) {
   .nav-link {
     color: #adb5bd;
@@ -455,6 +894,10 @@ const toggleSidebar = () => {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+}
+
+.nav-group--draggable {
+  touch-action: manipulation;
 }
 
 .nav-group__header {
@@ -597,6 +1040,37 @@ const toggleSidebar = () => {
 
 .nav-link--child:hover {
   transform: translateX(2px);
+}
+
+.nav-folder {
+  margin-left: 0.5rem;
+  border-radius: 12px;
+  padding: 0.25rem 0;
+}
+
+.nav-folder__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.75rem 0.35rem 1.75rem;
+  color: #6c757d;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .nav-folder__header {
+    color: #adb5bd;
+  }
+}
+
+.nav-folder__children {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 
 /* ─── Footer ─── */
