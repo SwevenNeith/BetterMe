@@ -9,6 +9,7 @@ const MenstruationView = () => import('../views/MenstruationView.vue')
 const MoodView = () => import('../views/MoodView.vue')
 const ExercicesView = () => import('../views/ExercicesView.vue')
 const ProjetsView = () => import('../views/ProjetsView.vue')
+const ProjectDetailView = () => import('../views/ProjectDetailView.vue')
 const HabitTrackerView = () => import('../views/HabitTrackerView.vue')
 
 const CHUNK_RELOAD_KEY = 'betterme-chunk-reload'
@@ -49,6 +50,11 @@ const router = createRouter({
           path: 'projets',
           name: 'projets',
           component: ProjetsView,
+        },
+        {
+          path: 'projets/:projectId',
+          name: 'projet-detail',
+          component: ProjectDetailView,
         },
         {
           path: 'habit-tracker',

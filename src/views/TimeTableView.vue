@@ -1477,6 +1477,11 @@ const getPositionedEventsForDay = (dayIdx) => {
   margin-bottom: 2rem;
   position: relative;
   z-index: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
 }
 
 .page-badge {

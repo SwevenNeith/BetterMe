@@ -19,6 +19,10 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  compact: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -70,7 +74,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 </script>
 
 <template>
-  <div ref="rootRef" class="emoji-picker-field">
+  <div ref="rootRef" class="emoji-picker-field" :class="{ 'emoji-picker-field--compact': compact }">
     <div class="emoji-picker-field__row">
       <button
         type="button"
@@ -89,10 +93,10 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
           <template v-else-if="modelValue">{{ modelValue }}</template>
           <template v-else>—</template>
         </span>
-        <span class="emoji-picker-field__label">{{ label }}</span>
+        <span v-if="!compact" class="emoji-picker-field__label">{{ label }}</span>
       </button>
       <button
-        v-if="clearable && modelValue"
+        v-if="clearable && modelValue && !compact"
         type="button"
         class="emoji-picker-field__clear"
         @click="clearIcon"
@@ -124,6 +128,23 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 <style scoped>
 .emoji-picker-field {
   position: relative;
+}
+
+.emoji-picker-field--compact .emoji-picker-field__trigger {
+  flex: 0 0 auto;
+  padding: 0.35rem;
+  justify-content: center;
+}
+
+.emoji-picker-field--compact .emoji-picker-field__preview {
+  width: 2.35rem;
+  height: 2.35rem;
+  font-size: 1.2rem;
+}
+
+.emoji-picker-field--compact .emoji-picker-field__panel {
+  left: 0;
+  right: auto;
 }
 
 .emoji-picker-field__row {

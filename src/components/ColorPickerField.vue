@@ -6,6 +6,10 @@ const props = defineProps({
     type: String,
     default: '#ad81be',
   },
+  compact: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -52,7 +56,7 @@ function onHexInput(event) {
 </script>
 
 <template>
-  <div class="color-picker-field">
+  <div class="color-picker-field" :class="{ 'color-picker-field--compact': compact }">
     <div class="color-picker-field__wheel-wrap">
       <label class="color-picker-field__wheel-label">
         <span class="color-picker-field__swatch" :style="{ backgroundColor: colorValue }" aria-hidden="true" />
@@ -62,11 +66,11 @@ function onHexInput(event) {
           class="color-picker-field__wheel"
           aria-label="Roue des couleurs"
         />
-        <span class="color-picker-field__wheel-text">Ouvrir la roue des couleurs</span>
+        <span v-if="!compact" class="color-picker-field__wheel-text">Ouvrir la roue des couleurs</span>
       </label>
     </div>
 
-    <label class="color-picker-field__hex">
+    <label v-if="!compact" class="color-picker-field__hex">
       <span class="color-picker-field__hex-label">Code couleur</span>
       <input
         :value="hexInput"
@@ -83,6 +87,25 @@ function onHexInput(event) {
 </template>
 
 <style scoped>
+.color-picker-field--compact {
+  gap: 0;
+}
+
+.color-picker-field--compact .color-picker-field__wheel-wrap {
+  justify-content: flex-start;
+}
+
+.color-picker-field--compact .color-picker-field__swatch {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-width: 2px;
+}
+
+.color-picker-field--compact .color-picker-field__wheel {
+  width: 2.35rem;
+  height: 2.35rem;
+}
+
 .color-picker-field {
   display: flex;
   flex-direction: column;
