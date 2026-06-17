@@ -107,30 +107,51 @@ export function countSatisfiedReconfortConditions(conditionIds, context) {
 }
 
 /**
- * Messages avec le plus grand nombre de conditions satisfaites (sans exiger 100 %).
+ * Messages regroupés par nombre de conditions satisfaites (du plus au moins proche).
  * @param {Array<{ id: string, qui: string, message: string, conditions?: string[] }>} messages
  * @param {import('./reconfortMatching.js').ReconfortMatchContext} context
  */
-export function getBestPartialReconfortMessages(messages, context) {
-  let bestCount = 0
-  let bestMessages = []
+export function getReconfortMessagesGroupedByMatchScore(messages, context) {
+  /** @type {Map<number, Array<{ id: string, qui: string, message: string, conditions?: string[] }>>} */
+  const groups = new Map()
 
   for (const message of messages) {
     const conditions = message.conditions ?? []
     if (!conditions.length) continue
 
-    const satisfiedCount = countSatisfiedReconfortConditions(conditions, context)
-    if (satisfiedCount <= 0) continue
+    const score = countSatisfiedReconfortConditions(conditions, context)
+    if (score <= 0) continue
 
-    if (satisfiedCount > bestCount) {
-      bestCount = satisfiedCount
-      bestMessages = [message]
-    } else if (satisfiedCount === bestCount) {
-      bestMessages.push(message)
-    }
+    if (!groups.has(score)) groups.set(score, [])
+    groups.get(score).push(message)
   }
 
-  return bestMessages
+  return [...groups.entries()]
+    .sort(([a], [b]) => b - a)
+    .map(([score, tierMessages]) => ({ score, messages: tierMessages }))
+}
+
+/**
+ * Messages du N-ième palier de proximité (1 = le plus proche, 2 = le suivant, etc.).
+ * @param {Array<{ id: string, qui: string, message: string, conditions?: string[] }>} messages
+ * @param {import('./reconfortMatching.js').ReconfortMatchContext} context
+ * @param {number} tier
+ * @param {{ excludeIds?: Set<string>|string[] }} [options]
+ */
+export function getNthBestPartialReconfortMessages(messages, context, tier = 1, options = {}) {
+  const excluded = toRecentIdSet(options.excludeIds)
+  const groups = getReconfortMessagesGroupedByMatchScore(messages, context)
+  if (tier < 1 || tier > groups.length) return []
+  return (groups[tier - 1]?.messages ?? []).filter((message) => !excluded.has(message.id))
+}
+
+/**
+ * Messages avec le plus grand nombre de conditions satisfaites (sans exiger 100 %).
+ * @param {Array<{ id: string, qui: string, message: string, conditions?: string[] }>} messages
+ * @param {import('./reconfortMatching.js').ReconfortMatchContext} context
+ */
+export function getBestPartialReconfortMessages(messages, context) {
+  return getNthBestPartialReconfortMessages(messages, context, 1)
 }
 
 /**
@@ -256,6 +277,91 @@ export function getUsedReconfortMessageIds(messages, notifications) {
 }
 
 /**
+ * Identifie le message réconfort envoyé le plus récemment.
+ * @param {Array<{ id: string, qui: string, message: string }>} messages
+ * @param {Array<{ title: string, body: string|null, scheduled_at: string, sent?: boolean }>} notifications
+ */
+export function getMostRecentlySentReconfortMessageId(messages, notifications) {
+  const sorted = [...notifications]
+    .filter((row) => row.sent !== false)
+    .sort(
+      (a, b) =>
+        new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime(),
+    )
+
+  for (const row of sorted) {
+    const match = messages.find(
+      (message) => message.qui === row.title && message.message === (row.body || '').trim(),
+    )
+    if (match?.id) return match.id
+  }
+
+  return null
+}
+
+/**
+ * Choisit les messages à planifier selon l'éligibilité, la rotation et le 2e palier de proximité.
+ * @param {{
+ *   messages: Array<{ id: string, qui: string, message: string, conditions?: string[] }>,
+ *   context: import('./reconfortMatching.js').ReconfortMatchContext,
+ *   usedTodayIds: Set<string>,
+ *   recentMessageIds: Set<string>,
+ *   lastSentMessageId: string|null,
+ *   slotsLeft: number,
+ * }} params
+ */
+export function pickReconfortMessagesForScheduling({
+  messages,
+  context,
+  usedTodayIds,
+  recentMessageIds,
+  lastSentMessageId,
+  slotsLeft,
+}) {
+  if (slotsLeft <= 0) return []
+
+  const eligible = getEligibleReconfortMessages(messages, context).filter(
+    (message) => !usedTodayIds.has(message.id),
+  )
+
+  if (eligible.length > 1) {
+    return pickRandomDistinctReconfortMessagesAvoidingRecent(
+      eligible,
+      Math.min(slotsLeft, eligible.length),
+      recentMessageIds,
+    )
+  }
+
+  if (eligible.length === 1) {
+    const soleMatch = eligible[0]
+    const wouldRepeat =
+      soleMatch.id === lastSentMessageId || recentMessageIds.has(soleMatch.id)
+
+    if (wouldRepeat) {
+      const secondClosest = getNthBestPartialReconfortMessages(messages, context, 2, {
+        excludeIds: new Set([soleMatch.id, ...usedTodayIds]),
+      })
+      const alternate = pickOneRandomReconfortMessageAvoidingRecent(
+        secondClosest,
+        recentMessageIds,
+      )
+      if (alternate) return [alternate]
+    }
+
+    return [soleMatch]
+  }
+
+  const partialCandidates = getBestPartialReconfortMessages(messages, context).filter(
+    (message) => !usedTodayIds.has(message.id),
+  )
+  const picked = pickOneRandomReconfortMessageAvoidingRecent(
+    partialCandidates,
+    recentMessageIds,
+  )
+  return picked ? [picked] : []
+}
+
+/**
  * Instants aléatoires répartis entre 9h00 et 23h30 (heure locale), pas avant maintenant.
  * @param {string} dateISO
  * @param {number} count
@@ -341,6 +447,7 @@ export async function scheduleReconfortNotification(supabase, userId, payload) {
  * - Maximum 3 notifications réconfort par jour (les autres types ne comptent pas).
  * - Si 2 messages sont entièrement éligibles, seulement 2 notifications sont planifiées.
  * - Sinon, un message au hasard parmi ceux qui remplissent le plus de conditions (partiel).
+ * - Si un seul message correspond parfaitement mais qu'il vient d'être envoyé, on prend le 2e palier.
  * - Évite de renvoyer un message déjà utilisé sur les derniers jours (si d'autres existent).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
@@ -367,36 +474,26 @@ export async function maybeScheduleReconfortNotification(supabase, userId, optio
     const sentToday = existingNotifications.filter((row) => row.sent)
     if (sentToday.length >= MAX_RECONFORT_NOTIFICATIONS_PER_DAY) return
 
-    const eligible = getEligibleReconfortMessages(messages, context)
     const usedTodayIds = getUsedReconfortMessageIds(messages, sentToday)
     const recentMessageIds = getUsedReconfortMessageIds(messages, recentSentNotifications)
-    const available = eligible.filter((message) => !usedTodayIds.has(message.id))
+    const lastSentMessageId = getMostRecentlySentReconfortMessageId(
+      messages,
+      recentSentNotifications,
+    )
 
     await deletePendingReconfortForDay(supabase, userId, dateISO)
 
     const slotsLeft = MAX_RECONFORT_NOTIFICATIONS_PER_DAY - sentToday.length
     if (slotsLeft <= 0) return
 
-    let toSchedule = []
-
-    if (available.length) {
-      toSchedule = pickRandomDistinctReconfortMessagesAvoidingRecent(
-        available,
-        Math.min(slotsLeft, available.length),
-        recentMessageIds,
-      )
-    } else {
-      const partialCandidates = getBestPartialReconfortMessages(messages, context).filter(
-        (message) => !usedTodayIds.has(message.id),
-      )
-      const picked = pickOneRandomReconfortMessageAvoidingRecent(
-        partialCandidates,
-        recentMessageIds,
-      )
-      if (picked) {
-        toSchedule = [picked]
-      }
-    }
+    const toSchedule = pickReconfortMessagesForScheduling({
+      messages,
+      context,
+      usedTodayIds,
+      recentMessageIds,
+      lastSentMessageId,
+      slotsLeft,
+    })
 
     if (!toSchedule.length) return
 
