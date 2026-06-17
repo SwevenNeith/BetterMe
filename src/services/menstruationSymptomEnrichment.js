@@ -38,10 +38,11 @@ export function getCycleLength(cycle, typeCycle) {
 }
 
 export function computeJourRelatif(dateJour, cycle, typeCycle) {
+  // Jour du cycle (J-1 = 1er jour) : plus lisible qu'un pourcentage.
+  // On conserve le nom historique "jour_relatif" côté DB pour éviter une migration.
   const jourDansCycle = computeJourDansCycle(dateJour, cycle, typeCycle)
-  const len = getCycleLength(cycle, typeCycle)
-  if (jourDansCycle == null || !len) return null
-  return Math.max(0, Math.min(100, Math.round((jourDansCycle / len) * 100)))
+  if (jourDansCycle == null) return null
+  return jourDansCycle + 1
 }
 
 export function getSymptomRawValue(row, symptomKey) {

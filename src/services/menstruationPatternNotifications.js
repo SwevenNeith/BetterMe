@@ -38,6 +38,15 @@ function buildKind(patternType, patternId, notifType) {
   return `${PATTERN_NOTIF_KIND_ROOT}:${patternType}:${patternId}:${notifType}`
 }
 
+function keyForWindowPattern(p, fallbackKey) {
+  const id = p?.id
+  if (id) return String(id)
+  const a = p?.jour_relatif_début
+  const b = p?.jour_relatif_fin
+  const win = a != null ? `${a}-${b ?? a}` : 'na'
+  return `${fallbackKey}:${win}`
+}
+
 function mean(nums) {
   if (!nums.length) return null
   return nums.reduce((a, b) => a + b, 0) / nums.length
@@ -49,12 +58,14 @@ function stdDev(nums) {
   return Math.sqrt(nums.reduce((s, x) => s + (x - m) ** 2, 0) / (nums.length - 1))
 }
 
-function offsetDaysFromJourRelatif(jourRelatif, dureeCycle) {
-  return Math.round((jourRelatif / 100) * dureeCycle)
+function offsetDaysFromJourRelatif(jourRelatif) {
+  // jour_relatif = jour du cycle (J-1 = 1er jour)
+  const jr = Math.max(1, Math.round(jourRelatif))
+  return jr - 1
 }
 
-function dateAtRelativePosition(cycleStart, jourRelatif, dureeCycle, extraDays = 0) {
-  const offset = offsetDaysFromJourRelatif(jourRelatif, dureeCycle) + extraDays
+function dateAtRelativePosition(cycleStart, jourRelatif, extraDays = 0) {
+  const offset = offsetDaysFromJourRelatif(jourRelatif) + extraDays
   return addDaysToISODate(cycleStart, offset)
 }
 
@@ -149,7 +160,6 @@ export function buildPatternNotificationCandidates({
 
   const currentId = currentCycle.id
   const cycleStart = getCycleStartDate(currentCycle, typeCycle)
-  const duree = getCycleLength(currentCycle, typeCycle)
   if (!cycleStart) return []
 
   const candidates = []
@@ -165,17 +175,22 @@ export function buildPatternNotificationCandidates({
     for (const p of activePatterns.filter((x) => x.type_pattern === PATTERN_TYPE.SIMPLE)) {
       if (p.jour_relatif_début == null) continue
       const notifyDate = addDaysToISODate(
-        dateAtRelativePosition(cycleStart, p.jour_relatif_début, duree, 0),
+        dateAtRelativePosition(cycleStart, p.jour_relatif_début, 0),
         -PREVOYANCE_DAYS_BEFORE,
       )
       const label = SYMPTOM_LABELS[p.symptôme] ?? p.symptôme
+      const windowLabel =
+        p.jour_relatif_fin != null && p.jour_relatif_fin !== p.jour_relatif_début
+          ? `J-${p.jour_relatif_début}–J-${p.jour_relatif_fin}`
+          : `J-${p.jour_relatif_début}`
+      const patternId = keyForWindowPattern(p, `simple:${p.symptôme ?? 'symptome'}`)
       push({
-        kind: buildKind('simple', p.symptôme, PATTERN_NOTIF_TYPE.PREVOYANCE),
-        patternKey: `simple:${p.symptôme}`,
+        kind: buildKind('simple', patternId, PATTERN_NOTIF_TYPE.PREVOYANCE),
+        patternKey: `simple:${patternId}`,
         notifType: PATTERN_NOTIF_TYPE.PREVOYANCE,
         dateKey: notifyDate,
         title: 'BetterMe — Tendance',
-        body: `🔮 Bientôt : ${label} pourrait se manifester (vers ${p.jour_relatif_début}–${p.jour_relatif_fin ?? p.jour_relatif_début} % du cycle).`,
+        body: `🔮 Bientôt : ${label} pourrait se manifester (entre ${windowLabel} du cycle).`,
         scheduled_at: scheduleAt(notifyDate, hhmm).toISOString(),
       })
     }
@@ -301,13 +316,14 @@ export function buildPatternNotificationCandidates({
     for (const p of activePatterns.filter((x) => x.type_pattern === PATTERN_TYPE.COMBINED)) {
       if (p.jour_relatif_début == null) continue
       const notifyDate = addDaysToISODate(
-        dateAtRelativePosition(cycleStart, p.jour_relatif_début, duree, 0),
+        dateAtRelativePosition(cycleStart, p.jour_relatif_début, 0),
         -PREVOYANCE_DAYS_BEFORE,
       )
       const label = CLUSTER_LABELS[p.cluster] ?? p.cluster
+      const patternId = keyForWindowPattern(p, `combine:${p.cluster ?? 'cluster'}`)
       push({
-        kind: buildKind('combine', p.cluster, PATTERN_NOTIF_TYPE.PREVOYANCE),
-        patternKey: `combine:${p.cluster}`,
+        kind: buildKind('combine', patternId, PATTERN_NOTIF_TYPE.PREVOYANCE),
+        patternKey: `combine:${patternId}`,
         notifType: PATTERN_NOTIF_TYPE.PREVOYANCE,
         dateKey: notifyDate,
         title: 'BetterMe — Cluster',

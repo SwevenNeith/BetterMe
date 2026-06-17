@@ -37,9 +37,9 @@ function patternTitle(p) {
 function formatRelativeWindow(p) {
   if (p.jour_relatif_début == null || p.jour_relatif_fin == null) return ''
   if (p.jour_relatif_début === p.jour_relatif_fin) {
-    return ` vers ${p.jour_relatif_début} % du cycle`
+    return ` le J-${p.jour_relatif_début} du cycle`
   }
-  return ` entre ${p.jour_relatif_début} % et ${p.jour_relatif_fin} % du cycle`
+  return ` entre le J-${p.jour_relatif_début} et le J-${p.jour_relatif_fin} du cycle`
 }
 
 function patternTypeLabel(type) {

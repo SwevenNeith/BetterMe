@@ -280,8 +280,8 @@ function findRecurrentScoreByJourRelatif(logs) {
   if (!candidates.length) return null
   const [a, b] = findRecurrentWindows(candidates)[0]
   return a === b
-    ? `Pattern récurrent détecté : score bas autour de ${a}% du cycle.`
-    : `Pattern récurrent détecté : score bas entre ${a}% et ${b}% du cycle.`
+    ? `Pattern récurrent détecté : score bas autour de J-${a} du cycle.`
+    : `Pattern récurrent détecté : score bas entre J-${a} et J-${b} du cycle.`
 }
 
 function findRecurrentReassuranceByJourRelatif(logs) {
@@ -295,8 +295,8 @@ function findRecurrentReassuranceByJourRelatif(logs) {
   if (!candidates.length) return null
   const [a, b] = findRecurrentWindows(candidates)[0]
   return a === b
-    ? `Pattern récurrent détecté : besoin de réassurance autour de ${a}% du cycle.`
-    : `Pattern récurrent détecté : besoin de réassurance entre ${a}% et ${b}% du cycle.`
+    ? `Pattern récurrent détecté : besoin de réassurance autour de J-${a} du cycle.`
+    : `Pattern récurrent détecté : besoin de réassurance entre J-${a} et J-${b} du cycle.`
 }
 
 function findRecurrentLowEnergyByJourRelatif(logs) {
@@ -311,8 +311,8 @@ function findRecurrentLowEnergyByJourRelatif(logs) {
   if (!candidates.length) return null
   const [a, b] = findRecurrentWindows(candidates)[0]
   return a === b
-    ? `Pattern récurrent détecté : fatigue émotionnelle autour de ${a}% du cycle.`
-    : `Pattern récurrent détecté : fatigue émotionnelle entre ${a}% et ${b}% du cycle.`
+    ? `Pattern récurrent détecté : fatigue émotionnelle autour de J-${a} du cycle.`
+    : `Pattern récurrent détecté : fatigue émotionnelle entre J-${a} et J-${b} du cycle.`
 }
 
 export function detectEmotionPatterns(logs) {

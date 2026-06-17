@@ -118,15 +118,14 @@ export function meetsThreshold(symptomKey, rawValue) {
 
 export function getRelativeDayWindow(jourRelatif) {
   if (jourRelatif == null || Number.isNaN(jourRelatif)) return null
-  const jr = Math.max(0, Math.min(100, Math.round(jourRelatif)))
-  const debut = Math.min(90, Math.floor(jr / WINDOW_SIZE) * WINDOW_SIZE)
-  const fin = debut === 90 ? 100 : debut + WINDOW_SIZE
-  return { debut, fin }
+  const jr = Math.max(1, Math.round(jourRelatif))
+  const debut = Math.floor((jr - 1) / WINDOW_SIZE) * WINDOW_SIZE + 1
+  const fin = debut + WINDOW_SIZE - 1
+  return { debut, fin } // inclusif
 }
 
 export function jourRelatifInWindow(jourRelatif, debut, fin) {
   if (jourRelatif == null) return false
   const jr = Math.round(jourRelatif)
-  if (fin >= 100) return jr >= debut && jr <= fin
-  return jr >= debut && jr < fin
+  return jr >= debut && jr <= fin
 }

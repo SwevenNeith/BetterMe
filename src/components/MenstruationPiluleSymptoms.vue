@@ -2,11 +2,11 @@
 import { computed, toRef } from 'vue'
 import {
   getPilulePeriodContext,
-  getSymptomsForPeriod,
-  createEmptySymptomValues,
-  getPiluleSymptomPersistencePeriod,
   PILULE_SYMPTOM_PERIOD,
   PILULE_SYMPTOM_PERIOD_LABELS,
+  createEmptySymptomValues,
+  getCombinedActiveAndSpmSymptoms,
+  PILULE_SYMPTOMS_BY_PERIOD,
 } from '../services/menstruationSymptomsPilule.js'
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
 import { useMenstruationSymptomPersistence } from '../composables/useMenstruationSymptomPersistence.js'
@@ -24,24 +24,29 @@ const props = defineProps({
 })
 
 const periodContext = computed(() => getPilulePeriodContext(props.cycles))
+const dayPeriodKey = computed(() => periodContext.value.period)
+const isRulesDay = computed(() => dayPeriodKey.value === PILULE_SYMPTOM_PERIOD.RULES)
 
-const periodKey = computed(() => periodContext.value.period)
+const cycleSymptomDefs = computed(() => getCombinedActiveAndSpmSymptoms())
+const rulesSymptomDefs = computed(
+  () => PILULE_SYMPTOMS_BY_PERIOD[PILULE_SYMPTOM_PERIOD.RULES] ?? [],
+)
 
-const persistencePeriodKey = computed(() => getPiluleSymptomPersistencePeriod(periodKey.value))
-
-const symptomContext = computed(() => ({
+const cycleContext = computed(() => ({
   ...periodContext.value,
-  period: persistencePeriodKey.value,
+  period: PILULE_SYMPTOM_PERIOD.CYCLE,
 }))
 
-const periodLabel = computed(() => PILULE_SYMPTOM_PERIOD_LABELS[persistencePeriodKey.value] ?? '')
+const rulesContext = computed(() => ({
+  ...periodContext.value,
+  period: PILULE_SYMPTOM_PERIOD.RULES,
+}))
 
-const periodEmoji = computed(() => {
-  if (periodKey.value === PILULE_SYMPTOM_PERIOD.RULES) return '🔴'
-  return '💊'
-})
+const cycleLabel = computed(() => PILULE_SYMPTOM_PERIOD_LABELS[PILULE_SYMPTOM_PERIOD.CYCLE] ?? '')
+const rulesLabel = computed(() => PILULE_SYMPTOM_PERIOD_LABELS[PILULE_SYMPTOM_PERIOD.RULES] ?? '')
 
-const symptomDefs = computed(() => getSymptomsForPeriod(persistencePeriodKey.value))
+const cycleEmoji = computed(() => '💊')
+const rulesEmoji = computed(() => '🔴')
 
 const formattedDate = computed(() => {
   const iso = periodContext.value.iso
@@ -57,40 +62,81 @@ const formattedDate = computed(() => {
 const canSave = computed(() => Boolean(props.userId && periodContext.value.cycle?.id))
 
 const {
-  values,
-  entries,
-  activeEntryId,
-  isLoading,
-  isSaving,
-  saveError,
-  lastSavedAt,
-  selectEntry,
-  startNewEntry,
-  entryLabel,
-  selectScale,
-  selectEnum,
-  selectBoolean,
+  values: cycleValues,
+  entries: cycleEntries,
+  activeEntryId: cycleActiveEntryId,
+  isLoading: cycleIsLoading,
+  isSaving: cycleIsSaving,
+  saveError: cycleSaveError,
+  lastSavedAt: cycleLastSavedAt,
+  selectEntry: cycleSelectEntry,
+  startNewEntry: cycleStartNewEntry,
+  entryLabel: cycleEntryLabel,
+  selectScale: cycleSelectScale,
+  selectEnum: cycleSelectEnum,
+  selectBoolean: cycleSelectBoolean,
 } = useMenstruationSymptomPersistence({
   userId: toRef(props, 'userId'),
   typeCycle: TYPE_CYCLE.PILULE,
-  context: symptomContext,
-  symptomDefs,
+  context: cycleContext,
+  symptomDefs: cycleSymptomDefs,
   createEmptyValues: createEmptySymptomValues,
 })
 
-const hasInteractableData = computed(() => {
-  if (entries.value.length > 0 || activeEntryId.value) return true
-  return Object.values(values.value).some((v) => v != null && v !== '')
+const {
+  values: rulesValues,
+  entries: rulesEntries,
+  activeEntryId: rulesActiveEntryId,
+  isLoading: rulesIsLoading,
+  isSaving: rulesIsSaving,
+  saveError: rulesSaveError,
+  lastSavedAt: rulesLastSavedAt,
+  selectEntry: rulesSelectEntry,
+  startNewEntry: rulesStartNewEntry,
+  entryLabel: rulesEntryLabel,
+  selectScale: rulesSelectScale,
+  selectEnum: rulesSelectEnum,
+  selectBoolean: rulesSelectBoolean,
+} = useMenstruationSymptomPersistence({
+  userId: toRef(props, 'userId'),
+  typeCycle: TYPE_CYCLE.PILULE,
+  context: rulesContext,
+  symptomDefs: rulesSymptomDefs,
+  createEmptyValues: createEmptySymptomValues,
 })
 
-const showLoadingOverlay = computed(() => isLoading.value && !hasInteractableData.value)
+const hasCycleInteractableData = computed(() => {
+  if (cycleEntries.value.length > 0 || cycleActiveEntryId.value) return true
+  return Object.values(cycleValues.value).some((v) => v != null && v !== '')
+})
 
-const saveStatusText = computed(() => {
+const hasRulesInteractableData = computed(() => {
+  if (rulesEntries.value.length > 0 || rulesActiveEntryId.value) return true
+  return Object.values(rulesValues.value).some((v) => v != null && v !== '')
+})
+
+const showCycleLoadingOverlay = computed(
+  () => cycleIsLoading.value && !hasCycleInteractableData.value,
+)
+const showRulesLoadingOverlay = computed(
+  () => rulesIsLoading.value && !hasRulesInteractableData.value,
+)
+
+const cycleSaveStatusText = computed(() => {
   if (!props.userId) return ''
-  if (showLoadingOverlay.value) return 'Chargement…'
-  if (isSaving.value) return 'Enregistrement…'
-  if (saveError.value) return saveError.value
-  if (lastSavedAt.value) return 'Enregistré'
+  if (showCycleLoadingOverlay.value) return 'Chargement…'
+  if (cycleIsSaving.value) return 'Enregistrement…'
+  if (cycleSaveError.value) return cycleSaveError.value
+  if (cycleLastSavedAt.value) return 'Enregistré'
+  return ''
+})
+
+const rulesSaveStatusText = computed(() => {
+  if (!props.userId) return ''
+  if (showRulesLoadingOverlay.value) return 'Chargement…'
+  if (rulesIsSaving.value) return 'Enregistrement…'
+  if (rulesSaveError.value) return rulesSaveError.value
+  if (rulesLastSavedAt.value) return 'Enregistré'
   return ''
 })
 
@@ -101,117 +147,191 @@ function scaleRange(def) {
   for (let i = min; i <= max; i += 1) out.push(i)
   return out
 }
+
+function keyForSection(section, key) {
+  return `${section}:${key}`
+}
 </script>
 
 <template>
   <section class="pilule-symptoms" aria-labelledby="pilule-symptoms-title">
+    <!-- Cycle (toujours affiché) -->
     <header class="pilule-symptoms__head">
       <h3 id="pilule-symptoms-title" class="pilule-symptoms__title">
-        <span class="pilule-symptoms__emoji" aria-hidden="true">{{ periodEmoji }}</span>
-        {{ periodLabel }}
+        <span class="pilule-symptoms__emoji" aria-hidden="true">{{ cycleEmoji }}</span>
+        {{ cycleLabel }}
       </h3>
       <p class="pilule-symptoms__hint">
         Symptômes du {{ formattedDate }}. Tu peux faire plusieurs saisies dans la journée
         (ex. matin et soir).
       </p>
       <p
-        v-if="saveStatusText"
+        v-if="cycleSaveStatusText"
         class="pilule-symptoms__status"
-        :class="{ 'pilule-symptoms__status--error': saveError }"
+        :class="{ 'pilule-symptoms__status--error': cycleSaveError }"
         role="status"
       >
-        {{ saveStatusText }}
+        {{ cycleSaveStatusText }}
       </p>
     </header>
 
     <MenstruationSymptomEntriesNav
-      v-if="!showLoadingOverlay && canSave"
-      :entries="entries"
-      :active-entry-id="activeEntryId"
-      :entry-label="entryLabel"
-      @select="selectEntry"
-      @new="startNewEntry"
+      v-if="!showCycleLoadingOverlay && canSave"
+      :entries="cycleEntries"
+      :active-entry-id="cycleActiveEntryId"
+      :entry-label="cycleEntryLabel"
+      @select="cycleSelectEntry"
+      @new="cycleStartNewEntry"
     />
 
-    <div v-if="showLoadingOverlay" class="pilule-symptoms__loading">Chargement des symptômes…</div>
+    <div v-if="showCycleLoadingOverlay" class="pilule-symptoms__loading">Chargement des symptômes…</div>
 
     <div v-else class="pilule-symptoms__list">
-      <div
-        v-for="def in symptomDefs"
-        :key="def.key"
-        class="pilule-symptoms__row"
-      >
+      <div v-for="def in cycleSymptomDefs" :key="keyForSection('cycle', def.key)" class="pilule-symptoms__row">
         <span class="pilule-symptoms__label">{{ def.label }}</span>
 
-        <div
-          v-if="def.type === 'scale'"
-          class="pilule-symptoms__scale"
-          role="group"
-          :aria-label="def.label"
-        >
+        <div v-if="def.type === 'scale'" class="pilule-symptoms__scale" role="group" :aria-label="def.label">
           <button
             v-for="n in scaleRange(def)"
             :key="n"
             type="button"
             class="pilule-symptoms__chip"
-            :class="{ 'pilule-symptoms__chip--on': values[def.key] === n }"
-            :aria-pressed="values[def.key] === n"
+            :class="{ 'pilule-symptoms__chip--on': cycleValues[def.key] === n }"
+            :aria-pressed="cycleValues[def.key] === n"
             :disabled="!canSave"
-            @click="selectScale(def.key, n)"
+            @click="cycleSelectScale(def.key, n)"
           >
             {{ n }}
           </button>
         </div>
 
-        <div
-          v-else-if="def.type === 'boolean'"
-          class="pilule-symptoms__bool"
-          role="group"
-          :aria-label="def.label"
-        >
+        <div v-else-if="def.type === 'boolean'" class="pilule-symptoms__bool" role="group" :aria-label="def.label">
           <button
             type="button"
             class="pilule-symptoms__chip pilule-symptoms__chip--wide"
-            :class="{ 'pilule-symptoms__chip--on': values[def.key] === true }"
-            :aria-pressed="values[def.key] === true"
+            :class="{ 'pilule-symptoms__chip--on': cycleValues[def.key] === true }"
+            :aria-pressed="cycleValues[def.key] === true"
             :disabled="!canSave"
-            @click="selectBoolean(def.key, true)"
+            @click="cycleSelectBoolean(def.key, true)"
           >
             Oui
           </button>
           <button
             type="button"
             class="pilule-symptoms__chip pilule-symptoms__chip--wide"
-            :class="{ 'pilule-symptoms__chip--on': values[def.key] === false }"
-            :aria-pressed="values[def.key] === false"
+            :class="{ 'pilule-symptoms__chip--on': cycleValues[def.key] === false }"
+            :aria-pressed="cycleValues[def.key] === false"
             :disabled="!canSave"
-            @click="selectBoolean(def.key, false)"
+            @click="cycleSelectBoolean(def.key, false)"
           >
             Non
           </button>
         </div>
 
-        <div
-          v-else-if="def.type === 'enum'"
-          class="pilule-symptoms__enum"
-          role="group"
-          :aria-label="def.label"
-        >
+        <div v-else-if="def.type === 'enum'" class="pilule-symptoms__enum" role="group" :aria-label="def.label">
           <button
             v-for="opt in def.options"
             :key="opt.value"
             type="button"
             class="pilule-symptoms__chip pilule-symptoms__chip--wide"
-            :class="{ 'pilule-symptoms__chip--on': values[def.key] === opt.value }"
-            :aria-pressed="values[def.key] === opt.value"
+            :class="{ 'pilule-symptoms__chip--on': cycleValues[def.key] === opt.value }"
+            :aria-pressed="cycleValues[def.key] === opt.value"
             :disabled="!canSave"
-            @click="selectEnum(def.key, opt.value)"
+            @click="cycleSelectEnum(def.key, opt.value)"
           >
             {{ opt.label }}
           </button>
         </div>
       </div>
     </div>
+
+    <!-- Règles (affiché uniquement pendant la période de règles) -->
+    <template v-if="isRulesDay">
+      <header class="pilule-symptoms__head pilule-symptoms__head--secondary">
+        <h3 class="pilule-symptoms__title">
+          <span class="pilule-symptoms__emoji" aria-hidden="true">{{ rulesEmoji }}</span>
+          {{ rulesLabel }}
+        </h3>
+        <p
+          v-if="rulesSaveStatusText"
+          class="pilule-symptoms__status"
+          :class="{ 'pilule-symptoms__status--error': rulesSaveError }"
+          role="status"
+        >
+          {{ rulesSaveStatusText }}
+        </p>
+      </header>
+
+      <MenstruationSymptomEntriesNav
+        v-if="!showRulesLoadingOverlay && canSave"
+        :entries="rulesEntries"
+        :active-entry-id="rulesActiveEntryId"
+        :entry-label="rulesEntryLabel"
+        @select="rulesSelectEntry"
+        @new="rulesStartNewEntry"
+      />
+
+      <div v-if="showRulesLoadingOverlay" class="pilule-symptoms__loading">Chargement des symptômes…</div>
+
+      <div v-else class="pilule-symptoms__list">
+        <div v-for="def in rulesSymptomDefs" :key="keyForSection('rules', def.key)" class="pilule-symptoms__row">
+          <span class="pilule-symptoms__label">{{ def.label }}</span>
+
+          <div v-if="def.type === 'scale'" class="pilule-symptoms__scale" role="group" :aria-label="def.label">
+            <button
+              v-for="n in scaleRange(def)"
+              :key="n"
+              type="button"
+              class="pilule-symptoms__chip"
+              :class="{ 'pilule-symptoms__chip--on': rulesValues[def.key] === n }"
+              :aria-pressed="rulesValues[def.key] === n"
+              :disabled="!canSave"
+              @click="rulesSelectScale(def.key, n)"
+            >
+              {{ n }}
+            </button>
+          </div>
+
+          <div v-else-if="def.type === 'boolean'" class="pilule-symptoms__bool" role="group" :aria-label="def.label">
+            <button
+              type="button"
+              class="pilule-symptoms__chip pilule-symptoms__chip--wide"
+              :class="{ 'pilule-symptoms__chip--on': rulesValues[def.key] === true }"
+              :aria-pressed="rulesValues[def.key] === true"
+              :disabled="!canSave"
+              @click="rulesSelectBoolean(def.key, true)"
+            >
+              Oui
+            </button>
+            <button
+              type="button"
+              class="pilule-symptoms__chip pilule-symptoms__chip--wide"
+              :class="{ 'pilule-symptoms__chip--on': rulesValues[def.key] === false }"
+              :aria-pressed="rulesValues[def.key] === false"
+              :disabled="!canSave"
+              @click="rulesSelectBoolean(def.key, false)"
+            >
+              Non
+            </button>
+          </div>
+
+          <div v-else-if="def.type === 'enum'" class="pilule-symptoms__enum" role="group" :aria-label="def.label">
+            <button
+              v-for="opt in def.options"
+              :key="opt.value"
+              type="button"
+              class="pilule-symptoms__chip pilule-symptoms__chip--wide"
+              :class="{ 'pilule-symptoms__chip--on': rulesValues[def.key] === opt.value }"
+              :aria-pressed="rulesValues[def.key] === opt.value"
+              :disabled="!canSave"
+              @click="rulesSelectEnum(def.key, opt.value)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -224,6 +344,10 @@ function scaleRange(def) {
 
 .pilule-symptoms__head {
   margin-bottom: 1.25rem;
+}
+
+.pilule-symptoms__head--secondary {
+  margin-top: 1.5rem;
 }
 
 .pilule-symptoms__title {

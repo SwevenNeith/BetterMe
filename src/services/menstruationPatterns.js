@@ -19,6 +19,35 @@ import {
 
 const PATTERNS_TABLE = 'menstruation_patterns'
 
+function omitColumn(rows, column) {
+  return rows.map(({ [column]: _removed, ...rest }) => rest)
+}
+
+function isMissingColumnError(error, column) {
+  return (
+    error?.code === 'PGRST204' &&
+    typeof error.message === 'string' &&
+    error.message.includes(`'${column}'`)
+  )
+}
+
+async function insertPatternRows(supabase, rows) {
+  if (!rows.length) return
+
+  const { error } = await supabase.from(PATTERNS_TABLE).insert(rows)
+  if (!error) return
+
+  if (isMissingColumnError(error, 'direction')) {
+    const { error: retryError } = await supabase
+      .from(PATTERNS_TABLE)
+      .insert(omitColumn(rows, 'direction'))
+    if (retryError) throw retryError
+    return
+  }
+
+  throw error
+}
+
 function mean(nums) {
   if (!nums.length) return null
   return nums.reduce((a, b) => a + b, 0) / nums.length
@@ -87,6 +116,102 @@ function daysBetweenCalendar(aISO, bISO) {
   return Math.round((b - a) / 86400000)
 }
 
+function meanInt(nums) {
+  if (!nums.length) return null
+  return nums.reduce((a, b) => a + b, 0) / nums.length
+}
+
+function findConsecutiveRanges(sortedDays) {
+  const ranges = []
+  let start = null
+  let prev = null
+  for (const d of sortedDays) {
+    if (start == null) {
+      start = d
+      prev = d
+      continue
+    }
+    if (d === prev + 1) {
+      prev = d
+      continue
+    }
+    ranges.push([start, prev])
+    start = d
+    prev = d
+  }
+  if (start != null) ranges.push([start, prev])
+  return ranges
+}
+
+function buildCoverageByDay(daySetsByCycle) {
+  /** @type {Map<number, Set<string>>} */
+  const coverage = new Map()
+  for (const [cycleId, daySet] of daySetsByCycle.entries()) {
+    for (const d of daySet) {
+      if (!coverage.has(d)) coverage.set(d, new Set())
+      coverage.get(d).add(cycleId)
+    }
+  }
+  return coverage
+}
+
+function scoreRecurrentRange(coverage, a, b, cyclesWithData) {
+  const coverages = []
+  const union = new Set()
+  for (let d = a; d <= b; d += 1) {
+    const s = coverage.get(d)
+    if (!s) continue
+    coverages.push(s.size)
+    for (const cid of s) union.add(cid)
+  }
+
+  if (union.size < CYCLES_MIN) return null
+  const ratio = cyclesWithData ? union.size / cyclesWithData : 0
+  if (ratio < RATIO_MIN) return null
+
+  const minCov = coverages.length ? Math.min(...coverages) : 0
+  const avgCov = meanInt(coverages) ?? 0
+  const len = b - a + 1
+
+  return {
+    debut: a,
+    fin: b,
+    cyclesWithPattern: union.size,
+    ratio,
+    score: { minCov, avgCov, len },
+  }
+}
+
+function compareWindows(a, b) {
+  // D'abord la stabilité (min coverage), puis la fréquence moyenne, puis concision, puis ordre naturel.
+  if (a.score.minCov !== b.score.minCov) return b.score.minCov - a.score.minCov
+  if (a.score.avgCov !== b.score.avgCov) return b.score.avgCov - a.score.avgCov
+  if (a.score.len !== b.score.len) return a.score.len - b.score.len
+  return a.debut - b.debut
+}
+
+function pickRecurrentWindows(daySetsByCycle, cyclesWithData, { maxWindows = 3 } = {}) {
+  const coverage = buildCoverageByDay(daySetsByCycle)
+  const candidateDays = [...coverage.entries()]
+    .filter(([, s]) => (s?.size ?? 0) >= CYCLES_MIN)
+    .map(([d]) => d)
+    .sort((a, b) => a - b)
+
+  if (!candidateDays.length) return null
+
+  const ranges = findConsecutiveRanges(candidateDays)
+  const windows = []
+
+  for (const [a, b] of ranges) {
+    const scored = scoreRecurrentRange(coverage, a, b, cyclesWithData)
+    if (scored) windows.push(scored)
+  }
+
+  if (!windows.length) return null
+  windows.sort(compareWindows)
+  return windows.slice(0, Math.max(1, maxWindows))
+}
+
 function detectSimplePatterns(timeline) {
   const patterns = []
   const cycleIds = uniqueCycleIds(timeline)
@@ -94,40 +219,41 @@ function detectSimplePatterns(timeline) {
 
   for (const symptomKey of ANALYZED_SYMPTOM_KEYS) {
     let cyclesWithData = 0
-    let cyclesWithPattern = 0
-    const relDaysAbove = []
+    /** @type {Map<string, Set<number>>} */
+    const daySetsByCycle = new Map()
 
     for (const cycleId of cycleIds) {
       const days = timelineForCycle(timeline, cycleId)
       if (!days.length) continue
       cyclesWithData += 1
 
-      const hitDays = days.filter(
-        (d) => d.jourRelatif != null && d.symptoms[symptomKey]?.above,
+      const set = new Set(
+        days
+          .filter((d) => d.jourRelatif != null && d.symptoms[symptomKey]?.above)
+          .map((d) => Math.round(d.jourRelatif)),
       )
-      if (hitDays.length > 0) {
-        cyclesWithPattern += 1
-        for (const d of hitDays) relDaysAbove.push(d.jourRelatif)
-      }
+      if (set.size) daySetsByCycle.set(cycleId, set)
     }
 
     if (cyclesWithData < CYCLES_MIN) continue
-    const ratio = cyclesWithPattern / cyclesWithData
-    if (ratio >= RATIO_MIN && relDaysAbove.length) {
+    const windows = pickRecurrentWindows(daySetsByCycle, cyclesWithData, { maxWindows: 3 })
+    if (windows) {
+      for (const w of windows) {
       patterns.push({
         type_pattern: PATTERN_TYPE.SIMPLE,
         symptôme: symptomKey,
         cluster: null,
-        jour_relatif_début: Math.min(...relDaysAbove),
-        jour_relatif_fin: Math.max(...relDaysAbove),
+        jour_relatif_début: w.debut,
+        jour_relatif_fin: w.fin,
         intensité_moyenne: null,
         durée_moyenne: null,
         direction: null,
-        cycles_détectés: cyclesWithPattern,
+        cycles_détectés: w.cyclesWithPattern,
         cycles_total: cyclesWithData,
-        ratio_répétition: ratio,
+        ratio_répétition: w.ratio,
         actif: true,
       })
+    }
     }
   }
 
@@ -250,40 +376,42 @@ function detectCombinedPatterns(timeline) {
     if (!validKeys.length) continue
 
     let cyclesWithData = 0
-    let cyclesWithCluster = 0
-    const relDays = []
+    /** @type {Map<string, Set<number>>} */
+    const daySetsByCycle = new Map()
 
     for (const cycleId of cycleIds) {
       const days = timelineForCycle(timeline, cycleId)
       if (!days.length) continue
       cyclesWithData += 1
       const activeDays = days.filter((d) => isClusterActiveDay(d, validKeys))
-      if (activeDays.length > 0) {
-        cyclesWithCluster += 1
-        for (const d of activeDays) {
-          if (d.jourRelatif != null) relDays.push(d.jourRelatif)
-        }
-      }
+      const set = new Set(
+        activeDays
+          .filter((d) => d.jourRelatif != null)
+          .map((d) => Math.round(d.jourRelatif)),
+      )
+      if (set.size) daySetsByCycle.set(cycleId, set)
     }
 
     if (cyclesWithData < CYCLES_MIN) continue
-    const ratio = cyclesWithCluster / cyclesWithData
-    if (ratio < RATIO_MIN) continue
+    const windows = pickRecurrentWindows(daySetsByCycle, cyclesWithData, { maxWindows: 3 })
+    if (!windows) continue
 
-    patterns.push({
-      type_pattern: PATTERN_TYPE.COMBINED,
-      symptôme: null,
-      cluster: clusterKey,
-      jour_relatif_début: relDays.length ? Math.min(...relDays) : null,
-      jour_relatif_fin: relDays.length ? Math.max(...relDays) : null,
-      intensité_moyenne: relDays.length ? mean(relDays) : null,
-      durée_moyenne: null,
-      direction: null,
-      cycles_détectés: cyclesWithCluster,
-      cycles_total: cyclesWithData,
-      ratio_répétition: ratio,
-      actif: true,
-    })
+    for (const w of windows) {
+      patterns.push({
+        type_pattern: PATTERN_TYPE.COMBINED,
+        symptôme: null,
+        cluster: clusterKey,
+        jour_relatif_début: w.debut,
+        jour_relatif_fin: w.fin,
+        intensité_moyenne: w.debut != null && w.fin != null ? mean([w.debut, w.fin]) : null,
+        durée_moyenne: null,
+        direction: null,
+        cycles_détectés: w.cyclesWithPattern,
+        cycles_total: cyclesWithData,
+        ratio_répétition: w.ratio,
+        actif: true,
+      })
+    }
   }
 
   return patterns
@@ -351,8 +479,7 @@ export async function recalculateMenstruationPatterns(supabase, userId, typeCycl
   await supabase.from(PATTERNS_TABLE).delete().eq('user_id', userId).eq('type_cycle', typeCycle)
 
   if (rows.length) {
-    const { error } = await supabase.from(PATTERNS_TABLE).insert(rows)
-    if (error) throw error
+    await insertPatternRows(supabase, rows)
   }
 
   return rows.filter((r) => r.actif)
