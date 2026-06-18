@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import {
   buildCalendarDataFromCycles,
   buildDayIndex,
@@ -8,6 +8,9 @@ import {
   buildVisibleLegendGroups,
   legendSwatchClasses,
 } from '../services/menstruationCalendar.js'
+import { COL } from '../services/menstruationCycles.js'
+import { getCurrentCycle } from '../services/menstruationSymptomEnrichment.js'
+import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
 
 function getTodayViewParts() {
@@ -67,10 +70,25 @@ const monthSummaries = computed(() =>
 )
 
 const visibleLegendGroups = computed(() => buildVisibleLegendGroups(calendarData.value))
+const editableCycle = computed(() => getCurrentCycle(props.cycles, todayISO, TYPE_CYCLE.PILULE))
 const rulesForm = ref({
   dateDebutReglesReelle: '',
   dateFinReglesReelle: '',
 })
+
+watch(
+  () => editableCycle.value,
+  (cycle) => {
+    if (!cycle) {
+      rulesForm.value.dateDebutReglesReelle = ''
+      rulesForm.value.dateFinReglesReelle = ''
+      return
+    }
+    rulesForm.value.dateDebutReglesReelle = cycle[COL.dateDebutReglesReelle] || ''
+    rulesForm.value.dateFinReglesReelle = cycle[COL.dateFinReglesReelle] || ''
+  },
+  { immediate: true },
+)
 
 function prevMonth() {
   if (viewMonth.value === 0) {

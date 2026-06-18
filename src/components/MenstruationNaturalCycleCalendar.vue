@@ -3,6 +3,8 @@ import { ref, computed, watch } from 'vue'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import { determinePhaseNaturel, COL_NATUREL } from '../services/menstruationCyclesNaturel.js'
 import { addDaysToISODate } from '../services/menstruationCycles.js'
+import { getCurrentCycle } from '../services/menstruationSymptomEnrichment.js'
+import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
 import {
   buildCalendarDataFromNaturalCycles,
   buildDayIndex,
@@ -59,10 +61,9 @@ const monthTitle = computed(() => {
 const gridCells = computed(() => getMonthGrid(viewYear.value, viewMonth.value))
 const legendGroups = computed(() => legendForNatural())
 
-const editableCycle = computed(() => {
-  if (!props.cycles?.length) return null
-  return props.cycles[props.cycles.length - 1]
-})
+const editableCycle = computed(() =>
+  getCurrentCycle(props.cycles, todayISO, TYPE_CYCLE.NATUREL),
+)
 
 const rulesForm = ref({
   dateDebutRegles: '',
@@ -71,10 +72,14 @@ const rulesForm = ref({
 
 watch(
   () => editableCycle.value,
-  (c) => {
-    if (!c) return
-    rulesForm.value.dateDebutRegles = c[COL_NATUREL.dateDebutRegles] || ''
-    rulesForm.value.dateFinReglesReelle = c[COL_NATUREL.dateFinReglesReelle] || ''
+  (cycle) => {
+    if (!cycle) {
+      rulesForm.value.dateDebutRegles = ''
+      rulesForm.value.dateFinReglesReelle = ''
+      return
+    }
+    rulesForm.value.dateDebutRegles = cycle[COL_NATUREL.dateDebutRegles] || ''
+    rulesForm.value.dateFinReglesReelle = cycle[COL_NATUREL.dateFinReglesReelle] || ''
   },
   { immediate: true },
 )
