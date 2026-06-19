@@ -4,8 +4,12 @@ import { TYPE_CYCLE } from './menstruationSymptoms.js'
 import {
   COL,
   addDaysToISODate,
-  getEffectiveDebutRegles,
+  daysBetweenISO,
   getDureeReglesForCalcul,
+  applyDureeReglesFields,
+  applySpmDatesEstimees,
+  computeDelaiRegles,
+  computeDureeSpmReelle,
   buildMenstruationCyclePiluleRecord,
   listCyclesPilule,
   syncForecastCyclesPilule,
@@ -13,6 +17,8 @@ import {
 import {
   COL_NATUREL,
   buildMenstruationCycleNaturelRecord,
+  getEffectiveDebutReglesNaturel,
+  getEffectiveFinReglesNaturel,
   listCyclesNaturel,
   syncForecastCyclesNaturel,
 } from './menstruationCyclesNaturel.js'
@@ -34,32 +40,42 @@ async function listCyclesForMode(supabase, userId, mode) {
 
 export function buildNaturelSeedFromPiluleCycle(piluleCycle) {
   const dateDebutRegles =
-    getEffectiveDebutRegles(piluleCycle) ?? piluleCycle[COL.dateDebutPlaquette]
+    piluleCycle[COL.dateDebutReglesReelle] ?? piluleCycle[COL.dateDebutReglesEstimee] ?? null
   if (!dateDebutRegles) {
     throw new Error('Impossible de déterminer le début des règles à partir du cycle pilule actuel.')
   }
 
+  const dateFinReglesReelle = piluleCycle[COL.dateFinReglesReelle] ?? null
+  let dureeRegles = piluleCycle[COL.dureeReglesReelle] ?? getDureeReglesForCalcul(piluleCycle)
+  if (dateFinReglesReelle) {
+    const diff = daysBetweenISO(dateDebutRegles, dateFinReglesReelle)
+    if (diff != null && diff >= 0) {
+      dureeRegles = diff + 1
+    }
+  }
+
   return {
     numeroCycle: piluleCycle[COL.numeroCycle] ?? 1,
-    dateDebutRegles,
-    dateFinReglesReelle: piluleCycle[COL.dateFinReglesReelle] ?? null,
+    dateDebutReglesEstimee: piluleCycle[COL.dateDebutReglesEstimee] ?? dateDebutRegles,
+    dateDebutReglesReelle: piluleCycle[COL.dateDebutReglesReelle] ?? null,
+    dateFinReglesReelle,
     dureeCycle: piluleCycle[COL.dureeCycle] ?? 28,
-    dureeRegles: getDureeReglesForCalcul(piluleCycle),
+    dureeRegles,
   }
 }
 
 export function buildPiluleSeedFromNaturelCycle(naturelCycle, prevNaturelCycle = null) {
-  const dateDebutRegles = naturelCycle[COL_NATUREL.dateDebutRegles]
+  const dateDebutRegles = getEffectiveDebutReglesNaturel(naturelCycle)
   if (!dateDebutRegles) {
     throw new Error('Impossible de déterminer le début des règles à partir du cycle naturel actuel.')
   }
 
-  const dateFinRegles = naturelCycle[COL_NATUREL.dateFinReglesReelle] ?? null
+  const dateFinRegles = getEffectiveFinReglesNaturel(naturelCycle)
   const dureeRegles = naturelCycle[COL_NATUREL.dureeRegles] ?? 5
 
   let dateDebutPlaquette
   if (prevNaturelCycle) {
-    const prevStart = prevNaturelCycle[COL_NATUREL.dateDebutRegles]
+    const prevStart = getEffectiveDebutReglesNaturel(prevNaturelCycle)
     const prevLen = prevNaturelCycle[COL_NATUREL.dureeCycle] ?? 28
     dateDebutPlaquette =
       prevNaturelCycle[COL_NATUREL.dateProchainesReglesEstimee] ??
@@ -72,7 +88,7 @@ export function buildPiluleSeedFromNaturelCycle(naturelCycle, prevNaturelCycle =
   return {
     numeroCycle: naturelCycle[COL_NATUREL.numeroCycle] ?? 1,
     dateDebutPlaquette,
-    dateDebutReglesReelle: dateDebutRegles,
+    dateDebutReglesReelle: naturelCycle[COL_NATUREL.dateDebutReglesReelle] ?? dateDebutRegles,
     dateFinReglesReelle: dateFinRegles,
     lastPeriodEndUnknown: !dateFinRegles,
     dureeReglesDays: dureeRegles,
@@ -178,6 +194,99 @@ async function syncTargetFromSource(
       await insertPiluleCycle(supabase, userId, n, payload)
     }
   }
+}
+
+async function patchPiluleCycleRealRules(
+  supabase,
+  userId,
+  piluleCycle,
+  { dateDebutRegles, dateFinReglesReelle },
+) {
+  if (!piluleCycle?.id || !dateDebutRegles) return
+
+  const next = { ...piluleCycle }
+  next[COL.dateDebutReglesReelle] = dateDebutRegles
+  next[COL.dateFinReglesReelle] = dateFinReglesReelle
+
+  applyDureeReglesFields(next)
+  next[COL.delaiRegles] = computeDelaiRegles(next)
+  applySpmDatesEstimees(next)
+  next[COL.dureeSpmReelle] = computeDureeSpmReelle(next)
+
+  const { error } = await supabase
+    .from(TABLE_PILULE)
+    .update({
+      [COL.dateDebutReglesReelle]: next[COL.dateDebutReglesReelle],
+      [COL.dateFinReglesReelle]: next[COL.dateFinReglesReelle],
+      [COL.dateDebutReglesEstimee]: next[COL.dateDebutReglesEstimee],
+      [COL.dateFinReglesEstimee]: next[COL.dateFinReglesEstimee],
+      [COL.dureeReglesReelle]: next[COL.dureeReglesReelle],
+      [COL.dureeReglesEstimee]: next[COL.dureeReglesEstimee],
+      [COL.delaiRegles]: next[COL.delaiRegles],
+      [COL.dateDebutSpmEstimee]: next[COL.dateDebutSpmEstimee],
+      [COL.dateFinSpmEstimee]: next[COL.dateFinSpmEstimee],
+      [COL.dureeSpmReelle]: next[COL.dureeSpmReelle],
+    })
+    .eq('id', piluleCycle.id)
+    .eq('user_id', userId)
+
+  if (error) throw error
+}
+
+async function patchNaturelCycleRealRules(
+  supabase,
+  userId,
+  naturelCycle,
+  { dateDebutRegles, dateFinReglesReelle },
+) {
+  if (!naturelCycle?.id || !dateDebutRegles) return
+
+  const { error } = await supabase
+    .from(TABLE_NATUREL)
+    .update({
+      [COL_NATUREL.dateDebutReglesReelle]: dateDebutRegles,
+      [COL_NATUREL.dateFinReglesReelle]: dateFinReglesReelle,
+    })
+    .eq('id', naturelCycle.id)
+    .eq('user_id', userId)
+
+  if (error) throw error
+}
+
+/**
+ * Aligne les dates réelles de règles entre pilule et naturel pour un même numéro de cycle,
+ * puis recalcule les prévisions des deux modes.
+ */
+export async function syncRealRulesDatesBetweenModes(
+  supabase,
+  userId,
+  { numeroCycle, dateDebutRegles, dateFinReglesReelle },
+) {
+  if (!userId || !numeroCycle || !dateDebutRegles) return
+
+  const [piluleCycles, naturelCycles] = await Promise.all([
+    listCyclesPilule(supabase, userId),
+    listCyclesNaturel(supabase, userId),
+  ])
+
+  const pilule = piluleCycles.find((c) => c[COL.numeroCycle] === numeroCycle)
+  const naturel = naturelCycles.find((c) => c[COL_NATUREL.numeroCycle] === numeroCycle)
+
+  await Promise.all([
+    patchPiluleCycleRealRules(supabase, userId, pilule, {
+      dateDebutRegles,
+      dateFinReglesReelle,
+    }),
+    patchNaturelCycleRealRules(supabase, userId, naturel, {
+      dateDebutRegles,
+      dateFinReglesReelle,
+    }),
+  ])
+
+  await Promise.all([
+    syncForecastCyclesPilule(supabase, userId),
+    syncForecastCyclesNaturel(supabase, userId),
+  ])
 }
 
 /**

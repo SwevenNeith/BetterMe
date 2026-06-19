@@ -93,7 +93,7 @@ export function getDureeReglesForCalcul(row) {
   return row[COL.dureeReglesReelle] ?? row[COL.dureeReglesEstimee] ?? DUREE_REGLES_DEFAUT
 }
 
-function applyDureeReglesFields(record, { cycle1UnknownEnd = false } = {}) {
+export function applyDureeReglesFields(record, { cycle1UnknownEnd = false } = {}) {
   const reelle = computeDureeReglesReelleFromDates(record)
 
   let estimée
@@ -248,11 +248,11 @@ function buildForecastCycleRecord(userId, numeroCycle, prev, previousCycles) {
   const dureeSpmEstimee =
     numeroCycle === 2
       ? getDureeSpmForCalcul(prev)
-      : averageRounded(
+      : (averageRounded(
           dureeSpmReellesConnues.length
             ? dureeSpmReellesConnues
             : previousCycles.map(getDureeSpmForCalcul),
-        ) ?? DUREE_SPM_DEFAUT
+        ) ?? DUREE_SPM_DEFAUT)
 
   const dateDebutReglesEstimee =
     delaiRegles != null && dateFinComprimesActifs
@@ -359,10 +359,7 @@ export async function refreshAllCyclesSpmDatesEstimees(supabase, userId) {
     applySpmDatesEstimees(temp)
     const debut = temp[COL.dateDebutSpmEstimee]
     const fin = temp[COL.dateFinSpmEstimee]
-    if (
-      debut !== cycle[COL.dateDebutSpmEstimee] ||
-      fin !== cycle[COL.dateFinSpmEstimee]
-    ) {
+    if (debut !== cycle[COL.dateDebutSpmEstimee] || fin !== cycle[COL.dateFinSpmEstimee]) {
       const { error } = await supabase
         .from(TABLE)
         .update({
@@ -504,7 +501,12 @@ export async function saveMenstruationRulesDates(supabase, userId, payload) {
 
   if (error) throw error
 
-  await syncForecastCyclesPilule(supabase, userId)
+  const { syncRealRulesDatesBetweenModes } = await import('./menstruationCycleModeSwitch.js')
+  await syncRealRulesDatesBetweenModes(supabase, userId, {
+    numeroCycle: target[COL.numeroCycle],
+    dateDebutRegles: next[COL.dateDebutReglesReelle],
+    dateFinReglesReelle: next[COL.dateFinReglesReelle],
+  })
 }
 
 export async function createMenstruationCyclePilule(supabase, userId, payload, options = {}) {

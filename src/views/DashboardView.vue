@@ -12,6 +12,7 @@ import {
   countMenstruationCyclesNaturel,
   listCyclesNaturel,
 } from '../services/menstruationCyclesNaturel.js'
+import { resolveMenstruationCycleMode } from '../services/menstruationCycleModePreference.js'
 import DashboardEmotionalCheckin from '../components/DashboardEmotionalCheckin.vue'
 import { useDashboardEmotionalCheckin } from '../composables/useDashboardEmotionalCheckin.js'
 import { useEmotionalCheckinPersistence } from '../composables/useEmotionalCheckinPersistence.js'
@@ -168,18 +169,21 @@ const loadMenstruationBoard = async (uid, gen) => {
     ])
     if (gen !== dashboardLoadGen) return
 
-    if (countPilule > 0) {
-      menstruationMode.value = 'pilule'
+    const mode = await resolveMenstruationCycleMode(supabase, uid, countPilule, countNaturel)
+    if (gen !== dashboardLoadGen) return
+
+    if (mode) {
+      menstruationMode.value = mode
       hasMenstruationCycleData.value = true
-      menstruationCycles.value = await listCyclesPilule(supabase, uid)
-      if (gen !== dashboardLoadGen) return
-      menstruationCyclesNaturel.value = []
-    } else if (countNaturel > 0) {
-      menstruationMode.value = 'naturel'
-      hasMenstruationCycleData.value = true
-      menstruationCycles.value = []
-      menstruationCyclesNaturel.value = await listCyclesNaturel(supabase, uid)
-      if (gen !== dashboardLoadGen) return
+      if (mode === 'pilule') {
+        menstruationCycles.value = await listCyclesPilule(supabase, uid)
+        if (gen !== dashboardLoadGen) return
+        menstruationCyclesNaturel.value = []
+      } else {
+        menstruationCycles.value = []
+        menstruationCyclesNaturel.value = await listCyclesNaturel(supabase, uid)
+        if (gen !== dashboardLoadGen) return
+      }
     } else {
       menstruationMode.value = null
       menstruationCycles.value = []
@@ -538,7 +542,7 @@ const onCancelEmotionalCheckin = () => {
                   :compact="true"
                 />
                 <MenstruationNaturalCycleCalendar
-                  v-else
+                  v-else-if="menstruationMode === 'naturel'"
                   :cycles="menstruationCyclesNaturel"
                   :compact="true"
                 />

@@ -3,11 +3,10 @@ import { supabase } from '../lib/supabase.js'
 import { TAB_HIDDEN_EVENT } from './useAppTabResume.js'
 import { withTimeout } from '../utils/asyncTimeout.js'
 import {
-  fetchSymptomEntriesForDate,
-  fetchSymptomEntryById,
-  formatEntryLabel,
+  fetchSymptomEntryForDate,
   rowToSymptomValues,
   saveSymptomField,
+  createEmptyValuesFromDefs,
 } from '../services/menstruationSymptoms.js'
 import { maybeScheduleReconfortNotification } from '../services/reconfortNotifications.js'
 
@@ -15,18 +14,17 @@ const SAVE_TIMEOUT_MS = 25_000
 const LOAD_TIMEOUT_MS = 20_000
 
 /**
- * Charge / enregistre les symptômes : plusieurs saisies possibles par jour.
+ * Charge / enregistre les symptômes : une seule saisie modifiable par jour.
  */
 export function useMenstruationSymptomPersistence({
   userId,
   typeCycle,
   context,
   symptomDefs,
-  createEmptyValues,
 }) {
   const values = ref({})
-  const entries = ref([])
   const activeEntryId = ref(null)
+  const savedToday = ref(false)
   const isLoading = ref(false)
   const isSaving = ref(false)
   const saveError = ref('')
@@ -36,10 +34,10 @@ export function useMenstruationSymptomPersistence({
   let saveToken = 0
   let lastContextKey = ''
 
-  function applyRowToValues(row, phase) {
+  function applyRowToValues(row) {
     values.value = row
       ? rowToSymptomValues(row, symptomDefs.value)
-      : createEmptyValues(phase)
+      : createEmptyValuesFromDefs(symptomDefs.value)
   }
 
   function cancelPendingWork() {
@@ -52,12 +50,11 @@ export function useMenstruationSymptomPersistence({
   async function loadFromDb({ silent = false } = {}) {
     const uid = unref(userId)
     const ctx = context.value
-    const phase = ctx?.phase ?? ctx?.period
 
-    if (!uid || !ctx?.iso || !phase) {
-      entries.value = []
+    if (!uid || !ctx?.iso) {
       activeEntryId.value = null
-      values.value = createEmptyValues(phase)
+      savedToday.value = false
+      values.value = createEmptyValuesFromDefs(symptomDefs.value)
       isLoading.value = false
       return
     }
@@ -67,34 +64,22 @@ export function useMenstruationSymptomPersistence({
     saveError.value = ''
 
     try {
-      const list = await withTimeout(
-        fetchSymptomEntriesForDate(supabase, uid, ctx.iso, typeCycle),
+      const row = await withTimeout(
+        fetchSymptomEntryForDate(supabase, uid, ctx.iso, typeCycle),
         LOAD_TIMEOUT_MS,
       )
       if (token !== loadToken) return
 
-      entries.value = list
-
-      const keepId =
-        activeEntryId.value && list.some((e) => e.id === activeEntryId.value)
-          ? activeEntryId.value
-          : null
-
-      if (keepId) {
-        const row = list.find((e) => e.id === keepId)
-        activeEntryId.value = keepId
-        applyRowToValues(row, phase)
-      } else {
-        activeEntryId.value = null
-        values.value = createEmptyValues(phase)
-      }
+      activeEntryId.value = row?.id ?? null
+      savedToday.value = Boolean(row?.id)
+      applyRowToValues(row)
     } catch (err) {
       if (token !== loadToken) return
       console.error(err)
       saveError.value = err.message || 'Impossible de charger les symptômes.'
-      entries.value = []
       activeEntryId.value = null
-      values.value = createEmptyValues(phase)
+      savedToday.value = false
+      values.value = createEmptyValuesFromDefs(symptomDefs.value)
     } finally {
       if (token === loadToken) isLoading.value = false
     }
@@ -104,8 +89,7 @@ export function useMenstruationSymptomPersistence({
     () => {
       const uid = unref(userId)
       const ctx = context.value
-      const phase = ctx?.phase ?? ctx?.period
-      return `${uid ?? ''}|${ctx?.iso ?? ''}|${phase ?? ''}|${ctx?.cycle?.id ?? ''}|${typeCycle}`
+      return `${uid ?? ''}|${ctx?.iso ?? ''}|${ctx?.cycle?.id ?? ''}|${typeCycle}`
     },
     (key) => {
       const contextChanged = lastContextKey && key !== lastContextKey
@@ -117,6 +101,14 @@ export function useMenstruationSymptomPersistence({
       loadFromDb({ silent })
     },
     { immediate: true },
+  )
+
+  watch(
+    () => symptomDefs.value,
+    () => {
+      if (activeEntryId.value) return
+      values.value = createEmptyValuesFromDefs(symptomDefs.value)
+    },
   )
 
   function onTabHidden() {
@@ -131,41 +123,6 @@ export function useMenstruationSymptomPersistence({
     window.removeEventListener(TAB_HIDDEN_EVENT, onTabHidden)
     cancelPendingWork()
   })
-
-  async function selectEntry(entryId) {
-    const uid = unref(userId)
-    const ctx = context.value
-    const phase = ctx?.phase ?? ctx?.period
-    if (!uid || !entryId) return
-
-    const token = ++loadToken
-    isLoading.value = true
-    saveError.value = ''
-    try {
-      const row = await fetchSymptomEntryById(supabase, uid, entryId)
-      if (token !== loadToken) return
-      activeEntryId.value = entryId
-      applyRowToValues(row, phase)
-    } catch (err) {
-      if (token !== loadToken) return
-      console.error(err)
-      saveError.value = err.message || 'Impossible de charger cette saisie.'
-    } finally {
-      if (token === loadToken) isLoading.value = false
-    }
-  }
-
-  function startNewEntry() {
-    const ctx = context.value
-    const phase = ctx?.phase ?? ctx?.period
-    activeEntryId.value = null
-    values.value = createEmptyValues(phase)
-    saveError.value = ''
-  }
-
-  function entryLabel(entry) {
-    return formatEntryLabel(entry)
-  }
 
   async function persistField(fieldKey, value) {
     const uid = unref(userId)
@@ -206,12 +163,7 @@ export function useMenstruationSymptomPersistence({
 
       if (entryId) {
         activeEntryId.value = entryId
-        const list = await withTimeout(
-          fetchSymptomEntriesForDate(supabase, uid, ctx.iso, typeCycle),
-          LOAD_TIMEOUT_MS,
-        )
-        if (token !== saveToken) return
-        entries.value = list
+        savedToday.value = true
       }
       lastSavedAt.value = Date.now()
       void maybeScheduleReconfortNotification(supabase, uid, {
@@ -259,16 +211,13 @@ export function useMenstruationSymptomPersistence({
 
   return {
     values,
-    entries,
     activeEntryId,
+    savedToday,
     isLoading,
     isSaving,
     saveError,
     lastSavedAt,
     loadFromDb,
-    selectEntry,
-    startNewEntry,
-    entryLabel,
     selectScale,
     selectEnum,
     selectBoolean,

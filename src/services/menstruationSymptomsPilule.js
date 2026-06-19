@@ -81,6 +81,18 @@ export const PILULE_SYMPTOM_PERIOD_LABELS = {
   [PILULE_SYMPTOM_PERIOD.RULES]: 'Règles',
 }
 
+export const PILULE_SYMPTOM_PERIOD_ACCORDION = {
+  [PILULE_SYMPTOM_PERIOD.ACTIVE]: { label: 'Prise active', emoji: '💊' },
+  [PILULE_SYMPTOM_PERIOD.SPM]: { label: 'SPM', emoji: '🌙' },
+  [PILULE_SYMPTOM_PERIOD.RULES]: { label: 'Règles', emoji: '🔴' },
+}
+
+export const PILULE_PERIOD_ORDER = [
+  PILULE_SYMPTOM_PERIOD.ACTIVE,
+  PILULE_SYMPTOM_PERIOD.SPM,
+  PILULE_SYMPTOM_PERIOD.RULES,
+]
+
 function mergeSymptomDefs(periodKeys) {
   const byKey = new Map()
   for (const periodKey of periodKeys) {
@@ -174,6 +186,22 @@ export function getPilulePeriodContext(cycles, iso = getLocalTodayISO()) {
     cycle,
     iso,
   }
+}
+
+export function getOrderedPilulePeriods(currentPeriod) {
+  const normalized =
+    currentPeriod === PILULE_SYMPTOM_PERIOD.CYCLE
+      ? PILULE_SYMPTOM_PERIOD.ACTIVE
+      : currentPeriod
+  if (!normalized || !PILULE_PERIOD_ORDER.includes(normalized)) {
+    return [...PILULE_PERIOD_ORDER]
+  }
+  const idx = PILULE_PERIOD_ORDER.indexOf(normalized)
+  return [...PILULE_PERIOD_ORDER.slice(idx), ...PILULE_PERIOD_ORDER.slice(0, idx)]
+}
+
+export function getAllPiluleSymptomDefs() {
+  return mergeSymptomDefs(PILULE_PERIOD_ORDER)
 }
 
 export function getSymptomsForPeriod(periodKey) {

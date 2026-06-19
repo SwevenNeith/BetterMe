@@ -62,11 +62,9 @@ const monthTitle = computed(() => {
 const gridCells = computed(() => getMonthGrid(viewYear.value, viewMonth.value))
 
 const monthSummaries = computed(() =>
-  filterSummariesForMonth(
-    calendarData.value.periodSummaries,
-    viewYear.value,
-    viewMonth.value,
-  ).sort((a, b) => a.start.localeCompare(b.start)),
+  filterSummariesForMonth(calendarData.value.periodSummaries, viewYear.value, viewMonth.value).sort(
+    (a, b) => a.start.localeCompare(b.start),
+  ),
 )
 
 const visibleLegendGroups = computed(() => buildVisibleLegendGroups(calendarData.value))
@@ -154,7 +152,6 @@ function dayCircleClasses(iso) {
     'cycle-calendar__day-num--ring-fin-spm-reel': markers.includes('fin-spm-reel'),
   }
 }
-
 </script>
 
 <template>
@@ -165,7 +162,9 @@ function dayCircleClasses(iso) {
       </button>
       <div class="cycle-calendar__title-wrap">
         <h3 class="cycle-calendar__title">{{ monthTitle }}</h3>
-        <button v-if="!compact" type="button" class="cal-today-btn" @click="goToToday">Aujourd’hui</button>
+        <button v-if="!compact" type="button" class="cal-today-btn" @click="goToToday">
+          Aujourd’hui
+        </button>
       </div>
       <button type="button" class="cal-nav-btn" aria-label="Mois suivant" @click="nextMonth">
         ›
@@ -191,11 +190,10 @@ function dayCircleClasses(iso) {
           :aria-label="cell.inMonth ? cell.iso : undefined"
         >
           <template v-if="cell.inMonth">
-            <span class="cycle-calendar__day-num" :class="dayCircleClasses(cell.iso)">{{ cell.day }}</span>
-            <div
-              class="cycle-calendar__layers"
-              :title="cellTooltip(cell.iso)"
-            >
+            <span class="cycle-calendar__day-num" :class="dayCircleClasses(cell.iso)">{{
+              cell.day
+            }}</span>
+            <div class="cycle-calendar__layers" :title="cellTooltip(cell.iso)">
               <span
                 v-for="kind in cellLayers(cell.iso).segments"
                 :key="kind"
@@ -223,12 +221,11 @@ function dayCircleClasses(iso) {
           >
             <h5 class="cycle-calendar__legend-group-title">{{ group.title }}</h5>
             <ul class="cycle-calendar__legend-list">
-              <li
-                v-for="item in group.items"
-                :key="item.kind"
-                class="cycle-calendar__legend-item"
-              >
-                <span class="cycle-calendar__legend-swatch" :class="legendSwatchClasses(item)"></span>
+              <li v-for="item in group.items" :key="item.kind" class="cycle-calendar__legend-item">
+                <span
+                  class="cycle-calendar__legend-swatch"
+                  :class="legendSwatchClasses(item)"
+                ></span>
                 <span class="cycle-calendar__legend-text">
                   <strong>{{ item.label }}</strong>
                   <span v-if="item.description" class="cycle-calendar__legend-desc">
@@ -786,7 +783,9 @@ function dayCircleClasses(iso) {
   }
 
   .cycle-calendar__legend-groups .cycle-calendar__legend-list,
-  .cycle-calendar.cycle-calendar--compact .cycle-calendar__legend-groups .cycle-calendar__legend-list {
+  .cycle-calendar.cycle-calendar--compact
+    .cycle-calendar__legend-groups
+    .cycle-calendar__legend-list {
     grid-template-columns: 1fr;
     gap: 0.45rem;
     width: 100%;

@@ -38,6 +38,10 @@ import {
 } from '../services/menstruationPatterns.js'
 import MenstruationPatternsPanel from '../components/MenstruationPatternsPanel.vue'
 import { switchMenstruationCycleMode } from '../services/menstruationCycleModeSwitch.js'
+import {
+  resolveMenstruationCycleMode,
+  saveMenstruationCycleModePreference,
+} from '../services/menstruationCycleModePreference.js'
 
 const router = useRouter()
 const localToday = getLocalTodayISO()
@@ -180,32 +184,35 @@ const loadPage = async ({ silent = false } = {}) => {
     hasPiluleCycles.value = countPilule > 0
     hasNaturelCycles.value = countNaturel > 0
 
-    if (countPilule > 0) {
-      cycleMode.value = 'pilule'
+    const mode = await resolveMenstruationCycleMode(
+      supabase,
+      userId.value,
+      countPilule,
+      countNaturel,
+    )
+
+    if (mode) {
+      cycleMode.value = mode
       hasCycleData.value = true
       menstruationNotifSettings.value = await withTimeout(
         loadMenstruationNotifSettings(userId.value),
         LOAD_TIMEOUT_MS,
       )
       if (gen !== pageLoadGen) return
-      cycles.value = await withTimeout(
-        listCyclesPilule(supabase, userId.value),
-        LOAD_TIMEOUT_MS,
-      )
-      cyclesNaturel.value = []
-    } else if (countNaturel > 0) {
-      cycleMode.value = 'naturel'
-      hasCycleData.value = true
-      menstruationNotifSettings.value = await withTimeout(
-        loadMenstruationNotifSettings(userId.value),
-        LOAD_TIMEOUT_MS,
-      )
-      if (gen !== pageLoadGen) return
-      cycles.value = []
-      cyclesNaturel.value = await withTimeout(
-        listCyclesNaturel(supabase, userId.value),
-        LOAD_TIMEOUT_MS,
-      )
+
+      if (mode === 'pilule') {
+        cycles.value = await withTimeout(
+          listCyclesPilule(supabase, userId.value),
+          LOAD_TIMEOUT_MS,
+        )
+        cyclesNaturel.value = []
+      } else {
+        cycles.value = []
+        cyclesNaturel.value = await withTimeout(
+          listCyclesNaturel(supabase, userId.value),
+          LOAD_TIMEOUT_MS,
+        )
+      }
     } else {
       cycleMode.value = null
       hasCycleData.value = false
@@ -354,6 +361,7 @@ async function switchCycleMode(target) {
     }
 
     cycleMode.value = target
+    await saveMenstruationCycleModePreference(supabase, userId.value, target)
     hasCycleData.value = true
     menstruationPatterns.value = []
     menstruationCache.publish({
@@ -405,7 +413,8 @@ const onSubmit = async () => {
 
       await createMenstruationCycleNaturel(supabase, userId.value, {
         numeroCycle: 1,
-        dateDebutRegles: form.value.lastPeriodStartDate,
+        dateDebutReglesEstimee: form.value.lastPeriodStartDate,
+        dateDebutReglesReelle: form.value.lastPeriodStartDate,
         dateFinReglesReelle: form.value.lastPeriodEndUnknown ? null : form.value.lastPeriodEndDate,
         dureeCycle: cycleLen,
         dureeRegles: rulesLen,
@@ -414,6 +423,7 @@ const onSubmit = async () => {
       hasCycleData.value = true
       hasNaturelCycles.value = true
       cycleMode.value = 'naturel'
+      await saveMenstruationCycleModePreference(supabase, userId.value, 'naturel')
       cycles.value = []
       cyclesNaturel.value = await listCyclesNaturel(supabase, userId.value)
     } catch (err) {
@@ -448,6 +458,7 @@ const onSubmit = async () => {
     hasCycleData.value = true
     hasPiluleCycles.value = true
     cycleMode.value = 'pilule'
+    await saveMenstruationCycleModePreference(supabase, userId.value, 'pilule')
     cycles.value = await listCyclesPilule(supabase, userId.value)
     cyclesNaturel.value = []
   } catch (err) {

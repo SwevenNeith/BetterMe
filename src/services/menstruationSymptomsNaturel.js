@@ -1,4 +1,4 @@
-import { COL_NATUREL, determinePhaseNaturel } from './menstruationCyclesNaturel.js'
+import { COL_NATUREL, determinePhaseNaturel, getEffectiveDebutReglesNaturel } from './menstruationCyclesNaturel.js'
 import { getLocalTodayISO } from './scheduledReminders.js'
 
 export const NATUREL_PHASE = {
@@ -123,7 +123,7 @@ function getCycleForDate(cycles, iso) {
   if (!iso || !cycles?.length) return null
   let candidate = null
   for (const c of cycles) {
-    const start = c?.[COL_NATUREL.dateDebutRegles]
+    const start = getEffectiveDebutReglesNaturel(c)
     if (!start) continue
     if (start <= iso) candidate = c
     else break
@@ -144,7 +144,7 @@ export function getNaturelPhaseContext(cycles, iso = getLocalTodayISO()) {
 
   const phase = determinePhaseNaturel(
     {
-      dateDebutRegles: cycle[COL_NATUREL.dateDebutRegles],
+      dateDebutRegles: getEffectiveDebutReglesNaturel(cycle),
       dureeCycle: cycle[COL_NATUREL.dureeCycle],
       dureeRegles: cycle[COL_NATUREL.dureeRegles],
     },
@@ -154,9 +154,34 @@ export function getNaturelPhaseContext(cycles, iso = getLocalTodayISO()) {
   return { phase, cycle, iso }
 }
 
+export const NATUREL_PHASE_ORDER = [
+  NATUREL_PHASE.MENSTRUELLE,
+  NATUREL_PHASE.FOLLICULAIRE,
+  NATUREL_PHASE.OVULATOIRE,
+  NATUREL_PHASE.LUTEALE,
+]
+
 export function getSymptomsForPhase(phaseKey) {
   if (!phaseKey) return []
   return NATUREL_SYMPTOMS_BY_PHASE[phaseKey] ?? []
+}
+
+export function getOrderedNaturelPhases(currentPhase) {
+  if (!currentPhase || !NATUREL_PHASE_ORDER.includes(currentPhase)) {
+    return [...NATUREL_PHASE_ORDER]
+  }
+  const idx = NATUREL_PHASE_ORDER.indexOf(currentPhase)
+  return [...NATUREL_PHASE_ORDER.slice(idx), ...NATUREL_PHASE_ORDER.slice(0, idx)]
+}
+
+export function getAllNaturelSymptomDefs() {
+  const byKey = new Map()
+  for (const phase of NATUREL_PHASE_ORDER) {
+    for (const def of NATUREL_SYMPTOMS_BY_PHASE[phase] ?? []) {
+      if (!byKey.has(def.key)) byKey.set(def.key, def)
+    }
+  }
+  return [...byKey.values()]
 }
 
 export function createEmptySymptomValues(phaseKey) {

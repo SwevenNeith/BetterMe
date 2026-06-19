@@ -85,6 +85,24 @@ export async function fetchSymptomEntriesForDate(supabase, userId, dateJour, typ
   return data ?? []
 }
 
+/** Une seule saisie modifiable par jour (la plus récente si plusieurs existent). */
+export async function fetchSymptomEntryForDate(supabase, userId, dateJour, typeCycle) {
+  const list = await fetchSymptomEntriesForDate(supabase, userId, dateJour, typeCycle)
+  if (!list.length) return null
+  return list[list.length - 1]
+}
+
+export function createEmptyValuesFromDefs(symptomDefs) {
+  const values = {}
+  for (const def of symptomDefs ?? []) {
+    values[def.key] = null
+    if (def.type === 'boolean_with_side' && def.sideKey) {
+      values[def.sideKey] = null
+    }
+  }
+  return values
+}
+
 export async function fetchSymptomEntryById(supabase, userId, entryId) {
   const { data, error } = await supabase
     .from(TABLE)
@@ -141,6 +159,16 @@ export async function saveSymptomField(supabase, userId, meta, fieldKey, value) 
   const col = SYMPTOM_UI_TO_DB[fieldKey]
   const dbValue = uiValueToDb(fieldKey, value)
   let entryId = meta.entryId ?? null
+
+  if (!entryId) {
+    const existing = await fetchSymptomEntryForDate(
+      supabase,
+      userId,
+      meta.dateJour,
+      meta.typeCycle,
+    )
+    if (existing?.id) entryId = existing.id
+  }
 
   const jourRelatif =
     meta.cycle && meta.dateJour

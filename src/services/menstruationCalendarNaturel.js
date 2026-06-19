@@ -1,5 +1,11 @@
 import { addDaysToISODate, daysBetweenISO } from './menstruationCycles.js'
-import { COL_NATUREL } from './menstruationCyclesNaturel.js'
+import {
+  COL_NATUREL,
+  getEffectiveDebutReglesNaturel,
+  getEffectiveFinReglesNaturel,
+  getEffectiveFenetreFertileNaturel,
+  getEffectiveOvulationDateNaturel,
+} from './menstruationCyclesNaturel.js'
 
 export const NAT_SEGMENT_KIND = {
   regles: 'regles',
@@ -36,20 +42,21 @@ export function buildCalendarDataFromNaturalCycles(cycles) {
   const segments = []
   const markers = []
   const periodSummaries = []
+  const byNum = new Map(cycles.map((c) => [c[COL_NATUREL.numeroCycle], c]))
 
   for (const row of cycles) {
     const cycleNum = row[COL_NATUREL.numeroCycle]
 
-    const debutRegles = row[COL_NATUREL.dateDebutRegles]
-    const finReglesReelle = row[COL_NATUREL.dateFinReglesReelle]
-    const finReglesEstimee = row[COL_NATUREL.dateFinReglesEstimee]
-    const finRegles = finReglesReelle || finReglesEstimee
+    const debutRegles = getEffectiveDebutReglesNaturel(row)
+    const finRegles = getEffectiveFinReglesNaturel(row)
 
     if (debutRegles) {
       markers.push({
         kind: NAT_MARKER_KIND.debutRegles,
         date: debutRegles,
-        label: `Début règles (cycle ${cycleNum})`,
+        label: row[COL_NATUREL.dateDebutReglesReelle]
+          ? `Début règles réel (cycle ${cycleNum})`
+          : `Début règles estimé (cycle ${cycleNum})`,
       })
     }
 
@@ -72,17 +79,18 @@ export function buildCalendarDataFromNaturalCycles(cycles) {
       })
     }
 
-    const ovul = row[COL_NATUREL.dateOvulationEstimee]
+    const ovul = getEffectiveOvulationDateNaturel(row)
     if (ovul) {
       markers.push({
         kind: NAT_MARKER_KIND.ovulation,
         date: ovul,
-        label: `Ovulation estimée (cycle ${cycleNum})`,
+        label: row[COL_NATUREL.dateDebutReglesReelle]
+          ? `Ovulation estimée (cycle ${cycleNum}, ancrée au réel)`
+          : `Ovulation estimée (cycle ${cycleNum})`,
       })
     }
 
-    const fertStart = row[COL_NATUREL.fenetreFertileDebut]
-    const fertEnd = row[COL_NATUREL.fenetreFertileFin]
+    const { debut: fertStart, fin: fertEnd } = getEffectiveFenetreFertileNaturel(row)
     if (fertStart && fertEnd && fertStart <= fertEnd) {
       segments.push({
         kind: NAT_SEGMENT_KIND.fenetreFertile,
@@ -102,12 +110,19 @@ export function buildCalendarDataFromNaturalCycles(cycles) {
       })
     }
 
-    const nextRules = row[COL_NATUREL.dateProchainesReglesEstimee]
-    if (nextRules) {
+    const nextCycle = byNum.get(cycleNum + 1)
+    const nextRulesDate = nextCycle
+      ? getEffectiveDebutReglesNaturel(nextCycle)
+      : row[COL_NATUREL.dateProchainesReglesEstimee]
+
+    if (nextRulesDate) {
+      const nextRealStart = nextCycle?.[COL_NATUREL.dateDebutReglesReelle]
       markers.push({
         kind: NAT_MARKER_KIND.prochainesRegles,
-        date: nextRules,
-        label: `Prochaines règles estimées (cycle ${cycleNum})`,
+        date: nextRulesDate,
+        label: nextRealStart
+          ? `Prochaines règles (cycle ${cycleNum + 1}, réel)`
+          : `Prochaines règles estimées (cycle ${cycleNum})`,
       })
     }
   }

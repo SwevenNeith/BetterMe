@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
-import { determinePhaseNaturel, COL_NATUREL } from '../services/menstruationCyclesNaturel.js'
+import { determinePhaseNaturel, COL_NATUREL, getEffectiveDebutReglesNaturel } from '../services/menstruationCyclesNaturel.js'
 import { addDaysToISODate } from '../services/menstruationCycles.js'
 import { getCurrentCycle } from '../services/menstruationSymptomEnrichment.js'
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
@@ -51,7 +51,9 @@ const viewYear = ref(todayView.year)
 const viewMonth = ref(todayView.month)
 
 const calendarData = computed(() => buildCalendarDataFromNaturalCycles(props.cycles))
-const dayIndex = computed(() => buildDayIndex(calendarData.value.segments, calendarData.value.markers))
+const dayIndex = computed(() =>
+  buildDayIndex(calendarData.value.segments, calendarData.value.markers),
+)
 
 const monthTitle = computed(() => {
   const d = new Date(viewYear.value, viewMonth.value, 1)
@@ -61,12 +63,10 @@ const monthTitle = computed(() => {
 const gridCells = computed(() => getMonthGrid(viewYear.value, viewMonth.value))
 const legendGroups = computed(() => legendForNatural())
 
-const editableCycle = computed(() =>
-  getCurrentCycle(props.cycles, todayISO, TYPE_CYCLE.NATUREL),
-)
+const editableCycle = computed(() => getCurrentCycle(props.cycles, todayISO, TYPE_CYCLE.NATUREL))
 
 const rulesForm = ref({
-  dateDebutRegles: '',
+  dateDebutReglesReelle: '',
   dateFinReglesReelle: '',
 })
 
@@ -74,11 +74,11 @@ watch(
   () => editableCycle.value,
   (cycle) => {
     if (!cycle) {
-      rulesForm.value.dateDebutRegles = ''
+      rulesForm.value.dateDebutReglesReelle = ''
       rulesForm.value.dateFinReglesReelle = ''
       return
     }
-    rulesForm.value.dateDebutRegles = cycle[COL_NATUREL.dateDebutRegles] || ''
+    rulesForm.value.dateDebutReglesReelle = cycle[COL_NATUREL.dateDebutReglesReelle] || ''
     rulesForm.value.dateFinReglesReelle = cycle[COL_NATUREL.dateFinReglesReelle] || ''
   },
   { immediate: true },
@@ -88,7 +88,7 @@ function onSubmitRulesDates() {
   if (!editableCycle.value) return
   emit('submit-rules-dates', {
     cycleId: editableCycle.value.id,
-    dateDebutRegles: rulesForm.value.dateDebutRegles || null,
+    dateDebutReglesReelle: rulesForm.value.dateDebutReglesReelle || null,
     dateFinReglesReelle: rulesForm.value.dateFinReglesReelle || null,
   })
 }
@@ -105,7 +105,7 @@ function getCycleForDay(iso) {
   // Cycles triés par numéro_cycle asc (listCyclesNaturel) : on garde le dernier start <= iso
   let candidate = null
   for (const c of props.cycles) {
-    const start = c?.[COL_NATUREL.dateDebutRegles]
+    const start = getEffectiveDebutReglesNaturel(c)
     if (!start) continue
     if (start <= iso) candidate = c
     else break
@@ -116,7 +116,7 @@ function getCycleForDay(iso) {
 function phaseForDay(iso) {
   const c = getCycleForDay(iso)
   if (!c) return null
-  const start = c[COL_NATUREL.dateDebutRegles]
+  const start = getEffectiveDebutReglesNaturel(c)
   const dureeCycle = c[COL_NATUREL.dureeCycle]
   const dureeRegles = c[COL_NATUREL.dureeRegles]
   const phase = determinePhaseNaturel({ dateDebutRegles: start, dureeCycle, dureeRegles }, iso)
@@ -176,24 +176,30 @@ function dayCircleClasses(iso) {
   const isPhaseStart = phase && prevPhase !== phase
   return {
     'nat-day-num--ring-ovulation': markers.includes('ovulation'),
-    'nat-day-num--ring-next': markers.includes('prochaines-regles'),
+    'nat-day-num--ring-next':
+      markers.includes('prochaines-regles') || markers.includes('debut-regles'),
     'nat-day-num--ring-phase-folliculaire': isPhaseStart && phase === 'folliculaire',
     'nat-day-num--ring-phase-ovulatoire': isPhaseStart && phase === 'ovulatoire',
     'nat-day-num--ring-phase-luteale': isPhaseStart && phase === 'lutéale',
   }
 }
-
 </script>
 
 <template>
   <div class="nat-calendar" :class="{ 'nat-calendar--compact': compact }">
     <div class="nat-calendar__nav">
-      <button type="button" class="nat-nav-btn" aria-label="Mois précédent" @click="prevMonth">‹</button>
+      <button type="button" class="nat-nav-btn" aria-label="Mois précédent" @click="prevMonth">
+        ‹
+      </button>
       <div class="nat-calendar__title-wrap">
         <h3 class="nat-calendar__title">{{ monthTitle }}</h3>
-        <button v-if="!compact" type="button" class="nat-today-btn" @click="goToToday">Aujourd’hui</button>
+        <button v-if="!compact" type="button" class="nat-today-btn" @click="goToToday">
+          Aujourd’hui
+        </button>
       </div>
-      <button type="button" class="nat-nav-btn" aria-label="Mois suivant" @click="nextMonth">›</button>
+      <button type="button" class="nat-nav-btn" aria-label="Mois suivant" @click="nextMonth">
+        ›
+      </button>
     </div>
 
     <div class="nat-calendar__grid" role="grid" aria-label="Calendrier du cycle (naturel)">
@@ -215,7 +221,9 @@ function dayCircleClasses(iso) {
           :aria-label="cell.inMonth ? cell.iso : undefined"
         >
           <template v-if="cell.inMonth">
-            <span class="nat-calendar__day-num" :class="dayCircleClasses(cell.iso)">{{ cell.day }}</span>
+            <span class="nat-calendar__day-num" :class="dayCircleClasses(cell.iso)">{{
+              cell.day
+            }}</span>
             <div class="nat-calendar__layers" :title="cellTooltip(cell.iso)">
               <span
                 v-for="kind in cellLayers(cell.iso).segments"
@@ -254,17 +262,18 @@ function dayCircleClasses(iso) {
     >
       <h4 class="nat-legend__title">Renseigner le réel</h4>
       <p class="nat-calendar__rules-hint">
-        Ces dates remplaceront l’estimé pour tes calculs (durée des règles, phases, etc.).
+        Ces dates réelles remplaceront l’estimé pour tes calculs (durée des règles, phases, etc.).
+        Les prévisions restent basées sur les dates estimées.
       </p>
       <div class="nat-calendar__field">
         <label>
-          <span>Début des règles</span>
-          <input v-model="rulesForm.dateDebutRegles" type="date" required />
+          <span>Début des règles (réel)</span>
+          <input v-model="rulesForm.dateDebutReglesReelle" type="date" required />
         </label>
       </div>
       <div class="nat-calendar__field">
         <label>
-          <span>Fin des règles</span>
+          <span>Fin des règles (réel)</span>
           <input v-model="rulesForm.dateFinReglesReelle" type="date" />
         </label>
       </div>
@@ -696,4 +705,3 @@ function dayCircleClasses(iso) {
   }
 }
 </style>
-

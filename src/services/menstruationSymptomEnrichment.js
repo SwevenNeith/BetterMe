@@ -1,5 +1,5 @@
 import { daysBetweenISO, getEffectiveDebutRegles, COL } from './menstruationCycles.js'
-import { COL_NATUREL } from './menstruationCyclesNaturel.js'
+import { COL_NATUREL, getEffectiveDebutReglesNaturel, getEffectiveProchainesReglesNaturel } from './menstruationCyclesNaturel.js'
 import { SYMPTOM_UI_TO_DB, TYPE_CYCLE } from './menstruationSymptoms.js'
 import { ANALYZED_SYMPTOM_KEYS, meetsThreshold } from './menstruationPatternThresholds.js'
 
@@ -8,7 +8,7 @@ const SYMPTOMS_TABLE = 'menstruation_symptomes'
 /** Date de début du cycle pour le jour relatif : début des règles (réel ou estimé). */
 export function getCycleStartDate(cycle, typeCycle) {
   if (!cycle) return null
-  if (typeCycle === TYPE_CYCLE.NATUREL) return cycle[COL_NATUREL.dateDebutRegles]
+  if (typeCycle === TYPE_CYCLE.NATUREL) return getEffectiveDebutReglesNaturel(cycle)
   return getEffectiveDebutRegles(cycle) ?? cycle[COL.dateDebutPlaquette]
 }
 
@@ -24,7 +24,7 @@ export function computeJourDansCycle(dateJour, cycle, typeCycle) {
 export function getCycleEndDate(cycle, typeCycle) {
   if (!cycle) return null
   if (typeCycle === TYPE_CYCLE.NATUREL) {
-    return cycle[COL_NATUREL.dateProchainesReglesEstimee]
+    return getEffectiveProchainesReglesNaturel(cycle)
   }
   return cycle[COL.dateProchainePlaquette]
 }
@@ -70,8 +70,7 @@ export function mergeDaySymptomState(entries) {
   }
   for (const key of ANALYZED_SYMPTOM_KEYS) {
     const nums = state[key].values.filter((v) => typeof v === 'number' && !Number.isNaN(v))
-    state[key].numeric =
-      nums.length > 0 ? nums.reduce((a, b) => Math.max(a, b), nums[0]) : null
+    state[key].numeric = nums.length > 0 ? nums.reduce((a, b) => Math.max(a, b), nums[0]) : null
   }
   return state
 }
