@@ -142,14 +142,7 @@ export function getNaturelPhaseContext(cycles, iso = getLocalTodayISO()) {
     return { phase: null, cycle: null, iso }
   }
 
-  const phase = determinePhaseNaturel(
-    {
-      dateDebutRegles: getEffectiveDebutReglesNaturel(cycle),
-      dureeCycle: cycle[COL_NATUREL.dureeCycle],
-      dureeRegles: cycle[COL_NATUREL.dureeRegles],
-    },
-    iso,
-  )
+  const phase = determinePhaseNaturel(cycle, iso)
 
   return { phase, cycle, iso }
 }

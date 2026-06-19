@@ -1,4 +1,11 @@
-import { COL, addDaysToISODate, daysBetweenISO } from './menstruationCycles.js'
+import {
+  COL,
+  addDaysToISODate,
+  daysBetweenISO,
+  getReglesPeriodEnd,
+  isOngoingRealReglesPeriod,
+} from './menstruationCycles.js'
+import { getLocalTodayISO } from './scheduledReminders.js'
 
 /** Types affichés dans le calendrier (classe CSS + légende) */
 export const CALENDAR_SEGMENT_KIND = {
@@ -51,7 +58,7 @@ function eachDayInclusive(startISO, endISO) {
 /**
  * Transforme les cycles pilule en segments (plages) et marqueurs (jours uniques).
  */
-export function buildCalendarDataFromCycles(cycles) {
+export function buildCalendarDataFromCycles(cycles, todayISO = getLocalTodayISO()) {
   const segments = []
   const markers = []
   const periodSummaries = []
@@ -132,45 +139,53 @@ export function buildCalendarDataFromCycles(cycles) {
 
     const debutReglesReel = row[COL.dateDebutReglesReelle]
     const finReglesReel = row[COL.dateFinReglesReelle]
+    const finReglesPeriod = getReglesPeriodEnd(row, todayISO)
     const debutReglesEstime = row[COL.dateDebutReglesEstimee]
     const finReglesEstime = row[COL.dateFinReglesEstimee]
 
-    if (debutReglesReel && finReglesReel) {
+    if (debutReglesReel && finReglesPeriod && debutReglesReel <= finReglesPeriod) {
       segments.push({
         kind: CALENDAR_SEGMENT_KIND.reglesReel,
         cycleNum,
         start: debutReglesReel,
-        end: finReglesReel,
-        label: `Règles réelles (cycle ${cycleNum})`,
-        detail: formatRangeLabel(debutReglesReel, finReglesReel),
+        end: finReglesPeriod,
+        label: finReglesReel
+          ? `Règles réelles (cycle ${cycleNum})`
+          : `Règles en cours (cycle ${cycleNum})`,
+        detail: formatRangeLabel(debutReglesReel, finReglesPeriod),
         durationDays: row[COL.dureeReglesReelle],
       })
       periodSummaries.push({
         kind: CALENDAR_SEGMENT_KIND.reglesReel,
         cycleNum,
         start: debutReglesReel,
-        end: finReglesReel,
-        title: `Règles réelles — cycle ${cycleNum}`,
-        detail: formatRangeLabel(debutReglesReel, finReglesReel),
+        end: finReglesPeriod,
+        title: finReglesReel
+          ? `Règles réelles — cycle ${cycleNum}`
+          : `Règles en cours — cycle ${cycleNum}`,
+        detail: formatRangeLabel(debutReglesReel, finReglesPeriod),
       })
       markers.push({
         kind: CALENDAR_MARKER_KIND.debutReglesReel,
         date: debutReglesReel,
         label: `Début règles réelles (cycle ${cycleNum})`,
       })
-      markers.push({
-        kind: CALENDAR_MARKER_KIND.finReglesReel,
-        date: finReglesReel,
-        label: `Fin règles réelles (cycle ${cycleNum})`,
-      })
+      if (finReglesReel) {
+        markers.push({
+          kind: CALENDAR_MARKER_KIND.finReglesReel,
+          date: finReglesReel,
+          label: `Fin règles réelles (cycle ${cycleNum})`,
+        })
+      }
     }
 
     if (debutReglesEstime && finReglesEstime) {
       const showEstimeRange =
-        !debutReglesReel ||
-        !finReglesReel ||
-        debutReglesEstime !== debutReglesReel ||
-        finReglesEstime !== finReglesReel
+        !isOngoingRealReglesPeriod(row, todayISO) &&
+        (!debutReglesReel ||
+          !finReglesReel ||
+          debutReglesEstime !== debutReglesReel ||
+          finReglesEstime !== finReglesReel)
 
       if (showEstimeRange) {
         segments.push({

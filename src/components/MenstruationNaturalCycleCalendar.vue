@@ -116,10 +116,7 @@ function getCycleForDay(iso) {
 function phaseForDay(iso) {
   const c = getCycleForDay(iso)
   if (!c) return null
-  const start = getEffectiveDebutReglesNaturel(c)
-  const dureeCycle = c[COL_NATUREL.dureeCycle]
-  const dureeRegles = c[COL_NATUREL.dureeRegles]
-  const phase = determinePhaseNaturel({ dateDebutRegles: start, dureeCycle, dureeRegles }, iso)
+  const phase = determinePhaseNaturel(c, iso)
   // Pas besoin d'afficher "menstruelle"
   if (!phase || phase === 'menstruelle') return null
   return phase

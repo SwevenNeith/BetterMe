@@ -1,4 +1,5 @@
 import { addDaysToISODate, daysBetweenISO, pickDate } from './menstruationCycles.js'
+import { getLocalTodayISO } from './scheduledReminders.js'
 
 const TABLE = 'menstruation_cycles_naturel'
 
@@ -48,20 +49,50 @@ export function getEffectiveFinReglesNaturel(row) {
   return pickDate(row?.[COL_NATUREL.dateFinReglesReelle], row?.[COL_NATUREL.dateFinReglesEstimee])
 }
 
+/** Règles en cours : début réel saisi, fin réelle pas encore renseignée. */
+export function isOngoingRealReglesPeriodNaturel(row, todayISO = getLocalTodayISO()) {
+  const debut = row?.[COL_NATUREL.dateDebutReglesReelle]
+  const fin = row?.[COL_NATUREL.dateFinReglesReelle]
+  return Boolean(debut && !fin && debut <= todayISO)
+}
+
+/**
+ * Fin de la période de règles pour affichage / phases :
+ * - fin réelle si connue
+ * - sinon aujourd'hui tant que les règles réelles sont en cours
+ * - sinon fin estimée
+ */
+export function getReglesPeriodEndNaturel(row, todayISO = getLocalTodayISO()) {
+  const realFin = row?.[COL_NATUREL.dateFinReglesReelle]
+  if (realFin) return realFin
+  if (isOngoingRealReglesPeriodNaturel(row, todayISO)) return todayISO
+  return row?.[COL_NATUREL.dateFinReglesEstimee] ?? null
+}
+
+export function isInMenstruellePhaseNaturel(cycle, nowISO = getLocalTodayISO()) {
+  if (!cycle || !nowISO) return false
+  const debut = getEffectiveDebutReglesNaturel(cycle)
+  if (!debut || nowISO < debut) return false
+  if (isOngoingRealReglesPeriodNaturel(cycle, nowISO)) return true
+  const fin = getReglesPeriodEndNaturel(cycle, nowISO)
+  return Boolean(fin && nowISO <= fin)
+}
+
 export function getEffectiveCycleLengthNaturel(row) {
   return row?.[COL_NATUREL.dureeCycleReelle] ?? row?.[COL_NATUREL.dureeCycle] ?? DEFAULT_CYCLE_LEN
 }
 
 /** Ovulation et fertilité ancrées sur le début effectif (réel si connu). */
-export function getEffectiveOvulationDateNaturel(row) {
+export function getEffectiveOvulationDateNaturel(row, todayISO = getLocalTodayISO()) {
+  if (isOngoingRealReglesPeriodNaturel(row, todayISO)) return null
   const start = getEffectiveDebutReglesNaturel(row)
   if (!start) return row?.[COL_NATUREL.dateOvulationEstimee] ?? null
   const cycleLen = clampInt(getEffectiveCycleLengthNaturel(row), 15, 60, DEFAULT_CYCLE_LEN)
   return addDaysToISODate(start, cycleLen - DUREE_PHASE_LUTEALE)
 }
 
-export function getEffectiveFenetreFertileNaturel(row) {
-  const ovul = getEffectiveOvulationDateNaturel(row)
+export function getEffectiveFenetreFertileNaturel(row, todayISO = getLocalTodayISO()) {
+  const ovul = getEffectiveOvulationDateNaturel(row, todayISO)
   if (!ovul) {
     return {
       debut: row?.[COL_NATUREL.fenetreFertileDebut] ?? null,
@@ -98,7 +129,7 @@ export function computeNaturalCycleDerivedFields({ dateDebutReglesEstimee, duree
   const cycleLen = clampInt(dureeCycle, 15, 60, DEFAULT_CYCLE_LEN)
   const rulesLen = clampInt(dureeRegles, 1, 20, DEFAULT_RULES_LEN)
 
-  const dateFinReglesEstimee = addDaysToISODate(dateDebutReglesEstimee, rulesLen)
+  const dateFinReglesEstimee = addDaysToISODate(dateDebutReglesEstimee, rulesLen - 1)
   const dateOvulationEstimee = addDaysToISODate(
     dateDebutReglesEstimee,
     cycleLen - DUREE_PHASE_LUTEALE,
@@ -139,10 +170,25 @@ export async function listCyclesNaturel(supabase, userId) {
   return data ?? []
 }
 
-function computeDureeReglesFromDates(debutISO, finISO) {
+/** Nombre de jours calendaires inclus entre début et fin (ex. 18→19 = 2, 18→21 = 4). */
+export function computeDureeReglesFromDates(debutISO, finISO) {
   if (!debutISO || !finISO) return null
   const diff = daysBetweenISO(debutISO, finISO)
-  return diff != null && diff >= 1 && diff <= 20 ? diff : null
+  if (diff == null || diff < 0) return null
+  const inclusive = diff + 1
+  return inclusive >= 1 && inclusive <= 20 ? inclusive : null
+}
+
+export function getRealOrOngoingDureeReglesNaturel(row, todayISO = getLocalTodayISO()) {
+  const debutReel = row?.[COL_NATUREL.dateDebutReglesReelle]
+  const finReel = row?.[COL_NATUREL.dateFinReglesReelle]
+  if (debutReel && finReel) {
+    return computeDureeReglesFromDates(debutReel, finReel)
+  }
+  if (isOngoingRealReglesPeriodNaturel(row, todayISO)) {
+    return computeDureeReglesFromDates(debutReel, todayISO)
+  }
+  return null
 }
 
 function averageRounded(values) {
@@ -155,13 +201,9 @@ function getDureeReglesForForecast(numeroCycle, prev, previousCycles) {
   if (numeroCycle === 2) {
     return prev[COL_NATUREL.dureeRegles] ?? DEFAULT_RULES_LEN
   }
-  const lens = previousCycles.map((c) => {
-    const realLen = computeDureeReglesFromDates(
-      getEffectiveDebutReglesNaturel(c),
-      getEffectiveFinReglesNaturel(c),
-    )
-    return realLen ?? c[COL_NATUREL.dureeRegles]
-  })
+  const lens = previousCycles.map(
+    (c) => getRealOrOngoingDureeReglesNaturel(c) ?? c[COL_NATUREL.dureeRegles],
+  )
   return averageRounded(lens) ?? DEFAULT_RULES_LEN
 }
 
@@ -241,10 +283,7 @@ export async function syncForecastCyclesNaturel(supabase, userId) {
     const existing = byNum.get(n)
     if (existing?.id) {
       copyKnownRealFieldsNaturel(existing, record)
-      const realRulesLen = computeDureeReglesFromDates(
-        getEffectiveDebutReglesNaturel(record),
-        getEffectiveFinReglesNaturel(record),
-      )
+      const realRulesLen = getRealOrOngoingDureeReglesNaturel(record)
       if (realRulesLen != null) {
         record[COL_NATUREL.dureeRegles] = realRulesLen
       }
@@ -299,13 +338,7 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
   }
 
   const rulesLens = cycles
-    .map((c) => {
-      const realLen = computeDureeReglesFromDates(
-        getEffectiveDebutReglesNaturel(c),
-        getEffectiveFinReglesNaturel(c),
-      )
-      return realLen ?? c[COL_NATUREL.dureeRegles]
-    })
+    .map((c) => getRealOrOngoingDureeReglesNaturel(c) ?? c[COL_NATUREL.dureeRegles])
     .filter((v) => typeof v === 'number' && !Number.isNaN(v) && v >= 1 && v <= 20)
 
   const avgCycleLen = averageRounded(cycleRealLens) ?? DEFAULT_CYCLE_LEN
@@ -313,10 +346,7 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
 
   const updates = cycles.map((c, idx) => {
     const dateDebutReglesEstimee = c[COL_NATUREL.dateDebutReglesEstimee]
-    const realRulesLen = computeDureeReglesFromDates(
-      getEffectiveDebutReglesNaturel(c),
-      getEffectiveFinReglesNaturel(c),
-    )
+    const realRulesLen = getRealOrOngoingDureeReglesNaturel(c)
     const effectiveCycleLen =
       idx >= 1
         ? (() => {
@@ -445,32 +475,54 @@ export async function saveMenstruationRulesDatesNaturel(supabase, userId, payloa
   return await listCyclesNaturel(supabase, userId)
 }
 
-export function determinePhaseNaturel({ dateDebutRegles, dureeCycle, dureeRegles }, nowISO) {
-  if (!dateDebutRegles || !nowISO) return null
+export function determinePhaseNaturel(cycle, nowISO) {
+  if (!cycle || !nowISO) return null
+
+  const dateDebutRegles = getEffectiveDebutReglesNaturel(cycle)
+  if (!dateDebutRegles) return null
+
   const dayInCycle = daysBetweenISO(dateDebutRegles, nowISO)
   if (dayInCycle == null || dayInCycle < 0) return null
 
-  const cycleLen = clampInt(dureeCycle, 15, 60, DEFAULT_CYCLE_LEN)
-  const rulesLen = clampInt(dureeRegles, 1, 20, DEFAULT_RULES_LEN)
-  const follicularEnd = cycleLen - DUREE_PHASE_LUTEALE
+  if (isInMenstruellePhaseNaturel(cycle, nowISO)) return 'menstruelle'
 
-  if (dayInCycle <= rulesLen) return 'menstruelle'
-  if (dayInCycle > rulesLen && dayInCycle <= follicularEnd) return 'folliculaire'
-  if (dayInCycle > follicularEnd && dayInCycle <= follicularEnd + DUREE_OVULATION)
-    return 'ovulatoire'
+  const starts = computeNaturalPhaseStartDates(cycle, nowISO)
+  if (!starts.folliculaire || !starts.ovulatoire || !starts.luteale) {
+    const cycleLen = clampInt(cycle[COL_NATUREL.dureeCycle], 15, 60, DEFAULT_CYCLE_LEN)
+    const rulesLen = clampInt(cycle[COL_NATUREL.dureeRegles], 1, 20, DEFAULT_RULES_LEN)
+    const follicularEnd = cycleLen - DUREE_PHASE_LUTEALE
+    if (dayInCycle < rulesLen) return 'menstruelle'
+    if (dayInCycle <= follicularEnd) return 'folliculaire'
+    if (dayInCycle <= follicularEnd + DUREE_OVULATION) return 'ovulatoire'
+    return 'lutéale'
+  }
+
+  if (nowISO < starts.folliculaire) return 'menstruelle'
+  if (nowISO < starts.ovulatoire) return 'folliculaire'
+  if (nowISO < starts.luteale) return 'ovulatoire'
   return 'lutéale'
 }
 
-export function computeNaturalPhaseStartDates(row) {
+export function computeNaturalPhaseStartDates(row, todayISO = getLocalTodayISO()) {
   if (!row) return { folliculaire: null, ovulatoire: null, luteale: null }
+
+  if (isOngoingRealReglesPeriodNaturel(row, todayISO)) {
+    return { folliculaire: null, ovulatoire: null, luteale: null }
+  }
+
   const dateDebutRegles = getEffectiveDebutReglesNaturel(row)
+  const realFin = row[COL_NATUREL.dateFinReglesReelle]
   const cycleLen = clampInt(row[COL_NATUREL.dureeCycle], 15, 60, DEFAULT_CYCLE_LEN)
   const rulesLen = clampInt(row[COL_NATUREL.dureeRegles], 1, 20, DEFAULT_RULES_LEN)
   if (!dateDebutRegles) return { folliculaire: null, ovulatoire: null, luteale: null }
 
   const follicularEnd = cycleLen - DUREE_PHASE_LUTEALE
+  const folliculaire = realFin
+    ? addDaysToISODate(realFin, 1)
+    : addDaysToISODate(dateDebutRegles, rulesLen)
+
   return {
-    folliculaire: addDaysToISODate(dateDebutRegles, rulesLen + 1),
+    folliculaire,
     ovulatoire: addDaysToISODate(dateDebutRegles, follicularEnd + 1),
     luteale: addDaysToISODate(dateDebutRegles, follicularEnd + DUREE_OVULATION + 1),
   }

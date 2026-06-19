@@ -29,6 +29,7 @@ import {
   createDefaultMenstruationNotifSettings,
   loadMenstruationNotifSettings,
   rescheduleMenstruationEstimatedNotifications,
+  rescheduleMenstruationNaturalPhaseNotifications,
 } from '../services/menstruationNotifications.js'
 import { rescheduleMenstruationPatternNotifications } from '../services/menstruationPatternNotifications.js'
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
@@ -312,6 +313,11 @@ const onSubmitRulesDatesNat = async (payload) => {
   isSavingRulesDatesNat.value = true
   try {
     cyclesNaturel.value = await saveMenstruationRulesDatesNaturel(supabase, userId.value, payload)
+    await rescheduleMenstruationNaturalPhaseNotifications(
+      userId.value,
+      cyclesNaturel.value,
+      menstruationNotifSettings.value,
+    )
     await loadPatterns(true)
   } catch (err) {
     console.error(err)

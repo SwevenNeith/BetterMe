@@ -17,8 +17,10 @@ import {
 import {
   COL_NATUREL,
   buildMenstruationCycleNaturelRecord,
+  computeNaturalCycleDerivedFields,
   getEffectiveDebutReglesNaturel,
   getEffectiveFinReglesNaturel,
+  getRealOrOngoingDureeReglesNaturel,
   listCyclesNaturel,
   syncForecastCyclesNaturel,
 } from './menstruationCyclesNaturel.js'
@@ -241,11 +243,32 @@ async function patchNaturelCycleRealRules(
 ) {
   if (!naturelCycle?.id || !dateDebutRegles) return
 
+  const todayISO = getLocalTodayISO()
+  const next = { ...naturelCycle }
+  next[COL_NATUREL.dateDebutReglesReelle] = dateDebutRegles
+  next[COL_NATUREL.dateFinReglesReelle] = dateFinReglesReelle
+
+  const dureeFromDates = getRealOrOngoingDureeReglesNaturel(next, todayISO)
+  const dureeRegles =
+    dureeFromDates ?? next[COL_NATUREL.dureeRegles] ?? 5
+
+  const derived = computeNaturalCycleDerivedFields({
+    dateDebutReglesEstimee: next[COL_NATUREL.dateDebutReglesEstimee],
+    dureeCycle: next[COL_NATUREL.dureeCycle],
+    dureeRegles,
+  })
+
   const { error } = await supabase
     .from(TABLE_NATUREL)
     .update({
       [COL_NATUREL.dateDebutReglesReelle]: dateDebutRegles,
       [COL_NATUREL.dateFinReglesReelle]: dateFinReglesReelle,
+      [COL_NATUREL.dureeRegles]: derived[COL_NATUREL.dureeRegles],
+      [COL_NATUREL.dateFinReglesEstimee]: derived[COL_NATUREL.dateFinReglesEstimee],
+      [COL_NATUREL.dateOvulationEstimee]: derived[COL_NATUREL.dateOvulationEstimee],
+      [COL_NATUREL.fenetreFertileDebut]: derived[COL_NATUREL.fenetreFertileDebut],
+      [COL_NATUREL.fenetreFertileFin]: derived[COL_NATUREL.fenetreFertileFin],
+      [COL_NATUREL.dateProchainesReglesEstimee]: derived[COL_NATUREL.dateProchainesReglesEstimee],
     })
     .eq('id', naturelCycle.id)
     .eq('user_id', userId)

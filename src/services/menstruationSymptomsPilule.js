@@ -1,9 +1,7 @@
 import {
   COL,
-  addDaysToISODate,
   getEffectiveDebutRegles,
-  getEffectiveFinRegles,
-  getDureeReglesForCalcul,
+  getReglesPeriodEnd,
   applySpmDatesEstimees,
 } from './menstruationCycles.js'
 import { getLocalTodayISO } from './scheduledReminders.js'
@@ -122,14 +120,11 @@ function isoInRange(iso, start, end) {
   return iso >= start && iso <= end
 }
 
-function getReglesWindow(row) {
+function getReglesWindow(row, iso = getLocalTodayISO()) {
   const debut = getEffectiveDebutRegles(row)
   if (!debut) return null
-  let fin = getEffectiveFinRegles(row)
-  if (!fin) {
-    const duree = getDureeReglesForCalcul(row)
-    fin = addDaysToISODate(debut, duree)
-  }
+  const fin = getReglesPeriodEnd(row, iso)
+  if (!fin) return null
   return { start: debut, end: fin }
 }
 
@@ -163,7 +158,7 @@ export function getPilulePeriodContext(cycles, iso = getLocalTodayISO()) {
   )
 
   for (const row of sorted) {
-    const regles = getReglesWindow(row)
+    const regles = getReglesWindow(row, iso)
     if (regles && isoInRange(iso, regles.start, regles.end)) {
       return { period: PILULE_SYMPTOM_PERIOD.RULES, cycle: row, iso }
     }

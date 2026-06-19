@@ -1,3 +1,5 @@
+import { getLocalTodayISO } from './scheduledReminders.js'
+
 const TABLE = 'menstruation_cycles_pilule'
 
 /** Noms de colonnes Supabase (avec accents, comme en base) */
@@ -65,6 +67,26 @@ export function getEffectiveDebutRegles(row) {
 
 export function getEffectiveFinRegles(row) {
   return pickDate(row[COL.dateFinReglesReelle], row[COL.dateFinReglesEstimee])
+}
+
+/** Règles en cours : début réel saisi, fin réelle pas encore renseignée. */
+export function isOngoingRealReglesPeriod(row, todayISO = getLocalTodayISO()) {
+  const debut = row?.[COL.dateDebutReglesReelle]
+  const fin = row?.[COL.dateFinReglesReelle]
+  return Boolean(debut && !fin && debut <= todayISO)
+}
+
+/**
+ * Fin de la période de règles pour affichage / symptômes :
+ * - fin réelle si connue
+ * - sinon aujourd'hui tant que les règles réelles sont en cours
+ * - sinon fin estimée
+ */
+export function getReglesPeriodEnd(row, todayISO = getLocalTodayISO()) {
+  const realFin = row?.[COL.dateFinReglesReelle]
+  if (realFin) return realFin
+  if (isOngoingRealReglesPeriod(row, todayISO)) return todayISO
+  return row?.[COL.dateFinReglesEstimee] ?? null
 }
 
 export function getEffectiveDebutSpm(row) {

@@ -1,8 +1,9 @@
 import { addDaysToISODate, daysBetweenISO } from './menstruationCycles.js'
+import { getLocalTodayISO } from './scheduledReminders.js'
 import {
   COL_NATUREL,
   getEffectiveDebutReglesNaturel,
-  getEffectiveFinReglesNaturel,
+  getReglesPeriodEndNaturel,
   getEffectiveFenetreFertileNaturel,
   getEffectiveOvulationDateNaturel,
 } from './menstruationCyclesNaturel.js'
@@ -38,7 +39,7 @@ function formatRangeLabel(start, end) {
   return `${formatDateShortFr(start)} → ${formatDateShortFr(end)}${duration}`
 }
 
-export function buildCalendarDataFromNaturalCycles(cycles) {
+export function buildCalendarDataFromNaturalCycles(cycles, todayISO = getLocalTodayISO()) {
   const segments = []
   const markers = []
   const periodSummaries = []
@@ -48,7 +49,7 @@ export function buildCalendarDataFromNaturalCycles(cycles) {
     const cycleNum = row[COL_NATUREL.numeroCycle]
 
     const debutRegles = getEffectiveDebutReglesNaturel(row)
-    const finRegles = getEffectiveFinReglesNaturel(row)
+    const finRegles = getReglesPeriodEndNaturel(row, todayISO)
 
     if (debutRegles) {
       markers.push({
@@ -79,7 +80,7 @@ export function buildCalendarDataFromNaturalCycles(cycles) {
       })
     }
 
-    const ovul = getEffectiveOvulationDateNaturel(row)
+    const ovul = getEffectiveOvulationDateNaturel(row, todayISO)
     if (ovul) {
       markers.push({
         kind: NAT_MARKER_KIND.ovulation,
@@ -90,7 +91,7 @@ export function buildCalendarDataFromNaturalCycles(cycles) {
       })
     }
 
-    const { debut: fertStart, fin: fertEnd } = getEffectiveFenetreFertileNaturel(row)
+    const { debut: fertStart, fin: fertEnd } = getEffectiveFenetreFertileNaturel(row, todayISO)
     if (fertStart && fertEnd && fertStart <= fertEnd) {
       segments.push({
         kind: NAT_SEGMENT_KIND.fenetreFertile,
