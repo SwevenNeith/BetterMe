@@ -115,6 +115,16 @@ Deno.serve(async (req) => {
 
         // Marque comme envoyée pour ne pas renvoyer
         await supabase.from('scheduled_notifications').update({ sent: true }).eq('id', notif.id)
+
+        if (notif.kind === 'reconfort' && notif.user_id) {
+          const sentDate = maintenant.slice(0, 10)
+          await supabase
+            .from('reconfort')
+            .update({ last_sent: sentDate })
+            .eq('user_id', notif.user_id)
+            .eq('qui', notif.title)
+            .eq('message', (notif.body || '').trim())
+        }
       }
 
       // Vérifie les rappels quotidiens

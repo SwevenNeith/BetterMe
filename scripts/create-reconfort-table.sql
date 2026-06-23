@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS public.reconfort (
   qui text NOT NULL,
   message text NOT NULL,
   conditions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  last_sent date,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT reconfort_qui_not_blank CHECK (char_length(trim(qui)) > 0),
@@ -25,6 +26,7 @@ COMMENT ON TABLE public.reconfort IS 'Messages de réconfort personnalisés par 
 COMMENT ON COLUMN public.reconfort.qui IS 'Identité de l''auteur du message (ex. Maman, Toi-même)';
 COMMENT ON COLUMN public.reconfort.message IS 'Texte du message de réconfort';
 COMMENT ON COLUMN public.reconfort.conditions IS 'Liste des identifiants de conditions (ex. symptom:fatigue:high)';
+COMMENT ON COLUMN public.reconfort.last_sent IS 'Date du dernier envoi effectif du message (NULL si jamais envoyé)';
 
 CREATE OR REPLACE FUNCTION public.reconfort_set_updated_at()
 RETURNS trigger

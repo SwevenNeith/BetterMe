@@ -1,3 +1,5 @@
+import { getLocalTodayISO } from './scheduledReminders.js'
+
 const TABLE = 'reconfort'
 
 function normalizeReconfortPayload(payload) {
@@ -27,7 +29,7 @@ function normalizeReconfortPayload(payload) {
 export async function listReconfortMessages(supabase, userId) {
   const { data, error } = await supabase
     .from(TABLE)
-    .select('id, user_id, qui, message, conditions, created_at, updated_at')
+    .select('id, user_id, qui, message, conditions, last_sent, created_at, updated_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
 
@@ -55,7 +57,7 @@ export async function createReconfortMessage(supabase, userId, payload) {
       message,
       conditions,
     })
-    .select('id, user_id, qui, message, conditions, created_at, updated_at')
+    .select('id, user_id, qui, message, conditions, last_sent, created_at, updated_at')
     .single()
 
   if (error) throw error
@@ -93,7 +95,7 @@ export async function updateReconfortMessage(supabase, userId, messageId, payloa
     })
     .eq('id', messageId)
     .eq('user_id', userId)
-    .select('id, user_id, qui, message, conditions, created_at, updated_at')
+    .select('id, user_id, qui, message, conditions, last_sent, created_at, updated_at')
     .single()
 
   if (error) throw error
@@ -124,6 +126,43 @@ export async function deleteReconfortMessage(supabase, userId, messageId) {
     .delete()
     .eq('id', messageId)
     .eq('user_id', userId)
+
+  if (error) throw error
+}
+
+/**
+ * Marque un message comme envoyé à la date indiquée (par défaut : aujourd'hui).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {{ messageId?: string, title?: string, body?: string, sentDateISO?: string }} params
+ */
+export async function markReconfortMessageSent(supabase, userId, params = {}) {
+  if (!userId) return
+
+  const sentDate = (params.sentDateISO || getLocalTodayISO()).slice(0, 10)
+  const patch = { last_sent: sentDate }
+
+  if (params.messageId) {
+    const { error } = await supabase
+      .from(TABLE)
+      .update(patch)
+      .eq('id', params.messageId)
+      .eq('user_id', userId)
+
+    if (error) throw error
+    return
+  }
+
+  const title = (params.title || '').trim()
+  const body = (params.body || '').trim()
+  if (!title || !body) return
+
+  const { error } = await supabase
+    .from(TABLE)
+    .update(patch)
+    .eq('user_id', userId)
+    .eq('qui', title)
+    .eq('message', body)
 
   if (error) throw error
 }

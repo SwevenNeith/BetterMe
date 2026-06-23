@@ -5,13 +5,13 @@ import {
   fetchSymptomEntriesForDate,
 } from './menstruationSymptoms.js'
 import { getEmotionLogForDate } from './emotionLogs.js'
-import { listReconfortMessages } from './reconfortMessages.js'
+import { listReconfortMessages, markReconfortMessageSent } from './reconfortMessages.js'
 import {
   matchesAllReconfortConditions,
   matchesReconfortCondition,
 } from './reconfortMatching.js'
 import { envoyerNotificationManuelle } from './notifications.js'
-import { addDaysToISODate } from './menstruationCycles.js'
+import { addDaysToISODate, daysBetweenISO } from './menstruationCycles.js'
 import {
   SCHEDULED_KIND,
   dateTimeLocalToDate,
@@ -277,26 +277,64 @@ export function getUsedReconfortMessageIds(messages, notifications) {
 }
 
 /**
- * Identifie le message réconfort envoyé le plus récemment.
- * @param {Array<{ id: string, qui: string, message: string }>} messages
- * @param {Array<{ title: string, body: string|null, scheduled_at: string, sent?: boolean }>} notifications
+ * Message envoyé il y a moins de N jours calendaires (last_sent sur la table reconfort).
+ * @param {{ id: string, last_sent?: string|null }} message
+ * @param {string} todayISO
+ * @param {number} [lookbackDays]
  */
-export function getMostRecentlySentReconfortMessageId(messages, notifications) {
-  const sorted = [...notifications]
-    .filter((row) => row.sent !== false)
-    .sort(
-      (a, b) =>
-        new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime(),
-    )
+export function isReconfortMessageRecentlySent(
+  message,
+  todayISO,
+  lookbackDays = RECENT_RECONFORT_LOOKBACK_DAYS,
+) {
+  if (!message?.last_sent || !todayISO) return false
+  const days = daysBetweenISO(message.last_sent, todayISO)
+  return days != null && days < lookbackDays
+}
 
-  for (const row of sorted) {
-    const match = messages.find(
-      (message) => message.qui === row.title && message.message === (row.body || '').trim(),
-    )
-    if (match?.id) return match.id
+/**
+ * IDs des messages envoyés il y a moins de N jours (via colonne last_sent).
+ * @param {Array<{ id: string, last_sent?: string|null }>} messages
+ * @param {string} todayISO
+ * @param {number} [lookbackDays]
+ */
+export function getRecentlySentReconfortMessageIds(
+  messages,
+  todayISO,
+  lookbackDays = RECENT_RECONFORT_LOOKBACK_DAYS,
+) {
+  const ids = new Set()
+  for (const message of messages) {
+    if (isReconfortMessageRecentlySent(message, todayISO, lookbackDays)) {
+      ids.add(message.id)
+    }
+  }
+  return ids
+}
+
+/**
+ * Message envoyé le plus récemment parmi ceux encore dans la fenêtre de rotation.
+ * @param {Array<{ id: string, last_sent?: string|null }>} messages
+ * @param {string} todayISO
+ * @param {number} [lookbackDays]
+ */
+export function getMostRecentlySentReconfortMessageIdFromLastSent(
+  messages,
+  todayISO,
+  lookbackDays = RECENT_RECONFORT_LOOKBACK_DAYS,
+) {
+  let bestId = null
+  let bestDate = null
+
+  for (const message of messages) {
+    if (!isReconfortMessageRecentlySent(message, todayISO, lookbackDays)) continue
+    if (!bestDate || message.last_sent > bestDate) {
+      bestDate = message.last_sent
+      bestId = message.id
+    }
   }
 
-  return null
+  return bestId
 }
 
 /**
@@ -448,7 +486,7 @@ export async function scheduleReconfortNotification(supabase, userId, payload) {
  * - Si 2 messages sont entièrement éligibles, seulement 2 notifications sont planifiées.
  * - Sinon, un message au hasard parmi ceux qui remplissent le plus de conditions (partiel).
  * - Si un seul message correspond parfaitement mais qu'il vient d'être envoyé, on prend le 2e palier.
- * - Évite de renvoyer un message déjà utilisé sur les derniers jours (si d'autres existent).
+ * - Évite de renvoyer un message dont last_sent remonte à moins de 3 jours (si d'autres existent).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {{ dateISO?: string, symptomsPartial?: Record<string, unknown>, checkinPartial?: object|null }} [options]
@@ -459,14 +497,13 @@ export async function maybeScheduleReconfortNotification(supabase, userId, optio
   const dateISO = options.dateISO || getLocalTodayISO()
 
   try {
-    const [messages, context, existingNotifications, recentSentNotifications] = await Promise.all([
+    const [messages, context, existingNotifications] = await Promise.all([
       listReconfortMessages(supabase, userId),
       buildReconfortContext(supabase, userId, dateISO, {
         symptomsPartial: options.symptomsPartial,
         checkinPartial: options.checkinPartial,
       }),
       listReconfortNotificationsForDay(supabase, userId, dateISO),
-      listRecentSentReconfortNotifications(supabase, userId, dateISO),
     ])
 
     if (!messages.length) return
@@ -475,10 +512,10 @@ export async function maybeScheduleReconfortNotification(supabase, userId, optio
     if (sentToday.length >= MAX_RECONFORT_NOTIFICATIONS_PER_DAY) return
 
     const usedTodayIds = getUsedReconfortMessageIds(messages, sentToday)
-    const recentMessageIds = getUsedReconfortMessageIds(messages, recentSentNotifications)
-    const lastSentMessageId = getMostRecentlySentReconfortMessageId(
+    const recentMessageIds = getRecentlySentReconfortMessageIds(messages, dateISO)
+    const lastSentMessageId = getMostRecentlySentReconfortMessageIdFromLastSent(
       messages,
-      recentSentNotifications,
+      dateISO,
     )
 
     await deletePendingReconfortForDay(supabase, userId, dateISO)
@@ -526,20 +563,22 @@ export async function sendRandomReconfortNotificationNow(supabase, userId) {
   }
 
   const dateISO = getLocalTodayISO()
-  const [messages, recentSentNotifications] = await Promise.all([
-    listReconfortMessages(supabase, userId),
-    listRecentSentReconfortNotifications(supabase, userId, dateISO),
-  ])
+  const messages = await listReconfortMessages(supabase, userId)
   if (!messages.length) {
     throw new Error('Aucun message de réconfort enregistré.')
   }
 
-  const recentMessageIds = getUsedReconfortMessageIds(messages, recentSentNotifications)
+  const recentMessageIds = getRecentlySentReconfortMessageIds(messages, dateISO)
   const picked = pickOneRandomReconfortMessageAvoidingRecent(messages, recentMessageIds)
   const ok = await envoyerNotificationManuelle(userId, picked.qui, picked.message)
   if (!ok) {
     throw new Error('Échec de l’envoi de la notification.')
   }
+
+  await markReconfortMessageSent(supabase, userId, {
+    messageId: picked.id,
+    sentDateISO: dateISO,
+  })
 
   return picked
 }
