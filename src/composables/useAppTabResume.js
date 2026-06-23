@@ -23,6 +23,29 @@ function isAuthenticatedAppPath() {
 
 let hiddenSince = 0
 let resumeTimer = null
+let filePickerActive = false
+let fileUploadInProgress = false
+
+function shouldSuppressTabReload() {
+  return filePickerActive || fileUploadInProgress
+}
+
+export function isTabReloadSuppressed() {
+  return shouldSuppressTabReload()
+}
+
+/** À appeler à l’ouverture / fermeture du sélecteur de fichiers (évite un reload au retour). */
+export function setFilePickerActive(active) {
+  filePickerActive = Boolean(active)
+  if (filePickerActive) {
+    hiddenSince = 0
+  }
+}
+
+/** Pendant un upload Storage, ne pas recharger l’app. */
+export function setFileUploadInProgress(active) {
+  fileUploadInProgress = Boolean(active)
+}
 
 function notifyTabHidden() {
   window.dispatchEvent(new CustomEvent(TAB_HIDDEN_EVENT))
@@ -30,6 +53,7 @@ function notifyTabHidden() {
 
 function reloadAuthenticatedApp() {
   if (!isAuthenticatedAppPath()) return
+  if (shouldSuppressTabReload()) return
   invalidateAllPageCaches()
   try {
     sessionStorage.setItem(RELOAD_FLAG, String(Date.now()))
@@ -42,6 +66,10 @@ function reloadAuthenticatedApp() {
 function tryReloadAfterBackground() {
   if (!hiddenSince) return
   if (document.visibilityState !== 'visible') return
+  if (shouldSuppressTabReload()) {
+    hiddenSince = 0
+    return
+  }
 
   const elapsed = Date.now() - hiddenSince
   hiddenSince = 0
@@ -52,11 +80,13 @@ function tryReloadAfterBackground() {
 }
 
 function markTabHidden() {
+  if (shouldSuppressTabReload()) return
   if (!hiddenSince) hiddenSince = Date.now()
   notifyTabHidden()
 }
 
 function scheduleReloadCheck() {
+  if (shouldSuppressTabReload()) return
   if (resumeTimer != null) clearTimeout(resumeTimer)
   resumeTimer = setTimeout(() => {
     resumeTimer = null
@@ -81,7 +111,7 @@ function onWindowFocus() {
 }
 
 function onPageShow(event) {
-  if (event.persisted) {
+  if (event.persisted && !shouldSuppressTabReload()) {
     reloadAuthenticatedApp()
   }
 }

@@ -1,6 +1,6 @@
 import { onMounted, onUnmounted } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import { TAB_HIDDEN_EVENT } from './useAppTabResume.js'
+import { TAB_HIDDEN_EVENT, isTabReloadSuppressed } from './useAppTabResume.js'
 
 /**
  * Invalide les chargements async quand on quitte la page (route) ou l’onglet navigateur.
@@ -32,6 +32,7 @@ export function useViewLoadGuard(onCancel) {
   }
 
   function onTabHidden() {
+    if (isTabReloadSuppressed()) return
     cancelAll()
   }
 

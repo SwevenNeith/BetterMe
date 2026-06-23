@@ -14,6 +14,7 @@ import {
 } from '../services/menstruationCyclesNaturel.js'
 import { resolveMenstruationCycleMode } from '../services/menstruationCycleModePreference.js'
 import DashboardEmotionalCheckin from '../components/DashboardEmotionalCheckin.vue'
+import DashboardComfortImages from '../components/DashboardComfortImages.vue'
 import { useDashboardEmotionalCheckin } from '../composables/useDashboardEmotionalCheckin.js'
 import { useEmotionalCheckinPersistence } from '../composables/useEmotionalCheckinPersistence.js'
 const router = useRouter()
@@ -238,7 +239,9 @@ const fetchTodayEvents = async (userId, gen) => {
       .from('timetable_events')
       .select('*')
       .eq('user_id', userId)
-      .or(`date_start.eq.${todayStr.value},and(date_start.lte.${todayStr.value},date_end.gte.${todayStr.value})`)
+      .or(
+        `date_start.eq.${todayStr.value},and(date_start.lte.${todayStr.value},date_end.gte.${todayStr.value})`,
+      )
 
     if (evError) throw evError
 
@@ -456,6 +459,7 @@ const onCancelEmotionalCheckin = () => {
         <div ref="carouselTrack" class="carousel-track">
           <!-- Left Column -->
           <div class="dashboard-column left-column">
+            <DashboardComfortImages :user-id="userId" />
             <h2 class="column-title">
               <span>Aujourd'hui</span>
               <span class="column-date">{{ formattedToday }}</span>
@@ -711,6 +715,10 @@ const onCancelEmotionalCheckin = () => {
   flex-direction: column;
   gap: 1.5rem;
   min-width: 0;
+}
+
+.left-column {
+  gap: 1rem;
 }
 
 /* Colonne droite : bloc intro + calendrier cycle + légende, même hauteur utile que la gauche (desktop) */
