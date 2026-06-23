@@ -117,13 +117,50 @@ Deno.serve(async (req) => {
         await supabase.from('scheduled_notifications').update({ sent: true }).eq('id', notif.id)
 
         if (notif.kind === 'reconfort' && notif.user_id) {
-          const sentDate = maintenant.slice(0, 10)
-          await supabase
-            .from('reconfort')
-            .update({ last_sent: sentDate })
-            .eq('user_id', notif.user_id)
-            .eq('qui', notif.title)
-            .eq('message', (notif.body || '').trim())
+          const sentDate =
+            notif.scheduled_at != null
+              ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(
+                  new Date(notif.scheduled_at),
+                )
+              : maintenant.slice(0, 10)
+
+          if (notif.reconfort_id) {
+            const { error: reconfortError } = await supabase
+              .from('reconfort')
+              .update({ last_sent: sentDate })
+              .eq('id', notif.reconfort_id)
+              .eq('user_id', notif.user_id)
+            if (reconfortError) {
+              console.error('Mise à jour last_sent (reconfort_id) :', reconfortError)
+            }
+          } else {
+            const title = (notif.title || '').trim()
+            const body = (notif.body || '').trim()
+            const { data: rows, error: listError } = await supabase
+              .from('reconfort')
+              .select('id, qui, message, last_sent')
+              .eq('user_id', notif.user_id)
+
+            if (listError) {
+              console.error('Lecture reconfort pour last_sent :', listError)
+            } else {
+              const match = (rows ?? []).find(
+                (row) =>
+                  (row.qui || '').trim() === title &&
+                  (row.message || '').trim() === body &&
+                  (!row.last_sent || row.last_sent < sentDate),
+              )
+              if (match?.id) {
+                const { error: reconfortError } = await supabase
+                  .from('reconfort')
+                  .update({ last_sent: sentDate })
+                  .eq('id', match.id)
+                if (reconfortError) {
+                  console.error('Mise à jour last_sent (match) :', reconfortError)
+                }
+              }
+            }
+          }
         }
       }
 

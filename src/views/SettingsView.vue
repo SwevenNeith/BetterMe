@@ -43,7 +43,7 @@ import {
   deleteReconfortMessage,
   listReconfortMessages,
 } from '../services/reconfortMessages.js'
-import { sendRandomReconfortNotificationNow } from '../services/reconfortNotifications.js'
+import { sendRandomReconfortNotificationNow, syncReconfortLastSentFromSentNotifications } from '../services/reconfortNotifications.js'
 const EmojiTextField = defineAsyncComponent(
   () => import('../components/EmojiTextField.vue'),
 )
@@ -146,6 +146,7 @@ const loadReconfortMessages = async () => {
   isLoadingReconfort.value = true
   reconfortLoadError.value = ''
   try {
+    await syncReconfortLastSentFromSentNotifications(supabase, userId.value)
     reconfortMessages.value = await listReconfortMessages(supabase, userId.value)
   } catch (err) {
     console.error(err)

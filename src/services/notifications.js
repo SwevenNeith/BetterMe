@@ -439,7 +439,21 @@ export async function lancerTimer(userId, dureeEnMinutes, label) {
 
 /** Déclenche l'envoi des rappels dus (quotidiens + planifiés). À appeler chaque minute (cron serveur ou app ouverte). */
 export async function declencherCronNotifications() {
-  return callEdgeFunction({ type: 'cron' })
+  const result = await callEdgeFunction({ type: 'cron' })
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (user?.id) {
+      const { syncReconfortLastSentFromSentNotifications } = await import(
+        './reconfortNotifications.js'
+      )
+      await syncReconfortLastSentFromSentNotifications(supabase, user.id)
+    }
+  } catch (err) {
+    console.error('syncReconfortLastSentFromSentNotifications:', err)
+  }
+  return result
 }
 
 /** Notification push immédiate sur cet appareil / compte */

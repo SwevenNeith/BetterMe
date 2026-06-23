@@ -143,6 +143,16 @@ export async function markReconfortMessageSent(supabase, userId, params = {}) {
   const patch = { last_sent: sentDate }
 
   if (params.messageId) {
+    const { data: current, error: readError } = await supabase
+      .from(TABLE)
+      .select('last_sent')
+      .eq('id', params.messageId)
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (readError) throw readError
+    if (current?.last_sent && current.last_sent >= sentDate) return
+
     const { error } = await supabase
       .from(TABLE)
       .update(patch)
@@ -157,12 +167,28 @@ export async function markReconfortMessageSent(supabase, userId, params = {}) {
   const body = (params.body || '').trim()
   if (!title || !body) return
 
+  const { data: rows, error: listError } = await supabase
+    .from(TABLE)
+    .select('id, last_sent, qui, message')
+    .eq('user_id', userId)
+
+  if (listError) throw listError
+
+  const normTitle = title.replace(/\s+/g, ' ')
+  const normBody = body.replace(/\s+/g, ' ')
+  const match = (rows ?? []).find(
+    (row) =>
+      (row.qui || '').trim().replace(/\s+/g, ' ') === normTitle &&
+      (row.message || '').trim().replace(/\s+/g, ' ') === normBody,
+  )
+  if (!match?.id) return
+  if (match.last_sent && match.last_sent >= sentDate) return
+
   const { error } = await supabase
     .from(TABLE)
     .update(patch)
+    .eq('id', match.id)
     .eq('user_id', userId)
-    .eq('qui', title)
-    .eq('message', body)
 
   if (error) throw error
 }
