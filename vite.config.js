@@ -72,4 +72,11 @@ export default defineConfig({
     ghPagesSpaFallback(),
   ],
   base: '/BetterMe/',
+  build: {
+    rolldownOptions: {
+      checks: {
+        pluginTimings: false,
+      },
+    },
+  },
 })
