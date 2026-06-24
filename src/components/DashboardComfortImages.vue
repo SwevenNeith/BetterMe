@@ -430,8 +430,6 @@ onMounted(() => {
   border-radius: 14px;
   overflow: hidden;
   background: rgba(213, 181, 234, 0.12);
-  min-height: 140px;
-  max-height: 280px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -456,10 +454,11 @@ onMounted(() => {
 }
 
 .comfort-images__hero {
-  width: 100%;
-  height: 100%;
-  max-height: 280px;
-  object-fit: cover;
+  max-width: 100%;
+  max-height: min(420px, 65vh);
+  width: auto;
+  height: auto;
+  object-fit: contain;
   display: block;
 }
 
