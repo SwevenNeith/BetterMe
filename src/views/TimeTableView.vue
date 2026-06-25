@@ -18,6 +18,12 @@ import {
   loadUserCategories,
   normalizeCategory,
 } from '../services/timetableCategories.js'
+import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+
+const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.TIMETABLE, undefined, {
+  setDocumentTitle: true,
+})
 
 // State
 const currentDate = ref(new Date())
@@ -931,7 +937,7 @@ const getPositionedEventsForDay = (dayIdx) => {
     <div class="bg-blob"></div>
 
     <div class="page-header">
-      <h1 class="page-title">Mon Emploi du Temps</h1>
+      <h1 class="page-title">{{ pageTitle }}</h1>
       <p class="page-subtitle">
         Visualise, planifie et structure tes journées de manière intuitive.
       </p>

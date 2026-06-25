@@ -12,6 +12,10 @@ import {
   markProjectsCustomOrder,
   persistProjectOrders,
 } from '../services/projects.js'
+import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+
+const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.PROJETS, undefined, { setDocumentTitle: true })
 
 const userId = ref(null)
 const isLoading = ref(true)
@@ -181,7 +185,7 @@ watch(userId, (id) => {
 <template>
   <div class="projects-wrapper">
     <header class="projects-header">
-      <h1 class="projects-title">Projets</h1>
+      <h1 class="projects-title">{{ pageTitle }}</h1>
       <p class="projects-subtitle">{{ projectsSubtitle }}</p>
     </header>
 

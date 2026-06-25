@@ -43,6 +43,10 @@ import {
   toISODate,
 } from '../utils/habitCalendar.js'
 import TodoItemCard from '../components/TodoItemCard.vue'
+import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+
+const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.TODO, undefined, { setDocumentTitle: true })
 
 const WEEKDAY_HEADERS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
 
@@ -525,7 +529,7 @@ watch(userId, (id) => {
 <template>
   <div class="todo-wrapper">
     <header class="todo-header">
-      <h1 class="todo-title">TODO</h1>
+      <h1 class="todo-title">{{ pageTitle }}</h1>
       <p class="todo-subtitle">{{ itemsSubtitle }}</p>
     </header>
 

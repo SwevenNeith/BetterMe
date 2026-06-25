@@ -18,6 +18,10 @@ import {
   HABIT_VALUE_TYPE_OPTIONS,
   HABIT_WEEKDAYS,
 } from '../constants/habitOptions.js'
+import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+
+const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.HABIT, undefined, { setDocumentTitle: true })
 
 const router = useRouter()
 
@@ -231,7 +235,7 @@ onUnmounted(() => {
 <template>
   <div class="habits-page">
     <header class="habits-page__header">
-      <h1 class="habits-page__title">Habit Tracker</h1>
+      <h1 class="habits-page__title">{{ pageTitle }}</h1>
       <p class="habits-page__subtitle">Suis tes habitudes au quotidien.</p>
 
       <template v-if="!showForm">

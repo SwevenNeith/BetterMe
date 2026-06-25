@@ -25,6 +25,8 @@ import {
   syncForecastCyclesNaturel,
   saveMenstruationRulesDatesNaturel,
 } from '../services/menstruationCyclesNaturel.js'
+import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import {
   createDefaultMenstruationNotifSettings,
   loadMenstruationNotifSettings,
@@ -43,6 +45,10 @@ import {
   resolveMenstruationCycleMode,
   saveMenstruationCycleModePreference,
 } from '../services/menstruationCycleModePreference.js'
+
+const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.MENSTRUATION, undefined, {
+  setDocumentTitle: true,
+})
 
 const router = useRouter()
 const localToday = getLocalTodayISO()
@@ -483,7 +489,7 @@ onMounted(() => {
 <template>
   <div class="menstruation-wrapper">
     <header class="menstruation-header">
-      <h1 class="menstruation-title">Menstruation</h1>
+      <h1 class="menstruation-title">{{ pageTitle }}</h1>
       <p class="menstruation-subtitle">
         Suis ton cycle, tes règles et tes symptômes au même endroit.
       </p>

@@ -17,6 +17,11 @@ import DashboardEmotionalCheckin from '../components/DashboardEmotionalCheckin.v
 import DashboardComfortImages from '../components/DashboardComfortImages.vue'
 import { useDashboardEmotionalCheckin } from '../composables/useDashboardEmotionalCheckin.js'
 import { useEmotionalCheckinPersistence } from '../composables/useEmotionalCheckinPersistence.js'
+import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+
+usePageDisplayLabel(APP_PAGE_IDS.DASHBOARD, undefined, { setDocumentTitle: true })
+
 const router = useRouter()
 const userName = ref('')
 const userId = ref(null)

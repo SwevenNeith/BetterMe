@@ -1,11 +1,16 @@
 <script setup>
-// Page d’accueil de la section Exercices (contenu à enrichir plus tard).
+import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+
+const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.EXERCICES_GROUP, undefined, {
+  setDocumentTitle: true,
+})
 </script>
 
 <template>
   <div class="exercices-wrapper">
     <header class="exercices-header">
-      <h1 class="exercices-title">Exercices</h1>
+      <h1 class="exercices-title">{{ pageTitle }}</h1>
       <p class="exercices-subtitle">
         Retrouve ici tes exercices et outils de bien-être.
       </p>
