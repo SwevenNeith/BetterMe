@@ -44,6 +44,7 @@ import {
   listReconfortMessages,
 } from '../services/reconfortMessages.js'
 import { sendRandomReconfortNotificationNow, syncReconfortLastSentFromSentNotifications } from '../services/reconfortNotifications.js'
+import SettingsVisibilityPanel from '../components/SettingsVisibilityPanel.vue'
 const EmojiTextField = defineAsyncComponent(
   () => import('../components/EmojiTextField.vue'),
 )
@@ -54,9 +55,10 @@ const SETTINGS_TABS = {
   RAPPELS: 'rappels',
   MENSTRUATION: 'menstruation',
   RECONFORT: 'reconfort',
+  VISIBILITE: 'visibilite',
 }
 
-const activeTab = ref(SETTINGS_TABS.RAPPELS)
+const activeTab = ref(SETTINGS_TABS.VISIBILITE)
 
 const COLLAPSIBLE_SECTIONS = {
   DAILY: 'daily',
@@ -667,6 +669,16 @@ onUnmounted(() => {
     </header>
 
     <nav class="settings-tabs" role="tablist" aria-label="Sections des réglages">
+      <button
+        type="button"
+        role="tab"
+        class="settings-tab"
+        :class="{ 'settings-tab--active': activeTab === SETTINGS_TABS.VISIBILITE }"
+        :aria-selected="activeTab === SETTINGS_TABS.VISIBILITE"
+        @click="activeTab = SETTINGS_TABS.VISIBILITE"
+      >
+        Visibilité
+      </button>
       <button
         type="button"
         role="tab"
@@ -1558,6 +1570,15 @@ onUnmounted(() => {
           </section>
         </div>
       </section>
+    </div>
+
+    <div
+      v-show="activeTab === SETTINGS_TABS.VISIBILITE"
+      role="tabpanel"
+      class="settings-tab-panel"
+      aria-label="Visibilité"
+    >
+      <SettingsVisibilityPanel :user-id="userId" />
     </div>
   </div>
 </template>

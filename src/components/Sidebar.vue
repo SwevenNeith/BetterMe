@@ -1,8 +1,16 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
+import { APP_PAGE_IDS } from '../constants/appPages.js'
+import {
+  loadPageVisibility,
+  getPageDisplayLabel,
+  isPageVisible,
+  PAGE_VISIBILITY_UPDATED_EVENT,
+  mergePageVisibility,
+} from '../services/pageVisibility.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -15,6 +23,8 @@ const isOpen = ref(false)
 const exercicesExpanded = ref(false)
 
 onMounted(async () => {
+  window.addEventListener(PAGE_VISIBILITY_UPDATED_EVENT, onPageVisibilityUpdated)
+
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -85,20 +95,45 @@ const isActive = (path) => {
   return route.path === path
 }
 
+const SIDEBAR_ITEM_IDS = APP_PAGE_IDS
+
+const pageVisibility = ref(mergePageVisibility(null))
+
+async function loadNavPageVisibility() {
+  if (!userId.value) {
+    pageVisibility.value = mergePageVisibility(null)
+    return
+  }
+  try {
+    pageVisibility.value = await loadPageVisibility(supabase, userId.value)
+  } catch (err) {
+    console.error('page visibility:', err)
+    pageVisibility.value = mergePageVisibility(null)
+  }
+}
+
+function isPageVisibleInNav(id) {
+  return isPageVisible(id, pageVisibility.value)
+}
+
+function getNavDisplayName(id) {
+  const link = sidebarLinkForId(id)
+  if (!link) return ''
+  return getPageDisplayLabel(id, pageVisibility.value, link.name)
+}
+
+function getExercicesNavDisplayName() {
+  return getPageDisplayLabel(
+    SIDEBAR_ITEM_IDS.EXERCICES_GROUP,
+    pageVisibility.value,
+    exercicesGroup.name,
+  )
+}
+
 // --- Sidebar order persistence (Supabase) ---
 const POSITIONS_TABLE = 'positions'
 const SIDEBAR_SCOPE = 'Sidebar'
 const EXERCICES_SCOPE = 'Sidebar:Exercices'
-
-const SIDEBAR_ITEM_IDS = {
-  DASHBOARD: 'dashboard',
-  TIMETABLE: 'timetable',
-  TODO: 'todo',
-  HABIT: 'habit-tracker',
-  PROJETS: 'projets',
-  MENSTRUATION: 'menstruation',
-  EXERCICES_GROUP: 'exercices-group',
-}
 
 // Position par défaut demandée : Habit Tracker avant Projets
 const defaultSidebarOrder = [
@@ -321,9 +356,18 @@ watch(
     if (!id) return
     void ensureSidebarPositionRow()
     void ensureExercicesPositionRow()
+    void loadNavPageVisibility()
   },
   { immediate: true },
 )
+
+function onPageVisibilityUpdated() {
+  void loadNavPageVisibility()
+}
+
+onUnmounted(() => {
+  window.removeEventListener(PAGE_VISIBILITY_UPDATED_EVENT, onPageVisibilityUpdated)
+})
 
 function sidebarLinkForId(id) {
   return sidebarItemsById[id] ?? null
@@ -555,7 +599,7 @@ const toggleSidebar = () => {
     <nav class="sidebar-nav">
       <template v-for="id in sidebarOrder" :key="id">
         <div
-          v-if="isGroupId(id)"
+          v-if="isGroupId(id) && isPageVisibleInNav(id)"
           class="nav-group nav-group--draggable"
           :class="{ 'nav-link--dragging': draggingId === id }"
           draggable="true"
@@ -578,7 +622,7 @@ const toggleSidebar = () => {
             @click="goToExercices"
           >
             <span class="nav-icon" v-html="exercicesGroup.icon"></span>
-            <span class="nav-label">{{ exercicesGroup.name }}</span>
+            <span class="nav-label">{{ getExercicesNavDisplayName() }}</span>
             <span class="nav-indicator" v-if="isActive(exercicesGroup.path)"></span>
           </button>
           <button
@@ -677,7 +721,7 @@ const toggleSidebar = () => {
       </div>
 
         <button
-          v-else
+          v-else-if="isPageVisibleInNav(id)"
           type="button"
           class="nav-link nav-link--draggable"
           :class="{
@@ -692,7 +736,7 @@ const toggleSidebar = () => {
           @click="onItemClick(id)"
         >
           <span class="nav-icon" v-html="sidebarLinkForId(id)?.icon"></span>
-          <span class="nav-label">{{ sidebarLinkForId(id)?.name }}</span>
+          <span class="nav-label">{{ getNavDisplayName(id) }}</span>
           <span class="nav-indicator" v-if="isActive(getItemPath(id))"></span>
         </button>
       </template>
