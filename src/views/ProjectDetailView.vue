@@ -65,6 +65,40 @@ function doneCount(items) {
   return (items ?? []).filter((item) => item.is_done).length
 }
 
+/** Étapes / sous-étapes terminées en bas, ordre relatif conservé dans chaque groupe. */
+function sortDoneLast(items) {
+  if (!items?.length) return
+  const pending = items.filter((item) => !item.is_done)
+  const done = items.filter((item) => item.is_done)
+  items.splice(0, items.length, ...pending, ...done)
+}
+
+function moveItemDoneLast(list, itemId) {
+  const idx = list.findIndex((item) => item.id === itemId)
+  if (idx < 0) return false
+  const [item] = list.splice(idx, 1)
+  list.push(item)
+  return true
+}
+
+function moveItemPendingEnd(list, itemId) {
+  const idx = list.findIndex((item) => item.id === itemId)
+  if (idx < 0) return false
+  const [item] = list.splice(idx, 1)
+  const firstDoneIdx = list.findIndex((entry) => entry.is_done)
+  if (firstDoneIdx < 0) list.push(item)
+  else list.splice(firstDoneIdx, 0, item)
+  return true
+}
+
+function normalizeProjectStepOrder(proj) {
+  if (!proj?.steps) return
+  sortDoneLast(proj.steps)
+  for (const step of proj.steps) {
+    sortDoneLast(step.substeps)
+  }
+}
+
 function editPanelTitle(kind) {
   if (kind === 'project') return 'Modifier le projet'
   if (kind === 'step') return "Modifier l'étape"
@@ -125,6 +159,7 @@ async function loadProject() {
       return
     }
     project.value = found
+    normalizeProjectStepOrder(project.value)
   } catch (err) {
     console.error(err)
     loadError.value = err.message || 'Impossible de charger le projet.'
@@ -177,26 +212,37 @@ async function saveEditPanel() {
 }
 
 async function toggleStepDone(step) {
-  if (!userId.value) return
+  if (!userId.value || !project.value) return
   const next = !step.is_done
   step.is_done = next
+  if (next) moveItemDoneLast(project.value.steps, step.id)
+  else moveItemPendingEnd(project.value.steps, step.id)
   try {
     await updateStepDone(supabase, userId.value, step.id, next)
+    await persistStepOrders(supabase, userId.value, project.value.steps)
   } catch (err) {
     step.is_done = !next
+    normalizeProjectStepOrder(project.value)
     console.error(err)
     loadError.value = err.message || "Erreur lors de la mise à jour de l'étape."
   }
 }
 
 async function toggleSubstepDone(substep) {
-  if (!userId.value) return
+  if (!userId.value || !project.value) return
+  const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
+  if (!step) return
+
   const next = !substep.is_done
   substep.is_done = next
+  if (next) moveItemDoneLast(step.substeps, substep.id)
+  else moveItemPendingEnd(step.substeps, substep.id)
   try {
     await updateSubstepDone(supabase, userId.value, substep.id, next)
+    await persistSubstepOrders(supabase, userId.value, step.substeps)
   } catch (err) {
     substep.is_done = !next
+    normalizeProjectStepOrder(project.value)
     console.error(err)
     loadError.value = err.message || 'Erreur lors de la mise à jour de la sous-étape.'
   }
