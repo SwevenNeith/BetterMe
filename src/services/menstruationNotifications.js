@@ -48,6 +48,8 @@ function buildSettingsInsertPayload(userId) {
     menstruation_notify_patterns_duree: d.menstruation_notify_patterns_duree,
     menstruation_notify_patterns_combine: d.menstruation_notify_patterns_combine,
     menstruation_pattern_notification_time: d.menstruation_pattern_notification_time,
+    todo_promesse_reminder_enabled: true,
+    todo_promesse_reminder_time: '21:30:00',
   }
 }
 

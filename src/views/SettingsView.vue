@@ -45,6 +45,18 @@ import {
 } from '../services/reconfortMessages.js'
 import { sendRandomReconfortNotificationNow, syncReconfortLastSentFromSentNotifications } from '../services/reconfortNotifications.js'
 import SettingsVisibilityPanel from '../components/SettingsVisibilityPanel.vue'
+import { APP_PAGE_IDS, APP_MAIN_PAGES } from '../constants/appPages.js'
+import {
+  createDefaultPageVisibility,
+  getPageDisplayLabel,
+  loadPageVisibility,
+  PAGE_VISIBILITY_UPDATED_EVENT,
+} from '../services/pageVisibility.js'
+import {
+  createDefaultTodoPromesseReminderSettings,
+  loadTodoPromesseReminderSettings,
+  saveTodoPromesseReminderSettings,
+} from '../services/todoPromesseNotifications.js'
 const EmojiTextField = defineAsyncComponent(
   () => import('../components/EmojiTextField.vue'),
 )
@@ -53,6 +65,7 @@ const router = useRouter()
 
 const SETTINGS_TABS = {
   RAPPELS: 'rappels',
+  TODO: 'todo',
   MENSTRUATION: 'menstruation',
   RECONFORT: 'reconfort',
   VISIBILITE: 'visibilite',
@@ -320,6 +333,17 @@ const isSavingMenstruationNotif = ref(false)
 const menstruationNotifMessage = ref('')
 const menstruationNotifError = ref('')
 
+const todoPageDefaultLabel =
+  APP_MAIN_PAGES.find((page) => page.id === APP_PAGE_IDS.TODO)?.defaultLabel ?? 'TODO'
+const pageVisibility = ref(createDefaultPageVisibility())
+const todoSettingsTabLabel = computed(() =>
+  getPageDisplayLabel(APP_PAGE_IDS.TODO, pageVisibility.value, todoPageDefaultLabel),
+)
+const todoPromesseReminderSettings = ref(createDefaultTodoPromesseReminderSettings())
+const isSavingTodoPromesseReminder = ref(false)
+const todoPromesseReminderMessage = ref('')
+const todoPromesseReminderError = ref('')
+
 const oneTimeUpcoming = ref([])
 const oneTimeFailed = ref([])
 const standaloneTimersUpcoming = ref([])
@@ -586,6 +610,49 @@ const loadMenstruationSettings = async () => {
   }
 }
 
+const loadPageVisibilityState = async () => {
+  if (!userId.value) return
+  try {
+    pageVisibility.value = await loadPageVisibility(supabase, userId.value)
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+const loadTodoPromesseReminderState = async () => {
+  if (!userId.value) return
+  try {
+    todoPromesseReminderSettings.value = await loadTodoPromesseReminderSettings(userId.value)
+  } catch (err) {
+    console.error(err)
+    todoPromesseReminderError.value =
+      err.message || 'Impossible de charger les réglages de rappel promesses.'
+  }
+}
+
+const onSaveTodoPromesseReminderSettings = async () => {
+  if (!userId.value) return
+  isSavingTodoPromesseReminder.value = true
+  todoPromesseReminderMessage.value = ''
+  todoPromesseReminderError.value = ''
+  try {
+    await saveTodoPromesseReminderSettings(userId.value, todoPromesseReminderSettings.value)
+    todoPromesseReminderMessage.value = 'Réglages enregistrés.'
+    setTimeout(() => {
+      todoPromesseReminderMessage.value = ''
+    }, 2500)
+  } catch (err) {
+    console.error(err)
+    todoPromesseReminderError.value = err.message || 'Impossible d’enregistrer ces réglages.'
+  } finally {
+    isSavingTodoPromesseReminder.value = false
+  }
+}
+
+const onPageVisibilityUpdated = () => {
+  void loadPageVisibilityState()
+}
+
 const onSaveMenstruationSettings = async () => {
   if (!userId.value) return
   isSavingMenstruationNotif.value = true
@@ -641,8 +708,11 @@ onMounted(async () => {
     loadOneTimeReminders(),
     loadMenstruationSettings(),
     loadReconfortMessages(),
+    loadPageVisibilityState(),
+    loadTodoPromesseReminderState(),
   ])
   window.addEventListener('betterme-notifications-granted', onNotificationsGranted)
+  window.addEventListener(PAGE_VISIBILITY_UPDATED_EVENT, onPageVisibilityUpdated)
   oneTimeRefreshIntervalId = window.setInterval(loadStandaloneScheduled, ONE_TIME_REFRESH_MS)
 })
 
@@ -654,6 +724,7 @@ watch(activeTab, (tab) => {
 
 onUnmounted(() => {
   window.removeEventListener('betterme-notifications-granted', onNotificationsGranted)
+  window.removeEventListener(PAGE_VISIBILITY_UPDATED_EVENT, onPageVisibilityUpdated)
   if (oneTimeRefreshIntervalId) {
     clearInterval(oneTimeRefreshIntervalId)
     oneTimeRefreshIntervalId = null
@@ -688,6 +759,16 @@ onUnmounted(() => {
         @click="activeTab = SETTINGS_TABS.RAPPELS"
       >
         Rappels
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="settings-tab"
+        :class="{ 'settings-tab--active': activeTab === SETTINGS_TABS.TODO }"
+        :aria-selected="activeTab === SETTINGS_TABS.TODO"
+        @click="activeTab = SETTINGS_TABS.TODO"
+      >
+        {{ todoSettingsTabLabel }}
       </button>
       <button
         type="button"
@@ -1158,6 +1239,62 @@ onUnmounted(() => {
       <p v-if="timerMessage" class="settings-feedback settings-feedback--ok">{{ timerMessage }}</p>
       </div>
     </section>
+    </div>
+
+    <div
+      v-show="activeTab === SETTINGS_TABS.TODO"
+      role="tabpanel"
+      class="settings-tab-panel"
+      :aria-label="todoSettingsTabLabel"
+    >
+      <section class="settings-card">
+        <h2 class="card-toggle__title card-toggle__title--static">Rappel promesses</h2>
+        <p class="card-body__desc">
+          Notification quotidienne si aucune promesse n’est prévue pour le lendemain.
+        </p>
+
+        <div v-if="!notificationsSupportees()" class="settings-alert settings-alert--warn">
+          Les notifications push ne sont pas prises en charge par ce navigateur.
+        </div>
+        <div v-else-if="!notificationsActives()" class="settings-alert">
+          Active les notifications push pour recevoir ce rappel.
+        </div>
+
+        <div class="reminder-row">
+          <label class="choice-check choice-check--card">
+            <input
+              v-model="todoPromesseReminderSettings.todo_promesse_reminder_enabled"
+              type="checkbox"
+            />
+            <span>Recevoir le rappel promesses</span>
+          </label>
+          <label class="field">
+            <span>Heure d’envoi</span>
+            <input
+              v-model="todoPromesseReminderSettings.todo_promesse_reminder_time"
+              type="time"
+              :disabled="!todoPromesseReminderSettings.todo_promesse_reminder_enabled"
+            />
+          </label>
+        </div>
+
+        <p v-if="todoPromesseReminderError" class="settings-feedback settings-feedback--error">
+          {{ todoPromesseReminderError }}
+        </p>
+        <p v-if="todoPromesseReminderMessage" class="settings-feedback settings-feedback--ok">
+          {{ todoPromesseReminderMessage }}
+        </p>
+        <div class="settings-actions">
+          <button
+            type="button"
+            class="btn btn--primary"
+            :disabled="isSavingTodoPromesseReminder"
+            @click="onSaveTodoPromesseReminderSettings"
+          >
+            {{ isSavingTodoPromesseReminder ? 'Enregistrement…' : 'Enregistrer' }}
+          </button>
+        </div>
+      </section>
     </div>
 
     <div
@@ -1714,6 +1851,10 @@ onUnmounted(() => {
   font-size: 1.25rem;
   font-weight: 800;
   color: #ad81be;
+}
+
+.card-toggle__title--static {
+  margin-bottom: 0.35rem;
 }
 
 .card-toggle:hover .card-toggle__title {

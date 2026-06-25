@@ -19,6 +19,188 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
+const TODO_FREQUENCY = {
+  ONE_OFF: 'ponctuel',
+  DAILY: 'quotidien',
+  WEEKLY: 'hebdomadaire',
+}
+
+function normalizeDateISO(value: unknown): string | null {
+  if (value == null || value === '') return null
+  return String(value).slice(0, 10)
+}
+
+function normalizeTimeHHmm(value: unknown): string {
+  if (value == null || value === '') return '00:00'
+  const raw = String(value).trim()
+  const match = raw.match(/^(\d{1,2}):(\d{2})/)
+  if (!match) return '00:00'
+  const h = Math.min(23, Math.max(0, parseInt(match[1], 10) || 0))
+  const m = Math.min(59, Math.max(0, parseInt(match[2], 10) || 0))
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+function getIsoWeekdayFromYMD(year: number, month: number, day: number): number {
+  const date = new Date(year, month - 1, day)
+  const jsDay = date.getDay()
+  return jsDay === 0 ? 7 : jsDay
+}
+
+function isTodoDueOnDate(
+  item: {
+    frequence?: string
+    date_echeance?: string
+    jour_semaine?: number | null
+  },
+  dateISO: string,
+): boolean {
+  const target = normalizeDateISO(dateISO)
+  const start = normalizeDateISO(item.date_echeance)
+  if (!target || !start || target < start) return false
+
+  if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
+    return target === start
+  }
+
+  if (item.frequence === TODO_FREQUENCY.DAILY) {
+    return true
+  }
+
+  if (item.frequence === TODO_FREQUENCY.WEEKLY) {
+    const [year, month, day] = target.split('-').map(Number)
+    return getIsoWeekdayFromYMD(year, month, day) === Number(item.jour_semaine)
+  }
+
+  return false
+}
+
+function countPromessesForDate(
+  items: Array<{ is_promesse?: boolean; frequence?: string; date_echeance?: string; jour_semaine?: number | null }>,
+  dateISO: string,
+): number {
+  return items.filter((item) => Boolean(item.is_promesse) && isTodoDueOnDate(item, dateISO)).length
+}
+
+function getParisNow() {
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+  const parts = Object.fromEntries(
+    formatter.formatToParts(new Date()).map((part) => [part.type, part.value]),
+  )
+  return {
+    dateISO: `${parts.year}-${parts.month}-${parts.day}`,
+    timeHHmm: `${parts.hour}:${parts.minute}`,
+  }
+}
+
+function addDaysISO(dateISO: string, delta: number): string {
+  const [year, month, day] = dateISO.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  date.setDate(date.getDate() + delta)
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function getTodoPageLabel(pageVisibility: unknown): string {
+  if (!pageVisibility || typeof pageVisibility !== 'object' || Array.isArray(pageVisibility)) {
+    return 'TODO'
+  }
+  const entry = (pageVisibility as Record<string, { label?: string | null }>).todo
+  const custom = typeof entry?.label === 'string' ? entry.label.trim() : ''
+  return custom || 'TODO'
+}
+
+async function processTodoPromesseReminders(parisNow: { dateISO: string; timeHHmm: string }) {
+  const { data: settingsRows, error: settingsError } = await supabase
+    .from('settings')
+    .select(
+      'user_id, todo_promesse_reminder_enabled, todo_promesse_reminder_time, todo_promesse_reminder_last_sent, page_visibility',
+    )
+    .eq('todo_promesse_reminder_enabled', true)
+
+  if (settingsError) {
+    console.error('Erreur récupération réglages promesses TODO :', settingsError)
+    return
+  }
+
+  const tomorrowISO = addDaysISO(parisNow.dateISO, 1)
+
+  for (const row of settingsRows ?? []) {
+    const userId = row.user_id
+    if (!userId) continue
+
+    const reminderTime = normalizeTimeHHmm(row.todo_promesse_reminder_time)
+    if (reminderTime !== parisNow.timeHHmm) continue
+
+    if (row.todo_promesse_reminder_last_sent === parisNow.dateISO) {
+      continue
+    }
+
+    const { data: items, error: itemsError } = await supabase
+      .from('todo_items')
+      .select('frequence, jour_semaine, date_echeance, is_promesse')
+      .eq('user_id', userId)
+      .eq('is_promesse', true)
+
+    if (itemsError) {
+      console.error('Erreur lecture promesses TODO :', itemsError)
+      continue
+    }
+
+    if (countPromessesForDate(items ?? [], tomorrowISO) > 0) {
+      continue
+    }
+
+    const { data: subscriptions, error: subsError } = await supabase
+      .from('push_subscriptions')
+      .select('subscription')
+      .eq('user_id', userId)
+
+    if (subsError) {
+      console.error('Erreur push_subscriptions promesses TODO :', subsError)
+      continue
+    }
+
+    if (!subscriptions?.length) {
+      continue
+    }
+
+    const pageLabel = getTodoPageLabel(row.page_visibility)
+    const payload = JSON.stringify({
+      title: pageLabel,
+      body: 'Tu n’as pas encore de promesse pour demain. Penses à en ajouter une 💜',
+    })
+
+    for (const sub of subscriptions) {
+      try {
+        await webpush.sendNotification(sub.subscription, payload)
+      } catch (e) {
+        console.error('Erreur envoi rappel promesses TODO :', e)
+      }
+    }
+
+    const { error: updateError } = await supabase
+      .from('settings')
+      .update({ todo_promesse_reminder_last_sent: parisNow.dateISO })
+      .eq('user_id', userId)
+
+    if (updateError) {
+      console.error('Mise à jour todo_promesse_reminder_last_sent :', updateError)
+    } else {
+      console.log('Rappel promesses TODO envoyé pour', userId)
+    }
+  }
+}
+
 Deno.serve(async (req) => {
   // Répond aux requêtes preflight OPTIONS du navigateur
   if (req.method === 'OPTIONS') {
@@ -195,6 +377,10 @@ Deno.serve(async (req) => {
           }
         }
       }
+
+      const parisNow = getParisNow()
+      console.log('Heure Paris pour promesses TODO :', parisNow.timeHHmm)
+      await processTodoPromesseReminders(parisNow)
     }
 
     return new Response(JSON.stringify({ success: true }), {
