@@ -43,10 +43,24 @@ const props = defineProps({
     type: String,
     default: null,
   },
+  annualOnly: {
+    type: Boolean,
+    default: false,
+  },
+  monthlyOnly: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const today = new Date()
-const viewMode = ref(HABIT_VIEW_MODE.ANNUAL)
+const viewMode = ref(
+  props.monthlyOnly
+    ? HABIT_VIEW_MODE.MONTHLY
+    : props.annualOnly
+      ? HABIT_VIEW_MODE.ANNUAL
+      : HABIT_VIEW_MODE.ANNUAL,
+)
 const selectedYear = ref(today.getFullYear())
 const selectedMonth = ref(today.getMonth() + 1)
 
@@ -268,7 +282,12 @@ watch(viewMode, hideTooltip)
 <template>
   <div class="habit-grid" :style="{ '--habit-color': habit.couleur }">
     <div class="habit-grid__toolbar">
-      <div class="habit-grid__mode" role="tablist" aria-label="Mode d’affichage">
+      <div
+        v-if="!annualOnly && !monthlyOnly"
+        class="habit-grid__mode"
+        role="tablist"
+        aria-label="Mode d’affichage"
+      >
         <button
           type="button"
           role="tab"
@@ -292,7 +311,10 @@ watch(viewMode, hideTooltip)
       </div>
 
       <div class="habit-grid__period">
-        <label v-if="viewMode === HABIT_VIEW_MODE.MONTHLY" class="habit-grid__select-wrap">
+        <label
+          v-if="(monthlyOnly || viewMode === HABIT_VIEW_MODE.MONTHLY) && !annualOnly"
+          class="habit-grid__select-wrap"
+        >
           <span class="habit-grid__select-label">Mois</span>
           <select v-model.number="selectedMonth" class="habit-grid__select">
             <option v-for="opt in monthOptions" :key="opt.value" :value="opt.value">
@@ -321,7 +343,10 @@ watch(viewMode, hideTooltip)
     <div v-if="isLoadingLogs" class="habit-grid__loading">Chargement du suivi…</div>
 
     <div v-else class="habit-grid__board" @mouseleave="hideTooltip">
-      <div v-if="viewMode === HABIT_VIEW_MODE.ANNUAL" class="habit-grid__annual">
+      <div
+        v-if="!monthlyOnly && (annualOnly || viewMode === HABIT_VIEW_MODE.ANNUAL)"
+        class="habit-grid__annual"
+      >
         <section
           v-for="column in annualColumns"
           :key="column.month"
@@ -346,7 +371,11 @@ watch(viewMode, hideTooltip)
         </section>
       </div>
 
-      <div v-else class="habit-grid__monthly" :style="monthlyGridStyle">
+      <div
+        v-else-if="monthlyOnly || (!annualOnly && viewMode === HABIT_VIEW_MODE.MONTHLY)"
+        class="habit-grid__monthly"
+        :style="monthlyGridStyle"
+      >
         <span
           v-for="(label, index) in monthlyLayout.weekdayHeaders"
           :key="`wh-${label}`"

@@ -1,13 +1,35 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { supabase } from '../lib/supabase.js'
-import { APP_MAIN_PAGES } from '../constants/appPages.js'
+import { APP_MAIN_PAGES, APP_PAGE_IDS } from '../constants/appPages.js'
+import {
+  DASHBOARD_WIDGETS,
+  DASHBOARD_WIDGET_IDS,
+  DASHBOARD_WIDGET_MOBILE_ORDER,
+  DASHBOARD_WIDGET_DESKTOP_LEFT,
+  DASHBOARD_WIDGET_DESKTOP_RIGHT,
+  DASHBOARD_WIDGET_DESKTOP_FULL,
+} from '../constants/dashboardWidgets.js'
+import DashboardVisibilityWidgetRow from './DashboardVisibilityWidgetRow.vue'
 import {
   loadPageVisibility,
   savePageVisibility,
   getPageDisplayLabel,
   mergePageVisibility,
 } from '../services/pageVisibility.js'
+import {
+  loadDashboardVisibility,
+  saveDashboardVisibility,
+  mergeDashboardVisibility,
+} from '../services/dashboardVisibility.js'
+
+const DASHBOARD_WIDGET_PAGE_IDS = {
+  [DASHBOARD_WIDGET_IDS.TODO]: APP_PAGE_IDS.TODO,
+  [DASHBOARD_WIDGET_IDS.TIMETABLE]: APP_PAGE_IDS.TIMETABLE,
+  [DASHBOARD_WIDGET_IDS.HABITS]: APP_PAGE_IDS.HABIT,
+  [DASHBOARD_WIDGET_IDS.MENSTRUATION]: APP_PAGE_IDS.MENSTRUATION,
+  [DASHBOARD_WIDGET_IDS.PROJECTS]: APP_PAGE_IDS.PROJETS,
+}
 
 const props = defineProps({
   userId: {
@@ -32,6 +54,7 @@ const loadError = ref('')
 const saveError = ref('')
 const saveMessage = ref('')
 const pageVisibility = ref(mergePageVisibility(null))
+const dashboardVisibility = ref(mergeDashboardVisibility(null))
 const editingPageId = ref(null)
 const editingLabel = ref('')
 
@@ -43,6 +66,35 @@ const pagesForList = computed(() =>
   })),
 )
 
+const dashboardWidgetsForList = computed(() =>
+  DASHBOARD_WIDGETS.map((widget) => {
+    const pageId = DASHBOARD_WIDGET_PAGE_IDS[widget.id]
+    return {
+      ...widget,
+      visible: dashboardVisibility.value[widget.id]?.visible !== false,
+      displayLabel: pageId
+        ? getPageDisplayLabel(pageId, pageVisibility.value, widget.defaultLabel)
+        : widget.defaultLabel,
+    }
+  }),
+)
+
+const dashboardWidgetMap = computed(() =>
+  Object.fromEntries(dashboardWidgetsForList.value.map((widget) => [widget.id, widget])),
+)
+
+function orderedDashboardWidgets(ids) {
+  return ids.map((id) => dashboardWidgetMap.value[id]).filter(Boolean)
+}
+
+const dashboardMobileWidgets = computed(() => orderedDashboardWidgets(DASHBOARD_WIDGET_MOBILE_ORDER))
+
+const dashboardLeftWidgets = computed(() => orderedDashboardWidgets(DASHBOARD_WIDGET_DESKTOP_LEFT))
+
+const dashboardRightWidgets = computed(() => orderedDashboardWidgets(DASHBOARD_WIDGET_DESKTOP_RIGHT))
+
+const dashboardFullWidgets = computed(() => orderedDashboardWidgets(DASHBOARD_WIDGET_DESKTOP_FULL))
+
 function toggleSection(section) {
   expandedSections.value[section] = !expandedSections.value[section]
 }
@@ -53,11 +105,17 @@ async function loadSettings() {
   isLoading.value = true
   loadError.value = ''
   try {
-    pageVisibility.value = await loadPageVisibility(supabase, props.userId)
+    const [pages, dashboard] = await Promise.all([
+      loadPageVisibility(supabase, props.userId),
+      loadDashboardVisibility(supabase, props.userId),
+    ])
+    pageVisibility.value = pages
+    dashboardVisibility.value = dashboard
   } catch (err) {
     console.error(err)
     loadError.value = err.message || 'Impossible de charger la visibilité des pages.'
     pageVisibility.value = mergePageVisibility(null)
+    dashboardVisibility.value = mergeDashboardVisibility(null)
   } finally {
     isLoading.value = false
   }
@@ -81,6 +139,37 @@ async function persist() {
   } finally {
     isSaving.value = false
   }
+}
+
+async function persistDashboard() {
+  if (!props.userId || isSaving.value) return
+
+  isSaving.value = true
+  saveError.value = ''
+  saveMessage.value = ''
+  try {
+    await saveDashboardVisibility(supabase, props.userId, dashboardVisibility.value)
+    saveMessage.value = 'Enregistré.'
+    setTimeout(() => {
+      saveMessage.value = ''
+    }, 2500)
+  } catch (err) {
+    console.error(err)
+    saveError.value = err.message || 'Erreur lors de la sauvegarde.'
+  } finally {
+    isSaving.value = false
+  }
+}
+
+async function onToggleDashboardVisible(widgetId, visible) {
+  dashboardVisibility.value = {
+    ...dashboardVisibility.value,
+    [widgetId]: {
+      ...dashboardVisibility.value[widgetId],
+      visible,
+    },
+  }
+  await persistDashboard()
 }
 
 async function onToggleVisible(pageId, visible) {
@@ -302,8 +391,70 @@ watch(
         class="card-body"
       >
         <p class="card-body__desc">
-          Les options de visibilité du tableau de bord seront configurables ici prochainement.
+          Affiche ou masque chaque bloc du tableau de bord (ordinateur et téléphone).
         </p>
+
+        <p v-if="isLoading" class="visibility-state">Chargement…</p>
+        <p v-else-if="loadError" class="settings-feedback settings-feedback--error" role="alert">
+          {{ loadError }}
+        </p>
+
+        <template v-else>
+          <!-- Desktop : même disposition que le dashboard -->
+          <div class="dashboard-visibility-grid" aria-label="Blocs du dashboard (ordinateur)">
+            <div class="dashboard-visibility-col dashboard-visibility-col--left">
+              <ul class="visibility-pages-list">
+                <DashboardVisibilityWidgetRow
+                  v-for="widget in dashboardLeftWidgets"
+                  :key="widget.id"
+                  :widget="widget"
+                  :disabled="isSaving"
+                  @toggle="onToggleDashboardVisible"
+                />
+              </ul>
+            </div>
+
+            <div class="dashboard-visibility-col dashboard-visibility-col--right">
+              <ul class="visibility-pages-list">
+                <DashboardVisibilityWidgetRow
+                  v-for="widget in dashboardRightWidgets"
+                  :key="widget.id"
+                  :widget="widget"
+                  :disabled="isSaving"
+                  @toggle="onToggleDashboardVisible"
+                />
+              </ul>
+            </div>
+
+            <div class="dashboard-visibility-col dashboard-visibility-col--full">
+              <ul class="visibility-pages-list">
+                <DashboardVisibilityWidgetRow
+                  v-for="widget in dashboardFullWidgets"
+                  :key="widget.id"
+                  :widget="widget"
+                  :disabled="isSaving"
+                  @toggle="onToggleDashboardVisible"
+                />
+              </ul>
+            </div>
+          </div>
+
+          <!-- Mobile : liste dans l’ordre du carrousel -->
+          <ul class="visibility-pages-list dashboard-visibility-mobile-list" aria-label="Blocs du dashboard (téléphone)">
+            <DashboardVisibilityWidgetRow
+              v-for="widget in dashboardMobileWidgets"
+              :key="`mobile-${widget.id}`"
+              :widget="widget"
+              :disabled="isSaving"
+              @toggle="onToggleDashboardVisible"
+            />
+          </ul>
+        </template>
+
+        <p v-if="saveError" class="settings-feedback settings-feedback--error" role="alert">
+          {{ saveError }}
+        </p>
+        <p v-if="saveMessage" class="settings-feedback settings-feedback--ok">{{ saveMessage }}</p>
       </div>
     </section>
 </template>
@@ -538,6 +689,41 @@ watch(
 .visibility-page-edit:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Dashboard visibility layout (miroir du dashboard) */
+.dashboard-visibility-grid {
+  display: none;
+}
+
+.dashboard-visibility-mobile-list {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 769px) {
+  .dashboard-visibility-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem 1.5rem;
+    align-items: start;
+  }
+
+  .dashboard-visibility-mobile-list {
+    display: none;
+  }
+
+  .dashboard-visibility-col--full {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard-visibility-col .visibility-pages-list {
+    height: 100%;
+  }
+}
+
+.dashboard-visibility-row {
+  width: 100%;
 }
 
 @media (prefers-color-scheme: dark) {

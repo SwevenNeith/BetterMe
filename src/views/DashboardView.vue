@@ -1,6 +1,6 @@
 <!-- eslint-disable no-useless-assignment -->
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { useRouter } from 'vue-router'
 import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
@@ -15,10 +15,15 @@ import {
 import { resolveMenstruationCycleMode } from '../services/menstruationCycleModePreference.js'
 import DashboardEmotionalCheckin from '../components/DashboardEmotionalCheckin.vue'
 import DashboardComfortImages from '../components/DashboardComfortImages.vue'
+import DashboardTodayTodos from '../components/DashboardTodayTodos.vue'
+import DashboardHabitsAnnual from '../components/DashboardHabitsAnnual.vue'
+import DashboardActiveProjects from '../components/DashboardActiveProjects.vue'
 import { useDashboardEmotionalCheckin } from '../composables/useDashboardEmotionalCheckin.js'
 import { useEmotionalCheckinPersistence } from '../composables/useEmotionalCheckinPersistence.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { useDashboardVisibility } from '../composables/useDashboardVisibility.js'
+import { DASHBOARD_WIDGET_IDS } from '../constants/dashboardWidgets.js'
 
 usePageDisplayLabel(APP_PAGE_IDS.DASHBOARD, undefined, { setDocumentTitle: true })
 
@@ -27,6 +32,21 @@ const userName = ref('')
 const userId = ref(null)
 let saveMessageTimeoutId = null
 let dashboardLoadGen = 0
+
+const { dashboardVisibility, isWidgetVisible } = useDashboardVisibility({ userId })
+
+const showComfort = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.COMFORT))
+const showTodo = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.TODO))
+const showTimetable = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.TIMETABLE))
+const showCheckin = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.CHECKIN))
+const showHabits = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.HABITS))
+const showMenstruation = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.MENSTRUATION))
+const showProjects = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.PROJECTS))
+const showIntroColumn = computed(() => showComfort.value || showTodo.value)
+const showRightGroup = computed(() => showHabits.value || showMenstruation.value)
+const showLeftGroup = computed(
+  () => showIntroColumn.value || showTimetable.value || showProjects.value,
+)
 
 const { setCheckinPayload, resetCheckin } = useDashboardEmotionalCheckin()
 
@@ -79,7 +99,7 @@ const activePage = ref(0)
 const carouselViewport = ref(null)
 const carouselTrack = ref(null)
 const slideWidthPx = ref(0)
-const slideCount = ref(2)
+const slideCount = ref(6)
 const isMobileCarousel = ref(false)
 let carouselResizeObserver = null
 let scrollSyncRaf = null
@@ -360,6 +380,13 @@ onMounted(async () => {
   }
 })
 
+watch(dashboardVisibility, () => {
+  if (activePage.value > lastSlideIndex.value) {
+    activePage.value = lastSlideIndex.value
+  }
+  void setupDashboardChrome()
+}, { deep: true })
+
 onUnmounted(() => {
   carouselResizeObserver?.disconnect()
   mobileMediaQuery?.removeEventListener('change', updateCarouselLayout)
@@ -462,51 +489,63 @@ const onCancelEmotionalCheckin = () => {
 
       <div ref="carouselViewport" class="dashboard-content" @scroll.passive="onCarouselScroll">
         <div ref="carouselTrack" class="carousel-track">
-          <!-- Left Column -->
-          <div class="dashboard-column left-column">
-            <DashboardComfortImages :user-id="userId" />
-            <h2 class="column-title">
-              <span>Aujourd'hui</span>
-              <span class="column-date">{{ formattedToday }}</span>
-            </h2>
-            <div class="today-events-container">
-              <div v-if="isLoadingEvents" class="loading-state">
-                <span class="spinner"></span> Chargement de ton planning...
-              </div>
-              <div v-else-if="userEvents.length === 0" class="empty-state">
-                <span class="empty-icon">☕</span>
-                <p>Aucun événement prévu aujourd'hui. Profite de ton temps libre !</p>
-              </div>
-              <div v-else class="today-events-list">
-                <div
-                  v-for="event in userEvents"
-                  :key="event.id"
-                  class="dashboard-event-card"
-                  :style="getCategoryStyle(event.category)"
-                >
-                  <div class="event-time">
-                    <span v-if="event.all_day" class="time-badge">Toute la journée</span>
-                    <span v-else class="time-badge">{{ event.time }}</span>
-                  </div>
-                  <div class="event-details">
-                    <div class="event-title-row">
-                      <span class="event-icon">{{ getCategoryIcon(event.category) }}</span>
-                      <h4 class="event-title">{{ event.title }}</h4>
+          <div v-if="showLeftGroup" class="dashboard-left-group">
+            <!-- Slide 1 mobile : réconfort + TODO -->
+            <div v-if="showIntroColumn" class="dashboard-column intro-column">
+              <DashboardComfortImages v-if="showComfort" :user-id="userId" />
+              <DashboardTodayTodos v-if="showTodo" :user-id="userId" :date-iso="todayStr" />
+            </div>
+
+            <!-- Slide 2 mobile : emploi du temps -->
+            <div v-if="showTimetable" class="dashboard-column edt-column">
+              <h2 class="column-title">
+                <span>Aujourd'hui</span>
+                <span class="column-date">{{ formattedToday }}</span>
+              </h2>
+              <div class="today-events-container">
+                <div v-if="isLoadingEvents" class="loading-state">
+                  <span class="spinner"></span> Chargement de ton planning...
+                </div>
+                <div v-else-if="userEvents.length === 0" class="empty-state">
+                  <span class="empty-icon">☕</span>
+                  <p>Aucun événement prévu aujourd'hui. Profite de ton temps libre !</p>
+                </div>
+                <div v-else class="today-events-list">
+                  <div
+                    v-for="event in userEvents"
+                    :key="event.id"
+                    class="dashboard-event-card"
+                    :style="getCategoryStyle(event.category)"
+                  >
+                    <div class="event-time">
+                      <span v-if="event.all_day" class="time-badge">Toute la journée</span>
+                      <span v-else class="time-badge">{{ event.time }}</span>
                     </div>
-                    <p v-if="event.detail" class="event-description">{{ event.detail }}</p>
-                    <div v-if="event.category" class="event-tags">
-                      <span class="event-category-tag">
-                        {{ getCategoryName(event.category) }}
-                      </span>
+                    <div class="event-details">
+                      <div class="event-title-row">
+                        <span class="event-icon">{{ getCategoryIcon(event.category) }}</span>
+                        <h4 class="event-title">{{ event.title }}</h4>
+                      </div>
+                      <p v-if="event.detail" class="event-description">{{ event.detail }}</p>
+                      <div v-if="event.category" class="event-tags">
+                        <span class="event-category-tag">
+                          {{ getCategoryName(event.category) }}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
+
+            <!-- Sous l'EDT (desktop) ; dernière slide mobile -->
+            <div v-if="showProjects" class="dashboard-column projects-column">
+              <DashboardActiveProjects :user-id="userId" />
+            </div>
           </div>
 
-          <!-- Mobile uniquement : slide entre Emploi du temps et Menstruation -->
-          <div v-if="isMobileCarousel" class="dashboard-column checkin-column">
+          <!-- Slide 3 mobile : check-in émotionnel -->
+          <div v-if="isMobileCarousel && showCheckin" class="dashboard-column checkin-column">
             <DashboardEmotionalCheckin
               compact
               show-footer
@@ -520,9 +559,14 @@ const onCancelEmotionalCheckin = () => {
             />
           </div>
 
-          <!-- Right Column -->
-          <div class="dashboard-column right-column">
-            <div class="right-column-stack">
+          <!-- Slide 4 mobile : habitudes (vue mensuelle) / colonne droite desktop -->
+          <div v-if="showRightGroup" class="dashboard-right-group">
+            <div v-if="showHabits" class="dashboard-column habits-column">
+              <DashboardHabitsAnnual :user-id="userId" />
+            </div>
+
+            <!-- Slide 5 mobile : menstruation -->
+            <div v-if="showMenstruation" class="dashboard-column menstruation-column right-column">
               <div class="mini-calendar-wrapper dashboard-menstruation-wrap">
                 <div
                   v-if="isLoadingMenstruationBoard"
@@ -581,7 +625,7 @@ const onCancelEmotionalCheckin = () => {
 
     <!-- Desktop : check-in puis message + boutons, sous les 2 colonnes -->
     <section
-      v-if="!isMobileCarousel"
+      v-if="!isMobileCarousel && showCheckin"
       class="dashboard-checkin-desktop"
       aria-label="Check-in émotionnel (desktop)"
     >
@@ -712,7 +756,7 @@ const onCancelEmotionalCheckin = () => {
   grid-template-columns: 1fr 1fr;
   gap: 2rem;
   width: 100%;
-  align-items: stretch;
+  align-items: start;
 }
 
 .dashboard-column {
@@ -722,32 +766,44 @@ const onCancelEmotionalCheckin = () => {
   min-width: 0;
 }
 
-.left-column {
+.dashboard-left-group {
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
+  min-width: 0;
 }
 
-/* Colonne droite : bloc intro + calendrier cycle + légende, même hauteur utile que la gauche (desktop) */
-.right-column-stack {
+.dashboard-right-group {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
   min-width: 0;
-  width: 100%;
 }
 
+.intro-column,
+.edt-column,
+.habits-column,
+.projects-column {
+  gap: 1rem;
+}
+
+/* Colonne droite desktop : habitudes + calendrier cycle */
 @media (min-width: 769px) {
-  .left-column .today-events-container {
-    flex: 1;
+  .edt-column .today-events-container {
+    flex: 0 1 auto;
     min-height: 0;
   }
 
-  .right-column .right-column-stack {
-    flex: 1;
-    min-height: 0;
+  .dashboard-left-group {
+    gap: 1rem;
+  }
+
+  .dashboard-right-group {
+    gap: 1.5rem;
   }
 
   /* Même largeur utile que la colonne grille (évite le cap à 320px qui déséquilibre) */
-  .right-column-stack .mini-calendar-wrapper {
+  .right-column .mini-calendar-wrapper {
     max-width: 100%;
     margin-left: 0;
     margin-right: 0;
@@ -829,6 +885,7 @@ const onCancelEmotionalCheckin = () => {
   .carousel-track {
     display: flex;
     grid-template-columns: none;
+    grid-template-rows: none;
     gap: 0;
     flex: 0 0 auto;
     width: max-content;
@@ -837,6 +894,38 @@ const onCancelEmotionalCheckin = () => {
     align-items: flex-start;
     align-content: flex-start;
     box-sizing: border-box;
+  }
+
+  .dashboard-left-group {
+    display: contents;
+  }
+
+  .dashboard-right-group {
+    display: contents;
+  }
+
+  .intro-column {
+    order: 1;
+  }
+
+  .edt-column {
+    order: 2;
+  }
+
+  .checkin-column {
+    order: 3;
+  }
+
+  .habits-column {
+    order: 4;
+  }
+
+  .menstruation-column {
+    order: 5;
+  }
+
+  .projects-column {
+    order: 6;
   }
 
   .dashboard-column {
@@ -863,7 +952,6 @@ const onCancelEmotionalCheckin = () => {
     }
   }
 
-  .right-column-stack,
   .today-events-container,
   .mini-calendar-wrapper,
   .dashboard-menstruation-wrap,
@@ -885,7 +973,7 @@ const onCancelEmotionalCheckin = () => {
     flex-grow: 0;
   }
 
-  .left-column .today-events-container {
+  .edt-column .today-events-container {
     flex: 0 1 auto;
     flex-grow: 0;
   }

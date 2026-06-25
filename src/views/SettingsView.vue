@@ -339,6 +339,41 @@ const pageVisibility = ref(createDefaultPageVisibility())
 const todoSettingsTabLabel = computed(() =>
   getPageDisplayLabel(APP_PAGE_IDS.TODO, pageVisibility.value, todoPageDefaultLabel),
 )
+
+function truncateSettingsTabLabel(text, maxLength = 10) {
+  const value = String(text ?? '').trim()
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, Math.max(1, maxLength - 1))}…`
+}
+
+const settingsTabItems = computed(() => [
+  {
+    id: SETTINGS_TABS.VISIBILITE,
+    label: 'Visibilité',
+    shortLabel: 'Visibilité',
+  },
+  {
+    id: SETTINGS_TABS.RAPPELS,
+    label: 'Rappels',
+    shortLabel: 'Rappels',
+  },
+  {
+    id: SETTINGS_TABS.TODO,
+    label: todoSettingsTabLabel.value,
+    shortLabel: truncateSettingsTabLabel(todoSettingsTabLabel.value, 8),
+  },
+  {
+    id: SETTINGS_TABS.MENSTRUATION,
+    label: 'Menstruation',
+    shortLabel: 'Cycle',
+  },
+  {
+    id: SETTINGS_TABS.RECONFORT,
+    label: 'Réconfort',
+    shortLabel: 'Réconfort',
+  },
+])
+
 const todoPromesseReminderSettings = ref(createDefaultTodoPromesseReminderSettings())
 const isSavingTodoPromesseReminder = ref(false)
 const todoPromesseReminderMessage = ref('')
@@ -741,54 +776,84 @@ onUnmounted(() => {
 
     <nav class="settings-tabs" role="tablist" aria-label="Sections des réglages">
       <button
+        v-for="tab in settingsTabItems"
+        :key="tab.id"
         type="button"
         role="tab"
         class="settings-tab"
-        :class="{ 'settings-tab--active': activeTab === SETTINGS_TABS.VISIBILITE }"
-        :aria-selected="activeTab === SETTINGS_TABS.VISIBILITE"
-        @click="activeTab = SETTINGS_TABS.VISIBILITE"
+        :class="{ 'settings-tab--active': activeTab === tab.id }"
+        :aria-selected="activeTab === tab.id"
+        :aria-label="tab.label"
+        :title="tab.label"
+        @click="activeTab = tab.id"
       >
-        Visibilité
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="settings-tab"
-        :class="{ 'settings-tab--active': activeTab === SETTINGS_TABS.RAPPELS }"
-        :aria-selected="activeTab === SETTINGS_TABS.RAPPELS"
-        @click="activeTab = SETTINGS_TABS.RAPPELS"
-      >
-        Rappels
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="settings-tab"
-        :class="{ 'settings-tab--active': activeTab === SETTINGS_TABS.TODO }"
-        :aria-selected="activeTab === SETTINGS_TABS.TODO"
-        @click="activeTab = SETTINGS_TABS.TODO"
-      >
-        {{ todoSettingsTabLabel }}
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="settings-tab"
-        :class="{ 'settings-tab--active': activeTab === SETTINGS_TABS.MENSTRUATION }"
-        :aria-selected="activeTab === SETTINGS_TABS.MENSTRUATION"
-        @click="activeTab = SETTINGS_TABS.MENSTRUATION"
-      >
-        Menstruation
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="settings-tab"
-        :class="{ 'settings-tab--active': activeTab === SETTINGS_TABS.RECONFORT }"
-        :aria-selected="activeTab === SETTINGS_TABS.RECONFORT"
-        @click="activeTab = SETTINGS_TABS.RECONFORT"
-      >
-        Réconfort
+        <span class="settings-tab__icon" aria-hidden="true">
+          <svg
+            v-if="tab.id === SETTINGS_TABS.VISIBILITE"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          <svg
+            v-else-if="tab.id === SETTINGS_TABS.RAPPELS"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+          </svg>
+          <svg
+            v-else-if="tab.id === SETTINGS_TABS.TODO"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M9 11l3 3L22 4" />
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+          </svg>
+          <svg
+            v-else-if="tab.id === SETTINGS_TABS.MENSTRUATION"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 22a7 7 0 0 0 7-7c0-5-7-13-7-13S5 10 5 15a7 7 0 0 0 7 7z" />
+          </svg>
+          <svg
+            v-else
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+          </svg>
+        </span>
+        <span class="settings-tab__text settings-tab__text--full">{{ tab.label }}</span>
+        <span class="settings-tab__text settings-tab__text--short">{{ tab.shortLabel }}</span>
       </button>
     </nav>
 
@@ -1747,9 +1812,10 @@ onUnmounted(() => {
 
 .settings-tab {
   flex: 1;
+  min-width: 0;
   border: none;
   border-radius: 10px;
-  padding: 0.65rem 1rem;
+  padding: 0.65rem 0.75rem;
   font-size: 0.95rem;
   font-weight: 700;
   color: #6c757d;
@@ -1759,6 +1825,31 @@ onUnmounted(() => {
     background 0.2s ease,
     color 0.2s ease,
     box-shadow 0.2s ease;
+}
+
+.settings-tab__icon {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.settings-tab__icon svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.settings-tab__text {
+  min-width: 0;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.settings-tab__text--short {
+  display: none;
 }
 
 .settings-tab:hover {
@@ -1775,6 +1866,43 @@ onUnmounted(() => {
 .settings-tab-panel {
   display: flex;
   flex-direction: column;
+}
+
+@media (max-width: 768px) {
+  .settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+    padding: 0.3rem;
+  }
+
+  .settings-tab {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    padding: 0.5rem 0.25rem;
+    font-size: 0.72rem;
+    text-align: center;
+  }
+
+  .settings-tab__icon {
+    display: flex;
+  }
+
+  .settings-tab__text--full {
+    display: none;
+  }
+
+  .settings-tab__text--short {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
