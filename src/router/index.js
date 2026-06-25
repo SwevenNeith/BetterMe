@@ -11,6 +11,7 @@ const ExercicesView = () => import('../views/ExercicesView.vue')
 const ProjetsView = () => import('../views/ProjetsView.vue')
 const ProjectDetailView = () => import('../views/ProjectDetailView.vue')
 const HabitTrackerView = () => import('../views/HabitTrackerView.vue')
+const TodoView = () => import('../views/TodoView.vue')
 
 const CHUNK_RELOAD_KEY = 'betterme-chunk-reload'
 
@@ -45,6 +46,11 @@ const router = createRouter({
           path: 'timetable',
           name: 'timetable',
           component: TimeTableView
+        },
+        {
+          path: 'todo',
+          name: 'todo',
+          component: TodoView,
         },
         {
           path: 'projets',

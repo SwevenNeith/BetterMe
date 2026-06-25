@@ -49,6 +49,12 @@ const habitTrackerLink = {
   icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
 }
 
+const todoLink = {
+  name: 'TODO',
+  path: '/todo',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`,
+}
+
 const menstruationLink = {
   name: 'Menstruation',
   path: '/menstruation',
@@ -87,6 +93,7 @@ const EXERCICES_SCOPE = 'Sidebar:Exercices'
 const SIDEBAR_ITEM_IDS = {
   DASHBOARD: 'dashboard',
   TIMETABLE: 'timetable',
+  TODO: 'todo',
   HABIT: 'habit-tracker',
   PROJETS: 'projets',
   MENSTRUATION: 'menstruation',
@@ -97,6 +104,7 @@ const SIDEBAR_ITEM_IDS = {
 const defaultSidebarOrder = [
   SIDEBAR_ITEM_IDS.DASHBOARD,
   SIDEBAR_ITEM_IDS.TIMETABLE,
+  SIDEBAR_ITEM_IDS.TODO,
   SIDEBAR_ITEM_IDS.HABIT,
   SIDEBAR_ITEM_IDS.PROJETS,
   SIDEBAR_ITEM_IDS.MENSTRUATION,
@@ -106,6 +114,7 @@ const defaultSidebarOrder = [
 const sidebarItemsById = {
   [SIDEBAR_ITEM_IDS.DASHBOARD]: navLinksTop[0],
   [SIDEBAR_ITEM_IDS.TIMETABLE]: navLinksTop[1],
+  [SIDEBAR_ITEM_IDS.TODO]: todoLink,
   [SIDEBAR_ITEM_IDS.PROJETS]: projetsLink,
   [SIDEBAR_ITEM_IDS.HABIT]: habitTrackerLink,
   [SIDEBAR_ITEM_IDS.MENSTRUATION]: menstruationLink,
