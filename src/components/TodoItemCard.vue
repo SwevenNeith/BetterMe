@@ -1,0 +1,352 @@
+<script setup>
+import { formatTodoSchedule } from '../constants/todoOptions.js'
+
+defineProps({
+  item: {
+    type: Object,
+    required: true,
+  },
+  draggable: {
+    type: Boolean,
+    default: false,
+  },
+  dragging: {
+    type: Boolean,
+    default: false,
+  },
+  compact: {
+    type: Boolean,
+    default: false,
+  },
+})
+
+defineEmits(['toggle', 'edit', 'delete', 'dragstart', 'dragover', 'drop', 'dragend'])
+
+function hasDescription(text) {
+  return String(text ?? '').trim().length > 0
+}
+</script>
+
+<template>
+  <article
+    class="todo-item-card"
+    :class="{
+      'todo-item-card--promesse': item.is_promesse,
+      'todo-item-card--done': item.occurrenceDone,
+      'todo-item-card--dragging': dragging,
+      'todo-item-card--compact': compact,
+    }"
+    @dragover="draggable ? $emit('dragover', $event) : undefined"
+    @drop="draggable ? $emit('drop', $event) : undefined"
+  >
+    <div class="todo-item-top">
+      <span
+        v-if="draggable"
+        class="todo-drag-handle"
+        draggable="true"
+        title="Glisser pour réordonner"
+        aria-label="Réordonner l'élément"
+        @dragstart.stop="$emit('dragstart', $event)"
+        @dragend="$emit('dragend', $event)"
+      >
+        ⋮⋮
+      </span>
+
+      <label class="todo-item-check">
+        <input
+          type="checkbox"
+          class="todo-item-check__input"
+          :checked="item.occurrenceDone"
+          :aria-label="
+            item.occurrenceDone
+              ? `Marquer « ${item.nom} » comme non fait`
+              : `Marquer « ${item.nom} » comme fait`
+          "
+          @change="$emit('toggle')"
+        />
+      </label>
+
+      <div class="todo-item-content">
+        <div class="todo-item-title-row">
+          <h2 class="todo-item-title">{{ item.nom }}</h2>
+          <span v-if="item.is_promesse" class="todo-item-badge">Promesse</span>
+        </div>
+        <p v-if="!compact && hasDescription(item.description)" class="todo-item-description">
+          {{ item.description }}
+        </p>
+        <p v-if="!compact" class="todo-item-meta">{{ formatTodoSchedule(item) }}</p>
+      </div>
+
+      <div class="todo-item-actions">
+        <button
+          type="button"
+          class="todo-item-action"
+          title="Modifier"
+          aria-label="Modifier l'élément"
+          @click.stop="$emit('edit')"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="todo-item-action todo-item-action--danger"
+          title="Supprimer"
+          aria-label="Supprimer l'élément"
+          @click.stop="$emit('delete')"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  </article>
+</template>
+
+<style scoped>
+.todo-item-card {
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.3);
+  background: rgba(213, 181, 234, 0.08);
+  padding: 0.75rem 0.85rem;
+  transition:
+    opacity 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.todo-item-card--promesse {
+  border-color: rgba(149, 209, 170, 0.55);
+  background: linear-gradient(135deg, rgba(149, 209, 170, 0.22), rgba(213, 181, 234, 0.14));
+  box-shadow: 0 4px 14px rgba(114, 160, 152, 0.12);
+}
+
+.todo-item-card--done {
+  opacity: 0.72;
+}
+
+.todo-item-card--dragging {
+  opacity: 0.55;
+}
+
+.todo-item-card--compact {
+  padding: 0.5rem 0.45rem;
+}
+
+.todo-item-card--compact .todo-item-top {
+  gap: 0.35rem;
+}
+
+.todo-item-card--compact .todo-item-title {
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+.todo-item-card--compact .todo-item-badge {
+  font-size: 0.58rem;
+  padding: 0.1rem 0.35rem;
+}
+
+.todo-item-card--compact .todo-item-check__input {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.todo-item-card--compact .todo-item-actions {
+  flex-direction: row;
+  gap: 0.2rem;
+}
+
+.todo-item-card--compact .todo-item-action {
+  width: 1.45rem;
+  height: 1.45rem;
+  font-size: 0.75rem;
+}
+
+.todo-item-card--compact .todo-item-action svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.todo-item-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.todo-drag-handle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  padding-top: 0.15rem;
+  color: #ad81be;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: -0.12em;
+  cursor: grab;
+  user-select: none;
+  opacity: 0.75;
+}
+
+.todo-drag-handle:active {
+  cursor: grabbing;
+}
+
+.todo-item-check {
+  flex-shrink: 0;
+  display: flex;
+  padding-top: 0.15rem;
+  cursor: pointer;
+}
+
+.todo-item-check__input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: #ad81be;
+  cursor: pointer;
+}
+
+.todo-item-card--promesse .todo-item-check__input {
+  accent-color: #72a098;
+}
+
+.todo-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-item-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.todo-item-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #2c3e50;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.todo-item-card--done .todo-item-title {
+  color: #8c98a4;
+  text-decoration: line-through;
+}
+
+.todo-item-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #3d6b62;
+  background: rgba(149, 209, 170, 0.35);
+}
+
+.todo-item-description {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  color: #6c757d;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.todo-item-card--done .todo-item-description {
+  text-decoration: line-through;
+}
+
+.todo-item-meta {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #ad81be;
+}
+
+.todo-item-card--promesse .todo-item-meta {
+  color: #72a098;
+}
+
+.todo-item-actions {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.todo-item-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: rgba(213, 181, 234, 0.15);
+  color: #ad81be;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.todo-item-action svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.todo-item-action:hover {
+  background: rgba(213, 181, 234, 0.28);
+}
+
+.todo-item-action--danger {
+  color: #c0392b;
+  background: rgba(192, 57, 43, 0.1);
+}
+
+.todo-item-action--danger:hover {
+  background: rgba(192, 57, 43, 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+  .todo-item-card {
+    background: rgba(213, 181, 234, 0.08);
+    border-color: rgba(213, 181, 234, 0.2);
+  }
+
+  .todo-item-card--promesse {
+    background: linear-gradient(135deg, rgba(149, 209, 170, 0.16), rgba(213, 181, 234, 0.1));
+    border-color: rgba(149, 209, 170, 0.35);
+  }
+
+  .todo-item-title {
+    color: #f0e8f8;
+  }
+
+  .todo-item-description {
+    color: #adb5bd;
+  }
+
+  .todo-item-badge {
+    color: #b8e0d0;
+    background: rgba(114, 160, 152, 0.35);
+  }
+}
+</style>
