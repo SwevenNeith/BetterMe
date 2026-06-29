@@ -51,8 +51,7 @@ const progress = computed(() =>
 const progressLabel = computed(() => {
   const stats = progress.value
   if (!stats.total) return ''
-  if (stats.hasPartialProgress) return `${stats.percent}%`
-  return `${stats.fullyDone}/${stats.total}`
+  return `${stats.percent}%`
 })
 
 async function loadPageVisibilityState() {

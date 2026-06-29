@@ -1,6 +1,5 @@
 <script setup>
 import { computed } from 'vue'
-import { formatTodoSchedule } from '../constants/todoOptions.js'
 
 const props = defineProps({
   item: {
@@ -21,7 +20,7 @@ const props = defineProps({
   },
 })
 
-defineEmits(['toggle', 'increment', 'decrement', 'edit', 'delete', 'dragstart', 'dragover', 'drop', 'dragend'])
+const emit = defineEmits(['toggle', 'increment', 'decrement', 'edit', 'delete', 'dragstart', 'dragover', 'drop', 'dragend'])
 
 const hasQuantite = computed(
   () =>
@@ -38,6 +37,20 @@ const quantiteLabel = computed(() => {
 function hasDescription(text) {
   return String(text ?? '').trim().length > 0
 }
+
+function onCardDragStart(event) {
+  if (!props.draggable) return
+  if (event.target?.closest('button, input, label, .todo-item-action')) {
+    event.preventDefault()
+    return
+  }
+  emit('dragstart', event)
+}
+
+function onCardDragEnd(event) {
+  if (!props.draggable) return
+  emit('dragend', event)
+}
 </script>
 
 <template>
@@ -48,48 +61,40 @@ function hasDescription(text) {
       'todo-item-card--done': item.occurrenceDone,
       'todo-item-card--dragging': dragging,
       'todo-item-card--compact': compact,
+      'todo-item-card--quantite': hasQuantite,
     }"
-    @dragover="draggable ? $emit('dragover', $event) : undefined"
-    @drop="draggable ? $emit('drop', $event) : undefined"
+    :draggable="draggable"
+    @dragstart="onCardDragStart"
+    @dragend="onCardDragEnd"
+    @dragover="draggable ? emit('dragover', $event) : undefined"
+    @drop="draggable ? emit('drop', $event) : undefined"
   >
-    <div class="todo-item-top">
-      <span
-        v-if="draggable"
-        class="todo-drag-handle"
-        draggable="true"
-        title="Glisser pour réordonner"
-        aria-label="Réordonner l'élément"
-        @dragstart.stop="$emit('dragstart', $event)"
-        @dragend="$emit('dragend', $event)"
+    <div v-if="hasQuantite" class="todo-item-quantite" role="group" :aria-label="`Progression : ${quantiteLabel}`">
+      <button
+        type="button"
+        class="todo-item-quantite__btn"
+        title="Diminuer"
+        aria-label="Diminuer la quantité"
+        :disabled="(item.occurrenceQuantiteActuelle ?? 0) <= 0"
+        @click.stop="emit('decrement')"
       >
-        ⋮⋮
-      </span>
+        −
+      </button>
+      <span class="todo-item-quantite__value">{{ quantiteLabel }}</span>
+      <button
+        type="button"
+        class="todo-item-quantite__btn"
+        title="Augmenter"
+        aria-label="Augmenter la quantité"
+        :disabled="item.occurrenceDone"
+        @click.stop="emit('increment')"
+      >
+        +
+      </button>
+    </div>
 
-      <div v-if="hasQuantite" class="todo-item-quantite" role="group" :aria-label="`Progression : ${quantiteLabel}`">
-        <button
-          type="button"
-          class="todo-item-quantite__btn"
-          title="Diminuer"
-          aria-label="Diminuer la quantité"
-          :disabled="(item.occurrenceQuantiteActuelle ?? 0) <= 0"
-          @click.stop="$emit('decrement')"
-        >
-          −
-        </button>
-        <span class="todo-item-quantite__value">{{ quantiteLabel }}</span>
-        <button
-          type="button"
-          class="todo-item-quantite__btn"
-          title="Augmenter"
-          aria-label="Augmenter la quantité"
-          :disabled="item.occurrenceDone"
-          @click.stop="$emit('increment')"
-        >
-          +
-        </button>
-      </div>
-
-      <label v-else class="todo-item-check">
+    <div class="todo-item-main">
+      <label v-if="!hasQuantite" class="todo-item-check">
         <input
           type="checkbox"
           class="todo-item-check__input"
@@ -99,7 +104,7 @@ function hasDescription(text) {
               ? `Marquer « ${item.nom} » comme non fait`
               : `Marquer « ${item.nom} » comme fait`
           "
-          @change="$emit('toggle')"
+          @change="emit('toggle')"
         />
       </label>
 
@@ -108,10 +113,9 @@ function hasDescription(text) {
           <h2 class="todo-item-title">{{ item.nom }}</h2>
           <span v-if="item.is_promesse" class="todo-item-badge">Promesse</span>
         </div>
-        <p v-if="!compact && hasDescription(item.description)" class="todo-item-description">
+        <p v-if="hasDescription(item.description)" class="todo-item-description">
           {{ item.description }}
         </p>
-        <p v-if="!compact" class="todo-item-meta">{{ formatTodoSchedule(item) }}</p>
       </div>
 
       <div class="todo-item-actions">
@@ -120,7 +124,7 @@ function hasDescription(text) {
           class="todo-item-action"
           title="Modifier"
           aria-label="Modifier l'élément"
-          @click.stop="$emit('edit')"
+          @click.stop="emit('edit')"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -141,7 +145,7 @@ function hasDescription(text) {
           class="todo-item-action todo-item-action--danger"
           title="Supprimer"
           aria-label="Supprimer l'élément"
-          @click.stop="$emit('delete')"
+          @click.stop="emit('delete')"
         >
           ✕
         </button>
@@ -152,6 +156,8 @@ function hasDescription(text) {
 
 <style scoped>
 .todo-item-card {
+  display: flex;
+  align-items: stretch;
   border-radius: 12px;
   border: 1px solid rgba(213, 181, 234, 0.3);
   background: rgba(213, 181, 234, 0.08);
@@ -159,6 +165,28 @@ function hasDescription(text) {
   transition:
     opacity 0.15s ease,
     box-shadow 0.15s ease;
+}
+
+.todo-item-card--quantite {
+  padding: 0;
+  cursor: grab;
+}
+
+.todo-item-card--quantite:active {
+  cursor: grabbing;
+}
+
+.todo-item-card--dragging {
+  opacity: 0.55;
+  cursor: grabbing;
+}
+
+.todo-item-card[draggable='true']:not(.todo-item-card--quantite) {
+  cursor: grab;
+}
+
+.todo-item-card[draggable='true']:not(.todo-item-card--quantite):active {
+  cursor: grabbing;
 }
 
 .todo-item-card--promesse {
@@ -171,16 +199,24 @@ function hasDescription(text) {
   opacity: 0.72;
 }
 
-.todo-item-card--dragging {
-  opacity: 0.55;
-}
-
 .todo-item-card--compact {
   padding: 0.5rem 0.45rem;
 }
 
-.todo-item-card--compact .todo-item-top {
+.todo-item-card--compact.todo-item-card--quantite {
+  padding: 0;
+}
+
+.todo-item-card--compact .todo-item-main {
   gap: 0.35rem;
+}
+
+.todo-item-card--compact.todo-item-card--quantite .todo-item-main {
+  padding: 0.45rem 0.4rem 0.45rem 0.35rem;
+}
+
+.todo-item-card--compact .todo-item-quantite {
+  padding: 0.4rem 0.3rem;
 }
 
 .todo-item-card--compact .todo-item-title {
@@ -214,48 +250,44 @@ function hasDescription(text) {
   height: 0.75rem;
 }
 
-.todo-item-top {
+.todo-item-main {
   display: flex;
   align-items: flex-start;
   gap: 0.65rem;
+  flex: 1;
+  min-width: 0;
 }
 
-.todo-drag-handle {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.35rem;
-  padding-top: 0.15rem;
-  color: #ad81be;
-  font-size: 0.95rem;
-  font-weight: 800;
-  letter-spacing: -0.12em;
-  cursor: grab;
-  user-select: none;
-  opacity: 0.75;
-}
-
-.todo-drag-handle:active {
-  cursor: grabbing;
+.todo-item-card--quantite .todo-item-main {
+  padding: 0.75rem 0.85rem 0.75rem 0.55rem;
 }
 
 .todo-item-quantite {
   flex-shrink: 0;
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.2rem;
-  padding: 0.15rem;
-  border-radius: 10px;
+  justify-content: space-between;
+  align-self: stretch;
+  gap: 0.35rem;
+  padding: 0.55rem 0.4rem;
+  border-radius: 12px 0 0 12px;
   background: rgba(213, 181, 234, 0.14);
+  border-right: 1px solid rgba(213, 181, 234, 0.22);
+}
+
+.todo-item-card--promesse .todo-item-quantite {
+  background: rgba(149, 209, 170, 0.2);
+  border-right-color: rgba(149, 209, 170, 0.28);
 }
 
 .todo-item-quantite__btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 1.85rem;
+  height: 1.85rem;
+  flex-shrink: 0;
   border: none;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.7);
@@ -276,11 +308,16 @@ function hasDescription(text) {
 }
 
 .todo-item-quantite__value {
-  min-width: 2.6rem;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.4rem;
   text-align: center;
   font-size: 0.82rem;
   font-weight: 800;
   color: #2c3e50;
+  line-height: 1.2;
 }
 
 .todo-item-card--done .todo-item-quantite__value {
@@ -344,6 +381,12 @@ function hasDescription(text) {
   background: rgba(149, 209, 170, 0.35);
 }
 
+.todo-item-card--compact .todo-item-description {
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
 .todo-item-description {
   margin: 0.35rem 0 0;
   font-size: 0.88rem;
@@ -354,17 +397,6 @@ function hasDescription(text) {
 
 .todo-item-card--done .todo-item-description {
   text-decoration: line-through;
-}
-
-.todo-item-meta {
-  margin: 0.35rem 0 0;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #ad81be;
-}
-
-.todo-item-card--promesse .todo-item-meta {
-  color: #72a098;
 }
 
 .todo-item-actions {
