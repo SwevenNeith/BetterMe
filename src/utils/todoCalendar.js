@@ -2,8 +2,8 @@ import {
   TODO_FREQUENCY,
   MAX_TODO_PROMESSES_PER_DAY,
   MAX_TODO_PROMESSES_PER_WEEK,
-  TODO_PROMESSE_LIMIT_MESSAGE,
-  TODO_PROMESSE_WEEK_LIMIT_MESSAGE,
+  getTodoPromesseDayLimitMessage,
+  getTodoPromesseWeekLimitMessage,
 } from '../constants/todoOptions.js'
 import {
   addDaysISO,
@@ -307,7 +307,7 @@ export function countDayScopedPromessesForDate(items, dateISO, excludeItemId = n
 }
 
 /**
- * Toutes les promesses prévues ce jour (y compris objectifs de la semaine) — ex. rappels.
+ * Toutes les promesses prévues ce jour (y compris objectifs « Cette semaine »).
  * @param {object[]} items
  * @param {string} dateISO
  * @param {string|null} [excludeItemId]
@@ -362,10 +362,12 @@ export function getPromesseDayCheckDate(payload) {
  * @param {object[]} items
  * @param {string} dateISO
  * @param {string|null} [excludeItemId]
+ * @param {{ perDay?: number }} [limits]
  */
-export function assertPromesseLimitForDate(items, dateISO, excludeItemId = null) {
-  if (countDayScopedPromessesForDate(items, dateISO, excludeItemId) >= MAX_TODO_PROMESSES_PER_DAY) {
-    throw new Error(TODO_PROMESSE_LIMIT_MESSAGE)
+export function assertPromesseLimitForDate(items, dateISO, excludeItemId = null, limits = {}) {
+  const maxPerDay = limits.perDay ?? MAX_TODO_PROMESSES_PER_DAY
+  if (countDayScopedPromessesForDate(items, dateISO, excludeItemId) >= maxPerDay) {
+    throw new Error(getTodoPromesseDayLimitMessage(maxPerDay))
   }
 }
 
@@ -373,10 +375,12 @@ export function assertPromesseLimitForDate(items, dateISO, excludeItemId = null)
  * @param {object[]} items
  * @param {string} weekStartISO
  * @param {string|null} [excludeItemId]
+ * @param {{ perWeek?: number }} [limits]
  */
-export function assertPromesseLimitForWeek(items, weekStartISO, excludeItemId = null) {
-  if (countPromessesForWeek(items, weekStartISO, excludeItemId) >= MAX_TODO_PROMESSES_PER_WEEK) {
-    throw new Error(TODO_PROMESSE_WEEK_LIMIT_MESSAGE)
+export function assertPromesseLimitForWeek(items, weekStartISO, excludeItemId = null, limits = {}) {
+  const maxPerWeek = limits.perWeek ?? MAX_TODO_PROMESSES_PER_WEEK
+  if (countPromessesForWeek(items, weekStartISO, excludeItemId) >= maxPerWeek) {
+    throw new Error(getTodoPromesseWeekLimitMessage(maxPerWeek))
   }
 }
 
@@ -385,21 +389,22 @@ export function assertPromesseLimitForWeek(items, weekStartISO, excludeItemId = 
  * @param {object[]} items
  * @param {{ is_promesse?: boolean, frequence?: string, date_echeance?: string, jour_semaine?: number|null }} payload
  * @param {string|null} [excludeItemId]
+ * @param {{ perDay?: number, perWeek?: number }} [limits]
  */
-export function assertPromesseLimits(items, payload, excludeItemId = null) {
+export function assertPromesseLimits(items, payload, excludeItemId = null, limits = {}) {
   if (!payload?.is_promesse) return
 
   const dateISO = normalizeDateISO(payload.date_echeance)
   if (!dateISO) return
 
   if (payload.frequence === TODO_FREQUENCY.WEEK_GOAL) {
-    assertPromesseLimitForWeek(items, getWeekStartISO(dateISO), excludeItemId)
+    assertPromesseLimitForWeek(items, getWeekStartISO(dateISO), excludeItemId, limits)
     return
   }
 
   const dayCheckDate = getPromesseDayCheckDate(payload)
   if (dayCheckDate) {
-    assertPromesseLimitForDate(items, dayCheckDate, excludeItemId)
+    assertPromesseLimitForDate(items, dayCheckDate, excludeItemId, limits)
   }
 }
 

@@ -23,6 +23,7 @@ const TODO_FREQUENCY = {
   ONE_OFF: 'ponctuel',
   DAILY: 'quotidien',
   WEEKLY: 'hebdomadaire',
+  WEEK_GOAL: 'semaine',
 }
 
 function normalizeDateISO(value: unknown): string | null {
@@ -71,14 +72,30 @@ function isTodoDueOnDate(
     return getIsoWeekdayFromYMD(year, month, day) === Number(item.jour_semaine)
   }
 
+  if (item.frequence === TODO_FREQUENCY.WEEK_GOAL) {
+    const weekStart = normalizeDateISO(item.date_echeance)
+    if (!weekStart) return false
+    const [wsY, wsM, wsD] = weekStart.split('-').map(Number)
+    const [tY, tM, tD] = target.split('-').map(Number)
+    const weekStartMs = Date.UTC(wsY, wsM - 1, wsD)
+    const targetMs = Date.UTC(tY, tM - 1, tD)
+    const weekEndMs = weekStartMs + 6 * 24 * 60 * 60 * 1000
+    return targetMs >= weekStartMs && targetMs <= weekEndMs
+  }
+
   return false
 }
 
-function countPromessesForDate(
+function countDayScopedPromessesForDate(
   items: Array<{ is_promesse?: boolean; frequence?: string; date_echeance?: string; jour_semaine?: number | null }>,
   dateISO: string,
 ): number {
-  return items.filter((item) => Boolean(item.is_promesse) && isTodoDueOnDate(item, dateISO)).length
+  return items.filter(
+    (item) =>
+      Boolean(item.is_promesse) &&
+      item.frequence !== TODO_FREQUENCY.WEEK_GOAL &&
+      isTodoDueOnDate(item, dateISO),
+  ).length
 }
 
 function getParisNow() {
@@ -193,7 +210,7 @@ async function ensureTodoPromesseReminders(parisNow: { dateISO: string; timeHHmm
       continue
     }
 
-    if (countPromessesForDate(items ?? [], tomorrowISO) > 0) {
+    if (countDayScopedPromessesForDate(items ?? [], tomorrowISO) > 0) {
       await supabase
         .from('scheduled_notifications')
         .delete()

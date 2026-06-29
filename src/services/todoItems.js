@@ -1,5 +1,6 @@
 import { TODO_FREQUENCY } from '../constants/todoOptions.js'
 import { assertPromesseLimits, getTodoOccurrenceKeyDate, getWeekStartISO, normalizeDateISO } from '../utils/todoCalendar.js'
+import { loadTodoPromesseLimits } from './todoPromesseSettings.js'
 
 const TABLE = 'todo_items'
 const COMPLETIONS_TABLE = 'todo_item_completions'
@@ -109,7 +110,8 @@ export async function createTodoItem(supabase, userId, payload) {
   const existing = await listTodoItems(supabase, userId)
 
   if (row.is_promesse) {
-    assertPromesseLimits(existing, row)
+    const limits = await loadTodoPromesseLimits(userId)
+    assertPromesseLimits(existing, row, null, limits)
   }
 
   let sortOrder = existing.length
@@ -162,7 +164,8 @@ export async function replaceTodoItem(supabase, userId, itemId, payload) {
 
   if (row.is_promesse) {
     const existing = await listTodoItems(supabase, userId)
-    assertPromesseLimits(existing, row, itemId)
+    const limits = await loadTodoPromesseLimits(userId)
+    assertPromesseLimits(existing, row, itemId, limits)
   }
 
   const { data, error } = await supabase

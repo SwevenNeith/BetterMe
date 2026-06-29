@@ -58,6 +58,11 @@ import {
   rescheduleTodoPromesseReminder,
   saveTodoPromesseReminderSettings,
 } from '../services/todoPromesseNotifications.js'
+import {
+  createDefaultTodoPromesseLimitSettings,
+  loadTodoPromesseLimitSettings,
+  saveTodoPromesseLimitSettings,
+} from '../services/todoPromesseSettings.js'
 const EmojiTextField = defineAsyncComponent(
   () => import('../components/EmojiTextField.vue'),
 )
@@ -78,6 +83,7 @@ const COLLAPSIBLE_SECTIONS = {
   DAILY: 'daily',
   ONE_TIME: 'oneTime',
   TIMER: 'timer',
+  TODO_PROMESSE_LIMIT: 'todoPromesseLimit',
   TODO_PROMESSE: 'todoPromesse',
   MENSTRUATION: 'menstruation',
   PATTERNS: 'patterns',
@@ -87,6 +93,7 @@ const expandedSections = ref({
   [COLLAPSIBLE_SECTIONS.DAILY]: false,
   [COLLAPSIBLE_SECTIONS.ONE_TIME]: false,
   [COLLAPSIBLE_SECTIONS.TIMER]: false,
+  [COLLAPSIBLE_SECTIONS.TODO_PROMESSE_LIMIT]: false,
   [COLLAPSIBLE_SECTIONS.TODO_PROMESSE]: false,
   [COLLAPSIBLE_SECTIONS.MENSTRUATION]: false,
   [COLLAPSIBLE_SECTIONS.PATTERNS]: false,
@@ -382,6 +389,11 @@ const isSavingTodoPromesseReminder = ref(false)
 const todoPromesseReminderMessage = ref('')
 const todoPromesseReminderError = ref('')
 
+const todoPromesseLimitSettings = ref(createDefaultTodoPromesseLimitSettings())
+const isSavingTodoPromesseLimits = ref(false)
+const todoPromesseLimitMessage = ref('')
+const todoPromesseLimitError = ref('')
+
 const oneTimeUpcoming = ref([])
 const oneTimeFailed = ref([])
 const standaloneTimersUpcoming = ref([])
@@ -657,6 +669,36 @@ const loadPageVisibilityState = async () => {
   }
 }
 
+const loadTodoPromesseLimitState = async () => {
+  if (!userId.value) return
+  try {
+    todoPromesseLimitSettings.value = await loadTodoPromesseLimitSettings(userId.value)
+  } catch (err) {
+    console.error(err)
+    todoPromesseLimitError.value =
+      err.message || 'Impossible de charger les limites de promesses.'
+  }
+}
+
+const onSaveTodoPromesseLimitSettings = async () => {
+  if (!userId.value) return
+  isSavingTodoPromesseLimits.value = true
+  todoPromesseLimitMessage.value = ''
+  todoPromesseLimitError.value = ''
+  try {
+    await saveTodoPromesseLimitSettings(userId.value, todoPromesseLimitSettings.value)
+    todoPromesseLimitMessage.value = 'Limites enregistrées.'
+    setTimeout(() => {
+      todoPromesseLimitMessage.value = ''
+    }, 2500)
+  } catch (err) {
+    console.error(err)
+    todoPromesseLimitError.value = err.message || 'Impossible d’enregistrer ces limites.'
+  } finally {
+    isSavingTodoPromesseLimits.value = false
+  }
+}
+
 const loadTodoPromesseReminderState = async () => {
   if (!userId.value) return
   try {
@@ -750,6 +792,7 @@ onMounted(async () => {
     loadMenstruationSettings(),
     loadReconfortMessages(),
     loadPageVisibilityState(),
+    loadTodoPromesseLimitState(),
     loadTodoPromesseReminderState(),
   ])
   window.addEventListener('betterme-notifications-granted', onNotificationsGranted)
@@ -1319,6 +1362,88 @@ onUnmounted(() => {
       :aria-label="todoSettingsTabLabel"
     >
       <section class="settings-card settings-card--collapsible">
+        <button
+          type="button"
+          class="card-toggle"
+          :aria-expanded="expandedSections[COLLAPSIBLE_SECTIONS.TODO_PROMESSE_LIMIT]"
+          aria-controls="settings-section-todo-promesse-limit"
+          @click="toggleSection(COLLAPSIBLE_SECTIONS.TODO_PROMESSE_LIMIT)"
+        >
+          <h2 class="card-toggle__title">Limite promesses</h2>
+          <span
+            class="card-toggle__chevron"
+            :class="{
+              'card-toggle__chevron--open': expandedSections[COLLAPSIBLE_SECTIONS.TODO_PROMESSE_LIMIT],
+            }"
+            aria-hidden="true"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </span>
+        </button>
+
+        <div
+          v-show="expandedSections[COLLAPSIBLE_SECTIONS.TODO_PROMESSE_LIMIT]"
+          id="settings-section-todo-promesse-limit"
+          class="card-body"
+        >
+          <p class="card-body__desc">
+            Nombre maximum de promesses autorisées par jour (ponctuel, quotidien, hebdomadaire) et
+            par semaine pour les objectifs « Cette semaine ».
+          </p>
+
+          <div class="reminder-fields">
+            <label class="field">
+              <span>Limite par jour</span>
+              <input
+                v-model.number="todoPromesseLimitSettings.todo_promesse_limit_per_day"
+                type="number"
+                min="1"
+                max="99"
+                inputmode="numeric"
+              />
+            </label>
+            <label class="field">
+              <span>Limite par semaine</span>
+              <input
+                v-model.number="todoPromesseLimitSettings.todo_promesse_limit_per_week"
+                type="number"
+                min="1"
+                max="99"
+                inputmode="numeric"
+              />
+            </label>
+          </div>
+
+          <p v-if="todoPromesseLimitError" class="settings-feedback settings-feedback--error">
+            {{ todoPromesseLimitError }}
+          </p>
+          <p v-if="todoPromesseLimitMessage" class="settings-feedback settings-feedback--ok">
+            {{ todoPromesseLimitMessage }}
+          </p>
+          <div class="settings-actions">
+            <button
+              type="button"
+              class="btn btn--primary"
+              :disabled="isSavingTodoPromesseLimits"
+              @click="onSaveTodoPromesseLimitSettings"
+            >
+              {{ isSavingTodoPromesseLimits ? 'Enregistrement…' : 'Enregistrer' }}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-card settings-card--spaced settings-card--collapsible">
         <button
           type="button"
           class="card-toggle"

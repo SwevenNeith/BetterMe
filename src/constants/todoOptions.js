@@ -26,16 +26,25 @@ export const TODO_WEEKDAYS = HABIT_WEEKDAYS
 export const MAX_TODO_PROMESSES_PER_DAY = 3
 export const MAX_TODO_PROMESSES_PER_WEEK = 3
 
-export const TODO_PROMESSE_LIMIT_MESSAGE =
-  'Tu as déjà 3 promesses pour ce jour. Retire le statut Promesse d’une autre ou choisis une autre date.'
+export function getTodoPromesseDayLimitMessage(limit = MAX_TODO_PROMESSES_PER_DAY) {
+  return `Tu as déjà ${limit} promesse${limit > 1 ? 's' : ''} pour ce jour. Retire le statut Promesse d’une autre ou choisis une autre date.`
+}
 
-export const TODO_PROMESSE_WEEK_LIMIT_MESSAGE =
-  'Tu as déjà 3 promesses « Cette semaine » pour cette semaine. Retire le statut Promesse d’une autre ou choisis une autre semaine.'
+export function getTodoPromesseWeekLimitMessage(limit = MAX_TODO_PROMESSES_PER_WEEK) {
+  return `Tu as déjà ${limit} promesse${limit > 1 ? 's' : ''} « Cette semaine » pour cette semaine. Retire le statut Promesse d’une autre ou choisis une autre semaine.`
+}
 
-export const TODO_PROMESSE_LIMIT_MESSAGES = [
-  TODO_PROMESSE_LIMIT_MESSAGE,
-  TODO_PROMESSE_WEEK_LIMIT_MESSAGE,
-]
+export const TODO_PROMESSE_LIMIT_MESSAGE = getTodoPromesseDayLimitMessage()
+
+export const TODO_PROMESSE_WEEK_LIMIT_MESSAGE = getTodoPromesseWeekLimitMessage()
+
+export function isTodoPromesseLimitError(message) {
+  if (typeof message !== 'string' || !message) return false
+  return (
+    message.includes('promesses pour ce jour') ||
+    message.includes('« Cette semaine » pour cette semaine')
+  )
+}
 
 export function getTodoWeekdayLabel(dayId) {
   return TODO_WEEKDAYS.find((d) => d.id === dayId)?.label ?? ''

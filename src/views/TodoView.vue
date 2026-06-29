@@ -5,7 +5,7 @@ import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import {
   TODO_FREQUENCY,
   TODO_FREQUENCY_OPTIONS,
-  TODO_PROMESSE_LIMIT_MESSAGES,
+  isTodoPromesseLimitError,
   TODO_WEEKDAYS,
   getDefaultTodoFrequencyForView,
   getTodoFrequencyClass,
@@ -20,6 +20,7 @@ import {
   setTodoCompletionForDate,
   setTodoQuantiteForDate,
 } from '../services/todoItems.js'
+import { loadTodoPromesseLimits } from '../services/todoPromesseSettings.js'
 import {
   TODO_VIEW_MODE,
   buildCompletionProgressMap,
@@ -70,6 +71,7 @@ const items = ref([])
 const completionProgress = ref(new Map())
 const draggingItemId = ref(null)
 const pendingDeleteItem = ref(null)
+const promesseLimits = ref({ perDay: 3, perWeek: 3 })
 
 const viewMode = ref(TODO_VIEW_MODE.DAY)
 const anchorDate = ref(getLocalTodayISO())
@@ -341,6 +343,11 @@ const progressAriaLabel = computed(() => {
   return `Progression ${scope} : ${currentProgress.value.percent} %`
 })
 
+const promesseLimitHint = computed(
+  () =>
+    `Jusqu’à ${promesseLimits.value.perDay} promesse${promesseLimits.value.perDay > 1 ? 's' : ''} par jour et ${promesseLimits.value.perWeek} promesse${promesseLimits.value.perWeek > 1 ? 's' : ''} « Cette semaine » par semaine.`,
+)
+
 async function loadData() {
   if (!userId.value) return
 
@@ -348,12 +355,14 @@ async function loadData() {
   loadError.value = ''
   try {
     const { start, end } = getTodoCompletionsFetchRange(anchorDate.value, viewMode.value)
-    const [itemsData, completionsData] = await Promise.all([
+    const [itemsData, completionsData, limits] = await Promise.all([
       listTodoItems(supabase, userId.value),
       listTodoCompletionsInRange(supabase, userId.value, start, end),
+      loadTodoPromesseLimits(userId.value),
     ])
     items.value = itemsData
     completionProgress.value = buildCompletionProgressMap(completionsData)
+    promesseLimits.value = limits
   } catch (err) {
     console.error(err)
     loadError.value = err.message || 'Impossible de charger la liste.'
@@ -391,9 +400,9 @@ async function submitForm() {
 
   if (payload.is_promesse) {
     try {
-      assertPromesseLimits(items.value, payload, editingItemId.value)
+      assertPromesseLimits(items.value, payload, editingItemId.value, promesseLimits.value)
     } catch (err) {
-      formError.value = err.message || TODO_PROMESSE_LIMIT_MESSAGES[0]
+      formError.value = err.message || 'Limite de promesses atteinte.'
       isSaving.value = false
       return
     }
@@ -414,7 +423,7 @@ async function submitForm() {
       (editingItemId.value
         ? "Erreur lors de la modification de l'élément."
         : "Erreur lors de l'ajout de l'élément.")
-    if (TODO_PROMESSE_LIMIT_MESSAGES.includes(message)) {
+    if (isTodoPromesseLimitError(message)) {
       formError.value = message
     } else {
       loadError.value = message
@@ -895,7 +904,7 @@ watch(userId, (id) => {
         <span>Promesse</span>
       </label>
       <p v-if="!formError" class="todo-form-hint todo-form-hint--promesse">
-        Jusqu’à 3 promesses par jour et 3 promesses « Cette semaine » par semaine.
+        {{ promesseLimitHint }}
       </p>
 
       <p v-if="formError" class="todo-error" role="alert">{{ formError }}</p>

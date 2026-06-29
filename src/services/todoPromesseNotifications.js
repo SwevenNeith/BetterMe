@@ -10,7 +10,7 @@ import {
   deletePendingByKinds,
   insertPendingNotifications,
 } from './scheduledReminders.js'
-import { addDaysISO, countPromessesForDate } from '../utils/todoCalendar.js'
+import { addDaysISO, countDayScopedPromessesForDate } from '../utils/todoCalendar.js'
 
 const SETTINGS_TABLE = 'settings'
 const APP_TIMEZONE = 'Europe/Paris'
@@ -146,7 +146,7 @@ export async function rescheduleTodoPromesseReminder(userId, options = {}) {
 
   const items = options.items ?? (await listTodoItems(supabase, userId))
   const tomorrowParis = addDaysISO(todayParis, 1)
-  if (countPromessesForDate(items, tomorrowParis) > 0) return
+  if (countDayScopedPromessesForDate(items, tomorrowParis) > 0) return
 
   const hhmm = settings.todo_promesse_reminder_time
   const scheduledAt = dateTimeParisToUtc(todayParis, hhmm)
