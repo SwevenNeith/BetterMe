@@ -8,6 +8,7 @@ export const SCHEDULED_KIND = {
   TIMER: 'timer',
   TIMER_START: 'timer_start',
   RECONFORT: 'reconfort',
+  TODO_PROMESSE_REMINDER: 'todo_promesse_reminder',
 }
 
 export function isStandaloneTimer(row) {
@@ -279,6 +280,9 @@ export async function loadStandaloneScheduledGrouped(supabase, userId) {
       continue
     }
     if (row?.kind === SCHEDULED_KIND.RECONFORT) {
+      continue
+    }
+    if (row?.kind === SCHEDULED_KIND.TODO_PROMESSE_REMINDER) {
       continue
     }
     if (isStandaloneTimer(row)) {

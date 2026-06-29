@@ -3,8 +3,19 @@ import { APP_PAGE_IDS, APP_MAIN_PAGES } from '../constants/appPages.js'
 import { ensureUserSettings } from './menstruationNotifications.js'
 import { getPageDisplayLabel, loadPageVisibility } from './pageVisibility.js'
 import { normalizeReminderTime } from './dailyReminders.js'
+import { dateTimeParisToUtc } from './notifications.js'
+import { listTodoItems } from './todoItems.js'
+import {
+  SCHEDULED_KIND,
+  deletePendingByKinds,
+  insertPendingNotifications,
+} from './scheduledReminders.js'
+import { addDaysISO, countPromessesForDate } from '../utils/todoCalendar.js'
 
 const SETTINGS_TABLE = 'settings'
+const APP_TIMEZONE = 'Europe/Paris'
+const TODO_PROMESSE_BODY =
+  'Tu n’as pas encore de promesse pour demain. Penses à en ajouter une 💜'
 
 const TODO_DEFAULT_LABEL =
   APP_MAIN_PAGES.find((p) => p.id === APP_PAGE_IDS.TODO)?.defaultLabel ?? 'TODO'
@@ -21,9 +32,39 @@ function isMissingColumnError(error) {
   return (
     error?.code === 'PGRST204' &&
     (msg.includes('todo_promesse_reminder_enabled') ||
-      msg.includes('todo_promesse_reminder_time') ||
-      msg.includes('todo_promesse_reminder_last_sent'))
+      msg.includes('todo_promesse_reminder_time'))
   )
+}
+
+function getParisTodayISO() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE }).format(new Date())
+}
+
+function getParisDayBoundsUtc(todayParis) {
+  return {
+    dayStart: dateTimeParisToUtc(todayParis, '00:00').toISOString(),
+    dayEnd: dateTimeParisToUtc(todayParis, '23:59').toISOString(),
+  }
+}
+
+async function hasTodoPromesseReminderSentToday(userId, todayParis) {
+  const { dayStart, dayEnd } = getParisDayBoundsUtc(todayParis)
+  const { data, error } = await supabase
+    .from('scheduled_notifications')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('kind', SCHEDULED_KIND.TODO_PROMESSE_REMINDER)
+    .eq('sent', true)
+    .gte('scheduled_at', dayStart)
+    .lte('scheduled_at', dayEnd)
+    .limit(1)
+
+  if (error) {
+    if (String(error.message || '').includes('kind')) return false
+    throw error
+  }
+
+  return Boolean(data?.length)
 }
 
 export async function loadTodoPromesseReminderSettings(userId) {
@@ -85,4 +126,42 @@ export async function getTodoPageLabelForUser(supabaseClient, userId) {
   } catch {
     return TODO_DEFAULT_LABEL
   }
+}
+
+/**
+ * Planifie (ou annule) le rappel du jour via scheduled_notifications.
+ * Appelé à l’ouverture de l’app, après modification des TODO ou des réglages.
+ */
+export async function rescheduleTodoPromesseReminder(userId, options = {}) {
+  if (!userId) return
+
+  const kind = SCHEDULED_KIND.TODO_PROMESSE_REMINDER
+  await deletePendingByKinds(supabase, userId, [kind])
+
+  const settings = options.settings ?? (await loadTodoPromesseReminderSettings(userId))
+  if (!settings.todo_promesse_reminder_enabled) return
+
+  const todayParis = getParisTodayISO()
+  if (await hasTodoPromesseReminderSentToday(userId, todayParis)) return
+
+  const items = options.items ?? (await listTodoItems(supabase, userId))
+  const tomorrowParis = addDaysISO(todayParis, 1)
+  if (countPromessesForDate(items, tomorrowParis) > 0) return
+
+  const hhmm = settings.todo_promesse_reminder_time
+  const scheduledAt = dateTimeParisToUtc(todayParis, hhmm)
+  if (scheduledAt.getTime() <= Date.now()) return
+
+  const title = await getTodoPageLabelForUser(supabase, userId)
+
+  await insertPendingNotifications(supabase, userId, [
+    {
+      user_id: userId,
+      event_id: null,
+      kind,
+      title,
+      body: TODO_PROMESSE_BODY,
+      scheduled_at: scheduledAt.toISOString(),
+    },
+  ])
 }

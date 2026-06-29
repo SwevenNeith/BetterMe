@@ -96,8 +96,43 @@ function getParisNow() {
   )
   return {
     dateISO: `${parts.year}-${parts.month}-${parts.day}`,
-    timeHHmm: `${parts.hour}:${parts.minute}`,
+    timeHHmm: normalizeTimeHHmm(`${parts.hour}:${parts.minute}`),
   }
+}
+
+function parisDateTimeToUtcISO(dateISO: string, timeHHmm: string): string {
+  const [targetYear, targetMonth, targetDay] = dateISO.split('-').map(Number)
+  const [targetHour, targetMinute] = normalizeTimeHHmm(timeHHmm).split(':').map(Number)
+
+  let utcMs = Date.UTC(targetYear, targetMonth - 1, targetDay, targetHour, targetMinute)
+
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+
+  for (let i = 0; i < 8; i++) {
+    const partMap = Object.fromEntries(
+      formatter.formatToParts(new Date(utcMs)).map((part) => [part.type, part.value]),
+    )
+    const pYear = Number(partMap.year)
+    const pMonth = Number(partMap.month)
+    const pDay = Number(partMap.day)
+    const pHour = Number(partMap.hour)
+    const pMinute = Number(partMap.minute)
+    const dayDiff =
+      (targetYear - pYear) * 372 + (targetMonth - pMonth) * 31 + (targetDay - pDay)
+    const minuteDiff = dayDiff * 24 * 60 + (targetHour - pHour) * 60 + (targetMinute - pMinute)
+    if (minuteDiff === 0) break
+    utcMs += minuteDiff * 60 * 1000
+  }
+
+  return new Date(utcMs).toISOString()
 }
 
 function addDaysISO(dateISO: string, delta: number): string {
@@ -119,12 +154,14 @@ function getTodoPageLabel(pageVisibility: unknown): string {
   return custom || 'TODO'
 }
 
-async function processTodoPromesseReminders(parisNow: { dateISO: string; timeHHmm: string }) {
+const TODO_PROMESSE_KIND = 'todo_promesse_reminder'
+const TODO_PROMESSE_BODY =
+  'Tu n’as pas encore de promesse pour demain. Penses à en ajouter une 💜'
+
+async function ensureTodoPromesseReminders(parisNow: { dateISO: string; timeHHmm: string }) {
   const { data: settingsRows, error: settingsError } = await supabase
     .from('settings')
-    .select(
-      'user_id, todo_promesse_reminder_enabled, todo_promesse_reminder_time, todo_promesse_reminder_last_sent, page_visibility',
-    )
+    .select('user_id, todo_promesse_reminder_enabled, todo_promesse_reminder_time, page_visibility')
     .eq('todo_promesse_reminder_enabled', true)
 
   if (settingsError) {
@@ -133,17 +170,17 @@ async function processTodoPromesseReminders(parisNow: { dateISO: string; timeHHm
   }
 
   const tomorrowISO = addDaysISO(parisNow.dateISO, 1)
+  const dayStartISO = parisDateTimeToUtcISO(parisNow.dateISO, '00:00')
+  const dayEndISO = parisDateTimeToUtcISO(parisNow.dateISO, '23:59')
+  const nowMs = Date.now()
 
   for (const row of settingsRows ?? []) {
     const userId = row.user_id
     if (!userId) continue
 
     const reminderTime = normalizeTimeHHmm(row.todo_promesse_reminder_time)
-    if (reminderTime !== parisNow.timeHHmm) continue
-
-    if (row.todo_promesse_reminder_last_sent === parisNow.dateISO) {
-      continue
-    }
+    const scheduledAtISO = parisDateTimeToUtcISO(parisNow.dateISO, reminderTime)
+    const scheduledMs = new Date(scheduledAtISO).getTime()
 
     const { data: items, error: itemsError } = await supabase
       .from('todo_items')
@@ -157,48 +194,76 @@ async function processTodoPromesseReminders(parisNow: { dateISO: string; timeHHm
     }
 
     if (countPromessesForDate(items ?? [], tomorrowISO) > 0) {
+      await supabase
+        .from('scheduled_notifications')
+        .delete()
+        .eq('user_id', userId)
+        .eq('kind', TODO_PROMESSE_KIND)
+        .eq('sent', false)
       continue
     }
 
-    const { data: subscriptions, error: subsError } = await supabase
-      .from('push_subscriptions')
-      .select('subscription')
+    const { data: sentRows, error: sentError } = await supabase
+      .from('scheduled_notifications')
+      .select('id')
       .eq('user_id', userId)
+      .eq('kind', TODO_PROMESSE_KIND)
+      .eq('sent', true)
+      .gte('scheduled_at', dayStartISO)
+      .lte('scheduled_at', dayEndISO)
+      .limit(1)
 
-    if (subsError) {
-      console.error('Erreur push_subscriptions promesses TODO :', subsError)
+    if (sentError) {
+      console.error('Lecture rappel promesses envoyé :', sentError)
       continue
     }
+    if (sentRows?.length) continue
 
-    if (!subscriptions?.length) {
+    const { data: pendingRows, error: pendingError } = await supabase
+      .from('scheduled_notifications')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('kind', TODO_PROMESSE_KIND)
+      .eq('sent', false)
+      .gte('scheduled_at', dayStartISO)
+      .lte('scheduled_at', dayEndISO)
+      .limit(1)
+
+    if (pendingError) {
+      console.error('Lecture rappel promesses en attente :', pendingError)
       continue
     }
+    if (pendingRows?.length) continue
 
+    if (nowMs > scheduledMs + 2 * 60 * 1000) continue
+
+    const whenISO = scheduledMs > nowMs ? scheduledAtISO : new Date().toISOString()
     const pageLabel = getTodoPageLabel(row.page_visibility)
-    const payload = JSON.stringify({
+
+    const { error: insertError } = await supabase.from('scheduled_notifications').insert({
+      user_id: userId,
+      event_id: null,
+      kind: TODO_PROMESSE_KIND,
       title: pageLabel,
-      body: 'Tu n’as pas encore de promesse pour demain. Penses à en ajouter une 💜',
+      body: TODO_PROMESSE_BODY,
+      scheduled_at: whenISO,
+      sent: false,
     })
 
-    for (const sub of subscriptions) {
-      try {
-        await webpush.sendNotification(sub.subscription, payload)
-      } catch (e) {
-        console.error('Erreur envoi rappel promesses TODO :', e)
-      }
-    }
-
-    const { error: updateError } = await supabase
-      .from('settings')
-      .update({ todo_promesse_reminder_last_sent: parisNow.dateISO })
-      .eq('user_id', userId)
-
-    if (updateError) {
-      console.error('Mise à jour todo_promesse_reminder_last_sent :', updateError)
+    if (insertError) {
+      console.error('Planification rappel promesses TODO :', insertError)
     } else {
-      console.log('Rappel promesses TODO envoyé pour', userId)
+      console.log('Rappel promesses TODO planifié pour', userId, whenISO)
     }
   }
+}
+
+function subscriptionsForUser(
+  subscriptions: Array<{ user_id?: string | null; subscription: unknown }>,
+  userId: string | null | undefined,
+) {
+  if (!userId) return subscriptions
+  return subscriptions.filter((row) => row.user_id === userId)
 }
 
 Deno.serve(async (req) => {
@@ -215,7 +280,7 @@ Deno.serve(async (req) => {
 
     const { data: subscriptions, error } = await supabase
       .from('push_subscriptions')
-      .select('subscription')
+      .select('user_id, subscription')
 
     if (error) {
       console.error('Erreur récupération subscriptions :', error)
@@ -266,6 +331,10 @@ Deno.serve(async (req) => {
       const maintenant = new Date().toISOString()
       console.log('Cron exécuté à :', maintenant)
 
+      const parisNow = getParisNow()
+      console.log('Heure Paris :', parisNow.timeHHmm)
+      await ensureTodoPromesseReminders(parisNow)
+
       // Vérifie les notifications planifiées à envoyer
       const { data: notificationsAEnvoyer, error: fetchError } = await supabase
         .from('scheduled_notifications')
@@ -280,7 +349,12 @@ Deno.serve(async (req) => {
       }
 
       for (const notif of notificationsAEnvoyer ?? []) {
-        for (const row of subscriptions) {
+        const targets = subscriptionsForUser(subscriptions ?? [], notif.user_id)
+        if (!targets.length) {
+          console.log('Aucune subscription pour', notif.user_id ?? 'tous')
+        }
+
+        for (const row of targets) {
           try {
             await webpush.sendNotification(
               row.subscription,
@@ -377,10 +451,6 @@ Deno.serve(async (req) => {
           }
         }
       }
-
-      const parisNow = getParisNow()
-      console.log('Heure Paris pour promesses TODO :', parisNow.timeHHmm)
-      await processTodoPromesseReminders(parisNow)
     }
 
     return new Response(JSON.stringify({ success: true }), {

@@ -4,6 +4,16 @@ import { assertPromesseLimitForDate, normalizeDateISO } from '../utils/todoCalen
 const TABLE = 'todo_items'
 const COMPLETIONS_TABLE = 'todo_item_completions'
 
+async function refreshTodoPromesseReminder(userId) {
+  if (!userId) return
+  try {
+    const { rescheduleTodoPromesseReminder } = await import('./todoPromesseNotifications.js')
+    await rescheduleTodoPromesseReminder(userId)
+  } catch (err) {
+    console.error('refreshTodoPromesseReminder:', err)
+  }
+}
+
 function normalizeTime(value) {
   if (value == null || value === '') return null
   const raw = String(value).trim()
@@ -122,6 +132,7 @@ export async function createTodoItem(supabase, userId, payload) {
     .single()
 
   if (error) throw error
+  await refreshTodoPromesseReminder(userId)
   return data
 }
 
@@ -152,6 +163,7 @@ export async function replaceTodoItem(supabase, userId, itemId, payload) {
     .single()
 
   if (error) throw error
+  await refreshTodoPromesseReminder(userId)
   return data
 }
 
@@ -166,6 +178,7 @@ export async function deleteTodoItem(supabase, userId, itemId) {
   const { error } = await supabase.from(TABLE).delete().eq('id', itemId).eq('user_id', userId)
 
   if (error) throw error
+  await refreshTodoPromesseReminder(userId)
 }
 
 /**

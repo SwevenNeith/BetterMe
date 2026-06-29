@@ -3,6 +3,7 @@ import { onMounted, onUnmounted } from 'vue';
 import { RouterView } from 'vue-router';
 import AppSidebar from '../components/Sidebar.vue';
 import NotificationPrompt from '../components/NotificationPrompt.vue';
+import { supabase } from '../lib/supabase.js';
 import {
   declencherCronNotifications,
   notificationsActives,
@@ -28,6 +29,21 @@ const stopNotificationCron = () => {
 onMounted(() => {
   startNotificationCron();
   window.addEventListener('betterme-notifications-granted', startNotificationCron);
+  void (async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user?.id) {
+        const { rescheduleTodoPromesseReminder } = await import(
+          '../services/todoPromesseNotifications.js'
+        );
+        await rescheduleTodoPromesseReminder(user.id);
+      }
+    } catch (err) {
+      console.error('rescheduleTodoPromesseReminder:', err);
+    }
+  })();
 });
 
 onUnmounted(() => {

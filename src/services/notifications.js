@@ -445,13 +445,16 @@ export async function declencherCronNotifications() {
       data: { user },
     } = await supabase.auth.getUser()
     if (user?.id) {
-      const { syncReconfortLastSentFromSentNotifications } = await import(
-        './reconfortNotifications.js'
-      )
+      const [{ syncReconfortLastSentFromSentNotifications }, { rescheduleTodoPromesseReminder }] =
+        await Promise.all([
+          import('./reconfortNotifications.js'),
+          import('./todoPromesseNotifications.js'),
+        ])
       await syncReconfortLastSentFromSentNotifications(supabase, user.id)
+      await rescheduleTodoPromesseReminder(user.id)
     }
   } catch (err) {
-    console.error('syncReconfortLastSentFromSentNotifications:', err)
+    console.error('Post-cron notifications:', err)
   }
   return result
 }

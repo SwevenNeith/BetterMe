@@ -55,6 +55,7 @@ import {
 import {
   createDefaultTodoPromesseReminderSettings,
   loadTodoPromesseReminderSettings,
+  rescheduleTodoPromesseReminder,
   saveTodoPromesseReminderSettings,
 } from '../services/todoPromesseNotifications.js'
 const EmojiTextField = defineAsyncComponent(
@@ -672,6 +673,9 @@ const onSaveTodoPromesseReminderSettings = async () => {
   todoPromesseReminderError.value = ''
   try {
     await saveTodoPromesseReminderSettings(userId.value, todoPromesseReminderSettings.value)
+    await rescheduleTodoPromesseReminder(userId.value, {
+      settings: todoPromesseReminderSettings.value,
+    })
     todoPromesseReminderMessage.value = 'Réglages enregistrés.'
     setTimeout(() => {
       todoPromesseReminderMessage.value = ''
