@@ -2125,7 +2125,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   width: max-content !important;
   min-width: 100% !important;
   max-width: 280px;
-  
+
   /* We do NOT override height. It keeps the inline style height (e.g. 130px).
      We add min-height: max-content so it CAN grow beyond the inline height if the content is taller, 
      but it will NEVER shrink below the inline height! */
@@ -2135,6 +2135,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   z-index: 50;
   overflow: visible;
   transform: translateY(-2px) scale(1.05);
+  transform-origin: left top;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
   background: #ffffff !important;
   border: 1px solid var(--event-color-solid) !important;
@@ -2147,8 +2148,17 @@ const getPositionedEventsForDay = (dayIdx) => {
   }
 }
 
-.grid-day-column:nth-child(n + 6) .event-block:hover {
-  transform: translate(-110px, -2px) scale(1.05);
+/* Ancrage aux bords : la carte agrandie reste dans sa colonne (pas de translate fixe). */
+.grid-day-column:first-child .event-block:hover {
+  left: 0 !important;
+  right: auto !important;
+  transform-origin: left top;
+}
+
+.grid-day-column:last-child .event-block:hover {
+  left: auto !important;
+  right: 0 !important;
+  transform-origin: right top;
 }
 
 .event-content {
