@@ -1,0 +1,30 @@
+/* Nuances TODO : 5 teintes distinctes (lavande / vert / bleu / mauve / ambre) */
+.todo-freq--ponctuel {
+  --todo-freq-accent: #ad81be;
+  --todo-freq-bg: rgba(173, 129, 190, 0.11);
+  --todo-freq-border: rgba(173, 129, 190, 0.32);
+}
+
+.todo-freq--semaine {
+  --todo-freq-accent: #72a098;
+  --todo-freq-bg: rgba(114, 160, 152, 0.13);
+  --todo-freq-border: rgba(114, 160, 152, 0.38);
+}
+
+.todo-freq--quotidien {
+  --todo-freq-accent: #6a8fc9;
+  --todo-freq-bg: rgba(106, 143, 201, 0.12);
+  --todo-freq-border: rgba(106, 143, 201, 0.34);
+}
+
+.todo-freq--hebdomadaire {
+  --todo-freq-accent: #b888c8;
+  --todo-freq-bg: rgba(184, 136, 200, 0.12);
+  --todo-freq-border: rgba(184, 136, 200, 0.34);
+}
+
+.todo-freq--promesse {
+  --todo-freq-accent: #d4a06a;
+  --todo-freq-bg: rgba(212, 160, 106, 0.14);
+  --todo-freq-border: rgba(212, 160, 106, 0.4);
+}

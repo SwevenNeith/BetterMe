@@ -1,5 +1,5 @@
 import { TODO_FREQUENCY } from '../constants/todoOptions.js'
-import { assertPromesseLimitForDate, normalizeDateISO } from '../utils/todoCalendar.js'
+import { assertPromesseLimits, getTodoOccurrenceKeyDate, getWeekStartISO, normalizeDateISO } from '../utils/todoCalendar.js'
 
 const TABLE = 'todo_items'
 const COMPLETIONS_TABLE = 'todo_item_completions'
@@ -37,7 +37,7 @@ function normalizeTodoPayload(payload) {
   const jour_semaine =
     frequence === TODO_FREQUENCY.WEEKLY ? Number(payload.jour_semaine) : null
   const heure = normalizeTime(payload.heure)
-  const date_echeance = normalizeDateISO(payload.date_echeance)
+  let date_echeance = normalizeDateISO(payload.date_echeance)
 
   if (!nom) {
     throw new Error('Indique un nom pour l’élément.')
@@ -55,6 +55,10 @@ function normalizeTodoPayload(payload) {
     if (!Number.isInteger(jour_semaine) || jour_semaine < 1 || jour_semaine > 7) {
       throw new Error('Sélectionne un jour de la semaine.')
     }
+  }
+
+  if (frequence === TODO_FREQUENCY.WEEK_GOAL && date_echeance) {
+    date_echeance = getWeekStartISO(date_echeance)
   }
 
   let quantite_cible = null
@@ -105,7 +109,7 @@ export async function createTodoItem(supabase, userId, payload) {
   const existing = await listTodoItems(supabase, userId)
 
   if (row.is_promesse) {
-    assertPromesseLimitForDate(existing, row.date_echeance)
+    assertPromesseLimits(existing, row)
   }
 
   let sortOrder = existing.length
@@ -158,7 +162,7 @@ export async function replaceTodoItem(supabase, userId, itemId, payload) {
 
   if (row.is_promesse) {
     const existing = await listTodoItems(supabase, userId)
-    assertPromesseLimitForDate(existing, row.date_echeance, itemId)
+    assertPromesseLimits(existing, row, itemId)
   }
 
   const { data, error } = await supabase
@@ -240,12 +244,12 @@ export async function listTodoCompletionsInRange(supabase, userId, startISO, end
 export async function setTodoCompletionForDate(supabase, userId, item, dateISO, done) {
   if (!userId || !item?.id) return
 
-  const date = normalizeDateISO(dateISO)
+  const date = getTodoOccurrenceKeyDate(item, dateISO)
   if (!date) return
 
   if (item.quantite_cible != null && Number(item.quantite_cible) >= 1) {
     const cible = Number(item.quantite_cible)
-    await setTodoQuantiteForDate(supabase, userId, item, date, done ? cible : 0)
+    await setTodoQuantiteForDate(supabase, userId, item, dateISO, done ? cible : 0)
     return
   }
 
@@ -284,7 +288,7 @@ export async function setTodoCompletionForDate(supabase, userId, item, dateISO, 
 export async function setTodoQuantiteForDate(supabase, userId, item, dateISO, quantiteActuelle) {
   if (!userId || !item?.id) return
 
-  const date = normalizeDateISO(dateISO)
+  const date = getTodoOccurrenceKeyDate(item, dateISO)
   const cible = Number(item.quantite_cible)
   if (!date || !Number.isInteger(cible) || cible < 1) return
 

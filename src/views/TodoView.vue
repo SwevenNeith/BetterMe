@@ -5,8 +5,10 @@ import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import {
   TODO_FREQUENCY,
   TODO_FREQUENCY_OPTIONS,
-  TODO_PROMESSE_LIMIT_MESSAGE,
+  TODO_PROMESSE_LIMIT_MESSAGES,
   TODO_WEEKDAYS,
+  getDefaultTodoFrequencyForView,
+  getTodoFrequencyClass,
 } from '../constants/todoOptions.js'
 import {
   listTodoItems,
@@ -22,7 +24,7 @@ import {
   TODO_VIEW_MODE,
   buildCompletionProgressMap,
   hasTodoQuantiteCible,
-  assertPromesseLimitForDate,
+  assertPromesseLimits,
   formatDayLabelFr,
   formatMonthLabelFr,
   formatWeekRangeLabelFr,
@@ -33,8 +35,10 @@ import {
   getMonthEndISO,
   getWeekStartISO,
   getTodosForDate,
+  getTodosForWeek,
   getTodoProgressStats,
   getWeekDates,
+  getTodoOccurrenceKeyDate,
   iterateISODateRange,
   normalizeDateISO,
   parseISODate,
@@ -46,6 +50,7 @@ import {
   toISODate,
 } from '../utils/habitCalendar.js'
 import TodoItemCard from '../components/TodoItemCard.vue'
+import '../styles/todo-frequency.css'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 
@@ -68,7 +73,7 @@ const pendingDeleteItem = ref(null)
 
 const viewMode = ref(TODO_VIEW_MODE.DAY)
 const anchorDate = ref(getLocalTodayISO())
-const selectedWeekDayIndex = ref(0)
+const dayPickerRef = ref(null)
 
 const todayParts = parseISODate(getLocalTodayISO())
 const selectedYear = ref(todayParts.year)
@@ -89,6 +94,12 @@ const todoForm = reactive({
 
 const showWeekdayPicker = computed(() => todoForm.frequence === TODO_FREQUENCY.WEEKLY)
 
+const formTargetWeekLabel = computed(() => {
+  if (todoForm.frequence !== TODO_FREQUENCY.WEEK_GOAL) return ''
+  const source = todoForm.date_echeance || anchorDate.value
+  return formatWeekRangeLabelFr(source)
+})
+
 const isEditMode = computed(() => Boolean(editingItemId.value))
 
 const periodLabel = computed(() => {
@@ -103,7 +114,7 @@ const periodLabel = computed(() => {
 
 const periodSubtitle = computed(() => {
   if (viewMode.value === TODO_VIEW_MODE.WEEK) {
-    return formatMonthLabelFr(getWeekStartISO(anchorDate.value))
+    return 'Objectifs à réaliser cette semaine'
   }
   return ''
 })
@@ -112,16 +123,9 @@ const dailyItems = computed(() =>
   getTodosForDate(items.value, anchorDate.value, completionProgress.value),
 )
 
-const weekSections = computed(() => {
-  const dates = getWeekDates(anchorDate.value)
-  return dates.map((dateISO) => ({
-    dateISO,
-    weekdayLabel: WEEKDAY_HEADERS[getIsoWeekdayFromISO(dateISO) - 1],
-    dayNumber: parseISODate(dateISO).day,
-    isToday: dateISO === getLocalTodayISO(),
-    items: getTodosForDate(items.value, dateISO, completionProgress.value),
-  }))
-})
+const weeklyGoalItems = computed(() =>
+  getTodosForWeek(items.value, anchorDate.value, completionProgress.value),
+)
 
 const monthGrid = computed(() => {
   const { dates } = getDateRangeForView(TODO_VIEW_MODE.MONTH, anchorDate.value)
@@ -158,7 +162,7 @@ const itemsSubtitle = computed(() => {
     return `${done}/${count} terminé${done > 1 ? 's' : ''} aujourd’hui.`
   }
   if (viewMode.value === TODO_VIEW_MODE.WEEK) {
-    const total = weekSections.value.reduce((sum, section) => sum + section.items.length, 0)
+    const total = currentProgress.value.total
     return total
       ? `${total} occurrence${total > 1 ? 's' : ''} cette semaine.`
       : 'Rien de prévu cette semaine.'
@@ -176,17 +180,27 @@ function formatTimeForInput(value) {
   return String(value).slice(0, 5)
 }
 
+const formFrequencyClass = computed(() => getTodoFrequencyClass(todoForm.frequence))
+
+function applyFormDefaultsForView() {
+  todoForm.frequence = getDefaultTodoFrequencyForView(viewMode.value)
+  todoForm.jour_semaine = null
+  if (todoForm.frequence === TODO_FREQUENCY.WEEK_GOAL) {
+    todoForm.date_echeance = getWeekStartISO(anchorDate.value || getLocalTodayISO())
+  } else {
+    todoForm.date_echeance = anchorDate.value || getLocalTodayISO()
+  }
+}
+
 function resetForm() {
   todoForm.nom = ''
   todoForm.description = ''
-  todoForm.frequence = TODO_FREQUENCY.ONE_OFF
-  todoForm.jour_semaine = null
   todoForm.heure = ''
-  todoForm.date_echeance = anchorDate.value || getLocalTodayISO()
   todoForm.is_promesse = false
   todoForm.quantite_cible = 0
   editingItemId.value = null
   formError.value = ''
+  applyFormDefaultsForView()
 }
 
 function openForm() {
@@ -222,6 +236,9 @@ function setViewMode(mode) {
   viewMode.value = mode
   if (mode === TODO_VIEW_MODE.MONTH) {
     syncMonthYearFromAnchor()
+  }
+  if (formOpen.value && !editingItemId.value) {
+    applyFormDefaultsForView()
   }
 }
 
@@ -259,14 +276,30 @@ function goToday() {
 function selectMonthDay(dateISO) {
   anchorDate.value = dateISO
   viewMode.value = TODO_VIEW_MODE.DAY
+  if (formOpen.value && !editingItemId.value) {
+    applyFormDefaultsForView()
+  }
 }
 
-function syncSelectedWeekDay() {
-  const idx = weekSections.value.findIndex((section) => section.isToday)
-  selectedWeekDayIndex.value = idx >= 0 ? idx : 0
+function openDayPicker() {
+  dayPickerRef.value?.showPicker?.()
 }
 
-const selectedWeekSection = computed(() => weekSections.value[selectedWeekDayIndex.value] ?? null)
+function onDayPickerChange(event) {
+  const next = normalizeDateISO(event.target.value)
+  if (next) {
+    anchorDate.value = next
+  }
+}
+
+function itemActionDate(item) {
+  return item.completionDate || item.occurrenceDate || anchorDate.value
+}
+
+function progressMapKey(item, dateISO) {
+  const keyDate = getTodoOccurrenceKeyDate(item, dateISO) || normalizeDateISO(dateISO)
+  return `${item.id}:${keyDate}`
+}
 
 const currentProgress = computed(() => {
   const keys = completionProgress.value
@@ -336,13 +369,21 @@ async function submitForm() {
 
   isSaving.value = true
   formError.value = ''
+
+  const dateEcheance =
+    todoForm.frequence === TODO_FREQUENCY.WEEK_GOAL
+      ? getWeekStartISO(
+          isEditMode.value ? todoForm.date_echeance || anchorDate.value : anchorDate.value,
+        )
+      : todoForm.date_echeance
+
   const payload = {
     nom: todoForm.nom,
     description: todoForm.description,
     frequence: todoForm.frequence,
     jour_semaine: todoForm.jour_semaine,
     heure: todoForm.heure || null,
-    date_echeance: todoForm.date_echeance,
+    date_echeance: dateEcheance,
     is_promesse: todoForm.is_promesse,
     quantite_cible:
       todoForm.quantite_cible > 0 ? Math.round(Number(todoForm.quantite_cible)) : null,
@@ -350,9 +391,9 @@ async function submitForm() {
 
   if (payload.is_promesse) {
     try {
-      assertPromesseLimitForDate(items.value, payload.date_echeance, editingItemId.value)
+      assertPromesseLimits(items.value, payload, editingItemId.value)
     } catch (err) {
-      formError.value = err.message || TODO_PROMESSE_LIMIT_MESSAGE
+      formError.value = err.message || TODO_PROMESSE_LIMIT_MESSAGES[0]
       isSaving.value = false
       return
     }
@@ -373,7 +414,7 @@ async function submitForm() {
       (editingItemId.value
         ? "Erreur lors de la modification de l'élément."
         : "Erreur lors de l'ajout de l'élément.")
-    if (message === TODO_PROMESSE_LIMIT_MESSAGE) {
+    if (TODO_PROMESSE_LIMIT_MESSAGES.includes(message)) {
       formError.value = message
     } else {
       loadError.value = message
@@ -414,10 +455,6 @@ async function confirmDelete() {
   }
 }
 
-function progressMapKey(item, dateISO) {
-  return `${item.id}:${normalizeDateISO(dateISO)}`
-}
-
 function applyOccurrenceProgress(item, quantiteActuelle) {
   const cible = Number(item.quantite_cible)
   item.occurrenceQuantiteActuelle = quantiteActuelle
@@ -431,7 +468,7 @@ function applyOccurrenceProgress(item, quantiteActuelle) {
 async function adjustItemQuantite(item, delta) {
   if (!userId.value || !item?.id || !hasTodoQuantiteCible(item)) return
 
-  const dateISO = item.occurrenceDate || anchorDate.value
+  const dateISO = itemActionDate(item)
   const key = progressMapKey(item, dateISO)
   const cible = Number(item.quantite_cible)
   const current = item.occurrenceQuantiteActuelle ?? 0
@@ -467,9 +504,9 @@ async function toggleItem(item) {
     return
   }
 
-  const dateISO = item.occurrenceDate || anchorDate.value
+  const dateISO = itemActionDate(item)
   const next = !item.occurrenceDone
-  const key = `${item.id}:${normalizeDateISO(dateISO)}`
+  const key = progressMapKey(item, dateISO)
 
   if (next) {
     completionProgress.value.set(key, { quantite_actuelle: 1, binaryDone: true })
@@ -567,6 +604,9 @@ watch(
     if (freq !== TODO_FREQUENCY.WEEKLY) {
       todoForm.jour_semaine = null
     }
+    if (freq === TODO_FREQUENCY.WEEK_GOAL) {
+      todoForm.date_echeance = getWeekStartISO(anchorDate.value)
+    }
   },
 )
 
@@ -577,11 +617,15 @@ watch([selectedMonth, selectedYear], () => {
 })
 
 watch([viewMode, anchorDate], () => {
-  if (viewMode.value === TODO_VIEW_MODE.WEEK) {
-    syncSelectedWeekDay()
-  }
   if (viewMode.value === TODO_VIEW_MODE.MONTH) {
     syncMonthYearFromAnchor()
+  }
+  if (
+    formOpen.value &&
+    todoForm.frequence === TODO_FREQUENCY.WEEK_GOAL &&
+    !editingItemId.value
+  ) {
+    todoForm.date_echeance = getWeekStartISO(anchorDate.value)
   }
   if (userId.value) void loadData()
 })
@@ -648,7 +692,26 @@ watch(userId, (id) => {
         </button>
 
         <div class="todo-nav-title">
-          <span class="todo-nav-title__main">{{ periodLabel }}</span>
+          <template v-if="viewMode === TODO_VIEW_MODE.DAY">
+            <button
+              type="button"
+              class="todo-nav-title__date-btn"
+              :title="`Choisir une date — ${periodLabel}`"
+              @click="openDayPicker"
+            >
+              <span class="todo-nav-title__main">{{ periodLabel }}</span>
+            </button>
+            <input
+              ref="dayPickerRef"
+              type="date"
+              class="todo-nav-date-input"
+              :value="anchorDate"
+              tabindex="-1"
+              aria-label="Choisir une date"
+              @change="onDayPickerChange"
+            />
+          </template>
+          <span v-else class="todo-nav-title__main">{{ periodLabel }}</span>
 
           <div v-if="viewMode === TODO_VIEW_MODE.MONTH" class="todo-nav-filters">
             <select
@@ -771,7 +834,25 @@ watch(userId, (id) => {
         />
       </label>
 
-      <label class="todo-form-field">
+      <div class="todo-form-field">
+        <span class="todo-form-label">Fréquence</span>
+        <div class="todo-form-frequence-row" :class="formFrequencyClass">
+          <span class="todo-form-freq-dot" aria-hidden="true" />
+          <select v-model="todoForm.frequence" class="todo-form-select todo-form-select--freq" required>
+            <option v-for="opt in TODO_FREQUENCY_OPTIONS" :key="opt.id" :value="opt.id">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <div v-if="todoForm.frequence === TODO_FREQUENCY.WEEK_GOAL" class="todo-form-field">
+        <span class="todo-form-label">Semaine</span>
+        <p class="todo-form-week-label">{{ formTargetWeekLabel }}</p>
+        <p class="todo-form-hint">Basée sur la semaine affichée dans le calendrier.</p>
+      </div>
+
+      <label v-else class="todo-form-field">
         <span class="todo-form-label">Pour quand</span>
         <input
           v-model="todoForm.date_echeance"
@@ -780,15 +861,6 @@ watch(userId, (id) => {
           required
           @change="formError = ''"
         />
-      </label>
-
-      <label class="todo-form-field">
-        <span class="todo-form-label">Fréquence</span>
-        <select v-model="todoForm.frequence" class="todo-form-select" required>
-          <option v-for="opt in TODO_FREQUENCY_OPTIONS" :key="opt.id" :value="opt.id">
-            {{ opt.label }}
-          </option>
-        </select>
       </label>
 
       <fieldset v-if="showWeekdayPicker" class="todo-form-field todo-form-weekdays">
@@ -815,10 +887,16 @@ watch(userId, (id) => {
         <input v-model="todoForm.heure" type="time" class="todo-form-input todo-form-input--time" />
       </label>
 
-      <label class="todo-form-promesse choice-check">
+      <label
+        class="todo-form-promesse choice-check"
+        :class="{ 'todo-freq--promesse': todoForm.is_promesse }"
+      >
         <input v-model="todoForm.is_promesse" type="checkbox" @change="formError = ''" />
         <span>Promesse</span>
       </label>
+      <p v-if="!formError" class="todo-form-hint todo-form-hint--promesse">
+        Jusqu’à 3 promesses par jour et 3 promesses « Cette semaine » par semaine.
+      </p>
 
       <p v-if="formError" class="todo-error" role="alert">{{ formError }}</p>
 
@@ -859,84 +937,21 @@ watch(userId, (id) => {
           />
         </div>
 
-        <div v-else-if="viewMode === TODO_VIEW_MODE.WEEK" class="todo-week">
-          <div class="todo-week-tabs" role="tablist" aria-label="Jours de la semaine">
-            <button
-              v-for="(section, idx) in weekSections"
-              :key="section.dateISO"
-              type="button"
-              role="tab"
-              class="todo-week-tab"
-              :class="{
-                'todo-week-tab--active': selectedWeekDayIndex === idx,
-                'todo-week-tab--today': section.isToday,
-              }"
-              :aria-selected="selectedWeekDayIndex === idx"
-              @click="selectedWeekDayIndex = idx"
-            >
-              <span class="todo-week-tab__name">{{ section.weekdayLabel }}</span>
-              <span class="todo-week-tab__number">{{ section.dayNumber }}</span>
-            </button>
-          </div>
-
-          <div v-if="selectedWeekSection" class="todo-week-mobile">
-            <p v-if="!selectedWeekSection.items.length" class="todo-week-mobile__empty">
-              Aucun élément ce jour-là.
-            </p>
-            <div v-else class="todo-week-mobile__list">
-              <TodoItemCard
-                v-for="item in selectedWeekSection.items"
-                :key="`${item.id}-${item.occurrenceDate}`"
-                :item="item"
-                @toggle="toggleItem(item)"
+        <div v-else-if="viewMode === TODO_VIEW_MODE.WEEK" class="todo-list" role="list">
+          <p v-if="!weeklyGoalItems.length" class="todo-empty">
+            Aucun objectif pour cette semaine.
+          </p>
+          <TodoItemCard
+            v-for="item in weeklyGoalItems"
+            :key="`${item.id}-${item.completionDate}`"
+            :item="item"
+            role="listitem"
+            @toggle="toggleItem(item)"
             @increment="adjustItemQuantite(item, 1)"
             @decrement="adjustItemQuantite(item, -1)"
-                @edit="openEditForm(item)"
-                @delete="removeItem(item)"
-              />
-            </div>
-          </div>
-
-          <div class="todo-week-desktop">
-            <div class="todo-week-grid">
-              <div class="todo-week-grid__headers">
-                <button
-                  v-for="section in weekSections"
-                  :key="`header-${section.dateISO}`"
-                  type="button"
-                  class="todo-week-grid__header"
-                  :class="{ 'todo-week-grid__header--today': section.isToday }"
-                  :title="`Voir le ${formatDayLabelFr(section.dateISO)}`"
-                  @click="selectMonthDay(section.dateISO)"
-                >
-                  <span class="todo-week-grid__day-name">{{ section.weekdayLabel }}</span>
-                  <span class="todo-week-grid__day-number">{{ section.dayNumber }}</span>
-                </button>
-              </div>
-
-              <div class="todo-week-grid__columns">
-                <div
-                  v-for="section in weekSections"
-                  :key="`column-${section.dateISO}`"
-                  class="todo-week-grid__column"
-                  :class="{ 'todo-week-grid__column--today': section.isToday }"
-                >
-                  <p v-if="!section.items.length" class="todo-week-grid__empty">—</p>
-                  <TodoItemCard
-                    v-for="item in section.items"
-                    :key="`${item.id}-${item.occurrenceDate}`"
-                    :item="item"
-                    compact
-                    @toggle="toggleItem(item)"
-            @increment="adjustItemQuantite(item, 1)"
-            @decrement="adjustItemQuantite(item, -1)"
-                    @edit="openEditForm(item)"
-                    @delete="removeItem(item)"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
+            @edit="openEditForm(item)"
+            @delete="removeItem(item)"
+          />
         </div>
 
         <div v-else class="todo-month">
@@ -1147,6 +1162,43 @@ watch(userId, (id) => {
   color: #ad81be;
   text-transform: capitalize;
   line-height: 1.25;
+}
+
+.todo-nav-title__date-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.todo-nav-title__date-btn:hover {
+  background: rgba(213, 181, 234, 0.12);
+}
+
+.todo-nav-title__date-btn:focus-visible {
+  outline: 2px solid #ad81be;
+  outline-offset: 2px;
+}
+
+.todo-nav-date-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.todo-nav-title {
+  position: relative;
 }
 
 .todo-nav-title__sub {
@@ -1441,10 +1493,18 @@ watch(userId, (id) => {
   cursor: pointer;
 }
 
+.todo-form-promesse.todo-freq--promesse {
+  color: var(--todo-freq-accent, #d4a06a);
+}
+
 .todo-form-promesse input {
   width: 1.1rem;
   height: 1.1rem;
-  accent-color: #95d1aa;
+  accent-color: #ad81be;
+}
+
+.todo-form-promesse.todo-freq--promesse input {
+  accent-color: var(--todo-freq-accent, #d4a06a);
 }
 
 .todo-form-actions {
@@ -1452,6 +1512,53 @@ watch(userId, (id) => {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.25rem;
+}
+
+.todo-form-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  color: #6c757d;
+  line-height: 1.4;
+}
+
+.todo-form-week-label {
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #2c3e50;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.todo-form-frequence-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem 0.45rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--todo-freq-border, rgba(213, 181, 234, 0.45));
+  background: var(--todo-freq-bg, rgba(255, 255, 255, 0.9));
+}
+
+.todo-form-freq-dot {
+  flex-shrink: 0;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 999px;
+  background: var(--todo-freq-accent, #ad81be);
+}
+
+.todo-form-select--freq {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 0.2rem 0;
+}
+
+.todo-form-select--freq:focus {
+  box-shadow: none;
 }
 
 .todo-cancel-btn {

@@ -1,5 +1,7 @@
 <script setup>
 import { computed } from 'vue'
+import { getTodoItemColorClass } from '../constants/todoOptions.js'
+import '../styles/todo-frequency.css'
 
 const props = defineProps({
   item: {
@@ -34,6 +36,8 @@ const quantiteLabel = computed(() => {
   return `${actuelle}/${cible}`
 })
 
+const itemColorClass = computed(() => getTodoItemColorClass(props.item))
+
 function hasDescription(text) {
   return String(text ?? '').trim().length > 0
 }
@@ -56,13 +60,15 @@ function onCardDragEnd(event) {
 <template>
   <article
     class="todo-item-card"
-    :class="{
-      'todo-item-card--promesse': item.is_promesse,
-      'todo-item-card--done': item.occurrenceDone,
-      'todo-item-card--dragging': dragging,
-      'todo-item-card--compact': compact,
-      'todo-item-card--quantite': hasQuantite,
-    }"
+    :class="[
+      itemColorClass,
+      {
+        'todo-item-card--done': item.occurrenceDone,
+        'todo-item-card--dragging': dragging,
+        'todo-item-card--compact': compact,
+        'todo-item-card--quantite': hasQuantite,
+      },
+    ]"
     :draggable="draggable"
     @dragstart="onCardDragStart"
     @dragend="onCardDragEnd"
@@ -159,8 +165,10 @@ function onCardDragEnd(event) {
   display: flex;
   align-items: stretch;
   border-radius: 12px;
-  border: 1px solid rgba(213, 181, 234, 0.3);
-  background: rgba(213, 181, 234, 0.08);
+  border: 1px solid var(--todo-freq-border, rgba(213, 181, 234, 0.3));
+  border-left-width: 4px;
+  border-left-color: var(--todo-freq-accent, #ad81be);
+  background: var(--todo-freq-bg, rgba(213, 181, 234, 0.08));
   padding: 0.75rem 0.85rem;
   transition:
     opacity 0.15s ease,
@@ -187,12 +195,6 @@ function onCardDragEnd(event) {
 
 .todo-item-card[draggable='true']:not(.todo-item-card--quantite):active {
   cursor: grabbing;
-}
-
-.todo-item-card--promesse {
-  border-color: rgba(149, 209, 170, 0.55);
-  background: linear-gradient(135deg, rgba(149, 209, 170, 0.22), rgba(213, 181, 234, 0.14));
-  box-shadow: 0 4px 14px rgba(114, 160, 152, 0.12);
 }
 
 .todo-item-card--done {
@@ -272,13 +274,8 @@ function onCardDragEnd(event) {
   gap: 0.35rem;
   padding: 0.55rem 0.4rem;
   border-radius: 12px 0 0 12px;
-  background: rgba(213, 181, 234, 0.14);
-  border-right: 1px solid rgba(213, 181, 234, 0.22);
-}
-
-.todo-item-card--promesse .todo-item-quantite {
-  background: rgba(149, 209, 170, 0.2);
-  border-right-color: rgba(149, 209, 170, 0.28);
+  background: color-mix(in srgb, var(--todo-freq-accent, #ad81be) 16%, white);
+  border-right: 1px solid var(--todo-freq-border, rgba(213, 181, 234, 0.22));
 }
 
 .todo-item-quantite__btn {
@@ -334,12 +331,8 @@ function onCardDragEnd(event) {
 .todo-item-check__input {
   width: 1.1rem;
   height: 1.1rem;
-  accent-color: #ad81be;
+  accent-color: var(--todo-freq-accent, #ad81be);
   cursor: pointer;
-}
-
-.todo-item-card--promesse .todo-item-check__input {
-  accent-color: #72a098;
 }
 
 .todo-item-content {
@@ -377,8 +370,8 @@ function onCardDragEnd(event) {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #3d6b62;
-  background: rgba(149, 209, 170, 0.35);
+  color: var(--todo-freq-accent, #d4a06a);
+  background: color-mix(in srgb, var(--todo-freq-accent, #d4a06a) 24%, white);
 }
 
 .todo-item-card--compact .todo-item-description {
@@ -443,13 +436,8 @@ function onCardDragEnd(event) {
 
 @media (prefers-color-scheme: dark) {
   .todo-item-card {
-    background: rgba(213, 181, 234, 0.08);
-    border-color: rgba(213, 181, 234, 0.2);
-  }
-
-  .todo-item-card--promesse {
-    background: linear-gradient(135deg, rgba(149, 209, 170, 0.16), rgba(213, 181, 234, 0.1));
-    border-color: rgba(149, 209, 170, 0.35);
+    background: var(--todo-freq-bg, rgba(213, 181, 234, 0.08));
+    border-color: var(--todo-freq-border, rgba(213, 181, 234, 0.2));
   }
 
   .todo-item-title {
@@ -461,8 +449,7 @@ function onCardDragEnd(event) {
   }
 
   .todo-item-badge {
-    color: #b8e0d0;
-    background: rgba(114, 160, 152, 0.35);
+    background: color-mix(in srgb, var(--todo-freq-accent, #d4a06a) 32%, transparent);
   }
 
   .todo-item-quantite__value {

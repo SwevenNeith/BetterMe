@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS public.todo_items (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT todo_items_nom_not_blank CHECK (char_length(trim(nom)) > 0),
   CONSTRAINT todo_items_frequence_check CHECK (
-    frequence IN ('quotidien', 'ponctuel', 'hebdomadaire')
+    frequence IN ('quotidien', 'ponctuel', 'hebdomadaire', 'semaine')
   ),
   CONSTRAINT todo_items_sort_order_positive CHECK (sort_order >= 1),
   CONSTRAINT todo_items_jour_semaine_check CHECK (
@@ -45,7 +45,7 @@ COMMENT ON COLUMN public.todo_items.quantite_cible IS
   'Objectif numérique optionnel (ex. 10 pages). NULL = case à cocher classique.';
 
 COMMENT ON COLUMN public.todo_items.date_echeance IS
-  'Date de début / échéance : ponctuel = jour unique ; récurrent = à partir de ce jour.';
+  'Ponctuel = jour unique ; quotidien/hebdomadaire = à partir de ce jour ; semaine = lundi de la semaine cible.';
 
 CREATE TABLE IF NOT EXISTS public.todo_item_completions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

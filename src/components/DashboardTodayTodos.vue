@@ -2,7 +2,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
-import { TODO_FREQUENCY } from '../constants/todoOptions.js'
+import { TODO_FREQUENCY, getTodoItemColorClass } from '../constants/todoOptions.js'
+import '../styles/todo-frequency.css'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import {
   isPageVisible,
@@ -16,6 +17,7 @@ import {
   getTodosForDate,
   getTodoProgressStats,
   hasTodoQuantiteCible,
+  getTodoOccurrenceKeyDate,
   normalizeDateISO,
 } from '../utils/todoCalendar.js'
 
@@ -104,8 +106,8 @@ async function reload() {
 async function adjustItemQuantite(item, delta) {
   if (!props.userId || !item?.id || !hasTodoQuantiteCible(item)) return
 
-  const dateISO = normalizeDateISO(item.occurrenceDate || props.dateIso)
-  const key = `${item.id}:${dateISO}`
+  const dateISO = normalizeDateISO(item.completionDate || item.occurrenceDate || props.dateIso)
+  const key = `${item.id}:${getTodoOccurrenceKeyDate(item, dateISO) || dateISO}`
   const cible = Number(item.quantite_cible)
   const current = item.occurrenceQuantiteActuelle ?? 0
   const next = Math.max(0, Math.min(cible, current + delta))
@@ -148,9 +150,9 @@ async function toggleItem(item) {
     return
   }
 
-  const dateISO = normalizeDateISO(item.occurrenceDate || props.dateIso)
+  const dateISO = normalizeDateISO(item.completionDate || item.occurrenceDate || props.dateIso)
   const next = !item.occurrenceDone
-  const key = `${item.id}:${dateISO}`
+  const key = `${item.id}:${getTodoOccurrenceKeyDate(item, dateISO) || dateISO}`
 
   if (next) completionProgress.value.set(key, { quantite_actuelle: 1, binaryDone: true })
   else completionProgress.value.delete(key)
@@ -219,10 +221,12 @@ onUnmounted(() => {
         v-for="item in todayTodos"
         :key="`${item.id}:${item.occurrenceDate}`"
         class="dashboard-todos__item"
-        :class="{
-          'dashboard-todos__item--done': item.occurrenceDone,
-          'dashboard-todos__item--promesse': item.is_promesse,
-        }"
+        :class="[
+          getTodoItemColorClass(item),
+          {
+            'dashboard-todos__item--done': item.occurrenceDone,
+          },
+        ]"
       >
         <div v-if="item.occurrenceQuantiteCible" class="dashboard-todos__quantite">
           <button
@@ -346,13 +350,10 @@ onUnmounted(() => {
   gap: 0.5rem;
   padding: 0.45rem 0.55rem;
   border-radius: 10px;
-  border: 1px solid rgba(213, 181, 234, 0.25);
-  background: rgba(213, 181, 234, 0.08);
-}
-
-.dashboard-todos__item--promesse {
-  border-color: rgba(39, 174, 96, 0.35);
-  background: rgba(39, 174, 96, 0.06);
+  border: 1px solid var(--todo-freq-border, rgba(213, 181, 234, 0.25));
+  border-left-width: 3px;
+  border-left-color: var(--todo-freq-accent, #ad81be);
+  background: var(--todo-freq-bg, rgba(213, 181, 234, 0.08));
 }
 
 .dashboard-todos__item--done {
@@ -410,7 +411,7 @@ onUnmounted(() => {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #27ae60;
+  color: var(--todo-freq-accent, #d4a06a);
 }
 
 .dashboard-todos__quantite {

@@ -1,7 +1,9 @@
 import {
   TODO_FREQUENCY,
   MAX_TODO_PROMESSES_PER_DAY,
+  MAX_TODO_PROMESSES_PER_WEEK,
   TODO_PROMESSE_LIMIT_MESSAGE,
+  TODO_PROMESSE_WEEK_LIMIT_MESSAGE,
 } from '../constants/todoOptions.js'
 import {
   addDaysISO,
@@ -118,7 +120,42 @@ export function isTodoDueOnDate(item, dateISO) {
     return getIsoWeekdayFromISO(target) === Number(item.jour_semaine)
   }
 
+  if (item.frequence === TODO_FREQUENCY.WEEK_GOAL) {
+    const weekStart = normalizeDateISO(item.date_echeance)
+    if (!weekStart) return false
+    const weekEnd = addDaysISO(weekStart, 6)
+    return target >= weekStart && target <= weekEnd
+  }
+
   return false
+}
+
+/** Date de clé pour complétions (lundi de la semaine pour un objectif hebdo). */
+export function getTodoOccurrenceKeyDate(item, dateISO) {
+  const target = normalizeDateISO(dateISO)
+  if (!target) return null
+  if (item.frequence === TODO_FREQUENCY.WEEK_GOAL) {
+    return getWeekStartISO(target)
+  }
+  return target
+}
+
+function mapTodoOccurrence(item, dateISO, progressMap) {
+  const occurrenceDate = normalizeDateISO(dateISO)
+  const completionDate = getTodoOccurrenceKeyDate(item, occurrenceDate)
+  const occurrenceQuantiteCible = hasTodoQuantiteCible(item) ? Number(item.quantite_cible) : null
+  const occurrenceQuantiteActuelle = occurrenceQuantiteCible
+    ? getOccurrenceQuantiteActuelle(item, occurrenceDate, progressMap)
+    : null
+
+  return {
+    ...item,
+    occurrenceDate,
+    completionDate,
+    occurrenceQuantiteCible,
+    occurrenceQuantiteActuelle,
+    occurrenceDone: isTodoCompletedOnDate(item, occurrenceDate, progressMap),
+  }
 }
 
 /**
@@ -164,7 +201,7 @@ export function buildCompletionKeyMap(completions) {
  * @param {Map<string, TodoCompletionEntry>} progressMap
  */
 export function getOccurrenceQuantiteActuelle(item, dateISO, progressMap) {
-  const key = completionMapKey(item.id, dateISO)
+  const key = completionMapKey(item.id, getTodoOccurrenceKeyDate(item, dateISO))
   if (!key) return 0
 
   const entry = progressMap.get(key)
@@ -194,7 +231,7 @@ export function isTodoCompletedOnDate(item, dateISO, progressMap) {
     return Boolean(item.is_done)
   }
 
-  const key = completionMapKey(item.id, target)
+  const key = completionMapKey(item.id, getTodoOccurrenceKeyDate(item, target))
   return Boolean(key && progressMap.get(key)?.binaryDone)
 }
 
@@ -223,20 +260,25 @@ export function getOccurrenceProgressFraction(item, dateISO, progressMap) {
 export function getTodosForDate(items, dateISO, progressMap) {
   return items
     .filter((item) => isTodoDueOnDate(item, dateISO))
-    .map((item) => {
-      const occurrenceQuantiteCible = hasTodoQuantiteCible(item) ? Number(item.quantite_cible) : null
-      const occurrenceQuantiteActuelle = occurrenceQuantiteCible
-        ? getOccurrenceQuantiteActuelle(item, dateISO, progressMap)
-        : null
-
-      return {
-        ...item,
-        occurrenceDate: normalizeDateISO(dateISO),
-        occurrenceQuantiteCible,
-        occurrenceQuantiteActuelle,
-        occurrenceDone: isTodoCompletedOnDate(item, dateISO, progressMap),
+    .map((item) => mapTodoOccurrence(item, dateISO, progressMap))
+    .sort((a, b) => {
+      if (Boolean(a.is_promesse) !== Boolean(b.is_promesse)) {
+        return a.is_promesse ? -1 : 1
       }
+      return (a.sort_order ?? 0) - (b.sort_order ?? 0)
     })
+}
+
+/** Objectifs « à faire cette semaine » (une fois par semaine, pas chaque jour). */
+export function getTodosForWeek(items, anchorISO, progressMap) {
+  const weekStart = getWeekStartISO(anchorISO)
+  return items
+    .filter(
+      (item) =>
+        item.frequence === TODO_FREQUENCY.WEEK_GOAL &&
+        normalizeDateISO(item.date_echeance) === weekStart,
+    )
+    .map((item) => mapTodoOccurrence(item, weekStart, progressMap))
     .sort((a, b) => {
       if (Boolean(a.is_promesse) !== Boolean(b.is_promesse)) {
         return a.is_promesse ? -1 : 1
@@ -246,6 +288,26 @@ export function getTodosForDate(items, dateISO, progressMap) {
 }
 
 /**
+ * Promesses comptées pour la limite jour (hors objectifs « Cette semaine »).
+ * @param {object[]} items
+ * @param {string} dateISO
+ * @param {string|null} [excludeItemId]
+ */
+export function countDayScopedPromessesForDate(items, dateISO, excludeItemId = null) {
+  const target = normalizeDateISO(dateISO)
+  if (!target) return 0
+
+  return items.filter(
+    (item) =>
+      Boolean(item.is_promesse) &&
+      item.id !== excludeItemId &&
+      item.frequence !== TODO_FREQUENCY.WEEK_GOAL &&
+      isTodoDueOnDate(item, target),
+  ).length
+}
+
+/**
+ * Toutes les promesses prévues ce jour (y compris objectifs de la semaine) — ex. rappels.
  * @param {object[]} items
  * @param {string} dateISO
  * @param {string|null} [excludeItemId]
@@ -263,13 +325,81 @@ export function countPromessesForDate(items, dateISO, excludeItemId = null) {
 }
 
 /**
+ * Promesses « Cette semaine » pour une semaine donnée (lundi = date_echeance).
+ * @param {object[]} items
+ * @param {string} weekStartISO
+ * @param {string|null} [excludeItemId]
+ */
+export function countPromessesForWeek(items, weekStartISO, excludeItemId = null) {
+  const weekStart = normalizeDateISO(weekStartISO)
+  if (!weekStart) return 0
+
+  return items.filter(
+    (item) =>
+      Boolean(item.is_promesse) &&
+      item.id !== excludeItemId &&
+      item.frequence === TODO_FREQUENCY.WEEK_GOAL &&
+      normalizeDateISO(item.date_echeance) === weekStart,
+  ).length
+}
+
+/** Jour de référence pour la limite quotidienne selon la fréquence. */
+export function getPromesseDayCheckDate(payload) {
+  const dateISO = normalizeDateISO(payload?.date_echeance)
+  if (!dateISO) return null
+
+  if (payload.frequence === TODO_FREQUENCY.WEEKLY) {
+    const jourSemaine = Number(payload.jour_semaine)
+    if (Number.isInteger(jourSemaine) && jourSemaine >= 1 && jourSemaine <= 7) {
+      return addDaysISO(getWeekStartISO(dateISO), jourSemaine - 1)
+    }
+  }
+
+  return dateISO
+}
+
+/**
  * @param {object[]} items
  * @param {string} dateISO
  * @param {string|null} [excludeItemId]
  */
 export function assertPromesseLimitForDate(items, dateISO, excludeItemId = null) {
-  if (countPromessesForDate(items, dateISO, excludeItemId) >= MAX_TODO_PROMESSES_PER_DAY) {
+  if (countDayScopedPromessesForDate(items, dateISO, excludeItemId) >= MAX_TODO_PROMESSES_PER_DAY) {
     throw new Error(TODO_PROMESSE_LIMIT_MESSAGE)
+  }
+}
+
+/**
+ * @param {object[]} items
+ * @param {string} weekStartISO
+ * @param {string|null} [excludeItemId]
+ */
+export function assertPromesseLimitForWeek(items, weekStartISO, excludeItemId = null) {
+  if (countPromessesForWeek(items, weekStartISO, excludeItemId) >= MAX_TODO_PROMESSES_PER_WEEK) {
+    throw new Error(TODO_PROMESSE_WEEK_LIMIT_MESSAGE)
+  }
+}
+
+/**
+ * Vérifie la limite adaptée à la fréquence avant d’enregistrer une promesse.
+ * @param {object[]} items
+ * @param {{ is_promesse?: boolean, frequence?: string, date_echeance?: string, jour_semaine?: number|null }} payload
+ * @param {string|null} [excludeItemId]
+ */
+export function assertPromesseLimits(items, payload, excludeItemId = null) {
+  if (!payload?.is_promesse) return
+
+  const dateISO = normalizeDateISO(payload.date_echeance)
+  if (!dateISO) return
+
+  if (payload.frequence === TODO_FREQUENCY.WEEK_GOAL) {
+    assertPromesseLimitForWeek(items, getWeekStartISO(dateISO), excludeItemId)
+    return
+  }
+
+  const dayCheckDate = getPromesseDayCheckDate(payload)
+  if (dayCheckDate) {
+    assertPromesseLimitForDate(items, dayCheckDate, excludeItemId)
   }
 }
 
@@ -312,10 +442,17 @@ export function getTodoProgressStats(items, dates, progressMap) {
   let fullyDone = 0
   let weightedDone = 0
   let hasPartialProgress = false
+  const seenWeekGoals = new Set()
 
   for (const dateISO of dates) {
     const occurrences = getTodosForDate(items, dateISO, progressMap)
     for (const item of occurrences) {
+      if (item.frequence === TODO_FREQUENCY.WEEK_GOAL) {
+        const dedupeKey = `${item.id}:${getWeekStartISO(dateISO)}`
+        if (seenWeekGoals.has(dedupeKey)) continue
+        seenWeekGoals.add(dedupeKey)
+      }
+
       total += 1
       const fraction = getOccurrenceProgressFraction(item, dateISO, progressMap)
       weightedDone += fraction
@@ -327,6 +464,29 @@ export function getTodoProgressStats(items, dates, progressMap) {
     }
   }
 
+  const percent = total === 0 ? 0 : Math.round((weightedDone / total) * 100)
+  return { total, fullyDone, weightedDone, percent, hasPartialProgress }
+}
+
+/** Progression des objectifs de la semaine (vue Semaine). */
+export function getTodoWeekGoalProgressStats(items, anchorISO, progressMap) {
+  const weekItems = getTodosForWeek(items, anchorISO, progressMap)
+  const weekStart = getWeekStartISO(anchorISO)
+  let fullyDone = 0
+  let weightedDone = 0
+  let hasPartialProgress = false
+
+  for (const item of weekItems) {
+    const fraction = getOccurrenceProgressFraction(item, weekStart, progressMap)
+    weightedDone += fraction
+    if (item.occurrenceDone) {
+      fullyDone += 1
+    } else if (fraction > 0) {
+      hasPartialProgress = true
+    }
+  }
+
+  const total = weekItems.length
   const percent = total === 0 ? 0 : Math.round((weightedDone / total) * 100)
   return { total, fullyDone, weightedDone, percent, hasPartialProgress }
 }
