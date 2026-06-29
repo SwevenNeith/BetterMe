@@ -579,7 +579,7 @@ watch(
   font-weight: 600;
 }
 
-.visibility-pages-list {
+:deep(.visibility-pages-list) {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -588,7 +588,7 @@ watch(
   gap: 0.35rem;
 }
 
-.visibility-page-row {
+:deep(.visibility-page-row) {
   display: flex;
   align-items: center;
   gap: 0.65rem;
@@ -598,21 +598,21 @@ watch(
   background: rgba(255, 255, 255, 0.5);
 }
 
-.visibility-page-check {
+:deep(.visibility-page-check) {
   display: flex;
   align-items: center;
   flex-shrink: 0;
   cursor: pointer;
 }
 
-.visibility-page-check__input {
+:deep(.visibility-page-check__input) {
   width: 1.1rem;
   height: 1.1rem;
   accent-color: #ad81be;
   cursor: pointer;
 }
 
-.visibility-page-main {
+:deep(.visibility-page-main) {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -621,19 +621,19 @@ watch(
   gap: 0.35rem 0.5rem;
 }
 
-.visibility-page-label {
+:deep(.visibility-page-label) {
   font-size: 0.95rem;
   font-weight: 700;
   color: #2c3e50;
 }
 
-.visibility-page-default-hint {
+:deep(.visibility-page-default-hint) {
   font-size: 0.78rem;
   font-weight: 600;
   color: #95a5a6;
 }
 
-.visibility-page-rename-input {
+:deep(.visibility-page-rename-input) {
   flex: 1;
   min-width: 0;
   padding: 0.45rem 0.65rem;
@@ -645,23 +645,23 @@ watch(
   background: rgba(255, 255, 255, 0.9);
 }
 
-.visibility-page-rename-input:focus {
+:deep(.visibility-page-rename-input:focus) {
   outline: none;
   border-color: #ad81be;
   box-shadow: 0 0 0 3px rgba(173, 129, 190, 0.2);
 }
 
-.visibility-page-rename-actions {
+:deep(.visibility-page-rename-actions) {
   display: flex;
   gap: 0.25rem;
 }
 
-.visibility-page-rename-btn {
+:deep(.visibility-page-rename-btn) {
   padding: 0.35rem 0.55rem;
   font-size: 0.78rem;
 }
 
-.visibility-page-edit {
+:deep(.visibility-page-edit) {
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -677,16 +677,16 @@ watch(
   transition: background 0.15s ease;
 }
 
-.visibility-page-edit svg {
+:deep(.visibility-page-edit svg) {
   width: 1rem;
   height: 1rem;
 }
 
-.visibility-page-edit:hover:not(:disabled) {
+:deep(.visibility-page-edit:hover:not(:disabled)) {
   background: rgba(213, 181, 234, 0.2);
 }
 
-.visibility-page-edit:disabled {
+:deep(.visibility-page-edit:disabled) {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -717,12 +717,12 @@ watch(
     grid-column: 1 / -1;
   }
 
-  .dashboard-visibility-col .visibility-pages-list {
+  .dashboard-visibility-col :deep(.visibility-pages-list) {
     height: 100%;
   }
 }
 
-.dashboard-visibility-row {
+:deep(.dashboard-visibility-row) {
   width: 100%;
 }
 
@@ -749,16 +749,16 @@ watch(
     background: rgba(213, 181, 234, 0.2);
   }
 
-  .visibility-page-row {
+  :deep(.visibility-page-row) {
     background: rgba(25, 20, 35, 0.5);
     border-color: rgba(213, 181, 234, 0.15);
   }
 
-  .visibility-page-label {
+  :deep(.visibility-page-label) {
     color: #f0e8f8;
   }
 
-  .visibility-page-rename-input {
+  :deep(.visibility-page-rename-input) {
     color: #f0e8f8;
     background: rgba(25, 20, 35, 0.6);
     border-color: rgba(213, 181, 234, 0.25);
