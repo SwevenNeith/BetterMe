@@ -921,6 +921,7 @@ const getPositionedEventsForDay = (dayIdx) => {
         position: 'absolute',
         top: `${top}px`,
         height: `${height}px`,
+        '--event-block-height': `${height}px`,
         left: `${leftPercent}%`,
         width: `${widthPercent}%`,
       }
@@ -2122,18 +2123,17 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .event-block:hover {
-  width: max-content !important;
+  /* Largeur : au moins toute la colonne */
+  width: max(100%, max-content) !important;
   min-width: 100% !important;
   max-width: 280px;
-
-  /* We do NOT override height. It keeps the inline style height (e.g. 130px).
-     We add min-height: max-content so it CAN grow beyond the inline height if the content is taller, 
-     but it will NEVER shrink below the inline height! */
-  min-height: max-content !important;
+  /* Hauteur : au moins le créneau, sinon s’adapte au contenu (description incluse) */
+  height: auto !important;
+  min-height: var(--event-block-height, 0px) !important;
 
   padding-right: 1.6rem !important;
   z-index: 50;
-  overflow: visible;
+  overflow: hidden;
   transform: translateY(-2px) scale(1.05);
   transform-origin: left top;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
@@ -2166,6 +2166,12 @@ const getPositionedEventsForDay = (dayIdx) => {
   flex-direction: column;
   height: 100%;
   position: relative;
+}
+
+.event-block:hover .event-content {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
 }
 
 .event-delete-btn {
@@ -2236,15 +2242,23 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .event-description {
-  display: none;
+  display: block;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
   font-size: 0.72rem;
   line-height: 1.35;
   color: #4f5f6f;
-  margin-top: 0.4rem;
-  border-top: 1px solid rgba(213, 181, 234, 0.15);
-  padding-top: 0.4rem;
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
   white-space: normal;
   word-break: break-word;
+  transition:
+    max-height 0.2s ease,
+    opacity 0.2s ease,
+    margin-top 0.2s ease,
+    padding-top 0.2s ease;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -2255,11 +2269,21 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .event-block:hover .event-description {
-  display: block;
+  max-height: 12rem;
+  opacity: 1;
+  margin-top: 0.4rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.15);
+  padding-top: 0.4rem;
+  overflow: visible;
 }
 
 .event-block--mobile .event-description {
-  display: block;
+  max-height: none;
+  opacity: 1;
+  margin-top: 0.4rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.15);
+  padding-top: 0.4rem;
+  overflow: visible;
 }
 
 .empty-col-state {
@@ -2329,10 +2353,12 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .event-block--mobile:hover {
-  transform: translateY(-2px) scale(1.02) !important;
-  max-width: 90% !important;
+  height: auto !important;
+  min-height: var(--event-block-height, 0px) !important;
+  width: max(100%, max-content) !important;
   min-width: 100% !important;
-  width: max-content !important;
+  max-width: 90% !important;
+  transform: translateY(-2px) scale(1.02) !important;
 }
 
 .mobile-empty-state {
