@@ -78,6 +78,7 @@ const COLLAPSIBLE_SECTIONS = {
   DAILY: 'daily',
   ONE_TIME: 'oneTime',
   TIMER: 'timer',
+  TODO_PROMESSE: 'todoPromesse',
   MENSTRUATION: 'menstruation',
   PATTERNS: 'patterns',
 }
@@ -86,6 +87,7 @@ const expandedSections = ref({
   [COLLAPSIBLE_SECTIONS.DAILY]: false,
   [COLLAPSIBLE_SECTIONS.ONE_TIME]: false,
   [COLLAPSIBLE_SECTIONS.TIMER]: false,
+  [COLLAPSIBLE_SECTIONS.TODO_PROMESSE]: false,
   [COLLAPSIBLE_SECTIONS.MENSTRUATION]: false,
   [COLLAPSIBLE_SECTIONS.PATTERNS]: false,
 })
@@ -1316,8 +1318,41 @@ onUnmounted(() => {
       class="settings-tab-panel"
       :aria-label="todoSettingsTabLabel"
     >
-      <section class="settings-card">
-        <h2 class="card-toggle__title card-toggle__title--static">Rappel promesses</h2>
+      <section class="settings-card settings-card--collapsible">
+        <button
+          type="button"
+          class="card-toggle"
+          :aria-expanded="expandedSections[COLLAPSIBLE_SECTIONS.TODO_PROMESSE]"
+          aria-controls="settings-section-todo-promesse"
+          @click="toggleSection(COLLAPSIBLE_SECTIONS.TODO_PROMESSE)"
+        >
+          <h2 class="card-toggle__title">Rappel promesses</h2>
+          <span
+            class="card-toggle__chevron"
+            :class="{
+              'card-toggle__chevron--open': expandedSections[COLLAPSIBLE_SECTIONS.TODO_PROMESSE],
+            }"
+            aria-hidden="true"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </span>
+        </button>
+
+        <div
+          v-show="expandedSections[COLLAPSIBLE_SECTIONS.TODO_PROMESSE]"
+          id="settings-section-todo-promesse"
+          class="card-body"
+        >
         <p class="card-body__desc">
           Notification quotidienne si aucune promesse n’est prévue pour le lendemain.
         </p>
@@ -1362,6 +1397,7 @@ onUnmounted(() => {
           >
             {{ isSavingTodoPromesseReminder ? 'Enregistrement…' : 'Enregistrer' }}
           </button>
+        </div>
         </div>
       </section>
     </div>
