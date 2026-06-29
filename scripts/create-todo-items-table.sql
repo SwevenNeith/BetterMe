@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS public.todo_items (
   heure time,
   date_echeance date NOT NULL DEFAULT CURRENT_DATE,
   is_promesse boolean NOT NULL DEFAULT false,
+  quantite_cible smallint,
   is_done boolean NOT NULL DEFAULT false,
   sort_order integer NOT NULL DEFAULT 1,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -26,6 +27,9 @@ CREATE TABLE IF NOT EXISTS public.todo_items (
   CONSTRAINT todo_items_hebdomadaire_jour_check CHECK (
     (frequence = 'hebdomadaire' AND jour_semaine IS NOT NULL)
     OR (frequence <> 'hebdomadaire' AND jour_semaine IS NULL)
+  ),
+  CONSTRAINT todo_items_quantite_cible_check CHECK (
+    quantite_cible IS NULL OR (quantite_cible >= 1 AND quantite_cible <= 9999)
   )
 );
 
@@ -37,6 +41,9 @@ COMMENT ON COLUMN public.todo_items.jour_semaine IS 'Jour ISO 1=lundi … 7=dima
 COMMENT ON COLUMN public.todo_items.heure IS 'Heure optionnelle de rappel ou d''échéance';
 COMMENT ON COLUMN public.todo_items.is_promesse IS 'Engagement prioritaire (affiché en tête par défaut, style distinct)';
 
+COMMENT ON COLUMN public.todo_items.quantite_cible IS
+  'Objectif numérique optionnel (ex. 10 pages). NULL = case à cocher classique.';
+
 COMMENT ON COLUMN public.todo_items.date_echeance IS
   'Date de début / échéance : ponctuel = jour unique ; récurrent = à partir de ce jour.';
 
@@ -45,8 +52,12 @@ CREATE TABLE IF NOT EXISTS public.todo_item_completions (
   user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
   todo_item_id uuid NOT NULL REFERENCES public.todo_items (id) ON DELETE CASCADE,
   completion_date date NOT NULL,
+  quantite_actuelle smallint NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT todo_item_completions_unique_day UNIQUE (todo_item_id, completion_date)
+  CONSTRAINT todo_item_completions_unique_day UNIQUE (todo_item_id, completion_date),
+  CONSTRAINT todo_item_completions_quantite_actuelle_check CHECK (
+    quantite_actuelle >= 0 AND quantite_actuelle <= 9999
+  )
 );
 
 CREATE INDEX IF NOT EXISTS todo_item_completions_user_date_idx
@@ -56,7 +67,7 @@ CREATE INDEX IF NOT EXISTS todo_item_completions_item_idx
   ON public.todo_item_completions (todo_item_id);
 
 COMMENT ON TABLE public.todo_item_completions IS
-  'Complétion d''un TODO pour une date donnée (quotidien / hebdomadaire).';
+  'Complétion par jour : case cochée (récurrent sans quantité) ou progression quantitative.';
 
 CREATE OR REPLACE FUNCTION public.todo_items_set_updated_at()
 RETURNS trigger
@@ -91,6 +102,12 @@ CREATE POLICY "todo_item_completions_delete_own"
   ON public.todo_item_completions FOR DELETE TO authenticated
   USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "todo_item_completions_update_own" ON public.todo_item_completions;
+CREATE POLICY "todo_item_completions_update_own"
+  ON public.todo_item_completions FOR UPDATE TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
 ALTER TABLE public.todo_items ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "todo_items_select_own" ON public.todo_items;
@@ -115,6 +132,6 @@ CREATE POLICY "todo_items_delete_own"
   USING (auth.uid() = user_id);
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.todo_items TO authenticated;
-GRANT SELECT, INSERT, DELETE ON public.todo_item_completions TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.todo_item_completions TO authenticated;
 GRANT ALL ON public.todo_items TO service_role;
 GRANT ALL ON public.todo_item_completions TO service_role;

@@ -4,6 +4,9 @@ import { assertPromesseLimitForDate, normalizeDateISO } from '../utils/todoCalen
 const TABLE = 'todo_items'
 const COMPLETIONS_TABLE = 'todo_item_completions'
 
+const TODO_ITEM_SELECT =
+  'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, created_at, updated_at'
+
 async function refreshTodoPromesseReminder(userId) {
   if (!userId) return
   try {
@@ -54,6 +57,15 @@ function normalizeTodoPayload(payload) {
     }
   }
 
+  let quantite_cible = null
+  if (payload.quantite_cible != null && payload.quantite_cible !== '') {
+    const qty = Math.round(Number(payload.quantite_cible))
+    if (!Number.isInteger(qty) || qty < 1 || qty > 9999) {
+      throw new Error('La quantité doit être entre 1 et 9999.')
+    }
+    quantite_cible = qty
+  }
+
   return {
     nom,
     description,
@@ -62,6 +74,7 @@ function normalizeTodoPayload(payload) {
     heure,
     is_promesse,
     date_echeance,
+    quantite_cible,
   }
 }
 
@@ -72,9 +85,7 @@ function normalizeTodoPayload(payload) {
 export async function listTodoItems(supabase, userId) {
   const { data, error } = await supabase
     .from(TABLE)
-    .select(
-      'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, sort_order, created_at, updated_at',
-    )
+    .select(TODO_ITEM_SELECT)
     .eq('user_id', userId)
     .order('sort_order', { ascending: true })
 
@@ -126,9 +137,7 @@ export async function createTodoItem(supabase, userId, payload) {
       is_done: false,
       sort_order: sortOrder,
     })
-    .select(
-      'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, sort_order, created_at, updated_at',
-    )
+    .select(TODO_ITEM_SELECT)
     .single()
 
   if (error) throw error
@@ -157,9 +166,7 @@ export async function replaceTodoItem(supabase, userId, itemId, payload) {
     .update(row)
     .eq('id', itemId)
     .eq('user_id', userId)
-    .select(
-      'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, sort_order, created_at, updated_at',
-    )
+    .select(TODO_ITEM_SELECT)
     .single()
 
   if (error) throw error
@@ -208,7 +215,7 @@ export async function updateTodoItem(supabase, userId, itemId, patch) {
 export async function listTodoCompletionsInRange(supabase, userId, startISO, endISO) {
   const { data, error } = await supabase
     .from(COMPLETIONS_TABLE)
-    .select('todo_item_id, completion_date')
+    .select('todo_item_id, completion_date, quantite_actuelle')
     .eq('user_id', userId)
     .gte('completion_date', startISO)
     .lte('completion_date', endISO)
@@ -236,6 +243,12 @@ export async function setTodoCompletionForDate(supabase, userId, item, dateISO, 
   const date = normalizeDateISO(dateISO)
   if (!date) return
 
+  if (item.quantite_cible != null && Number(item.quantite_cible) >= 1) {
+    const cible = Number(item.quantite_cible)
+    await setTodoQuantiteForDate(supabase, userId, item, date, done ? cible : 0)
+    return
+  }
+
   if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
     await updateTodoItem(supabase, userId, item.id, { is_done: done })
     return
@@ -247,6 +260,7 @@ export async function setTodoCompletionForDate(supabase, userId, item, dateISO, 
         user_id: userId,
         todo_item_id: item.id,
         completion_date: date,
+        quantite_actuelle: 1,
       },
       { onConflict: 'todo_item_id,completion_date' },
     )
@@ -261,6 +275,46 @@ export async function setTodoCompletionForDate(supabase, userId, item, dateISO, 
     .eq('todo_item_id', item.id)
     .eq('completion_date', date)
 
+  if (error) throw error
+}
+
+/**
+ * Met à jour la progression quantitative pour une occurrence (jour) dans todo_item_completions.
+ */
+export async function setTodoQuantiteForDate(supabase, userId, item, dateISO, quantiteActuelle) {
+  if (!userId || !item?.id) return
+
+  const date = normalizeDateISO(dateISO)
+  const cible = Number(item.quantite_cible)
+  if (!date || !Number.isInteger(cible) || cible < 1) return
+
+  const qty = Math.max(0, Math.min(cible, Math.round(Number(quantiteActuelle) || 0)))
+  const done = qty >= cible
+
+  if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
+    await updateTodoItem(supabase, userId, item.id, { is_done: done })
+  }
+
+  if (qty === 0) {
+    const { error } = await supabase
+      .from(COMPLETIONS_TABLE)
+      .delete()
+      .eq('user_id', userId)
+      .eq('todo_item_id', item.id)
+      .eq('completion_date', date)
+    if (error) throw error
+    return
+  }
+
+  const { error } = await supabase.from(COMPLETIONS_TABLE).upsert(
+    {
+      user_id: userId,
+      todo_item_id: item.id,
+      completion_date: date,
+      quantite_actuelle: qty,
+    },
+    { onConflict: 'todo_item_id,completion_date' },
+  )
   if (error) throw error
 }
 

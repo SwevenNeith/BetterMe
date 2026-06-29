@@ -16,15 +16,18 @@ import {
   persistTodoOrders,
   listTodoCompletionsInRange,
   setTodoCompletionForDate,
+  setTodoQuantiteForDate,
 } from '../services/todoItems.js'
 import {
   TODO_VIEW_MODE,
-  buildCompletionKeyMap,
+  buildCompletionProgressMap,
+  hasTodoQuantiteCible,
   assertPromesseLimitForDate,
   formatDayLabelFr,
   formatMonthLabelFr,
   formatWeekRangeLabelFr,
   getDateRangeForView,
+  getTodoCompletionsFetchRange,
   getIsoWeekdayFromISO,
   getMonthStartISO,
   getMonthEndISO,
@@ -59,7 +62,7 @@ const isDeletingId = ref(null)
 const formOpen = ref(false)
 const editingItemId = ref(null)
 const items = ref([])
-const completionKeys = ref(new Map())
+const completionProgress = ref(new Map())
 const draggingItemId = ref(null)
 const pendingDeleteItem = ref(null)
 
@@ -81,6 +84,7 @@ const todoForm = reactive({
   heure: '',
   date_echeance: getLocalTodayISO(),
   is_promesse: false,
+  quantite_cible: 0,
 })
 
 const showWeekdayPicker = computed(() => todoForm.frequence === TODO_FREQUENCY.WEEKLY)
@@ -105,7 +109,7 @@ const periodSubtitle = computed(() => {
 })
 
 const dailyItems = computed(() =>
-  getTodosForDate(items.value, anchorDate.value, completionKeys.value),
+  getTodosForDate(items.value, anchorDate.value, completionProgress.value),
 )
 
 const weekSections = computed(() => {
@@ -115,7 +119,7 @@ const weekSections = computed(() => {
     weekdayLabel: WEEKDAY_HEADERS[getIsoWeekdayFromISO(dateISO) - 1],
     dayNumber: parseISODate(dateISO).day,
     isToday: dateISO === getLocalTodayISO(),
-    items: getTodosForDate(items.value, dateISO, completionKeys.value),
+    items: getTodosForDate(items.value, dateISO, completionProgress.value),
   }))
 })
 
@@ -128,7 +132,7 @@ const monthGrid = computed(() => {
     const cell = parseISODate(dateISO)
     const inMonth = cell.year === year && cell.month === month
     const dayItems = inMonth
-      ? getTodosForDate(items.value, dateISO, completionKeys.value)
+      ? getTodosForDate(items.value, dateISO, completionProgress.value)
       : []
     return {
       dateISO,
@@ -146,7 +150,11 @@ const itemsSubtitle = computed(() => {
   if (viewMode.value === TODO_VIEW_MODE.DAY) {
     const count = dailyItems.value.length
     if (!count) return 'Rien de prévu ce jour-là.'
-    const done = dailyItems.value.filter((item) => item.occurrenceDone).length
+    const stats = currentProgress.value
+    if (stats.hasPartialProgress) {
+      return `${stats.percent}% de progression aujourd’hui.`
+    }
+    const done = stats.fullyDone
     return `${done}/${count} terminé${done > 1 ? 's' : ''} aujourd’hui.`
   }
   if (viewMode.value === TODO_VIEW_MODE.WEEK) {
@@ -176,6 +184,7 @@ function resetForm() {
   todoForm.heure = ''
   todoForm.date_echeance = anchorDate.value || getLocalTodayISO()
   todoForm.is_promesse = false
+  todoForm.quantite_cible = 0
   editingItemId.value = null
   formError.value = ''
 }
@@ -196,6 +205,7 @@ function openEditForm(item) {
   todoForm.heure = formatTimeForInput(item.heure)
   todoForm.date_echeance = normalizeDateISO(item.date_echeance) || getLocalTodayISO()
   todoForm.is_promesse = Boolean(item.is_promesse)
+  todoForm.quantite_cible = item.quantite_cible ?? 0
   formOpen.value = true
 }
 
@@ -259,7 +269,7 @@ function syncSelectedWeekDay() {
 const selectedWeekSection = computed(() => weekSections.value[selectedWeekDayIndex.value] ?? null)
 
 const currentProgress = computed(() => {
-  const keys = completionKeys.value
+  const keys = completionProgress.value
   const list = items.value
 
   if (viewMode.value === TODO_VIEW_MODE.DAY) {
@@ -278,6 +288,16 @@ const currentProgress = computed(() => {
   )
 })
 
+const progressMetaLabel = computed(() => {
+  const stats = currentProgress.value
+  if (!stats.total) return ''
+  const terminees = `${stats.fullyDone}/${stats.total} terminée${stats.fullyDone > 1 ? 's' : ''}`
+  if (stats.hasPartialProgress) {
+    return `${terminees} · progression partielle comptée`
+  }
+  return terminees
+})
+
 const progressAriaLabel = computed(() => {
   const scope =
     viewMode.value === TODO_VIEW_MODE.DAY
@@ -294,18 +314,18 @@ async function loadData() {
   isLoading.value = true
   loadError.value = ''
   try {
-    const { start, end } = getDateRangeForView(viewMode.value, anchorDate.value)
+    const { start, end } = getTodoCompletionsFetchRange(anchorDate.value, viewMode.value)
     const [itemsData, completionsData] = await Promise.all([
       listTodoItems(supabase, userId.value),
       listTodoCompletionsInRange(supabase, userId.value, start, end),
     ])
     items.value = itemsData
-    completionKeys.value = buildCompletionKeyMap(completionsData)
+    completionProgress.value = buildCompletionProgressMap(completionsData)
   } catch (err) {
     console.error(err)
     loadError.value = err.message || 'Impossible de charger la liste.'
     items.value = []
-    completionKeys.value = new Map()
+    completionProgress.value = new Map()
   } finally {
     isLoading.value = false
   }
@@ -324,6 +344,8 @@ async function submitForm() {
     heure: todoForm.heure || null,
     date_echeance: todoForm.date_echeance,
     is_promesse: todoForm.is_promesse,
+    quantite_cible:
+      todoForm.quantite_cible > 0 ? Math.round(Number(todoForm.quantite_cible)) : null,
   }
 
   if (payload.is_promesse) {
@@ -392,19 +414,69 @@ async function confirmDelete() {
   }
 }
 
+function progressMapKey(item, dateISO) {
+  return `${item.id}:${normalizeDateISO(dateISO)}`
+}
+
+function applyOccurrenceProgress(item, quantiteActuelle) {
+  const cible = Number(item.quantite_cible)
+  item.occurrenceQuantiteActuelle = quantiteActuelle
+  item.occurrenceQuantiteCible = cible
+  item.occurrenceDone = quantiteActuelle >= cible
+  if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
+    item.is_done = item.occurrenceDone
+  }
+}
+
+async function adjustItemQuantite(item, delta) {
+  if (!userId.value || !item?.id || !hasTodoQuantiteCible(item)) return
+
+  const dateISO = item.occurrenceDate || anchorDate.value
+  const key = progressMapKey(item, dateISO)
+  const cible = Number(item.quantite_cible)
+  const current = item.occurrenceQuantiteActuelle ?? 0
+  const next = Math.max(0, Math.min(cible, current + delta))
+
+  const prevEntry = completionProgress.value.get(key)
+  if (next > 0) {
+    completionProgress.value.set(key, { quantite_actuelle: next, binaryDone: true })
+  } else {
+    completionProgress.value.delete(key)
+  }
+  completionProgress.value = new Map(completionProgress.value)
+  applyOccurrenceProgress(item, next)
+
+  try {
+    await setTodoQuantiteForDate(supabase, userId.value, item, dateISO, next)
+  } catch (err) {
+    console.error(err)
+    if (prevEntry) completionProgress.value.set(key, prevEntry)
+    else completionProgress.value.delete(key)
+    completionProgress.value = new Map(completionProgress.value)
+    applyOccurrenceProgress(item, current)
+    loadError.value = err.message || 'Impossible de mettre à jour la progression.'
+  }
+}
+
 async function toggleItem(item) {
   if (!userId.value || !item?.id) return
+  if (hasTodoQuantiteCible(item)) {
+    const cible = Number(item.quantite_cible)
+    const next = item.occurrenceDone ? 0 : cible
+    await adjustItemQuantite(item, next - (item.occurrenceQuantiteActuelle ?? 0))
+    return
+  }
 
   const dateISO = item.occurrenceDate || anchorDate.value
   const next = !item.occurrenceDone
   const key = `${item.id}:${normalizeDateISO(dateISO)}`
 
   if (next) {
-    completionKeys.value.set(key, true)
+    completionProgress.value.set(key, { quantite_actuelle: 1, binaryDone: true })
   } else {
-    completionKeys.value.delete(key)
+    completionProgress.value.delete(key)
   }
-  completionKeys.value = new Map(completionKeys.value)
+  completionProgress.value = new Map(completionProgress.value)
 
   if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
     item.is_done = next
@@ -416,11 +488,11 @@ async function toggleItem(item) {
   } catch (err) {
     console.error(err)
     if (next) {
-      completionKeys.value.delete(key)
+      completionProgress.value.delete(key)
     } else {
-      completionKeys.value.set(key, true)
+      completionProgress.value.set(key, { quantite_actuelle: 1, binaryDone: true })
     }
-    completionKeys.value = new Map(completionKeys.value)
+    completionProgress.value = new Map(completionProgress.value)
     item.occurrenceDone = !next
     if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
       item.is_done = !next
@@ -633,11 +705,7 @@ watch(userId, (id) => {
     <div class="todo-progress">
       <div class="todo-progress__header">
         <span class="todo-progress__value">{{ currentProgress.percent }}%</span>
-        <span class="todo-progress__meta">
-          {{ currentProgress.done }}/{{ currentProgress.total }} terminé{{
-            currentProgress.done > 1 ? 's' : ''
-          }}
-        </span>
+        <span class="todo-progress__meta">{{ progressMetaLabel }}</span>
       </div>
       <div
         class="todo-progress__track"
@@ -665,15 +733,29 @@ watch(userId, (id) => {
 
       <label class="todo-form-field">
         <span class="todo-form-label">Nom</span>
-        <input
-          v-model="todoForm.nom"
-          type="text"
-          class="todo-form-input"
-          maxlength="120"
-          placeholder="Ex : Méditer 10 min, Appeler le médecin…"
-          required
-          autofocus
-        />
+        <div class="todo-form-nom-row">
+          <input
+            v-model="todoForm.nom"
+            type="text"
+            class="todo-form-input todo-form-input--nom"
+            maxlength="120"
+            placeholder="Ex : Méditer 10 min, Appeler le médecin…"
+            required
+            autofocus
+          />
+          <input
+            v-model.number="todoForm.quantite_cible"
+            type="number"
+            class="todo-form-input todo-form-input--qty"
+            min="0"
+            max="9999"
+            step="1"
+            inputmode="numeric"
+            aria-label="Objectif en quantité (0 = sans objectif)"
+            title="Objectif en quantité (0 = sans objectif)"
+            @change="formError = ''"
+          />
+        </div>
       </label>
 
       <label class="todo-form-field">
@@ -766,6 +848,8 @@ watch(userId, (id) => {
             :dragging="draggingItemId === item.id"
             role="listitem"
             @toggle="toggleItem(item)"
+            @increment="adjustItemQuantite(item, 1)"
+            @decrement="adjustItemQuantite(item, -1)"
             @edit="openEditForm(item)"
             @delete="removeItem(item)"
             @dragstart="onDragStart(item.id, $event)"
@@ -805,6 +889,8 @@ watch(userId, (id) => {
                 :key="`${item.id}-${item.occurrenceDate}`"
                 :item="item"
                 @toggle="toggleItem(item)"
+            @increment="adjustItemQuantite(item, 1)"
+            @decrement="adjustItemQuantite(item, -1)"
                 @edit="openEditForm(item)"
                 @delete="removeItem(item)"
               />
@@ -842,6 +928,8 @@ watch(userId, (id) => {
                     :item="item"
                     compact
                     @toggle="toggleItem(item)"
+            @increment="adjustItemQuantite(item, 1)"
+            @decrement="adjustItemQuantite(item, -1)"
                     @edit="openEditForm(item)"
                     @delete="removeItem(item)"
                   />
@@ -1277,6 +1365,32 @@ watch(userId, (id) => {
 
 .todo-form-input--time {
   max-width: 12rem;
+}
+
+.todo-form-nom-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.todo-form-input--nom {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-form-input--qty {
+  flex: 0 0 4.25rem;
+  width: 4.25rem;
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.todo-form-input--qty::-webkit-outer-spin-button,
+.todo-form-input--qty::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .todo-form-textarea {

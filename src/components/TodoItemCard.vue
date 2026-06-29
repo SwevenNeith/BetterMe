@@ -1,7 +1,8 @@
 <script setup>
+import { computed } from 'vue'
 import { formatTodoSchedule } from '../constants/todoOptions.js'
 
-defineProps({
+const props = defineProps({
   item: {
     type: Object,
     required: true,
@@ -20,7 +21,19 @@ defineProps({
   },
 })
 
-defineEmits(['toggle', 'edit', 'delete', 'dragstart', 'dragover', 'drop', 'dragend'])
+defineEmits(['toggle', 'increment', 'decrement', 'edit', 'delete', 'dragstart', 'dragover', 'drop', 'dragend'])
+
+const hasQuantite = computed(
+  () =>
+    props.item.occurrenceQuantiteCible != null && Number(props.item.occurrenceQuantiteCible) >= 1,
+)
+
+const quantiteLabel = computed(() => {
+  if (!hasQuantite.value) return ''
+  const actuelle = props.item.occurrenceQuantiteActuelle ?? 0
+  const cible = props.item.occurrenceQuantiteCible
+  return `${actuelle}/${cible}`
+})
 
 function hasDescription(text) {
   return String(text ?? '').trim().length > 0
@@ -52,7 +65,31 @@ function hasDescription(text) {
         ⋮⋮
       </span>
 
-      <label class="todo-item-check">
+      <div v-if="hasQuantite" class="todo-item-quantite" role="group" :aria-label="`Progression : ${quantiteLabel}`">
+        <button
+          type="button"
+          class="todo-item-quantite__btn"
+          title="Diminuer"
+          aria-label="Diminuer la quantité"
+          :disabled="(item.occurrenceQuantiteActuelle ?? 0) <= 0"
+          @click.stop="$emit('decrement')"
+        >
+          −
+        </button>
+        <span class="todo-item-quantite__value">{{ quantiteLabel }}</span>
+        <button
+          type="button"
+          class="todo-item-quantite__btn"
+          title="Augmenter"
+          aria-label="Augmenter la quantité"
+          :disabled="item.occurrenceDone"
+          @click.stop="$emit('increment')"
+        >
+          +
+        </button>
+      </div>
+
+      <label v-else class="todo-item-check">
         <input
           type="checkbox"
           class="todo-item-check__input"
@@ -203,6 +240,53 @@ function hasDescription(text) {
   cursor: grabbing;
 }
 
+.todo-item-quantite {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.15rem;
+  border-radius: 10px;
+  background: rgba(213, 181, 234, 0.14);
+}
+
+.todo-item-quantite__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #ad81be;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.todo-item-quantite__btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.todo-item-quantite__btn:not(:disabled):hover {
+  background: #fff;
+}
+
+.todo-item-quantite__value {
+  min-width: 2.6rem;
+  text-align: center;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #2c3e50;
+}
+
+.todo-item-card--done .todo-item-quantite__value {
+  color: #72a098;
+}
+
 .todo-item-check {
   flex-shrink: 0;
   display: flex;
@@ -347,6 +431,10 @@ function hasDescription(text) {
   .todo-item-badge {
     color: #b8e0d0;
     background: rgba(114, 160, 152, 0.35);
+  }
+
+  .todo-item-quantite__value {
+    color: #f0e8f8;
   }
 }
 </style>

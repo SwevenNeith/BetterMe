@@ -122,44 +122,121 @@ export function isTodoDueOnDate(item, dateISO) {
 }
 
 /**
- * @param {Map<string, true>} completionKeys keys: `${todoId}:${dateISO}`
+ * @typedef {{ quantite_actuelle?: number, binaryDone?: boolean }} TodoCompletionEntry
  */
-export function isTodoCompletedOnDate(item, dateISO, completionKeys) {
+
+function completionMapKey(todoItemId, dateISO) {
+  const date = normalizeDateISO(dateISO)
+  return date ? `${todoItemId}:${date}` : null
+}
+
+export function hasTodoQuantiteCible(item) {
+  const n = Number(item?.quantite_cible)
+  return Number.isInteger(n) && n >= 1
+}
+
+/**
+ * @param {Array<{ todo_item_id: string, completion_date: string, quantite_actuelle?: number }>} completions
+ * @returns {Map<string, TodoCompletionEntry>}
+ */
+export function buildCompletionProgressMap(completions) {
+  const map = new Map()
+  for (const row of completions ?? []) {
+    const date = normalizeDateISO(row.completion_date)
+    if (!row.todo_item_id || !date) continue
+    const qty = Number(row.quantite_actuelle)
+    map.set(`${row.todo_item_id}:${date}`, {
+      quantite_actuelle: Number.isFinite(qty) && qty > 0 ? qty : 0,
+      binaryDone: true,
+    })
+  }
+  return map
+}
+
+/** @deprecated Utiliser buildCompletionProgressMap */
+export function buildCompletionKeyMap(completions) {
+  return buildCompletionProgressMap(completions)
+}
+
+/**
+ * @param {object} item
+ * @param {string} dateISO
+ * @param {Map<string, TodoCompletionEntry>} progressMap
+ */
+export function getOccurrenceQuantiteActuelle(item, dateISO, progressMap) {
+  const key = completionMapKey(item.id, dateISO)
+  if (!key) return 0
+
+  const entry = progressMap.get(key)
+  if (hasTodoQuantiteCible(item)) {
+    return entry?.quantite_actuelle ?? 0
+  }
+
+  return entry?.binaryDone ? 1 : 0
+}
+
+/**
+ * @param {object} item
+ * @param {string} dateISO
+ * @param {Map<string, TodoCompletionEntry>} progressMap
+ */
+export function isTodoCompletedOnDate(item, dateISO, progressMap) {
   const target = normalizeDateISO(dateISO)
   if (!target) return false
+
+  if (hasTodoQuantiteCible(item)) {
+    if (!isTodoDueOnDate(item, target)) return false
+    return getOccurrenceQuantiteActuelle(item, target, progressMap) >= Number(item.quantite_cible)
+  }
 
   if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
     if (target !== normalizeDateISO(item.date_echeance)) return false
     return Boolean(item.is_done)
   }
 
-  return completionKeys.has(`${item.id}:${target}`)
+  const key = completionMapKey(item.id, target)
+  return Boolean(key && progressMap.get(key)?.binaryDone)
 }
 
-export function buildCompletionKeyMap(completions) {
-  const map = new Map()
-  for (const row of completions ?? []) {
-    const date = normalizeDateISO(row.completion_date)
-    if (row.todo_item_id && date) {
-      map.set(`${row.todo_item_id}:${date}`, true)
-    }
+/**
+ * Fraction de complétion d'une occurrence (0–1) pour les barres de progression.
+ * Sans quantité : 0 ou 1. Avec quantité : actuelle / cible (ex. 3/10 → 0,3).
+ */
+export function getOccurrenceProgressFraction(item, dateISO, progressMap) {
+  if (!isTodoDueOnDate(item, dateISO)) return 0
+
+  if (hasTodoQuantiteCible(item)) {
+    const cible = Number(item.quantite_cible)
+    if (!cible) return 0
+    const actuelle = getOccurrenceQuantiteActuelle(item, dateISO, progressMap)
+    return Math.min(1, actuelle / cible)
   }
-  return map
+
+  return isTodoCompletedOnDate(item, dateISO, progressMap) ? 1 : 0
 }
 
 /**
  * @param {object[]} items
  * @param {string} dateISO
- * @param {Map<string, true>} completionKeys
+ * @param {Map<string, TodoCompletionEntry>} progressMap
  */
-export function getTodosForDate(items, dateISO, completionKeys) {
+export function getTodosForDate(items, dateISO, progressMap) {
   return items
     .filter((item) => isTodoDueOnDate(item, dateISO))
-    .map((item) => ({
-      ...item,
-      occurrenceDate: normalizeDateISO(dateISO),
-      occurrenceDone: isTodoCompletedOnDate(item, dateISO, completionKeys),
-    }))
+    .map((item) => {
+      const occurrenceQuantiteCible = hasTodoQuantiteCible(item) ? Number(item.quantite_cible) : null
+      const occurrenceQuantiteActuelle = occurrenceQuantiteCible
+        ? getOccurrenceQuantiteActuelle(item, dateISO, progressMap)
+        : null
+
+      return {
+        ...item,
+        occurrenceDate: normalizeDateISO(dateISO),
+        occurrenceQuantiteCible,
+        occurrenceQuantiteActuelle,
+        occurrenceDone: isTodoCompletedOnDate(item, dateISO, progressMap),
+      }
+    })
     .sort((a, b) => {
       if (Boolean(a.is_promesse) !== Boolean(b.is_promesse)) {
         return a.is_promesse ? -1 : 1
@@ -223,20 +300,35 @@ export function getTodoCompletionsFetchRange(anchorISO, viewMode) {
 /**
  * @param {object[]} items
  * @param {string[]} dates
- * @param {Map<string, true>} completionKeys
+ * @param {Map<string, { quantite_actuelle?: number, binaryDone?: boolean }>} progressMap
  */
-export function getTodoProgressStats(items, dates, completionKeys) {
+/**
+ * Statistiques de progression pour une ou plusieurs dates.
+ * Chaque occurrence compte pour 1/n (ex. 4 tâches → 25 % chacune).
+ * Avec quantité : la part de l’occurrence est répartie sur la cible (3/10 → 7,5 % sur 4 tâches).
+ */
+export function getTodoProgressStats(items, dates, progressMap) {
   let total = 0
-  let done = 0
+  let fullyDone = 0
+  let weightedDone = 0
+  let hasPartialProgress = false
 
   for (const dateISO of dates) {
-    const occurrences = getTodosForDate(items, dateISO, completionKeys)
-    total += occurrences.length
-    done += occurrences.filter((item) => item.occurrenceDone).length
+    const occurrences = getTodosForDate(items, dateISO, progressMap)
+    for (const item of occurrences) {
+      total += 1
+      const fraction = getOccurrenceProgressFraction(item, dateISO, progressMap)
+      weightedDone += fraction
+      if (item.occurrenceDone) {
+        fullyDone += 1
+      } else if (fraction > 0) {
+        hasPartialProgress = true
+      }
+    }
   }
 
-  const percent = total === 0 ? 0 : Math.round((done / total) * 100)
-  return { total, done, percent }
+  const percent = total === 0 ? 0 : Math.round((weightedDone / total) * 100)
+  return { total, fullyDone, weightedDone, percent, hasPartialProgress }
 }
 
 export function getDateRangeForView(viewMode, anchorISO) {

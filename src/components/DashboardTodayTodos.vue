@@ -10,11 +10,12 @@ import {
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
 } from '../services/pageVisibility.js'
-import { listTodoCompletionsInRange, listTodoItems, setTodoCompletionForDate } from '../services/todoItems.js'
+import { listTodoCompletionsInRange, listTodoItems, setTodoCompletionForDate, setTodoQuantiteForDate } from '../services/todoItems.js'
 import {
-  buildCompletionKeyMap,
+  buildCompletionProgressMap,
   getTodosForDate,
   getTodoProgressStats,
+  hasTodoQuantiteCible,
   normalizeDateISO,
 } from '../utils/todoCalendar.js'
 
@@ -35,17 +36,24 @@ const pageVisibility = ref(mergePageVisibility(null))
 const isLoading = ref(false)
 const loadError = ref('')
 const items = ref([])
-const completionKeys = ref(new Map())
+const completionProgress = ref(new Map())
 
 const isTodoPageVisible = computed(() => isPageVisible(APP_PAGE_IDS.TODO, pageVisibility.value))
 
 const todayTodos = computed(() =>
-  getTodosForDate(items.value, props.dateIso, completionKeys.value),
+  getTodosForDate(items.value, props.dateIso, completionProgress.value),
 )
 
 const progress = computed(() =>
-  getTodoProgressStats(items.value, [props.dateIso], completionKeys.value),
+  getTodoProgressStats(items.value, [props.dateIso], completionProgress.value),
 )
+
+const progressLabel = computed(() => {
+  const stats = progress.value
+  if (!stats.total) return ''
+  if (stats.hasPartialProgress) return `${stats.percent}%`
+  return `${stats.fullyDone}/${stats.total}`
+})
 
 async function loadPageVisibilityState() {
   if (!props.userId) {
@@ -63,7 +71,7 @@ async function loadPageVisibilityState() {
 async function loadTodos() {
   if (!props.userId || !isTodoPageVisible.value) {
     items.value = []
-    completionKeys.value = new Map()
+    completionProgress.value = new Map()
     return
   }
 
@@ -78,12 +86,12 @@ async function loadTodos() {
       listTodoCompletionsInRange(supabase, props.userId, dateISO, dateISO),
     ])
     items.value = todoRows
-    completionKeys.value = buildCompletionKeyMap(completions)
+    completionProgress.value = buildCompletionProgressMap(completions)
   } catch (err) {
     console.error('dashboard todos:', err)
     loadError.value = err.message || 'Impossible de charger les tâches du jour.'
     items.value = []
-    completionKeys.value = new Map()
+    completionProgress.value = new Map()
   } finally {
     isLoading.value = false
   }
@@ -94,16 +102,60 @@ async function reload() {
   await loadTodos()
 }
 
+async function adjustItemQuantite(item, delta) {
+  if (!props.userId || !item?.id || !hasTodoQuantiteCible(item)) return
+
+  const dateISO = normalizeDateISO(item.occurrenceDate || props.dateIso)
+  const key = `${item.id}:${dateISO}`
+  const cible = Number(item.quantite_cible)
+  const current = item.occurrenceQuantiteActuelle ?? 0
+  const next = Math.max(0, Math.min(cible, current + delta))
+
+  const prevEntry = completionProgress.value.get(key)
+  if (next > 0) {
+    completionProgress.value.set(key, { quantite_actuelle: next, binaryDone: true })
+  } else {
+    completionProgress.value.delete(key)
+  }
+  completionProgress.value = new Map(completionProgress.value)
+  item.occurrenceQuantiteActuelle = next
+  item.occurrenceDone = next >= cible
+  if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
+    item.is_done = item.occurrenceDone
+  }
+
+  try {
+    await setTodoQuantiteForDate(supabase, props.userId, item, dateISO, next)
+  } catch (err) {
+    console.error(err)
+    if (prevEntry) completionProgress.value.set(key, prevEntry)
+    else completionProgress.value.delete(key)
+    completionProgress.value = new Map(completionProgress.value)
+    item.occurrenceQuantiteActuelle = current
+    item.occurrenceDone = current >= cible
+    if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
+      item.is_done = item.occurrenceDone
+    }
+    loadError.value = err.message || 'Impossible de mettre à jour la tâche.'
+  }
+}
+
 async function toggleItem(item) {
   if (!props.userId || !item?.id) return
+  if (hasTodoQuantiteCible(item)) {
+    const cible = Number(item.quantite_cible)
+    const next = item.occurrenceDone ? 0 : cible
+    await adjustItemQuantite(item, next - (item.occurrenceQuantiteActuelle ?? 0))
+    return
+  }
 
   const dateISO = normalizeDateISO(item.occurrenceDate || props.dateIso)
   const next = !item.occurrenceDone
   const key = `${item.id}:${dateISO}`
 
-  if (next) completionKeys.value.set(key, true)
-  else completionKeys.value.delete(key)
-  completionKeys.value = new Map(completionKeys.value)
+  if (next) completionProgress.value.set(key, { quantite_actuelle: 1, binaryDone: true })
+  else completionProgress.value.delete(key)
+  completionProgress.value = new Map(completionProgress.value)
 
   if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
     item.is_done = next
@@ -114,9 +166,9 @@ async function toggleItem(item) {
     await setTodoCompletionForDate(supabase, props.userId, item, dateISO, next)
   } catch (err) {
     console.error(err)
-    if (next) completionKeys.value.delete(key)
-    else completionKeys.value.set(key, true)
-    completionKeys.value = new Map(completionKeys.value)
+    if (next) completionProgress.value.delete(key)
+    else completionProgress.value.set(key, { quantite_actuelle: 1, binaryDone: true })
+    completionProgress.value = new Map(completionProgress.value)
     item.occurrenceDone = !next
     if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
       item.is_done = !next
@@ -147,7 +199,7 @@ onUnmounted(() => {
     <div class="dashboard-todos__header">
       <h2 id="dashboard-todos-title" class="dashboard-todos__title">{{ todoPageTitle }}</h2>
       <span v-if="!isLoading && progress.total > 0" class="dashboard-todos__progress">
-        {{ progress.done }}/{{ progress.total }}
+        {{ progressLabel }}
       </span>
     </div>
 
@@ -173,7 +225,34 @@ onUnmounted(() => {
           'dashboard-todos__item--promesse': item.is_promesse,
         }"
       >
-        <label class="dashboard-todos__check" :title="item.occurrenceDone ? 'Marquer comme à faire' : 'Marquer comme fait'">
+        <div v-if="item.occurrenceQuantiteCible" class="dashboard-todos__quantite">
+          <button
+            type="button"
+            class="dashboard-todos__quantite-btn"
+            :disabled="(item.occurrenceQuantiteActuelle ?? 0) <= 0"
+            aria-label="Diminuer"
+            @click="adjustItemQuantite(item, -1)"
+          >
+            −
+          </button>
+          <span class="dashboard-todos__quantite-value">
+            {{ item.occurrenceQuantiteActuelle ?? 0 }}/{{ item.occurrenceQuantiteCible }}
+          </span>
+          <button
+            type="button"
+            class="dashboard-todos__quantite-btn"
+            :disabled="item.occurrenceDone"
+            aria-label="Augmenter"
+            @click="adjustItemQuantite(item, 1)"
+          >
+            +
+          </button>
+        </div>
+        <label
+          v-else
+          class="dashboard-todos__check"
+          :title="item.occurrenceDone ? 'Marquer comme à faire' : 'Marquer comme fait'"
+        >
           <input
             type="checkbox"
             class="dashboard-todos__check-input"
@@ -333,6 +412,41 @@ onUnmounted(() => {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: #27ae60;
+}
+
+.dashboard-todos__quantite {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.dashboard-todos__quantite-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #ad81be;
+  font-size: 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dashboard-todos__quantite-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.dashboard-todos__quantite-value {
+  min-width: 2.4rem;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #2c3e50;
 }
 
 .spinner {
