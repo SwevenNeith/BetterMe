@@ -1,13 +1,45 @@
 import { daysBetweenISO, getEffectiveDebutRegles, COL } from './menstruationCycles.js'
-import { COL_NATUREL, getEffectiveDebutReglesNaturel, getEffectiveProchainesReglesNaturel } from './menstruationCyclesNaturel.js'
+import {
+  COL_NATUREL,
+  getEffectiveCycleLengthNaturel,
+  getEffectiveDebutReglesNaturel,
+} from './menstruationCyclesNaturel.js'
 import { SYMPTOM_UI_TO_DB, TYPE_CYCLE } from './menstruationSymptoms.js'
 import { ANALYZED_SYMPTOM_KEYS, meetsThreshold } from './menstruationPatternThresholds.js'
 
 const SYMPTOMS_TABLE = 'menstruation_symptomes'
 
-/** Date de début du cycle pour le jour relatif : début des règles (réel ou estimé). */
+export function getCycleNumeroKey(typeCycle) {
+  return typeCycle === TYPE_CYCLE.NATUREL ? COL_NATUREL.numeroCycle : COL.numeroCycle
+}
+
+export function sortCyclesByNumero(cycles, typeCycle) {
+  const key = getCycleNumeroKey(typeCycle)
+  return [...cycles].sort((a, b) => (a[key] ?? 0) - (b[key] ?? 0))
+}
+
+export function getCycleByNumero(cycles, typeCycle, numero) {
+  const key = getCycleNumeroKey(typeCycle)
+  return cycles.find((c) => c[key] === numero) ?? null
+}
+
+/** Début réel des règles — seul déclencheur d’un nouveau cycle. */
+export function getRealDebutReglesForCycle(cycle, typeCycle) {
+  if (!cycle) return null
+  if (typeCycle === TYPE_CYCLE.NATUREL) {
+    return cycle[COL_NATUREL.dateDebutReglesReelle] ?? null
+  }
+  return cycle[COL.dateDebutReglesReelle] ?? null
+}
+
+/**
+ * Date de début du cycle pour le jour relatif :
+ * début réel des règles si connu, sinon estimé (cycle 1 / onboarding).
+ */
 export function getCycleStartDate(cycle, typeCycle) {
   if (!cycle) return null
+  const real = getRealDebutReglesForCycle(cycle, typeCycle)
+  if (real) return real
   if (typeCycle === TYPE_CYCLE.NATUREL) return getEffectiveDebutReglesNaturel(cycle)
   return getEffectiveDebutRegles(cycle) ?? cycle[COL.dateDebutPlaquette]
 }
@@ -21,28 +53,66 @@ export function computeJourDansCycle(dateJour, cycle, typeCycle) {
   return diff
 }
 
-export function getCycleEndDate(cycle, typeCycle) {
+/** Fin du cycle = début réel des règles du cycle suivant (null tant qu’il n’est pas saisi). */
+export function getCycleEndDate(cycle, typeCycle, cycles = []) {
   if (!cycle) return null
-  if (typeCycle === TYPE_CYCLE.NATUREL) {
-    return getEffectiveProchainesReglesNaturel(cycle)
-  }
-  return cycle[COL.dateProchainePlaquette]
+  const numeroKey = getCycleNumeroKey(typeCycle)
+  const next = getCycleByNumero(cycles, typeCycle, (cycle[numeroKey] ?? 0) + 1)
+  if (!next) return null
+  return getRealDebutReglesForCycle(next, typeCycle)
 }
 
 export function getCycleLength(cycle, typeCycle) {
   if (!cycle) return 28
   if (typeCycle === TYPE_CYCLE.NATUREL) {
-    return cycle[COL_NATUREL.dureeCycle] ?? 28
+    return getEffectiveCycleLengthNaturel(cycle)
   }
   return cycle[COL.dureeCycle] ?? 28
 }
 
 export function computeJourRelatif(dateJour, cycle, typeCycle) {
-  // Jour du cycle (J-1 = 1er jour) : plus lisible qu'un pourcentage.
-  // On conserve le nom historique "jour_relatif" côté DB pour éviter une migration.
   const jourDansCycle = computeJourDansCycle(dateJour, cycle, typeCycle)
   if (jourDansCycle == null) return null
   return jourDansCycle + 1
+}
+
+/**
+ * Cycle actif à une date donnée : dernier cycle dont le début réel est passé.
+ * Les cycles projetés (sans début réel) ne prennent pas le relais tant que le réel n’est pas saisi.
+ */
+export function getCycleForDate(cycles, dateISO, typeCycle) {
+  if (!dateISO || !cycles?.length) return null
+  const sorted = sortCyclesByNumero(cycles, typeCycle)
+
+  let current = null
+  for (const c of sorted) {
+    const realStart = getRealDebutReglesForCycle(c, typeCycle)
+    if (realStart && realStart <= dateISO) {
+      current = c
+    }
+  }
+  if (current) return current
+
+  for (const c of sorted) {
+    const start = getCycleStartDate(c, typeCycle)
+    if (start && start <= dateISO) return c
+  }
+
+  return null
+}
+
+export function getCurrentCycle(cycles, todayISO, typeCycle) {
+  return getCycleForDate(cycles, todayISO, typeCycle)
+}
+
+export function isCycleEnded(cycle, todayISO, typeCycle, cycles = []) {
+  const end = getCycleEndDate(cycle, typeCycle, cycles)
+  return Boolean(end && todayISO >= end)
+}
+
+export function shouldRecalculatePatterns(cycles, todayISO, typeCycle) {
+  if (!cycles.length) return false
+  return cycles.some((c) => isCycleEnded(c, todayISO, typeCycle, cycles))
 }
 
 export function getSymptomRawValue(row, symptomKey) {
@@ -150,28 +220,4 @@ export async function backfillJourRelatif(supabase, userId, typeCycle, cycles) {
   }
 
   return updates.length
-}
-
-export function getCurrentCycle(cycles, todayISO, typeCycle) {
-  const sorted = [...cycles].sort(
-    (a, b) =>
-      (b[typeCycle === TYPE_CYCLE.NATUREL ? COL_NATUREL.numeroCycle : COL.numeroCycle] ?? 0) -
-      (a[typeCycle === TYPE_CYCLE.NATUREL ? COL_NATUREL.numeroCycle : COL.numeroCycle] ?? 0),
-  )
-  for (const c of sorted) {
-    const start = getCycleStartDate(c, typeCycle)
-    const end = getCycleEndDate(c, typeCycle)
-    if (start && start <= todayISO && (!end || todayISO < end)) return c
-  }
-  return sorted[0] ?? null
-}
-
-export function isCycleEnded(cycle, todayISO, typeCycle) {
-  const end = getCycleEndDate(cycle, typeCycle)
-  return Boolean(end && todayISO >= end)
-}
-
-export function shouldRecalculatePatterns(cycles, todayISO, typeCycle) {
-  if (!cycles.length) return false
-  return cycles.some((c) => isCycleEnded(c, todayISO, typeCycle))
 }

@@ -8,7 +8,7 @@ import {
   buildVisibleLegendGroups,
   legendSwatchClasses,
 } from '../services/menstruationCalendar.js'
-import { COL } from '../services/menstruationCycles.js'
+import { COL, getReglesPeriodEnd } from '../services/menstruationCycles.js'
 import { getCurrentCycle } from '../services/menstruationSymptomEnrichment.js'
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
@@ -82,7 +82,18 @@ watch(
       rulesForm.value.dateFinReglesReelle = ''
       return
     }
-    rulesForm.value.dateDebutReglesReelle = cycle[COL.dateDebutReglesReelle] || ''
+
+    const realStart = cycle[COL.dateDebutReglesReelle] || ''
+    const rulesEnd = getReglesPeriodEnd(cycle, todayISO)
+    const awaitingNextPeriod = Boolean(realStart && rulesEnd && rulesEnd < todayISO)
+
+    if (awaitingNextPeriod) {
+      rulesForm.value.dateDebutReglesReelle = ''
+      rulesForm.value.dateFinReglesReelle = ''
+      return
+    }
+
+    rulesForm.value.dateDebutReglesReelle = realStart
     rulesForm.value.dateFinReglesReelle = cycle[COL.dateFinReglesReelle] || ''
   },
   { immediate: true },

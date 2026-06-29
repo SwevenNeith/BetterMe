@@ -1,5 +1,5 @@
 import { TYPE_CYCLE } from './menstruationSymptoms.js'
-import { computeJourRelatif, getCycleEndDate, getCycleStartDate } from './menstruationSymptomEnrichment.js'
+import { computeJourRelatif, getCycleForDate } from './menstruationSymptomEnrichment.js'
 
 const TABLE = 'emotion_logs'
 
@@ -24,14 +24,7 @@ export function computeScoreGlobal({ humeurGenerale, energieEmotionnelle, sentim
 }
 
 function findCycleForDate(cycles, typeCycle, dateJour) {
-  if (!Array.isArray(cycles) || !dateJour) return null
-  for (const cycle of cycles) {
-    const start = getCycleStartDate(cycle, typeCycle)
-    if (!start) continue
-    const end = getCycleEndDate(cycle, typeCycle)
-    if (start <= dateJour && (!end || dateJour < end)) return cycle
-  }
-  return null
+  return getCycleForDate(cycles, dateJour, typeCycle)
 }
 
 export function computeCycleContext({ dateJour, menstruationMode, cyclesPilule, cyclesNaturel }) {

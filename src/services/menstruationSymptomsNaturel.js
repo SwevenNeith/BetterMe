@@ -1,5 +1,7 @@
-import { COL_NATUREL, determinePhaseNaturel, getEffectiveDebutReglesNaturel } from './menstruationCyclesNaturel.js'
+import { COL_NATUREL, determinePhaseNaturel } from './menstruationCyclesNaturel.js'
 import { getLocalTodayISO } from './scheduledReminders.js'
+import { getCycleForDate } from './menstruationSymptomEnrichment.js'
+import { TYPE_CYCLE } from './menstruationSymptoms.js'
 
 export const NATUREL_PHASE = {
   MENSTRUELLE: 'menstruelle',
@@ -119,16 +121,8 @@ export const NATUREL_SYMPTOMS_BY_PHASE = {
   ],
 }
 
-function getCycleForDate(cycles, iso) {
-  if (!iso || !cycles?.length) return null
-  let candidate = null
-  for (const c of cycles) {
-    const start = getEffectiveDebutReglesNaturel(c)
-    if (!start) continue
-    if (start <= iso) candidate = c
-    else break
-  }
-  return candidate
+function getCycleForDateLocal(cycles, iso) {
+  return getCycleForDate(cycles, iso, TYPE_CYCLE.NATUREL)
 }
 
 /**
@@ -137,7 +131,7 @@ function getCycleForDate(cycles, iso) {
  * @param {string} [iso]
  */
 export function getNaturelPhaseContext(cycles, iso = getLocalTodayISO()) {
-  const cycle = getCycleForDate(cycles, iso)
+  const cycle = getCycleForDateLocal(cycles, iso)
   if (!cycle) {
     return { phase: null, cycle: null, iso }
   }

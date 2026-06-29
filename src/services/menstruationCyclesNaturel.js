@@ -41,8 +41,21 @@ function clampInt(n, min, max, fallback) {
   return Math.min(max, Math.max(min, parsed))
 }
 
+export function getRealDebutReglesNaturel(row) {
+  return row?.[COL_NATUREL.dateDebutReglesReelle] ?? null
+}
+
 export function getEffectiveDebutReglesNaturel(row) {
   return pickDate(row?.[COL_NATUREL.dateDebutReglesReelle], row?.[COL_NATUREL.dateDebutReglesEstimee])
+}
+
+/** Cycle projeté sans début réel : affichage prévision uniquement, pas de période active. */
+export function isForecastOnlyNaturalCycle(row, cycles) {
+  if (!row || row[COL_NATUREL.dateDebutReglesReelle]) return false
+  const numero = row[COL_NATUREL.numeroCycle] ?? 0
+  if (numero <= 1) return false
+  const prev = cycles.find((c) => c[COL_NATUREL.numeroCycle] === numero - 1)
+  return Boolean(prev?.[COL_NATUREL.dateDebutReglesReelle])
 }
 
 export function getEffectiveFinReglesNaturel(row) {
@@ -331,8 +344,8 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
   for (let i = 1; i < cycles.length; i++) {
     const prev = cycles[i - 1]
     const cur = cycles[i]
-    const prevStart = getEffectiveDebutReglesNaturel(prev)
-    const curStart = getEffectiveDebutReglesNaturel(cur)
+    const prevStart = getRealDebutReglesNaturel(prev)
+    const curStart = getRealDebutReglesNaturel(cur)
     const diff = prevStart && curStart ? daysBetweenISO(prevStart, curStart) : null
     if (diff != null && diff >= 15 && diff <= 60) cycleRealLens.push(diff)
   }
@@ -350,10 +363,9 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
     const effectiveCycleLen =
       idx >= 1
         ? (() => {
-            const prevStart = getEffectiveDebutReglesNaturel(cycles[idx - 1])
-            const curStart = getEffectiveDebutReglesNaturel(c)
-            const diff =
-              prevStart && curStart ? daysBetweenISO(prevStart, curStart) : null
+            const prevStart = getRealDebutReglesNaturel(cycles[idx - 1])
+            const curStart = getRealDebutReglesNaturel(c)
+            const diff = prevStart && curStart ? daysBetweenISO(prevStart, curStart) : null
             return diff != null && diff >= 15 && diff <= 60 ? diff : avgCycleLen
           })()
         : (c[COL_NATUREL.dureeCycle] ?? avgCycleLen)
@@ -375,10 +387,9 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
       [COL_NATUREL.dureeCycleReelle]:
         idx >= 1
           ? (() => {
-              const prevStart = getEffectiveDebutReglesNaturel(cycles[idx - 1])
-              const curStart = getEffectiveDebutReglesNaturel(c)
-              const diff =
-                prevStart && curStart ? daysBetweenISO(prevStart, curStart) : null
+              const prevStart = getRealDebutReglesNaturel(cycles[idx - 1])
+              const curStart = getRealDebutReglesNaturel(c)
+              const diff = prevStart && curStart ? daysBetweenISO(prevStart, curStart) : null
               return diff != null && diff >= 15 && diff <= 60 ? diff : null
             })()
           : null,
@@ -433,6 +444,31 @@ export async function createMenstruationCycleNaturel(supabase, userId, payload, 
   return data
 }
 
+export function resolveTargetCycleForRealDatesNaturel(cycles, cycleId, payload) {
+  const current = cycles.find((c) => c.id === cycleId)
+  if (!current) return null
+
+  const dateDebutReglesReelle = payload?.dateDebutReglesReelle || null
+  if (!dateDebutReglesReelle) return current
+
+  const currentRealStart = current[COL_NATUREL.dateDebutReglesReelle]
+  if (!currentRealStart || dateDebutReglesReelle === currentRealStart) {
+    return current
+  }
+
+  const rulesEnd = getReglesPeriodEndNaturel(current)
+  const nextNum = (current[COL_NATUREL.numeroCycle] ?? 0) + 1
+  const nextCycle = cycles.find((c) => c[COL_NATUREL.numeroCycle] === nextNum)
+
+  if (nextCycle && !nextCycle[COL_NATUREL.dateDebutReglesReelle]) {
+    if (rulesEnd && dateDebutReglesReelle > rulesEnd) return nextCycle
+    const nextEst = current[COL_NATUREL.dateProchainesReglesEstimee]
+    if (nextEst && dateDebutReglesReelle >= nextEst) return nextCycle
+  }
+
+  return current
+}
+
 export async function saveMenstruationRulesDatesNaturel(supabase, userId, payload) {
   const cycleId = payload?.cycleId
   if (!cycleId) throw new Error('cycleId manquant')
@@ -447,31 +483,31 @@ export async function saveMenstruationRulesDatesNaturel(supabase, userId, payloa
     throw new Error('La date de fin ne peut pas être avant la date de début.')
   }
 
-  const { data: existing, error: readError } = await supabase
-    .from(TABLE)
-    .select('*')
-    .eq('id', cycleId)
-    .eq('user_id', userId)
-    .maybeSingle()
-
-  if (readError) throw readError
-  if (!existing) throw new Error('Cycle introuvable.')
+  const cycles = await listCyclesNaturel(supabase, userId)
+  const target = resolveTargetCycleForRealDatesNaturel(cycles, cycleId, payload)
+  if (!target?.id) throw new Error('Cycle introuvable.')
 
   const patch = {
     [COL_NATUREL.dateDebutReglesReelle]: dateDebutReglesReelle,
     [COL_NATUREL.dateFinReglesReelle]: dateFinReglesReelle,
+    [COL_NATUREL.dateDebutReglesEstimee]: dateDebutReglesReelle,
   }
 
-  const { error } = await supabase.from(TABLE).update(patch).eq('id', cycleId).eq('user_id', userId)
+  const { error } = await supabase
+    .from(TABLE)
+    .update(patch)
+    .eq('id', target.id)
+    .eq('user_id', userId)
   if (error) throw error
 
   const { syncRealRulesDatesBetweenModes } = await import('./menstruationCycleModeSwitch.js')
   await syncRealRulesDatesBetweenModes(supabase, userId, {
-    numeroCycle: existing[COL_NATUREL.numeroCycle],
+    numeroCycle: target[COL_NATUREL.numeroCycle],
     dateDebutRegles: dateDebutReglesReelle,
     dateFinReglesReelle,
   })
 
+  await syncForecastCyclesNaturel(supabase, userId)
   return await listCyclesNaturel(supabase, userId)
 }
 

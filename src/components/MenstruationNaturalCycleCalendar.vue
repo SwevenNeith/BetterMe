@@ -1,9 +1,9 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
-import { determinePhaseNaturel, COL_NATUREL, getEffectiveDebutReglesNaturel } from '../services/menstruationCyclesNaturel.js'
+import { determinePhaseNaturel, COL_NATUREL, getReglesPeriodEndNaturel } from '../services/menstruationCyclesNaturel.js'
 import { addDaysToISODate } from '../services/menstruationCycles.js'
-import { getCurrentCycle } from '../services/menstruationSymptomEnrichment.js'
+import { getCurrentCycle, getCycleForDate } from '../services/menstruationSymptomEnrichment.js'
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
 import {
   buildCalendarDataFromNaturalCycles,
@@ -78,7 +78,18 @@ watch(
       rulesForm.value.dateFinReglesReelle = ''
       return
     }
-    rulesForm.value.dateDebutReglesReelle = cycle[COL_NATUREL.dateDebutReglesReelle] || ''
+
+    const realStart = cycle[COL_NATUREL.dateDebutReglesReelle] || ''
+    const rulesEnd = getReglesPeriodEndNaturel(cycle, todayISO)
+    const awaitingNextPeriod = Boolean(realStart && rulesEnd && rulesEnd < todayISO)
+
+    if (awaitingNextPeriod) {
+      rulesForm.value.dateDebutReglesReelle = ''
+      rulesForm.value.dateFinReglesReelle = ''
+      return
+    }
+
+    rulesForm.value.dateDebutReglesReelle = realStart
     rulesForm.value.dateFinReglesReelle = cycle[COL_NATUREL.dateFinReglesReelle] || ''
   },
   { immediate: true },
@@ -101,16 +112,7 @@ function phaseLabel(phase) {
 }
 
 function getCycleForDay(iso) {
-  if (!iso || !props.cycles?.length) return null
-  // Cycles triés par numéro_cycle asc (listCyclesNaturel) : on garde le dernier start <= iso
-  let candidate = null
-  for (const c of props.cycles) {
-    const start = getEffectiveDebutReglesNaturel(c)
-    if (!start) continue
-    if (start <= iso) candidate = c
-    else break
-  }
-  return candidate
+  return getCycleForDate(props.cycles, iso, TYPE_CYCLE.NATUREL)
 }
 
 function phaseForDay(iso) {
@@ -259,8 +261,8 @@ function dayCircleClasses(iso) {
     >
       <h4 class="nat-legend__title">Renseigner le réel</h4>
       <p class="nat-calendar__rules-hint">
-        Ces dates réelles remplaceront l’estimé pour tes calculs (durée des règles, phases, etc.).
-        Les prévisions restent basées sur les dates estimées.
+        Le nouveau cycle ne démarre qu’à la saisie du début réel des règles. Tant que ce n’est pas
+        fait, tu restes dans le cycle en cours (les prévisions restent indicatives).
       </p>
       <div class="nat-calendar__field">
         <label>

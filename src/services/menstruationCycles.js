@@ -466,6 +466,24 @@ function pickTargetCycleForRulesUpdate(cycles, { dateDebutReglesReelle, dateFinR
     if (within) return within
   }
 
+  const lastWithReal = [...cycles]
+    .reverse()
+    .find((c) => c[COL.dateDebutReglesReelle] && c[COL.dateDebutReglesReelle] <= dateDebutReglesReelle)
+
+  if (lastWithReal && dateDebutReglesReelle) {
+    const finPeriod = getReglesPeriodEnd(lastWithReal)
+    const nextNum = (lastWithReal[COL.numeroCycle] ?? 0) + 1
+    const nextCycle = cycles.find((c) => c[COL.numeroCycle] === nextNum)
+    if (
+      nextCycle &&
+      !nextCycle[COL.dateDebutReglesReelle] &&
+      finPeriod &&
+      dateDebutReglesReelle > finPeriod
+    ) {
+      return nextCycle
+    }
+  }
+
   return cycles[cycles.length - 1]
 }
 
@@ -529,6 +547,8 @@ export async function saveMenstruationRulesDates(supabase, userId, payload) {
     dateDebutRegles: next[COL.dateDebutReglesReelle],
     dateFinReglesReelle: next[COL.dateFinReglesReelle],
   })
+
+  await syncForecastCyclesPilule(supabase, userId)
 }
 
 export async function createMenstruationCyclePilule(supabase, userId, payload, options = {}) {

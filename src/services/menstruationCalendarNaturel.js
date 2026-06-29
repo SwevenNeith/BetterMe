@@ -6,6 +6,7 @@ import {
   getReglesPeriodEndNaturel,
   getEffectiveFenetreFertileNaturel,
   getEffectiveOvulationDateNaturel,
+  isForecastOnlyNaturalCycle,
 } from './menstruationCyclesNaturel.js'
 
 export const NAT_SEGMENT_KIND = {
@@ -47,6 +48,7 @@ export function buildCalendarDataFromNaturalCycles(cycles, todayISO = getLocalTo
 
   for (const row of cycles) {
     const cycleNum = row[COL_NATUREL.numeroCycle]
+    const forecastOnly = isForecastOnlyNaturalCycle(row, cycles)
 
     const debutRegles = getEffectiveDebutReglesNaturel(row)
     const finRegles = getReglesPeriodEndNaturel(row, todayISO)
@@ -61,7 +63,7 @@ export function buildCalendarDataFromNaturalCycles(cycles, todayISO = getLocalTo
       })
     }
 
-    if (debutRegles && finRegles && debutRegles <= finRegles) {
+    if (!forecastOnly && debutRegles && finRegles && debutRegles <= finRegles) {
       segments.push({
         kind: NAT_SEGMENT_KIND.regles,
         cycleNum,
@@ -80,35 +82,37 @@ export function buildCalendarDataFromNaturalCycles(cycles, todayISO = getLocalTo
       })
     }
 
-    const ovul = getEffectiveOvulationDateNaturel(row, todayISO)
-    if (ovul) {
-      markers.push({
-        kind: NAT_MARKER_KIND.ovulation,
-        date: ovul,
-        label: row[COL_NATUREL.dateDebutReglesReelle]
-          ? `Ovulation estimée (cycle ${cycleNum}, ancrée au réel)`
-          : `Ovulation estimée (cycle ${cycleNum})`,
-      })
-    }
+    if (!forecastOnly) {
+      const ovul = getEffectiveOvulationDateNaturel(row, todayISO)
+      if (ovul) {
+        markers.push({
+          kind: NAT_MARKER_KIND.ovulation,
+          date: ovul,
+          label: row[COL_NATUREL.dateDebutReglesReelle]
+            ? `Ovulation estimée (cycle ${cycleNum}, ancrée au réel)`
+            : `Ovulation estimée (cycle ${cycleNum})`,
+        })
+      }
 
-    const { debut: fertStart, fin: fertEnd } = getEffectiveFenetreFertileNaturel(row, todayISO)
-    if (fertStart && fertEnd && fertStart <= fertEnd) {
-      segments.push({
-        kind: NAT_SEGMENT_KIND.fenetreFertile,
-        cycleNum,
-        start: fertStart,
-        end: fertEnd,
-        label: `Fenêtre fertile (cycle ${cycleNum})`,
-        detail: formatRangeLabel(fertStart, fertEnd),
-      })
-      periodSummaries.push({
-        kind: NAT_SEGMENT_KIND.fenetreFertile,
-        cycleNum,
-        start: fertStart,
-        end: fertEnd,
-        title: `Fenêtre fertile — cycle ${cycleNum}`,
-        detail: formatRangeLabel(fertStart, fertEnd),
-      })
+      const { debut: fertStart, fin: fertEnd } = getEffectiveFenetreFertileNaturel(row, todayISO)
+      if (fertStart && fertEnd && fertStart <= fertEnd) {
+        segments.push({
+          kind: NAT_SEGMENT_KIND.fenetreFertile,
+          cycleNum,
+          start: fertStart,
+          end: fertEnd,
+          label: `Fenêtre fertile (cycle ${cycleNum})`,
+          detail: formatRangeLabel(fertStart, fertEnd),
+        })
+        periodSummaries.push({
+          kind: NAT_SEGMENT_KIND.fenetreFertile,
+          cycleNum,
+          start: fertStart,
+          end: fertEnd,
+          title: `Fenêtre fertile — cycle ${cycleNum}`,
+          detail: formatRangeLabel(fertStart, fertEnd),
+        })
+      }
     }
 
     const nextCycle = byNum.get(cycleNum + 1)
