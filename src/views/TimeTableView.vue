@@ -29,8 +29,9 @@ const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.TIMETABLE, undefined, {
 const currentDate = ref(new Date())
 const selectedDayIndex = ref(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1) // 0 = Mon, 6 = Sun
 
-// Modal quick add state
+// Modal quick add / edit state
 const isModalOpen = ref(false)
+const editingEventId = ref(null)
 const newEventTitle = ref('')
 const newEventDetail = ref('')
 const newEventStartTime = ref('10:00')
@@ -58,6 +59,92 @@ const resetTimerFields = () => {
   newEventTimerMinutes.value = 30
 }
 
+function parseEventTimeRange(timeStr) {
+  if (!timeStr) return { start: '10:00', end: '11:30' }
+  const parts = String(timeStr).replace(/h/gi, ':').split(/\s*[-–—]\s*/)
+  const normalize = (raw) => {
+    const match = String(raw || '').trim().match(/^(\d{1,2}):(\d{2})/)
+    if (!match) return null
+    return `${String(Number(match[1])).padStart(2, '0')}:${match[2]}`
+  }
+  return {
+    start: normalize(parts[0]) || '10:00',
+    end: normalize(parts[1]) || '11:30',
+  }
+}
+
+function setReminderFieldsFromMinutes(totalMinutes) {
+  const mins = Math.max(0, Number(totalMinutes) || 0)
+  if (mins <= 0) {
+    resetReminderFields()
+    return
+  }
+  newEventReminderEnabled.value = true
+  newEventReminderHours.value = Math.floor(mins / 60)
+  newEventReminderMinutes.value = mins % 60
+}
+
+function setTimerFieldsFromMinutes(totalMinutes) {
+  const mins = Math.max(0, Number(totalMinutes) || 0)
+  if (mins <= 0) {
+    resetTimerFields()
+    return
+  }
+  newEventTimerEnabled.value = true
+  newEventTimerHours.value = Math.floor(mins / 60)
+  newEventTimerMinutes.value = mins % 60
+}
+
+function resetEventForm() {
+  editingEventId.value = null
+  newEventTitle.value = ''
+  newEventDetail.value = ''
+  newEventStartTime.value = '10:00'
+  newEventEndTime.value = '11:30'
+  newEventCategory.value = 'Travail'
+  newEventDateEnd.value = ''
+  newEventAllDay.value = false
+  resetReminderFields()
+  resetTimerFields()
+}
+
+function closeEventModal() {
+  isModalOpen.value = false
+  resetEventForm()
+}
+
+function openEventForEdit(event) {
+  const original = userEvents.value.find((e) => e.id === event.id) ?? event
+
+  editingEventId.value = original.id
+  newEventTitle.value = original.title || ''
+  newEventDetail.value = original.detail || ''
+  newEventDay.value = original.date_start || newEventDay.value
+  newEventDateEnd.value =
+    original.date_end && original.date_end !== original.date_start ? original.date_end : ''
+  newEventAllDay.value = Boolean(original.all_day)
+
+  if (!original.all_day) {
+    const { start, end } = parseEventTimeRange(original.time)
+    newEventStartTime.value = start
+    newEventEndTime.value = end
+  }
+
+  const cat = userCategories.value.find((c) => c.id === original.category)
+  newEventCategory.value = cat?.name || 'Travail'
+
+  resetReminderFields()
+  resetTimerFields()
+  if (original.reminder) {
+    setReminderFieldsFromMinutes(original.reminder_time)
+  }
+  if (original.timer) {
+    setTimerFieldsFromMinutes(original.timer_duration)
+  }
+
+  isModalOpen.value = true
+}
+
 const getReminderMinutesBefore = () => {
   return getDurationMinutes(newEventReminderHours.value, newEventReminderMinutes.value)
 }
@@ -77,6 +164,7 @@ const syncEndTimeFromTimer = () => {
 }
 
 const openModalWithDefaultDate = async () => {
+  resetEventForm()
   if (weekDays.value && weekDays.value[selectedDayIndex.value]) {
     newEventDay.value = formatDateToLocalISO(weekDays.value[selectedDayIndex.value].date)
   }
@@ -102,6 +190,7 @@ const categoriesForPills = computed(() =>
 )
 
 const openModalWithHobby = (hobbyTitle) => {
+  resetEventForm()
   newEventTitle.value = hobbyTitle
   newEventCategory.value = 'Hobbies'
   newEventStartTime.value = '10:00'
@@ -127,6 +216,7 @@ const handleDrop = (event, dayIdx, startHour) => {
   const hobbyTitle = event.dataTransfer.getData('text/plain')
   if (!hobbyTitle) return
 
+  resetEventForm()
   newEventTitle.value = hobbyTitle
   newEventCategory.value = 'Hobbies'
 
@@ -678,8 +768,7 @@ const handleAddEvent = async () => {
       newEventReminderEnabled.value && !newEventAllDay.value
     const reminderMinutes = reminderActive ? getReminderMinutesBefore() : null
 
-    const eventInsert = {
-      user_id: user.id,
+    const eventPayload = {
       title: newEventTitle.value,
       date_start: startDStr,
       date_end: endDStr || null,
@@ -693,22 +782,40 @@ const handleAddEvent = async () => {
       timer_duration: timerActive ? timerMinutes : null,
     }
 
-    const { data, error } = await supabase.from('timetable_events').insert(eventInsert).select()
+    let savedEvent
 
-    if (error) throw error
+    if (editingEventId.value) {
+      await supprimerRappelsEvenement(editingEventId.value)
 
-    const createdEvent = data?.[0]
+      const { data, error } = await supabase
+        .from('timetable_events')
+        .update(eventPayload)
+        .eq('id', editingEventId.value)
+        .eq('user_id', user.id)
+        .select()
+        .single()
 
-    // Insert locally to update UI immediately
-    if (createdEvent) {
-      userEvents.value.push(createdEvent)
+      if (error) throw error
+      savedEvent = data
+      userEvents.value = userEvents.value.map((ev) => (ev.id === savedEvent.id ? savedEvent : ev))
+    } else {
+      const { data, error } = await supabase
+        .from('timetable_events')
+        .insert({ user_id: user.id, ...eventPayload })
+        .select()
+
+      if (error) throw error
+      savedEvent = data?.[0]
+      if (savedEvent) {
+        userEvents.value.push(savedEvent)
+      }
     }
 
     if (categoryName.toLowerCase() === 'hobbies') {
       await fetchEvents()
     }
 
-    if (notificationsActives() && reminderActive && createdEvent) {
+    if (notificationsActives() && reminderActive && savedEvent) {
       const delaiLabel = formatDelaiAvantEvenement(
         newEventReminderHours.value,
         newEventReminderMinutes.value,
@@ -719,48 +826,48 @@ const handleAddEvent = async () => {
         timeStart: newEventStartTime.value,
         minutesAvant: reminderMinutes,
         delaiLabel,
-        eventId: createdEvent.id,
+        eventId: savedEvent.id,
       })
     }
 
-    if (notificationsActives() && timerActive && createdEvent) {
+    if (notificationsActives() && timerActive && savedEvent) {
       await planifierNotificationDebutEvenement(user.id, {
         label: newEventTitle.value,
         dateStart: startDStr,
         timeStart: newEventStartTime.value,
         durationMinutes: timerMinutes,
-        eventId: createdEvent.id,
+        eventId: savedEvent.id,
       })
       await planifierNotificationFinTimer(user.id, {
         label: newEventTitle.value,
         dateStart: startDStr,
         timeStart: newEventStartTime.value,
         durationMinutes: timerMinutes,
-        eventId: createdEvent.id,
+        eventId: savedEvent.id,
         body: `${newEventTitle.value} : le timer est terminé !`,
       })
     }
 
-    // Reset form & Close modal
-    newEventTitle.value = ''
-    newEventDetail.value = ''
-    newEventStartTime.value = '10:00'
-    newEventEndTime.value = '11:30'
-    newEventCategory.value = 'Travail'
-    newEventDateEnd.value = ''
-    newEventAllDay.value = false
-    resetReminderFields()
-    resetTimerFields()
-    isModalOpen.value = false
+    timetableCache.publish({
+      userEvents: userEvents.value,
+      userCategories: userCategories.value,
+      hobbyQuickPicks: hobbyQuickPicks.value,
+    })
+    await fetchEvents({ silent: true })
+    closeEventModal()
   } catch (err) {
-    console.error('Error adding event:', err)
+    console.error('Error saving event:', err)
     const msg = err.message || ''
     if (msg.includes('timer') && msg.includes('column')) {
       alert(
         "Erreur : ajoute les colonnes timer et timer_duration sur timetable_events dans Supabase (voir la doc du projet).",
       )
     } else {
-      alert("Erreur lors de l'ajout de l'activité.")
+      alert(
+        editingEventId.value
+          ? "Erreur lors de la modification de l'activité."
+          : "Erreur lors de l'ajout de l'activité.",
+      )
     }
   }
 }
@@ -1053,6 +1160,11 @@ const getPositionedEventsForDay = (dayIdx) => {
                 :key="event.id"
                 class="all-day-event-bar"
                 :style="getCategoryStyle(event.category)"
+                role="button"
+                tabindex="0"
+                :title="`Modifier « ${event.title} »`"
+                @click="openEventForEdit(event)"
+                @keydown.enter="openEventForEdit(event)"
               >
                 <span class="all-day-event-icon">{{ getCategoryIcon(event.category) }}</span>
                 <span class="all-day-event-title" :title="event.title + (event.detail ? ' - ' + event.detail : '')">
@@ -1107,10 +1219,15 @@ const getPositionedEventsForDay = (dayIdx) => {
                     :key="event.id"
                     class="event-block"
                     :style="[getCategoryStyle(event.category), event.positionStyle]"
+                    role="button"
+                    tabindex="0"
+                    :title="`Modifier « ${event.title} »`"
+                    @click="openEventForEdit(event)"
+                    @keydown.enter="openEventForEdit(event)"
                   >
                     <button
                       class="event-delete-btn"
-                      @click="deleteEvent(event.id)"
+                      @click.stop="deleteEvent(event.id)"
                       title="Supprimer"
                     >
                       ✕
@@ -1152,6 +1269,11 @@ const getPositionedEventsForDay = (dayIdx) => {
             :key="event.id"
             class="all-day-event-bar"
             :style="getCategoryStyle(event.category)"
+            role="button"
+            tabindex="0"
+            :title="`Modifier « ${event.title} »`"
+            @click="openEventForEdit(event)"
+            @keydown.enter="openEventForEdit(event)"
           >
             <span class="all-day-event-icon">{{ getCategoryIcon(event.category) }}</span>
             <span class="all-day-event-title" :title="event.title + (event.detail ? ' - ' + event.detail : '')">
@@ -1205,10 +1327,15 @@ const getPositionedEventsForDay = (dayIdx) => {
                     :key="event.id"
                     class="event-block event-block--mobile"
                     :style="[getCategoryStyle(event.category), event.positionStyle]"
+                    role="button"
+                    tabindex="0"
+                    :title="`Modifier « ${event.title} »`"
+                    @click="openEventForEdit(event)"
+                    @keydown.enter="openEventForEdit(event)"
                   >
                     <button
                       class="event-delete-btn"
-                      @click="deleteEvent(event.id)"
+                      @click.stop="deleteEvent(event.id)"
                       title="Supprimer"
                     >
                       ✕
@@ -1236,11 +1363,11 @@ const getPositionedEventsForDay = (dayIdx) => {
     </div>
 
     <!-- Quick Add Event Modal -->
-    <div class="modal-overlay" v-if="isModalOpen" @click.self="isModalOpen = false">
+    <div class="modal-overlay" v-if="isModalOpen" @click.self="closeEventModal">
       <div class="modal-card">
         <div class="modal-header">
-          <h3>Nouvelle activité</h3>
-          <button class="modal-close" @click="isModalOpen = false">✕</button>
+          <h3>{{ editingEventId ? "Modifier l'activité" : 'Nouvelle activité' }}</h3>
+          <button class="modal-close" type="button" @click="closeEventModal">✕</button>
         </div>
 
         <form class="modal-form" @submit.prevent="handleAddEvent">
@@ -1441,7 +1568,9 @@ const getPositionedEventsForDay = (dayIdx) => {
             </span>
           </div>
 
-          <button type="submit" class="modal-submit-btn">Ajouter à mon planning</button>
+          <button type="submit" class="modal-submit-btn">
+            {{ editingEventId ? 'Enregistrer les modifications' : 'Ajouter à mon planning' }}
+          </button>
         </form>
       </div>
     </div>
@@ -1926,6 +2055,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   font-size: 0.72rem;
   font-weight: 700;
   color: inherit;
+  cursor: pointer;
   transition: all 0.2s ease;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
   position: relative;
@@ -2114,7 +2244,7 @@ const getPositionedEventsForDay = (dayIdx) => {
     transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
     box-shadow 0.25s ease,
     z-index 0.1s ease;
-  cursor: default;
+  cursor: pointer;
   z-index: 1;
   overflow: hidden;
   display: flex;
