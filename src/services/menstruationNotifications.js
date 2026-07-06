@@ -133,6 +133,50 @@ async function syncMenstruationKindNotifications(userId, kind, enabled, buildRow
   await insertPendingNotifications(supabase, userId, buildRows())
 }
 
+export const PILULE_MENSTRUATION_KINDS = [
+  MENSTRUATION_KIND.SPM_ESTIMEE,
+  MENSTRUATION_KIND.REGLES_ESTIMEES,
+]
+
+export const NATURAL_MENSTRUATION_KINDS = [
+  MENSTRUATION_KIND.PHASE_FOLLICULAIRE,
+  MENSTRUATION_KIND.PHASE_OVULATOIRE,
+  MENSTRUATION_KIND.PHASE_LUTEALE,
+]
+
+export async function clearPiluleMenstruationNotifications(userId) {
+  await deletePendingByKinds(supabase, userId, PILULE_MENSTRUATION_KINDS)
+}
+
+export async function clearNaturalMenstruationNotifications(userId) {
+  await deletePendingByKinds(supabase, userId, NATURAL_MENSTRUATION_KINDS)
+}
+
+/**
+ * Planifie les notifications selon le mode cycle actif (pilule vs naturel).
+ * @param {'pilule'|'naturel'|null} cycleMode
+ */
+export async function rescheduleMenstruationNotificationsByMode(
+  userId,
+  cycleMode,
+  { cyclesPilule = [], cyclesNaturel = [], settings },
+) {
+  if (cycleMode === 'naturel') {
+    await clearPiluleMenstruationNotifications(userId)
+    await rescheduleMenstruationNaturalPhaseNotifications(userId, cyclesNaturel, settings)
+    return
+  }
+
+  if (cycleMode === 'pilule') {
+    await clearNaturalMenstruationNotifications(userId)
+    await rescheduleMenstruationEstimatedNotifications(userId, cyclesPilule, settings)
+    return
+  }
+
+  await clearPiluleMenstruationNotifications(userId)
+  await clearNaturalMenstruationNotifications(userId)
+}
+
 export async function rescheduleMenstruationEstimatedNotifications(userId, cycles, settings) {
   const now = Date.now()
   const hhmm = String(settings.menstruation_notification_time || '09:00').slice(0, 5)

@@ -25,17 +25,17 @@ import {
   declencherCronNotifications,
 } from '../services/notifications.js'
 import { listCyclesPilule } from '../services/menstruationCycles.js'
-import { listCyclesNaturel } from '../services/menstruationCyclesNaturel.js'
+import { countMenstruationCyclesNaturel, syncForecastCyclesNaturel } from '../services/menstruationCyclesNaturel.js'
 import {
   createDefaultMenstruationNotifSettings,
   loadMenstruationNotifSettings,
   saveMenstruationNotifSettings,
-  rescheduleMenstruationEstimatedNotifications,
-  rescheduleMenstruationNaturalPhaseNotifications,
+  rescheduleMenstruationNotificationsByMode,
 } from '../services/menstruationNotifications.js'
 import { rescheduleMenstruationPatternNotifications } from '../services/menstruationPatternNotifications.js'
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
 import { listMenstruationPatterns } from '../services/menstruationPatterns.js'
+import { resolveMenstruationCycleMode } from '../services/menstruationCycleModePreference.js'
 import { RECONFORT_CONDITION_GROUPS } from '../constants/reconfortConditions.js'
 import {
   createReconfortMessage,
@@ -743,16 +743,27 @@ const onSaveMenstruationSettings = async () => {
   menstruationNotifMessage.value = ''
   try {
     await saveMenstruationNotifSettings(userId.value, menstruationNotifSettings.value)
-    const [cyclesPilule, cyclesNaturel] = await Promise.all([
-      listCyclesPilule(supabase, userId.value),
-      listCyclesNaturel(supabase, userId.value),
-    ])
-    await rescheduleMenstruationEstimatedNotifications(userId.value, cyclesPilule, menstruationNotifSettings.value)
-    await rescheduleMenstruationNaturalPhaseNotifications(userId.value, cyclesNaturel, menstruationNotifSettings.value)
+    const cyclesPilule = await listCyclesPilule(supabase, userId.value)
+    const countNaturel = await countMenstruationCyclesNaturel(supabase, userId.value)
+    const cycleMode = await resolveMenstruationCycleMode(
+      supabase,
+      userId.value,
+      cyclesPilule.length,
+      countNaturel,
+    )
+    const cyclesNaturel =
+      cycleMode === 'naturel' && countNaturel > 0
+        ? await syncForecastCyclesNaturel(supabase, userId.value)
+        : []
+    await rescheduleMenstruationNotificationsByMode(userId.value, cycleMode, {
+      cyclesPilule,
+      cyclesNaturel,
+      settings: menstruationNotifSettings.value,
+    })
 
-    const typeCycle = cyclesPilule.length > 0 ? TYPE_CYCLE.PILULE : TYPE_CYCLE.NATUREL
-    const cycleList = cyclesPilule.length > 0 ? cyclesPilule : cyclesNaturel
-    if (cycleList.length) {
+    const typeCycle = cycleMode === 'pilule' ? TYPE_CYCLE.PILULE : TYPE_CYCLE.NATUREL
+    const cycleList = cycleMode === 'pilule' ? cyclesPilule : cyclesNaturel
+    if (cycleMode && cycleList.length) {
       const patterns = await listMenstruationPatterns(supabase, userId.value, typeCycle, {
         actifOnly: false,
       })

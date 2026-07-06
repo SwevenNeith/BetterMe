@@ -30,8 +30,7 @@ import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import {
   createDefaultMenstruationNotifSettings,
   loadMenstruationNotifSettings,
-  rescheduleMenstruationEstimatedNotifications,
-  rescheduleMenstruationNaturalPhaseNotifications,
+  rescheduleMenstruationNotificationsByMode,
 } from '../services/menstruationNotifications.js'
 import { rescheduleMenstruationPatternNotifications } from '../services/menstruationPatternNotifications.js'
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
@@ -135,15 +134,17 @@ async function runMenstruationBackgroundSync(gen) {
       if (gen !== pageLoadGen) return
       cycles.value = await listCyclesPilule(supabase, userId.value)
       if (gen !== pageLoadGen) return
-      await rescheduleMenstruationEstimatedNotifications(
-        userId.value,
-        cycles.value,
-        menstruationNotifSettings.value,
-      )
     } else if (cycleMode.value === 'naturel') {
       cyclesNaturel.value = await syncForecastCyclesNaturel(supabase, userId.value)
       if (gen !== pageLoadGen) return
     }
+
+    if (gen !== pageLoadGen) return
+    await rescheduleMenstruationNotificationsByMode(userId.value, cycleMode.value, {
+      cyclesPilule: cycles.value,
+      cyclesNaturel: cyclesNaturel.value,
+      settings: menstruationNotifSettings.value,
+    })
 
     if (gen === pageLoadGen) {
       await loadPatterns()
@@ -299,11 +300,11 @@ const onSubmitRulesDates = async (payload) => {
   try {
     await saveMenstruationRulesDates(supabase, userId.value, payload)
     cycles.value = await listCyclesPilule(supabase, userId.value)
-    await rescheduleMenstruationEstimatedNotifications(
-      userId.value,
-      cycles.value,
-      menstruationNotifSettings.value,
-    )
+    await rescheduleMenstruationNotificationsByMode(userId.value, 'pilule', {
+      cyclesPilule: cycles.value,
+      cyclesNaturel: cyclesNaturel.value,
+      settings: menstruationNotifSettings.value,
+    })
     await loadPatterns(true)
   } catch (err) {
     console.error(err)
@@ -319,11 +320,11 @@ const onSubmitRulesDatesNat = async (payload) => {
   isSavingRulesDatesNat.value = true
   try {
     cyclesNaturel.value = await saveMenstruationRulesDatesNaturel(supabase, userId.value, payload)
-    await rescheduleMenstruationNaturalPhaseNotifications(
-      userId.value,
-      cyclesNaturel.value,
-      menstruationNotifSettings.value,
-    )
+    await rescheduleMenstruationNotificationsByMode(userId.value, 'naturel', {
+      cyclesPilule: cycles.value,
+      cyclesNaturel: cyclesNaturel.value,
+      settings: menstruationNotifSettings.value,
+    })
     await loadPatterns(true)
   } catch (err) {
     console.error(err)

@@ -252,9 +252,8 @@ async function ensureTodoPromesseReminders(parisNow: { dateISO: string; timeHHmm
     }
     if (pendingRows?.length) continue
 
-    if (nowMs > scheduledMs + 2 * 60 * 1000) continue
-
-    const whenISO = scheduledMs > nowMs ? scheduledAtISO : new Date().toISOString()
+    const whenISO =
+      scheduledMs > nowMs ? scheduledAtISO : new Date().toISOString()
     const pageLabel = getTodoPageLabel(row.page_visibility)
 
     const { error: insertError } = await supabase.from('scheduled_notifications').insert({

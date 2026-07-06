@@ -35,13 +35,18 @@ onMounted(() => {
         data: { user },
       } = await supabase.auth.getUser();
       if (user?.id) {
-        const { rescheduleTodoPromesseReminder } = await import(
-          '../services/todoPromesseNotifications.js'
-        );
-        await rescheduleTodoPromesseReminder(user.id);
+        const [{ rescheduleTodoPromesseReminder }, { syncMenstruationNotificationsForUser }] =
+          await Promise.all([
+            import('../services/todoPromesseNotifications.js'),
+            import('../services/menstruationNotificationSync.js'),
+          ])
+        await Promise.all([
+          rescheduleTodoPromesseReminder(user.id),
+          syncMenstruationNotificationsForUser(user.id),
+        ])
       }
     } catch (err) {
-      console.error('rescheduleTodoPromesseReminder:', err);
+      console.error('rescheduleTodoPromesseReminder / syncMenstruationNotifications:', err);
     }
   })();
 });

@@ -67,6 +67,14 @@ async function hasTodoPromesseReminderSentToday(userId, todayParis) {
   return Boolean(data?.length)
 }
 
+function getTodoPromesseScheduledAt(todayParis, hhmm) {
+  const scheduledAt = dateTimeParisToUtc(todayParis, hhmm)
+  if (scheduledAt.getTime() <= Date.now()) {
+    return new Date()
+  }
+  return scheduledAt
+}
+
 export async function loadTodoPromesseReminderSettings(userId) {
   if (!userId) return createDefaultTodoPromesseReminderSettings()
 
@@ -149,8 +157,7 @@ export async function rescheduleTodoPromesseReminder(userId, options = {}) {
   if (countDayScopedPromessesForDate(items, tomorrowParis) > 0) return
 
   const hhmm = settings.todo_promesse_reminder_time
-  const scheduledAt = dateTimeParisToUtc(todayParis, hhmm)
-  if (scheduledAt.getTime() <= Date.now()) return
+  const scheduledAt = getTodoPromesseScheduledAt(todayParis, hhmm)
 
   const title = await getTodoPageLabelForUser(supabase, userId)
 

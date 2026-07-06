@@ -70,6 +70,14 @@ export async function saveMenstruationCycleModePreference(supabase, userId, mode
     }
     throw error
   }
+
+  if (mode === 'naturel') {
+    const { clearPiluleMenstruationNotifications } = await import('./menstruationNotifications.js')
+    await clearPiluleMenstruationNotifications(userId)
+  } else if (mode === 'pilule') {
+    const { clearNaturalMenstruationNotifications } = await import('./menstruationNotifications.js')
+    await clearNaturalMenstruationNotifications(userId)
+  }
 }
 
 /**
@@ -81,8 +89,8 @@ export async function saveMenstruationCycleModePreference(supabase, userId, mode
  */
 export async function resolveMenstruationCycleMode(supabase, userId, countPilule, countNaturel) {
   const saved = await loadMenstruationCycleModePreference(supabase, userId)
-  if (saved === 'naturel' && countNaturel > 0) return 'naturel'
-  if (saved === 'pilule' && countPilule > 0) return 'pilule'
+  if (saved === 'naturel') return 'naturel'
+  if (saved === 'pilule') return 'pilule'
 
   const inferred = inferMenstruationCycleMode(countPilule, countNaturel)
   if (inferred && !saved) {
