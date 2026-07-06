@@ -190,6 +190,44 @@ function onSave() {
     background: rgba(35, 30, 48, 0.75);
     border-color: rgba(213, 181, 234, 0.2);
   }
+
+  .checkin__label {
+    color: #d5b5ea;
+  }
+
+  .scale__chip:not(.scale__chip--on) {
+    background: rgba(40, 32, 52, 0.95);
+    border-color: rgba(213, 181, 234, 0.38);
+    color: #f0e8f8;
+  }
+
+  .scale__chip:hover:not(.scale__chip--on) {
+    background: rgba(213, 181, 234, 0.22);
+    border-color: rgba(213, 181, 234, 0.5);
+  }
+
+  .support-check {
+    color: #f0e8f8;
+  }
+
+  .checkin__sentiment-detail,
+  .checkin-note {
+    color: #c5c9d0;
+  }
+
+  .checkin-pattern {
+    color: #d5b5ea;
+  }
+
+  .btn--secondary {
+    color: #d5b5ea;
+    background: rgba(213, 181, 234, 0.14);
+    border-color: rgba(213, 181, 234, 0.32);
+  }
+
+  .btn--secondary:hover:not(:disabled) {
+    background: rgba(213, 181, 234, 0.24);
+  }
 }
 
 .checkin--compact {

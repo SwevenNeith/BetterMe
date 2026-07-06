@@ -405,14 +405,49 @@ async function onBoolean(def, v) {
     border-color: rgba(213, 181, 234, 0.2);
   }
 
+  .m-symptom-section--current {
+    border-color: rgba(213, 181, 234, 0.45);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  }
+
+  .m-symptom-section__toggle {
+    background: rgba(213, 181, 234, 0.1);
+  }
+
+  .m-symptom-section--current .m-symptom-section__toggle {
+    background: rgba(213, 181, 234, 0.18);
+  }
+
+  .m-symptom-section__label,
+  .m-symptom-section__chevron {
+    color: #d5b5ea;
+  }
+
   .m-symptom-section__field-label {
     color: #f0e8f8;
   }
 
-  .m-symptom-section__chip {
-    background: rgba(40, 32, 52, 0.9);
-    border-color: rgba(213, 181, 234, 0.25);
-    color: #e8dff0;
+  .m-symptom-section__side-label {
+    color: #adb5bd;
+  }
+
+  .m-symptom-section__side {
+    border-left-color: rgba(213, 181, 234, 0.35);
+  }
+
+  .m-symptom-section__chip:not(.m-symptom-section__chip--on) {
+    background: rgba(40, 32, 52, 0.95);
+    border-color: rgba(213, 181, 234, 0.38);
+    color: #f0e8f8;
+  }
+
+  .m-symptom-section__chip:hover:not(:disabled):not(.m-symptom-section__chip--on) {
+    background: rgba(213, 181, 234, 0.22);
+    border-color: rgba(213, 181, 234, 0.5);
+  }
+
+  .m-symptom-section__chip--on {
+    color: #fff;
   }
 }
 </style>

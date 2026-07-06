@@ -2012,6 +2012,14 @@ watch(userId, (id) => {
     color: #adb5bd;
   }
 
+  .todo-progress__value {
+    color: #d5b5ea;
+  }
+
+  .todo-progress__track {
+    background: rgba(213, 181, 234, 0.18);
+  }
+
   .todo-today-btn {
     background: rgba(30, 26, 40, 0.8);
     border-color: rgba(149, 209, 170, 0.25);
@@ -2078,6 +2086,16 @@ watch(userId, (id) => {
 
   .todo-month-cell__preview-item {
     color: #adb5bd;
+  }
+
+  .todo-month-cell__badge {
+    background: #c9a8dc;
+    color: #1a1724;
+    box-shadow: 0 0 0 1px rgba(213, 181, 234, 0.35);
+  }
+
+  .todo-month-cell__preview-more {
+    color: #d5b5ea;
   }
 }
 

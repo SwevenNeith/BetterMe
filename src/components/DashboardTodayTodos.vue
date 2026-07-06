@@ -485,6 +485,20 @@ onUnmounted(() => {
     border-color: rgba(213, 181, 234, 0.45);
   }
 
+  .dashboard-todos__quantite-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(213, 181, 234, 0.28);
+    color: #d5b5ea;
+  }
+
+  .dashboard-todos__quantite-btn:not(:disabled):hover {
+    background: rgba(255, 255, 255, 0.18);
+  }
+
+  .dashboard-todos__quantite-value {
+    color: #f0e8f8;
+  }
+
   .dashboard-todos__state {
     color: #adb5bd;
   }

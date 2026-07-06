@@ -452,8 +452,27 @@ function onCardDragEnd(event) {
     background: color-mix(in srgb, var(--todo-freq-accent, #d4a06a) 32%, transparent);
   }
 
+  .todo-item-quantite {
+    background: color-mix(in srgb, var(--todo-freq-accent, #ad81be) 24%, transparent);
+    border-right-color: rgba(213, 181, 234, 0.22);
+  }
+
+  .todo-item-quantite__btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(213, 181, 234, 0.28);
+    color: var(--todo-freq-accent, #d5b5ea);
+  }
+
+  .todo-item-quantite__btn:not(:disabled):hover {
+    background: rgba(255, 255, 255, 0.18);
+  }
+
   .todo-item-quantite__value {
     color: #f0e8f8;
+  }
+
+  .todo-item-card--done .todo-item-quantite__value {
+    color: #95d1aa;
   }
 }
 </style>

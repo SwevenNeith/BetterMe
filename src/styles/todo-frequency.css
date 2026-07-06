@@ -28,3 +28,30 @@
   --todo-freq-bg: rgba(212, 160, 106, 0.14);
   --todo-freq-border: rgba(212, 160, 106, 0.4);
 }
+
+@media (prefers-color-scheme: dark) {
+  .todo-freq--ponctuel {
+    --todo-freq-bg: rgba(173, 129, 190, 0.16);
+    --todo-freq-border: rgba(173, 129, 190, 0.45);
+  }
+
+  .todo-freq--semaine {
+    --todo-freq-bg: rgba(114, 160, 152, 0.16);
+    --todo-freq-border: rgba(114, 160, 152, 0.45);
+  }
+
+  .todo-freq--quotidien {
+    --todo-freq-bg: rgba(106, 143, 201, 0.16);
+    --todo-freq-border: rgba(106, 143, 201, 0.45);
+  }
+
+  .todo-freq--hebdomadaire {
+    --todo-freq-bg: rgba(184, 136, 200, 0.16);
+    --todo-freq-border: rgba(184, 136, 200, 0.45);
+  }
+
+  .todo-freq--promesse {
+    --todo-freq-bg: rgba(212, 160, 106, 0.18);
+    --todo-freq-border: rgba(212, 160, 106, 0.48);
+  }
+}
