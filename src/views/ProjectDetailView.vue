@@ -7,6 +7,9 @@ import ProjectItemProgress from '../components/ProjectItemProgress.vue'
 import {
   DEFAULT_QUANTITE_CIBLE,
   DEFAULT_RESET_PERIODE,
+  hasQuantiteTracking,
+  normalizeQuantiteCible,
+  normalizeResetPeriode,
   PROJECT_RESET_PERIODE_OPTIONS,
 } from '../constants/projectProgress.js'
 import { supabase } from '../lib/supabase.js'
@@ -190,6 +193,7 @@ function getItemLogs(itemId) {
 }
 
 function syncItemDoneState(item, logs) {
+  if (!hasQuantiteTracking(item)) return Boolean(item.is_done)
   const count = getCurrentPeriodCount(logs, item.reset_periode)
   return count >= item.quantite_cible
 }
@@ -227,9 +231,13 @@ async function loadProject() {
     project.value = found
     await loadProgressLogs(found)
     for (const step of project.value.steps) {
-      step.is_done = syncItemDoneState(step, getItemLogs(step.id))
+      if (hasQuantiteTracking(step)) {
+        step.is_done = syncItemDoneState(step, getItemLogs(step.id))
+      }
       for (const substep of step.substeps) {
-        substep.is_done = syncItemDoneState(substep, getItemLogs(substep.id))
+        if (hasQuantiteTracking(substep)) {
+          substep.is_done = syncItemDoneState(substep, getItemLogs(substep.id))
+        }
       }
     }
     normalizeProjectStepOrder(project.value)
@@ -274,9 +282,11 @@ async function saveEditPanel() {
       if (step) {
         step.title = title
         step.description = description
-        step.quantite_cible = Number(editPanel.value.quantite_cible) || DEFAULT_QUANTITE_CIBLE
+        step.quantite_cible = normalizeQuantiteCible(editPanel.value.quantite_cible)
         step.reset_periode = editPanel.value.reset_periode || DEFAULT_RESET_PERIODE
-        step.is_done = syncItemDoneState(step, getItemLogs(step.id))
+        if (hasQuantiteTracking(step)) {
+          step.is_done = syncItemDoneState(step, getItemLogs(step.id))
+        }
       }
     } else if (kind === 'substep') {
       await updateSubstepTitle(supabase, userId.value, id, title)
@@ -292,9 +302,11 @@ async function saveEditPanel() {
       if (substep) {
         substep.title = title
         substep.description = description
-        substep.quantite_cible = Number(editPanel.value.quantite_cible) || DEFAULT_QUANTITE_CIBLE
+        substep.quantite_cible = normalizeQuantiteCible(editPanel.value.quantite_cible)
         substep.reset_periode = editPanel.value.reset_periode || DEFAULT_RESET_PERIODE
-        substep.is_done = syncItemDoneState(substep, getItemLogs(substep.id))
+        if (hasQuantiteTracking(substep)) {
+          substep.is_done = syncItemDoneState(substep, getItemLogs(substep.id))
+        }
       }
     }
     closeEdit()
@@ -311,8 +323,45 @@ async function applyItemDoneReorder(item, list, wasDone) {
   await persistStepOrders(supabase, userId.value, project.value.steps)
 }
 
+async function toggleStepDone(step) {
+  if (!userId.value || !project.value || hasQuantiteTracking(step)) return
+  const next = !step.is_done
+  step.is_done = next
+  if (next) moveItemDoneLast(project.value.steps, step.id)
+  else moveItemPendingEnd(project.value.steps, step.id)
+  try {
+    await updateStepDone(supabase, userId.value, step.id, next)
+    await persistStepOrders(supabase, userId.value, project.value.steps)
+  } catch (err) {
+    step.is_done = !next
+    normalizeProjectStepOrder(project.value)
+    console.error(err)
+    loadError.value = err.message || "Erreur lors de la mise à jour de l'étape."
+  }
+}
+
+async function toggleSubstepDone(substep) {
+  if (!userId.value || !project.value || hasQuantiteTracking(substep)) return
+  const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
+  if (!step) return
+
+  const next = !substep.is_done
+  substep.is_done = next
+  if (next) moveItemDoneLast(step.substeps, substep.id)
+  else moveItemPendingEnd(step.substeps, substep.id)
+  try {
+    await updateSubstepDone(supabase, userId.value, substep.id, next)
+    await persistSubstepOrders(supabase, userId.value, step.substeps)
+  } catch (err) {
+    substep.is_done = !next
+    normalizeProjectStepOrder(project.value)
+    console.error(err)
+    loadError.value = err.message || 'Erreur lors de la mise à jour de la sous-étape.'
+  }
+}
+
 async function onStepIncrement(step) {
-  if (!userId.value || !project.value) return
+  if (!userId.value || !project.value || !hasQuantiteTracking(step)) return
   const wasDone = step.is_done
   try {
     const log = await addProgressLog(supabase, userId.value, { stepId: step.id })
@@ -329,7 +378,7 @@ async function onStepIncrement(step) {
 }
 
 async function onStepDecrement(step) {
-  if (!userId.value || !project.value) return
+  if (!userId.value || !project.value || !hasQuantiteTracking(step)) return
   const wasDone = step.is_done
   try {
     const deletedId = await removeLatestLogInPeriod(supabase, userId.value, {
@@ -350,7 +399,7 @@ async function onStepDecrement(step) {
 }
 
 async function onSubstepIncrement(substep) {
-  if (!userId.value || !project.value) return
+  if (!userId.value || !project.value || !hasQuantiteTracking(substep)) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
   if (!step) return
 
@@ -374,7 +423,7 @@ async function onSubstepIncrement(substep) {
 }
 
 async function onSubstepDecrement(substep) {
-  if (!userId.value || !project.value) return
+  if (!userId.value || !project.value || !hasQuantiteTracking(substep)) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
   if (!step) return
 
@@ -682,17 +731,19 @@ watch(projectId, () => {
           </label>
           <div class="project-form-row">
             <label class="project-form-field">
-              <span class="project-form-label">Quantité</span>
+              <span class="project-form-label">
+                Quantité <span class="project-form-optional">(0 = une fois)</span>
+              </span>
               <input
                 v-model.number="stepForm.quantite_cible"
                 type="number"
                 class="project-form-input"
-                min="1"
+                min="0"
                 max="999"
                 required
               />
             </label>
-            <label class="project-form-field">
+            <label v-if="stepForm.quantite_cible >= 1" class="project-form-field">
               <span class="project-form-label">Réinitialiser</span>
               <select v-model="stepForm.reset_periode" class="project-form-input">
                 <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">
@@ -728,6 +779,7 @@ watch(projectId, () => {
                 :item="s"
                 :logs="getItemLogs(s.id)"
                 :project-color="project.couleur"
+                @toggle="toggleStepDone(s)"
                 @increment="onStepIncrement(s)"
                 @decrement="onStepDecrement(s)"
               />
@@ -786,17 +838,19 @@ watch(projectId, () => {
                   </label>
                   <div class="project-form-row">
                     <label class="project-form-field">
-                      <span class="project-form-label">Quantité</span>
+                      <span class="project-form-label">
+                        Quantité <span class="project-form-optional">(0 = une fois)</span>
+                      </span>
                       <input
                         v-model.number="editPanel.quantite_cible"
                         type="number"
                         class="project-form-input"
-                        min="1"
+                        min="0"
                         max="999"
                         required
                       />
                     </label>
-                    <label class="project-form-field">
+                    <label v-if="editPanel.quantite_cible >= 1" class="project-form-field">
                       <span class="project-form-label">Réinitialiser</span>
                       <select v-model="editPanel.reset_periode" class="project-form-input">
                         <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">
@@ -831,17 +885,19 @@ watch(projectId, () => {
                   </label>
                   <div class="project-form-row">
                     <label class="project-form-field">
-                      <span class="project-form-label">Quantité</span>
+                      <span class="project-form-label">
+                        Quantité <span class="project-form-optional">(0 = une fois)</span>
+                      </span>
                       <input
                         v-model.number="substepForm.quantite_cible"
                         type="number"
                         class="project-form-input"
-                        min="1"
+                        min="0"
                         max="999"
                         required
                       />
                     </label>
-                    <label class="project-form-field">
+                    <label v-if="substepForm.quantite_cible >= 1" class="project-form-field">
                       <span class="project-form-label">Réinitialiser</span>
                       <select v-model="substepForm.reset_periode" class="project-form-input">
                         <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">
@@ -879,6 +935,7 @@ watch(projectId, () => {
                           :logs="getItemLogs(ss.id)"
                           :project-color="project.couleur"
                           compact
+                          @toggle="toggleSubstepDone(ss)"
                           @increment="onSubstepIncrement(ss)"
                           @decrement="onSubstepDecrement(ss)"
                         />
@@ -935,17 +992,19 @@ watch(projectId, () => {
                         </label>
                         <div class="project-form-row">
                           <label class="project-form-field">
-                            <span class="project-form-label">Quantité</span>
+                            <span class="project-form-label">
+                              Quantité <span class="project-form-optional">(0 = une fois)</span>
+                            </span>
                             <input
                               v-model.number="editPanel.quantite_cible"
                               type="number"
                               class="project-form-input"
-                              min="1"
+                              min="0"
                               max="999"
                               required
                             />
                           </label>
-                          <label class="project-form-field">
+                          <label v-if="editPanel.quantite_cible >= 1" class="project-form-field">
                             <span class="project-form-label">Réinitialiser</span>
                             <select v-model="editPanel.reset_periode" class="project-form-input">
                               <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">

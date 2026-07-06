@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { hasQuantiteTracking } from '../constants/projectProgress.js'
 import { getCurrentPeriodCount } from '../services/projectProgress.js'
 import { buildHistoryEntries, computeAverageStats } from '../utils/projectProgressPeriods.js'
 
@@ -24,10 +25,12 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['increment', 'decrement'])
+const emit = defineEmits(['increment', 'decrement', 'toggle'])
 
 const historyOpen = ref(false)
 const historyPage = ref(0)
+
+const usesQuantiteTracking = computed(() => hasQuantiteTracking(props.item))
 
 const currentCount = computed(() => getCurrentPeriodCount(props.logs, props.item.reset_periode))
 
@@ -81,6 +84,28 @@ function goToHistoryPage(page) {
 
 <template>
   <div
+    v-if="!usesQuantiteTracking"
+    class="project-progress project-progress--checkbox"
+    :class="{ 'project-progress--compact': compact, 'project-progress--done': item.is_done }"
+    :style="accentStyle"
+  >
+    <label
+      class="project-progress__check"
+      :class="{ 'project-progress__check--small': compact }"
+      :title="item.is_done ? 'Marquer comme à faire' : 'Marquer comme terminée'"
+    >
+      <input
+        type="checkbox"
+        class="project-progress__check-input"
+        :checked="item.is_done"
+        @change.stop="emit('toggle')"
+      />
+      <span class="project-progress__check-box" aria-hidden="true" />
+    </label>
+  </div>
+
+  <div
+    v-else
     class="project-progress"
     :class="{ 'project-progress--compact': compact, 'project-progress--done': item.is_done }"
     :style="accentStyle"
@@ -205,6 +230,50 @@ function goToHistoryPage(page) {
   align-self: stretch;
   flex-shrink: 0;
   gap: 0.5rem;
+}
+
+.project-progress--checkbox {
+  align-items: center;
+  align-self: auto;
+}
+
+.project-progress__check {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.project-progress__check--small .project-progress__check-box {
+  width: 1rem;
+  height: 1rem;
+}
+
+.project-progress__check-input {
+  position: absolute;
+  opacity: 0;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0;
+  cursor: pointer;
+}
+
+.project-progress__check-box {
+  display: block;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 4px;
+  border: 2px solid color-mix(in srgb, var(--project-color, #ad81be) 65%, transparent);
+  background: white;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.project-progress__check-input:checked + .project-progress__check-box {
+  background: linear-gradient(135deg, #2ecc71, #27ae60);
+  border-color: #27ae60;
+  box-shadow: inset 0 0 0 2px white;
 }
 
 .project-progress--compact {

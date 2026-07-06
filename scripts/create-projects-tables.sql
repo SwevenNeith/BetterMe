@@ -28,13 +28,13 @@ CREATE TABLE IF NOT EXISTS public.project_steps (
   description text NOT NULL DEFAULT '',
   step_order integer NOT NULL DEFAULT 1,
   is_done boolean NOT NULL DEFAULT false,
-  quantite_cible integer NOT NULL DEFAULT 1,
+  quantite_cible integer NOT NULL DEFAULT 0,
   reset_periode text NOT NULL DEFAULT 'jour',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT project_steps_title_not_blank CHECK (char_length(trim(title)) > 0),
   CONSTRAINT project_steps_step_order_positive CHECK (step_order >= 1),
-  CONSTRAINT project_steps_quantite_check CHECK (quantite_cible >= 1 AND quantite_cible <= 999),
+  CONSTRAINT project_steps_quantite_check CHECK (quantite_cible >= 0 AND quantite_cible <= 999),
   CONSTRAINT project_steps_reset_periode_check CHECK (reset_periode IN ('jour', 'semaine', 'mois'))
 );
 
@@ -52,13 +52,13 @@ CREATE TABLE IF NOT EXISTS public.project_substeps (
   description text NOT NULL DEFAULT '',
   substep_order integer NOT NULL DEFAULT 1,
   is_done boolean NOT NULL DEFAULT false,
-  quantite_cible integer NOT NULL DEFAULT 1,
+  quantite_cible integer NOT NULL DEFAULT 0,
   reset_periode text NOT NULL DEFAULT 'jour',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT project_substeps_title_not_blank CHECK (char_length(trim(title)) > 0),
   CONSTRAINT project_substeps_substep_order_positive CHECK (substep_order >= 1),
-  CONSTRAINT project_substeps_quantite_check CHECK (quantite_cible >= 1 AND quantite_cible <= 999),
+  CONSTRAINT project_substeps_quantite_check CHECK (quantite_cible >= 0 AND quantite_cible <= 999),
   CONSTRAINT project_substeps_reset_periode_check CHECK (reset_periode IN ('jour', 'semaine', 'mois'))
 );
 

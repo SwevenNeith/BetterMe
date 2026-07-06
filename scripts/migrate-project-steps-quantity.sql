@@ -3,30 +3,30 @@
 -- À exécuter dans le SQL Editor Supabase
 
 ALTER TABLE public.project_steps
-  ADD COLUMN IF NOT EXISTS quantite_cible integer NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS quantite_cible integer NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS reset_periode text NOT NULL DEFAULT 'jour';
 
 ALTER TABLE public.project_steps DROP CONSTRAINT IF EXISTS project_steps_quantite_check;
 ALTER TABLE public.project_steps DROP CONSTRAINT IF EXISTS project_steps_reset_periode_check;
 
 ALTER TABLE public.project_steps
-  ADD CONSTRAINT project_steps_quantite_check CHECK (quantite_cible >= 1 AND quantite_cible <= 999),
+  ADD CONSTRAINT project_steps_quantite_check CHECK (quantite_cible >= 0 AND quantite_cible <= 999),
   ADD CONSTRAINT project_steps_reset_periode_check CHECK (reset_periode IN ('jour', 'semaine', 'mois'));
 
 ALTER TABLE public.project_substeps
-  ADD COLUMN IF NOT EXISTS quantite_cible integer NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS quantite_cible integer NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS reset_periode text NOT NULL DEFAULT 'jour';
 
 ALTER TABLE public.project_substeps DROP CONSTRAINT IF EXISTS project_substeps_quantite_check;
 ALTER TABLE public.project_substeps DROP CONSTRAINT IF EXISTS project_substeps_reset_periode_check;
 
 ALTER TABLE public.project_substeps
-  ADD CONSTRAINT project_substeps_quantite_check CHECK (quantite_cible >= 1 AND quantite_cible <= 999),
+  ADD CONSTRAINT project_substeps_quantite_check CHECK (quantite_cible >= 0 AND quantite_cible <= 999),
   ADD CONSTRAINT project_substeps_reset_periode_check CHECK (reset_periode IN ('jour', 'semaine', 'mois'));
 
-COMMENT ON COLUMN public.project_steps.quantite_cible IS 'Objectif de réalisations par période (dépassement autorisé)';
+COMMENT ON COLUMN public.project_steps.quantite_cible IS '0 = une fois (checkbox) ; >= 1 = objectif par période';
 COMMENT ON COLUMN public.project_steps.reset_periode IS 'jour | semaine | mois — réinitialisation en fin de période';
-COMMENT ON COLUMN public.project_substeps.quantite_cible IS 'Objectif de réalisations par période (dépassement autorisé)';
+COMMENT ON COLUMN public.project_substeps.quantite_cible IS '0 = une fois (checkbox) ; >= 1 = objectif par période';
 COMMENT ON COLUMN public.project_substeps.reset_periode IS 'jour | semaine | mois — réinitialisation en fin de période';
 
 CREATE TABLE IF NOT EXISTS public.project_progress_logs (
