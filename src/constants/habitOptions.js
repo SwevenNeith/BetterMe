@@ -39,6 +39,11 @@ export const HABIT_WEEKDAYS = [
 
 export const HABIT_ALL_WEEKDAY_IDS = HABIT_WEEKDAYS.map((d) => d.id)
 
+export const HABIT_STATUS = {
+  ACTIF: 'actif',
+  ARCHIVE: 'archive',
+}
+
 export const HABIT_MONTH_DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
 
 export const HABIT_VALUE_TYPE_LABELS = {

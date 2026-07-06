@@ -3,11 +3,12 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
-import { createHabit, listHabits } from '../services/habits.js'
+import { createHabit, updateHabit, deleteHabits, archiveHabits, unarchiveHabits, listHabits, listArchivedHabits, countArchivedHabits } from '../services/habits.js'
 import EmojiPickerField from '../components/EmojiPickerField.vue'
 import ColorPickerField from '../components/ColorPickerField.vue'
 import HabitTrackerGrid from '../components/HabitTrackerGrid.vue'
 import HabitDayEntryPanel from '../components/HabitDayEntryPanel.vue'
+import HabitManageList from '../components/HabitManageList.vue'
 import { useHorizontalCarousel } from '../composables/useHorizontalCarousel.js'
 import {
   HABIT_ALL_WEEKDAY_IDS,
@@ -27,8 +28,16 @@ const router = useRouter()
 
 const userId = ref(null)
 const habits = ref([])
+const archivedHabits = ref([])
+const archivedCount = ref(0)
 const activeHabitId = ref(null)
 const showForm = ref(false)
+const editingHabitId = ref(null)
+/** @type {import('vue').Ref<null|'active'|'archived'>} */
+const manageView = ref(null)
+const selectedManageIds = ref([])
+const isManageBusy = ref(false)
+const confirmDialog = ref(null)
 const isLoading = ref(false)
 const isSaving = ref(false)
 const loadError = ref('')
@@ -103,6 +112,48 @@ const activeHabit = computed(
   () => habits.value.find((h) => h.id === activeHabitId.value) ?? null,
 )
 
+const formTitle = computed(() =>
+  editingHabitId.value ? 'Modifier l’habitude' : 'Nouvelle habitude',
+)
+
+const confirmDialogTitle = computed(() => {
+  if (!confirmDialog.value) return ''
+  if (confirmDialog.value.type === 'delete') {
+    return confirmDialog.value.count > 1
+      ? `Supprimer ${confirmDialog.value.count} habitudes ?`
+      : 'Supprimer cette habitude ?'
+  }
+  if (confirmDialog.value.type === 'archive') {
+    return confirmDialog.value.count > 1
+      ? `Archiver ${confirmDialog.value.count} habitudes ?`
+      : 'Archiver cette habitude ?'
+  }
+  return confirmDialog.value.count > 1
+    ? `Désarchiver ${confirmDialog.value.count} habitudes ?`
+    : 'Désarchiver cette habitude ?'
+})
+
+const confirmDialogMessage = computed(() => {
+  if (!confirmDialog.value) return ''
+  const name = confirmDialog.value.habitName
+  if (confirmDialog.value.type === 'delete') {
+    if (name) {
+      return `« ${name} » sera supprimée définitivement, ainsi que tout son historique. Cette action est irréversible.`
+    }
+    return 'Ces habitudes seront supprimées définitivement, avec tout leur historique. Cette action est irréversible.'
+  }
+  if (confirmDialog.value.type === 'archive') {
+    if (name) {
+      return `« ${name} » sera mise en pause : elle disparaît du suivi mais conserve toutes ses données. Tu pourras la désarchiver plus tard.`
+    }
+    return 'Ces habitudes seront mises en pause : elles disparaissent du suivi mais conservent toutes leurs données.'
+  }
+  if (name) {
+    return `« ${name} » redeviendra active dans le suivi, avec toutes les données enregistrées avant l’archivage.`
+  }
+  return 'Ces habitudes redeviendront actives dans le suivi, avec toutes leurs données conservées.'
+})
+
 watch(
   habits,
   (list) => {
@@ -157,17 +208,102 @@ function isDayActive(dayId) {
   return habitForm.value.jours_actifs.includes(dayId)
 }
 
+function habitToForm(habit) {
+  return {
+    nom: habit.nom ?? '',
+    description: habit.description ?? '',
+    icone: habit.icone ?? null,
+    couleur: habit.couleur ?? '#ad81be',
+    type_valeur: habit.type_valeur,
+    unite: habit.unite ?? '',
+    frequence: habit.frequence,
+    jours_actifs: Array.isArray(habit.jours_actifs) ? [...habit.jours_actifs] : [],
+    date_debut: habit.date_debut,
+  }
+}
+
 function openForm() {
+  editingHabitId.value = null
   habitForm.value = createEmptyForm()
   formError.value = ''
   saveMessage.value = ''
+  manageView.value = null
+  showForm.value = true
+}
+
+function openEditForm(habit) {
+  editingHabitId.value = habit.id
+  habitForm.value = habitToForm(habit)
+  formError.value = ''
+  saveMessage.value = ''
+  manageView.value = null
   showForm.value = true
 }
 
 function closeForm() {
   showForm.value = false
+  editingHabitId.value = null
   formError.value = ''
   habitForm.value = createEmptyForm()
+}
+
+function openManagePanel() {
+  manageView.value = 'active'
+  selectedManageIds.value = []
+  showForm.value = false
+}
+
+async function openArchivedPanel() {
+  manageView.value = 'archived'
+  selectedManageIds.value = []
+  showForm.value = false
+  await loadArchivedHabitsList()
+}
+
+function closeManagePanel() {
+  manageView.value = null
+  selectedManageIds.value = []
+}
+
+function openConfirmDialog(type, items) {
+  const list = Array.isArray(items) ? items : [items]
+  const habitIds = list.map((h) => h.id).filter(Boolean)
+  if (!habitIds.length) return
+  confirmDialog.value = {
+    type,
+    habitIds,
+    habitName: list.length === 1 ? list[0].nom : null,
+    count: habitIds.length,
+  }
+}
+
+function closeConfirmDialog() {
+  if (isManageBusy.value) return
+  confirmDialog.value = null
+}
+
+async function loadArchivedCount() {
+  if (!userId.value) return
+  try {
+    archivedCount.value = await countArchivedHabits(supabase, userId.value)
+  } catch (err) {
+    console.error(err)
+    archivedCount.value = 0
+  }
+}
+
+async function loadArchivedHabitsList() {
+  if (!userId.value) return
+  isManageBusy.value = true
+  try {
+    archivedHabits.value = await listArchivedHabits(supabase, userId.value)
+    archivedCount.value = archivedHabits.value.length
+  } catch (err) {
+    console.error(err)
+    archivedHabits.value = []
+  } finally {
+    isManageBusy.value = false
+  }
 }
 
 async function loadHabits() {
@@ -176,6 +312,7 @@ async function loadHabits() {
   loadError.value = ''
   try {
     habits.value = await listHabits(supabase, userId.value)
+    await loadArchivedCount()
   } catch (err) {
     console.error(err)
     const msg = err.message || ''
@@ -187,17 +324,66 @@ async function loadHabits() {
   }
 }
 
+async function onConfirmDialogAction() {
+  const dialog = confirmDialog.value
+  if (!dialog || !userId.value) return
+
+  isManageBusy.value = true
+  try {
+    if (dialog.type === 'delete') {
+      await deleteHabits(supabase, userId.value, dialog.habitIds)
+      saveMessage.value =
+        dialog.count > 1 ? 'Habitudes supprimées.' : 'Habitude supprimée.'
+    } else if (dialog.type === 'archive') {
+      await archiveHabits(supabase, userId.value, dialog.habitIds)
+      saveMessage.value =
+        dialog.count > 1 ? 'Habitudes archivées.' : 'Habitude archivée.'
+    } else if (dialog.type === 'unarchive') {
+      await unarchiveHabits(supabase, userId.value, dialog.habitIds)
+      saveMessage.value =
+        dialog.count > 1 ? 'Habitudes désarchivées.' : 'Habitude désarchivée.'
+    }
+
+    confirmDialog.value = null
+    selectedManageIds.value = []
+    await loadHabits()
+
+    if (manageView.value === 'archived') {
+      await loadArchivedHabitsList()
+      if (!archivedHabits.value.length) manageView.value = null
+    }
+
+    setTimeout(() => {
+      saveMessage.value = ''
+    }, 2500)
+  } catch (err) {
+    console.error(err)
+    formError.value = err.message || 'Impossible d’appliquer cette action.'
+  } finally {
+    isManageBusy.value = false
+  }
+}
+
 async function onSaveHabit() {
   if (!userId.value) return
   isSaving.value = true
   formError.value = ''
   saveMessage.value = ''
   try {
-    const created = await createHabit(supabase, userId.value, habitForm.value)
+    if (editingHabitId.value) {
+      await updateHabit(supabase, userId.value, editingHabitId.value, habitForm.value)
+      saveMessage.value = 'Habitude mise à jour.'
+    } else {
+      const created = await createHabit(supabase, userId.value, habitForm.value)
+      activeHabitId.value = created.id
+      saveMessage.value = 'Habitude enregistrée.'
+    }
     await loadHabits()
-    activeHabitId.value = created.id
-    saveMessage.value = 'Habitude enregistrée.'
+    if (editingHabitId.value) {
+      activeHabitId.value = editingHabitId.value
+    }
     showForm.value = false
+    editingHabitId.value = null
     habitForm.value = createEmptyForm()
     setTimeout(() => {
       saveMessage.value = ''
@@ -238,12 +424,30 @@ onUnmounted(() => {
       <h1 class="habits-page__title">{{ pageTitle }}</h1>
       <p class="habits-page__subtitle">Suis tes habitudes au quotidien.</p>
 
-      <template v-if="!showForm">
+      <template v-if="!showForm && !manageView">
         <div class="habits-page__toolbar">
           <button type="button" class="btn btn--primary" @click="openForm">
             Ajouter une habitude
           </button>
+          <button
+            type="button"
+            class="btn btn--secondary"
+            :disabled="isLoading || isManageBusy"
+            @click="openManagePanel"
+          >
+            Modifier mes habitudes
+          </button>
         </div>
+
+        <button
+          v-if="archivedCount > 0"
+          type="button"
+          class="habits-archived-link"
+          :disabled="isManageBusy"
+          @click="openArchivedPanel"
+        >
+          Voir les habitudes archivées ({{ archivedCount }})
+        </button>
 
         <p v-if="saveMessage" class="habits-feedback habits-feedback--ok">{{ saveMessage }}</p>
 
@@ -279,7 +483,7 @@ onUnmounted(() => {
     </header>
 
     <section v-if="showForm" class="habits-card habits-form">
-      <h2 class="habits-form__title">Nouvelle habitude</h2>
+      <h2 class="habits-form__title">{{ formTitle }}</h2>
 
       <form class="habits-form__body" @submit.prevent="onSaveHabit">
         <fieldset class="habits-fieldset">
@@ -416,6 +620,32 @@ onUnmounted(() => {
       </form>
     </section>
 
+    <HabitManageList
+      v-else-if="manageView === 'active'"
+      :habits="habits"
+      mode="active"
+      :selected-ids="selectedManageIds"
+      :is-busy="isManageBusy"
+      @update:selected-ids="selectedManageIds = $event"
+      @edit="openEditForm"
+      @delete="openConfirmDialog('delete', $event)"
+      @archive="openConfirmDialog('archive', $event)"
+      @close="closeManagePanel"
+    />
+
+    <HabitManageList
+      v-else-if="manageView === 'archived'"
+      :habits="archivedHabits"
+      mode="archived"
+      :selected-ids="selectedManageIds"
+      :is-busy="isManageBusy"
+      @update:selected-ids="selectedManageIds = $event"
+      @edit="openEditForm"
+      @delete="openConfirmDialog('delete', $event)"
+      @unarchive="openConfirmDialog('unarchive', $event)"
+      @close="closeManagePanel"
+    />
+
     <template v-else>
       <div v-if="isLoading" class="habits-loading">Chargement…</div>
 
@@ -505,6 +735,55 @@ onUnmounted(() => {
         </div>
       </div>
     </template>
+
+    <div
+      v-if="confirmDialog"
+      class="habits-confirm-overlay"
+      role="presentation"
+      @click.self="closeConfirmDialog"
+    >
+      <div
+        class="habits-confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        :aria-labelledby="'habits-confirm-title'"
+        :aria-describedby="'habits-confirm-message'"
+      >
+        <h2 id="habits-confirm-title" class="habits-confirm-title">{{ confirmDialogTitle }}</h2>
+        <p id="habits-confirm-message" class="habits-confirm-message">{{ confirmDialogMessage }}</p>
+        <div class="habits-confirm-actions">
+          <button
+            type="button"
+            class="btn btn--ghost"
+            :disabled="isManageBusy"
+            @click="closeConfirmDialog"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            class="habits-confirm-action-btn"
+            :class="{
+              'habits-confirm-action-btn--delete': confirmDialog.type === 'delete',
+              'habits-confirm-action-btn--archive':
+                confirmDialog.type === 'archive' || confirmDialog.type === 'unarchive',
+            }"
+            :disabled="isManageBusy"
+            @click="onConfirmDialogAction"
+          >
+            {{
+              isManageBusy
+                ? 'En cours…'
+                : confirmDialog.type === 'delete'
+                  ? 'Supprimer'
+                  : confirmDialog.type === 'archive'
+                    ? 'Archiver'
+                    : 'Désarchiver'
+            }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -543,8 +822,28 @@ onUnmounted(() => {
 
 .habits-page__toolbar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  gap: 0.65rem;
   width: 100%;
+}
+
+.habits-archived-link {
+  align-self: center;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #b8792e;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.habits-archived-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .habits-page__title {
@@ -615,6 +914,83 @@ onUnmounted(() => {
 .btn--ghost {
   background: rgba(213, 181, 234, 0.2);
   color: #ad81be;
+}
+
+.btn--secondary {
+  background: rgba(255, 255, 255, 0.75);
+  color: #ad81be;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  box-shadow: none;
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: rgba(213, 181, 234, 0.18);
+  transform: translateY(-1px);
+}
+
+.habits-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(20, 16, 28, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.habits-confirm-dialog {
+  width: min(100%, 26rem);
+  padding: 1.35rem 1.25rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  box-shadow: 0 16px 40px rgba(44, 62, 80, 0.18);
+}
+
+.habits-confirm-title {
+  margin: 0 0 0.65rem;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #2c3e50;
+}
+
+.habits-confirm-message {
+  margin: 0 0 1.1rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #6c757d;
+}
+
+.habits-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.habits-confirm-action-btn {
+  border: none;
+  border-radius: 12px;
+  padding: 0.65rem 1.1rem;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #fff;
+  cursor: pointer;
+}
+
+.habits-confirm-action-btn--delete {
+  background: linear-gradient(135deg, #e57373, #c0392b);
+}
+
+.habits-confirm-action-btn--archive {
+  background: linear-gradient(135deg, #e8b878, #b8792e);
+}
+
+.habits-confirm-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .habits-loading,
@@ -1255,6 +1631,29 @@ onUnmounted(() => {
     background: rgba(40, 32, 52, 0.9);
     border-color: rgba(213, 181, 234, 0.25);
     color: #e8dff0;
+  }
+
+  .btn--secondary {
+    background: rgba(40, 32, 52, 0.8);
+    border-color: rgba(213, 181, 234, 0.25);
+    color: #d5b5ea;
+  }
+
+  .habits-archived-link {
+    color: #e8b878;
+  }
+
+  .habits-confirm-dialog {
+    background: rgba(35, 30, 48, 0.96);
+    border-color: rgba(213, 181, 234, 0.2);
+  }
+
+  .habits-confirm-title {
+    color: #f0e8f8;
+  }
+
+  .habits-confirm-message {
+    color: #adb5bd;
   }
 }
 </style>

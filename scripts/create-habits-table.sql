@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS public.habits (
   frequence text NOT NULL,
   jours_actifs jsonb NOT NULL DEFAULT '[]'::jsonb,
   date_debut date NOT NULL,
+  status text NOT NULL DEFAULT 'actif',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT habits_nom_not_blank CHECK (char_length(trim(nom)) > 0),
@@ -22,7 +23,8 @@ CREATE TABLE IF NOT EXISTS public.habits (
   CONSTRAINT habits_frequence_check CHECK (
     frequence IN ('quotidien', 'hebdomadaire', 'mensuel')
   ),
-  CONSTRAINT habits_jours_actifs_is_array CHECK (jsonb_typeof(jours_actifs) = 'array')
+  CONSTRAINT habits_jours_actifs_is_array CHECK (jsonb_typeof(jours_actifs) = 'array'),
+  CONSTRAINT habits_status_check CHECK (status IN ('actif', 'archive'))
 );
 
 CREATE INDEX IF NOT EXISTS habits_user_id_idx ON public.habits (user_id);
@@ -32,6 +34,7 @@ CREATE INDEX IF NOT EXISTS habits_user_id_created_at_idx
 
 COMMENT ON TABLE public.habits IS 'Habitudes suivies par l''utilisateur (Habit Tracker)';
 COMMENT ON COLUMN public.habits.jours_actifs IS 'Jours ISO 1-7 (hebdo/quotidien) ou jours du mois 1-31 (mensuel)';
+COMMENT ON COLUMN public.habits.status IS 'actif = visible dans le suivi ; archive = mise en pause (logs conservés)';
 
 CREATE OR REPLACE FUNCTION public.habits_set_updated_at()
 RETURNS trigger
