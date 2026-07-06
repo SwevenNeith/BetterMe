@@ -1,3 +1,10 @@
+import {
+  DEFAULT_QUANTITE_CIBLE,
+  DEFAULT_RESET_PERIODE,
+  normalizeQuantiteCible,
+  normalizeResetPeriode,
+} from '../constants/projectProgress.js'
+
 const PROJECTS_TABLE = 'projects'
 const STEPS_TABLE = 'project_steps'
 const SUBSTEPS_TABLE = 'project_substeps'
@@ -97,10 +104,22 @@ export async function fetchProjectsTree(supabase, userId) {
 
   ;({ data: stepRows, error: stepsError } = await supabase
     .from(STEPS_TABLE)
-    .select('id, project_id, title, description, step_order, is_done, created_at')
+    .select('id, project_id, title, description, step_order, is_done, quantite_cible, reset_periode, created_at')
     .eq('user_id', userId)
     .in('project_id', projectIds)
     .order('step_order', { ascending: true }))
+
+  if (
+    stepsError?.message?.includes('quantite_cible')
+    || stepsError?.message?.includes('reset_periode')
+  ) {
+    ;({ data: stepRows, error: stepsError } = await supabase
+      .from(STEPS_TABLE)
+      .select('id, project_id, title, description, step_order, is_done, created_at')
+      .eq('user_id', userId)
+      .in('project_id', projectIds)
+      .order('step_order', { ascending: true }))
+  }
 
   if (stepsError?.message?.includes('description') || stepsError?.message?.includes('is_done')) {
     ;({ data: stepRows, error: stepsError } = await supabase
@@ -121,6 +140,8 @@ export async function fetchProjectsTree(supabase, userId) {
     description: s.description ?? '',
     step_order: s.step_order ?? 1,
     is_done: Boolean(s.is_done),
+    quantite_cible: normalizeQuantiteCible(s.quantite_cible),
+    reset_periode: normalizeResetPeriode(s.reset_periode),
     substeps: [],
   }))
 
@@ -135,10 +156,22 @@ export async function fetchProjectsTree(supabase, userId) {
 
     ;({ data: subRows, error: subsError } = await supabase
       .from(SUBSTEPS_TABLE)
-      .select('id, step_id, title, description, substep_order, is_done, created_at')
+      .select('id, step_id, title, description, substep_order, is_done, quantite_cible, reset_periode, created_at')
       .eq('user_id', userId)
       .in('step_id', stepIds)
       .order('substep_order', { ascending: true }))
+
+    if (
+      subsError?.message?.includes('quantite_cible')
+      || subsError?.message?.includes('reset_periode')
+    ) {
+      ;({ data: subRows, error: subsError } = await supabase
+        .from(SUBSTEPS_TABLE)
+        .select('id, step_id, title, description, substep_order, is_done, created_at')
+        .eq('user_id', userId)
+        .in('step_id', stepIds)
+        .order('substep_order', { ascending: true }))
+    }
 
     if (subsError?.message?.includes('description') || subsError?.message?.includes('is_done')) {
       ;({ data: subRows, error: subsError } = await supabase
@@ -159,6 +192,8 @@ export async function fetchProjectsTree(supabase, userId) {
         description: sub.description ?? '',
         substep_order: sub.substep_order ?? 1,
         is_done: Boolean(sub.is_done),
+        quantite_cible: normalizeQuantiteCible(sub.quantite_cible),
+        reset_periode: normalizeResetPeriode(sub.reset_periode),
       })
     }
 
@@ -265,15 +300,35 @@ export async function deleteProject(supabase, userId, projectId) {
   if (error) throw error
 }
 
-export async function createStep(supabase, userId, projectId, title, stepOrder, description = '') {
+export async function createStep(
+  supabase,
+  userId,
+  projectId,
+  title,
+  stepOrder,
+  description = '',
+  quantiteCible = DEFAULT_QUANTITE_CIBLE,
+  resetPeriode = DEFAULT_RESET_PERIODE,
+) {
   const desc = String(description ?? '').trim()
-  let { error } = await supabase.from(STEPS_TABLE).insert({
+  const payload = {
     user_id: userId,
     project_id: projectId,
     title,
     step_order: stepOrder,
     description: desc,
-  })
+    quantite_cible: normalizeQuantiteCible(quantiteCible),
+    reset_periode: normalizeResetPeriode(resetPeriode),
+  }
+  let { error } = await supabase.from(STEPS_TABLE).insert(payload)
+  if (
+    error?.message?.includes('quantite_cible')
+    || error?.message?.includes('reset_periode')
+  ) {
+    delete payload.quantite_cible
+    delete payload.reset_periode
+    ;({ error } = await supabase.from(STEPS_TABLE).insert(payload))
+  }
   if (error?.message?.includes('description')) {
     ;({ error } = await supabase.from(STEPS_TABLE).insert({
       user_id: userId,
@@ -303,6 +358,26 @@ export async function updateStepDescription(supabase, userId, stepId, descriptio
   if (error) throw error
 }
 
+export async function updateStepProgressSettings(
+  supabase,
+  userId,
+  stepId,
+  quantiteCible,
+  resetPeriode,
+) {
+  const payload = {
+    quantite_cible: normalizeQuantiteCible(quantiteCible),
+    reset_periode: normalizeResetPeriode(resetPeriode),
+  }
+  const { error } = await supabase
+    .from(STEPS_TABLE)
+    .update(payload)
+    .eq('id', stepId)
+    .eq('user_id', userId)
+  if (error?.message?.includes('quantite_cible') || error?.message?.includes('reset_periode')) return
+  if (error) throw error
+}
+
 export async function updateStepDone(supabase, userId, stepId, isDone) {
   const { error } = await supabase
     .from(STEPS_TABLE)
@@ -321,15 +396,35 @@ export async function deleteStep(supabase, userId, stepId) {
   if (error) throw error
 }
 
-export async function createSubstep(supabase, userId, stepId, title, substepOrder, description = '') {
+export async function createSubstep(
+  supabase,
+  userId,
+  stepId,
+  title,
+  substepOrder,
+  description = '',
+  quantiteCible = DEFAULT_QUANTITE_CIBLE,
+  resetPeriode = DEFAULT_RESET_PERIODE,
+) {
   const desc = String(description ?? '').trim()
-  let { error } = await supabase.from(SUBSTEPS_TABLE).insert({
+  const payload = {
     user_id: userId,
     step_id: stepId,
     title,
     substep_order: substepOrder,
     description: desc,
-  })
+    quantite_cible: normalizeQuantiteCible(quantiteCible),
+    reset_periode: normalizeResetPeriode(resetPeriode),
+  }
+  let { error } = await supabase.from(SUBSTEPS_TABLE).insert(payload)
+  if (
+    error?.message?.includes('quantite_cible')
+    || error?.message?.includes('reset_periode')
+  ) {
+    delete payload.quantite_cible
+    delete payload.reset_periode
+    ;({ error } = await supabase.from(SUBSTEPS_TABLE).insert(payload))
+  }
   if (error?.message?.includes('description')) {
     ;({ error } = await supabase.from(SUBSTEPS_TABLE).insert({
       user_id: userId,
@@ -356,6 +451,26 @@ export async function updateSubstepDescription(supabase, userId, substepId, desc
     .update({ description })
     .eq('id', substepId)
     .eq('user_id', userId)
+  if (error) throw error
+}
+
+export async function updateSubstepProgressSettings(
+  supabase,
+  userId,
+  substepId,
+  quantiteCible,
+  resetPeriode,
+) {
+  const payload = {
+    quantite_cible: normalizeQuantiteCible(quantiteCible),
+    reset_periode: normalizeResetPeriode(resetPeriode),
+  }
+  const { error } = await supabase
+    .from(SUBSTEPS_TABLE)
+    .update(payload)
+    .eq('id', substepId)
+    .eq('user_id', userId)
+  if (error?.message?.includes('quantite_cible') || error?.message?.includes('reset_periode')) return
   if (error) throw error
 }
 

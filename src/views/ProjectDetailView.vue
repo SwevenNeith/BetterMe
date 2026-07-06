@@ -3,7 +3,20 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ColorPickerField from '../components/ColorPickerField.vue'
 import EmojiPickerField from '../components/EmojiPickerField.vue'
+import ProjectItemProgress from '../components/ProjectItemProgress.vue'
+import {
+  DEFAULT_QUANTITE_CIBLE,
+  DEFAULT_RESET_PERIODE,
+  PROJECT_RESET_PERIODE_OPTIONS,
+} from '../constants/projectProgress.js'
 import { supabase } from '../lib/supabase.js'
+import {
+  addProgressLog,
+  fetchProgressLogsForProject,
+  getCurrentPeriodCount,
+  groupLogsByItemId,
+  removeLatestLogInPeriod,
+} from '../services/projectProgress.js'
 import {
   createStep,
   createSubstep,
@@ -17,11 +30,15 @@ import {
   updateProjectTitle,
   updateStepDescription,
   updateStepDone,
+  updateStepProgressSettings,
   updateStepTitle,
   updateSubstepDescription,
   updateSubstepDone,
+  updateSubstepProgressSettings,
   updateSubstepTitle,
 } from '../services/projects.js'
+
+const resetPeriodeOptions = PROJECT_RESET_PERIODE_OPTIONS
 
 const route = useRoute()
 
@@ -32,10 +49,22 @@ const loadError = ref('')
 const project = ref(null)
 
 const stepFormOpen = ref(false)
-const stepForm = reactive({ title: '', description: '' })
+const stepForm = reactive({
+  title: '',
+  description: '',
+  quantite_cible: DEFAULT_QUANTITE_CIBLE,
+  reset_periode: DEFAULT_RESET_PERIODE,
+})
 
 const substepFormStepId = ref(null)
-const substepForm = reactive({ title: '', description: '' })
+const substepForm = reactive({
+  title: '',
+  description: '',
+  quantite_cible: DEFAULT_QUANTITE_CIBLE,
+  reset_periode: DEFAULT_RESET_PERIODE,
+})
+
+const progressLogsByItemId = ref(new Map())
 
 const editPanel = ref(null)
 
@@ -113,6 +142,8 @@ function openEdit(kind, item) {
     description: item.description ?? '',
     icone: item.icone ?? null,
     couleur: item.couleur ?? '#ad81be',
+    quantite_cible: item.quantite_cible ?? DEFAULT_QUANTITE_CIBLE,
+    reset_periode: item.reset_periode ?? DEFAULT_RESET_PERIODE,
   }
 }
 
@@ -123,6 +154,8 @@ function closeEdit() {
 function openStepForm() {
   stepForm.title = ''
   stepForm.description = ''
+  stepForm.quantite_cible = DEFAULT_QUANTITE_CIBLE
+  stepForm.reset_periode = DEFAULT_RESET_PERIODE
   stepFormOpen.value = true
   substepFormStepId.value = null
 }
@@ -131,12 +164,16 @@ function closeStepForm() {
   stepFormOpen.value = false
   stepForm.title = ''
   stepForm.description = ''
+  stepForm.quantite_cible = DEFAULT_QUANTITE_CIBLE
+  stepForm.reset_periode = DEFAULT_RESET_PERIODE
 }
 
 function openSubstepForm(stepId) {
   substepFormStepId.value = stepId
   substepForm.title = ''
   substepForm.description = ''
+  substepForm.quantite_cible = DEFAULT_QUANTITE_CIBLE
+  substepForm.reset_periode = DEFAULT_RESET_PERIODE
   stepFormOpen.value = false
 }
 
@@ -144,6 +181,35 @@ function closeSubstepForm() {
   substepFormStepId.value = null
   substepForm.title = ''
   substepForm.description = ''
+  substepForm.quantite_cible = DEFAULT_QUANTITE_CIBLE
+  substepForm.reset_periode = DEFAULT_RESET_PERIODE
+}
+
+function getItemLogs(itemId) {
+  return progressLogsByItemId.value.get(itemId) ?? []
+}
+
+function syncItemDoneState(item, logs) {
+  const count = getCurrentPeriodCount(logs, item.reset_periode)
+  return count >= item.quantite_cible
+}
+
+async function loadProgressLogs(proj) {
+  const stepIds = (proj?.steps ?? []).map((s) => s.id)
+  const substepIds = (proj?.steps ?? []).flatMap((s) => s.substeps.map((ss) => ss.id))
+
+  if (stepIds.length === 0 && substepIds.length === 0) {
+    progressLogsByItemId.value = new Map()
+    return
+  }
+
+  try {
+    const logs = await fetchProgressLogsForProject(supabase, userId.value, stepIds, substepIds)
+    progressLogsByItemId.value = groupLogsByItemId(logs)
+  } catch (err) {
+    console.warn('Historique de progression indisponible :', err)
+    progressLogsByItemId.value = new Map()
+  }
 }
 
 async function loadProject() {
@@ -159,6 +225,13 @@ async function loadProject() {
       return
     }
     project.value = found
+    await loadProgressLogs(found)
+    for (const step of project.value.steps) {
+      step.is_done = syncItemDoneState(step, getItemLogs(step.id))
+      for (const substep of step.substeps) {
+        substep.is_done = syncItemDoneState(substep, getItemLogs(substep.id))
+      }
+    }
     normalizeProjectStepOrder(project.value)
   } catch (err) {
     console.error(err)
@@ -190,18 +263,38 @@ async function saveEditPanel() {
     } else if (kind === 'step') {
       await updateStepTitle(supabase, userId.value, id, title)
       await updateStepDescription(supabase, userId.value, id, description)
+      await updateStepProgressSettings(
+        supabase,
+        userId.value,
+        id,
+        editPanel.value.quantite_cible,
+        editPanel.value.reset_periode,
+      )
       const step = project.value.steps.find((s) => s.id === id)
       if (step) {
         step.title = title
         step.description = description
+        step.quantite_cible = Number(editPanel.value.quantite_cible) || DEFAULT_QUANTITE_CIBLE
+        step.reset_periode = editPanel.value.reset_periode || DEFAULT_RESET_PERIODE
+        step.is_done = syncItemDoneState(step, getItemLogs(step.id))
       }
     } else if (kind === 'substep') {
       await updateSubstepTitle(supabase, userId.value, id, title)
       await updateSubstepDescription(supabase, userId.value, id, description)
+      await updateSubstepProgressSettings(
+        supabase,
+        userId.value,
+        id,
+        editPanel.value.quantite_cible,
+        editPanel.value.reset_periode,
+      )
       const substep = project.value.steps.flatMap((s) => s.substeps).find((ss) => ss.id === id)
       if (substep) {
         substep.title = title
         substep.description = description
+        substep.quantite_cible = Number(editPanel.value.quantite_cible) || DEFAULT_QUANTITE_CIBLE
+        substep.reset_periode = editPanel.value.reset_periode || DEFAULT_RESET_PERIODE
+        substep.is_done = syncItemDoneState(substep, getItemLogs(substep.id))
       }
     }
     closeEdit()
@@ -211,40 +304,100 @@ async function saveEditPanel() {
   }
 }
 
-async function toggleStepDone(step) {
+async function applyItemDoneReorder(item, list, wasDone) {
+  const nowDone = item.is_done
+  if (nowDone && !wasDone) moveItemDoneLast(list, item.id)
+  else if (!nowDone && wasDone) moveItemPendingEnd(list, item.id)
+  await persistStepOrders(supabase, userId.value, project.value.steps)
+}
+
+async function onStepIncrement(step) {
   if (!userId.value || !project.value) return
-  const next = !step.is_done
-  step.is_done = next
-  if (next) moveItemDoneLast(project.value.steps, step.id)
-  else moveItemPendingEnd(project.value.steps, step.id)
+  const wasDone = step.is_done
   try {
-    await updateStepDone(supabase, userId.value, step.id, next)
-    await persistStepOrders(supabase, userId.value, project.value.steps)
+    const log = await addProgressLog(supabase, userId.value, { stepId: step.id })
+    const logs = [...getItemLogs(step.id), log]
+    progressLogsByItemId.value.set(step.id, logs)
+    step.is_done = syncItemDoneState(step, logs)
+    await updateStepDone(supabase, userId.value, step.id, step.is_done)
+    if (wasDone !== step.is_done) await applyItemDoneReorder(step, project.value.steps, wasDone)
   } catch (err) {
-    step.is_done = !next
-    normalizeProjectStepOrder(project.value)
     console.error(err)
-    loadError.value = err.message || "Erreur lors de la mise à jour de l'étape."
+    loadError.value = err.message || "Erreur lors de l'incrémentation."
+    await loadProject()
   }
 }
 
-async function toggleSubstepDone(substep) {
+async function onStepDecrement(step) {
+  if (!userId.value || !project.value) return
+  const wasDone = step.is_done
+  try {
+    const deletedId = await removeLatestLogInPeriod(supabase, userId.value, {
+      stepId: step.id,
+      resetPeriode: step.reset_periode,
+    })
+    if (!deletedId) return
+    const logs = getItemLogs(step.id).filter((log) => log.id !== deletedId)
+    progressLogsByItemId.value.set(step.id, logs)
+    step.is_done = syncItemDoneState(step, logs)
+    await updateStepDone(supabase, userId.value, step.id, step.is_done)
+    if (wasDone !== step.is_done) await applyItemDoneReorder(step, project.value.steps, wasDone)
+  } catch (err) {
+    console.error(err)
+    loadError.value = err.message || 'Erreur lors de la décrémentation.'
+    await loadProject()
+  }
+}
+
+async function onSubstepIncrement(substep) {
   if (!userId.value || !project.value) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
   if (!step) return
 
-  const next = !substep.is_done
-  substep.is_done = next
-  if (next) moveItemDoneLast(step.substeps, substep.id)
-  else moveItemPendingEnd(step.substeps, substep.id)
+  const wasDone = substep.is_done
   try {
-    await updateSubstepDone(supabase, userId.value, substep.id, next)
-    await persistSubstepOrders(supabase, userId.value, step.substeps)
+    const log = await addProgressLog(supabase, userId.value, { substepId: substep.id })
+    const logs = [...getItemLogs(substep.id), log]
+    progressLogsByItemId.value.set(substep.id, logs)
+    substep.is_done = syncItemDoneState(substep, logs)
+    await updateSubstepDone(supabase, userId.value, substep.id, substep.is_done)
+    if (wasDone !== substep.is_done) {
+      if (substep.is_done) moveItemDoneLast(step.substeps, substep.id)
+      else moveItemPendingEnd(step.substeps, substep.id)
+      await persistSubstepOrders(supabase, userId.value, step.substeps)
+    }
   } catch (err) {
-    substep.is_done = !next
-    normalizeProjectStepOrder(project.value)
     console.error(err)
-    loadError.value = err.message || 'Erreur lors de la mise à jour de la sous-étape.'
+    loadError.value = err.message || "Erreur lors de l'incrémentation."
+    await loadProject()
+  }
+}
+
+async function onSubstepDecrement(substep) {
+  if (!userId.value || !project.value) return
+  const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
+  if (!step) return
+
+  const wasDone = substep.is_done
+  try {
+    const deletedId = await removeLatestLogInPeriod(supabase, userId.value, {
+      substepId: substep.id,
+      resetPeriode: substep.reset_periode,
+    })
+    if (!deletedId) return
+    const logs = getItemLogs(substep.id).filter((log) => log.id !== deletedId)
+    progressLogsByItemId.value.set(substep.id, logs)
+    substep.is_done = syncItemDoneState(substep, logs)
+    await updateSubstepDone(supabase, userId.value, substep.id, substep.is_done)
+    if (wasDone !== substep.is_done) {
+      if (substep.is_done) moveItemDoneLast(step.substeps, substep.id)
+      else moveItemPendingEnd(step.substeps, substep.id)
+      await persistSubstepOrders(supabase, userId.value, step.substeps)
+    }
+  } catch (err) {
+    console.error(err)
+    loadError.value = err.message || 'Erreur lors de la décrémentation.'
+    await loadProject()
   }
 }
 
@@ -257,7 +410,16 @@ async function submitStepForm() {
   const stepOrder = (project.value.steps?.length ?? 0) + 1
 
   try {
-    await createStep(supabase, userId.value, project.value.id, title, stepOrder, stepForm.description)
+    await createStep(
+      supabase,
+      userId.value,
+      project.value.id,
+      title,
+      stepOrder,
+      stepForm.description,
+      stepForm.quantite_cible,
+      stepForm.reset_periode,
+    )
     closeStepForm()
     await loadProject()
   } catch (err) {
@@ -289,7 +451,16 @@ async function submitSubstepForm(stepId) {
   const substepOrder = (step?.substeps?.length ?? 0) + 1
 
   try {
-    await createSubstep(supabase, userId.value, stepId, title, substepOrder, substepForm.description)
+    await createSubstep(
+      supabase,
+      userId.value,
+      stepId,
+      title,
+      substepOrder,
+      substepForm.description,
+      substepForm.quantite_cible,
+      substepForm.reset_periode,
+    )
     closeSubstepForm()
     await loadProject()
   } catch (err) {
@@ -509,6 +680,27 @@ watch(projectId, () => {
             <span class="project-form-label">Description <span class="project-form-optional">(optionnel)</span></span>
             <textarea v-model="stepForm.description" class="project-form-textarea" rows="2" maxlength="1000" />
           </label>
+          <div class="project-form-row">
+            <label class="project-form-field">
+              <span class="project-form-label">Quantité</span>
+              <input
+                v-model.number="stepForm.quantite_cible"
+                type="number"
+                class="project-form-input"
+                min="1"
+                max="999"
+                required
+              />
+            </label>
+            <label class="project-form-field">
+              <span class="project-form-label">Réinitialiser</span>
+              <select v-model="stepForm.reset_periode" class="project-form-input">
+                <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </label>
+          </div>
           <div class="project-form-actions">
             <button type="submit" class="project-action-btn project-action-btn--small">Créer</button>
             <button type="button" class="project-cancel-btn" @click="closeStepForm">Annuler</button>
@@ -532,10 +724,13 @@ watch(projectId, () => {
             @drop="onStepDrop(s.id, $event)"
           >
             <div class="project-step-header">
-              <label class="project-todo" :title="s.is_done ? 'Marquer comme à faire' : 'Marquer comme terminée'">
-                <input type="checkbox" class="project-todo-input" :checked="s.is_done" @change="toggleStepDone(s)" />
-                <span class="project-todo-box" aria-hidden="true" />
-              </label>
+              <ProjectItemProgress
+                :item="s"
+                :logs="getItemLogs(s.id)"
+                :project-color="project.couleur"
+                @increment="onStepIncrement(s)"
+                @decrement="onStepDecrement(s)"
+              />
 
               <span
                 class="project-drag-handle"
@@ -589,6 +784,27 @@ watch(projectId, () => {
                     <span class="project-form-label">Description <span class="project-form-optional">(optionnel)</span></span>
                     <textarea v-model="editPanel.description" class="project-form-textarea" rows="2" maxlength="1000" />
                   </label>
+                  <div class="project-form-row">
+                    <label class="project-form-field">
+                      <span class="project-form-label">Quantité</span>
+                      <input
+                        v-model.number="editPanel.quantite_cible"
+                        type="number"
+                        class="project-form-input"
+                        min="1"
+                        max="999"
+                        required
+                      />
+                    </label>
+                    <label class="project-form-field">
+                      <span class="project-form-label">Réinitialiser</span>
+                      <select v-model="editPanel.reset_periode" class="project-form-input">
+                        <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">
+                          {{ opt.label }}
+                        </option>
+                      </select>
+                    </label>
+                  </div>
                   <div class="project-form-actions">
                     <button type="submit" class="project-action-btn project-action-btn--small">Enregistrer</button>
                     <button type="button" class="project-cancel-btn" @click="closeEdit">Annuler</button>
@@ -613,6 +829,27 @@ watch(projectId, () => {
                     <span class="project-form-label">Description <span class="project-form-optional">(optionnel)</span></span>
                     <textarea v-model="substepForm.description" class="project-form-textarea" rows="2" maxlength="1000" />
                   </label>
+                  <div class="project-form-row">
+                    <label class="project-form-field">
+                      <span class="project-form-label">Quantité</span>
+                      <input
+                        v-model.number="substepForm.quantite_cible"
+                        type="number"
+                        class="project-form-input"
+                        min="1"
+                        max="999"
+                        required
+                      />
+                    </label>
+                    <label class="project-form-field">
+                      <span class="project-form-label">Réinitialiser</span>
+                      <select v-model="substepForm.reset_periode" class="project-form-input">
+                        <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">
+                          {{ opt.label }}
+                        </option>
+                      </select>
+                    </label>
+                  </div>
                   <div class="project-form-actions">
                     <button type="submit" class="project-action-btn project-action-btn--small">Créer</button>
                     <button type="button" class="project-cancel-btn" @click="closeSubstepForm">Annuler</button>
@@ -637,10 +874,14 @@ watch(projectId, () => {
                       @drop="onSubstepDrop(s.id, ss.id, $event)"
                     >
                       <div v-if="!(editPanel?.kind === 'substep' && editPanel.id === ss.id)" class="project-substep-row">
-                        <label class="project-todo project-todo--small" :title="ss.is_done ? 'Marquer comme à faire' : 'Marquer comme terminée'">
-                          <input type="checkbox" class="project-todo-input" :checked="ss.is_done" @change="toggleSubstepDone(ss)" />
-                          <span class="project-todo-box" aria-hidden="true" />
-                        </label>
+                        <ProjectItemProgress
+                          :item="ss"
+                          :logs="getItemLogs(ss.id)"
+                          :project-color="project.couleur"
+                          compact
+                          @increment="onSubstepIncrement(ss)"
+                          @decrement="onSubstepDecrement(ss)"
+                        />
 
                         <span
                           class="project-drag-handle project-drag-handle--small"
@@ -692,6 +933,27 @@ watch(projectId, () => {
                           <span class="project-form-label">Description <span class="project-form-optional">(optionnel)</span></span>
                           <textarea v-model="editPanel.description" class="project-form-textarea" rows="2" maxlength="1000" />
                         </label>
+                        <div class="project-form-row">
+                          <label class="project-form-field">
+                            <span class="project-form-label">Quantité</span>
+                            <input
+                              v-model.number="editPanel.quantite_cible"
+                              type="number"
+                              class="project-form-input"
+                              min="1"
+                              max="999"
+                              required
+                            />
+                          </label>
+                          <label class="project-form-field">
+                            <span class="project-form-label">Réinitialiser</span>
+                            <select v-model="editPanel.reset_periode" class="project-form-input">
+                              <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">
+                                {{ opt.label }}
+                              </option>
+                            </select>
+                          </label>
+                        </div>
                         <div class="project-form-actions">
                           <button type="submit" class="project-action-btn project-action-btn--small">Enregistrer</button>
                           <button type="button" class="project-cancel-btn" @click="closeEdit">Annuler</button>
@@ -886,6 +1148,18 @@ watch(projectId, () => {
   flex-wrap: wrap;
 }
 
+.project-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+@media (max-width: 520px) {
+  .project-form-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .project-action-btn {
   padding: 0.65rem 1rem;
   border-radius: 12px;
@@ -950,7 +1224,7 @@ watch(projectId, () => {
 
 .project-step-header {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 0.45rem;
 }
 
@@ -1041,8 +1315,9 @@ watch(projectId, () => {
 
 .project-substep-row {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .project-drag-handle {
