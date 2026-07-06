@@ -130,7 +130,7 @@ export async function saveMenstruationNotifSettings(userId, settings) {
 async function syncMenstruationKindNotifications(userId, kind, enabled, buildRows) {
   await deletePendingByKinds(supabase, userId, [kind])
   if (!enabled) return
-  await insertPendingNotifications(supabase, userId, buildRows())
+  await insertPendingNotifications(supabase, userId, buildRows(), { skipPerRowDedupe: true })
 }
 
 export const PILULE_MENSTRUATION_KINDS = [

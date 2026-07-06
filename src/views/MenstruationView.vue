@@ -86,6 +86,7 @@ const patternsLoading = ref(false)
 const patternsError = ref('')
 
 let pageLoadGen = 0
+let backgroundSyncInFlight = false
 
 async function loadPatterns(forceRecalc = false) {
   if (!userId.value || !cycleMode.value) return
@@ -127,7 +128,9 @@ async function loadPatterns(forceRecalc = false) {
 /** Sync lourd (prévisions, SPM, notifs, patterns) — ne bloque pas l’affichage initial. */
 async function runMenstruationBackgroundSync(gen) {
   if (!userId.value || !hasCycleData.value || gen !== pageLoadGen) return
+  if (backgroundSyncInFlight) return
 
+  backgroundSyncInFlight = true
   try {
     if (cycleMode.value === 'pilule') {
       await refreshAllCyclesSpmDatesEstimees(supabase, userId.value)
@@ -151,6 +154,8 @@ async function runMenstruationBackgroundSync(gen) {
     }
   } catch (err) {
     console.error('Menstruation background sync:', err)
+  } finally {
+    backgroundSyncInFlight = false
   }
 }
 

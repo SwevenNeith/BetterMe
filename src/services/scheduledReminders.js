@@ -202,7 +202,12 @@ export async function deletePendingByKindPrefix(supabase, userId, prefix) {
 }
 
 /** Insère des planifications en évitant les doublons (contrainte pending_uq). */
-export async function insertPendingNotifications(supabase, userId, rows) {
+export async function insertPendingNotifications(
+  supabase,
+  userId,
+  rows,
+  { skipPerRowDedupe = false } = {},
+) {
   if (!rows?.length) return
 
   const seen = new Set()
@@ -215,12 +220,14 @@ export async function insertPendingNotifications(supabase, userId, rows) {
     unique.push(row)
   }
 
-  for (const row of unique) {
-    await deletePendingScheduledDuplicate(supabase, userId, {
-      scheduledAt: row.scheduled_at,
-      kind: row.kind,
-      eventId: row.event_id ?? null,
-    })
+  if (!skipPerRowDedupe) {
+    for (const row of unique) {
+      await deletePendingScheduledDuplicate(supabase, userId, {
+        scheduledAt: row.scheduled_at,
+        kind: row.kind,
+        eventId: row.event_id ?? null,
+      })
+    }
   }
 
   const { error } = await supabase.from('scheduled_notifications').insert(unique)

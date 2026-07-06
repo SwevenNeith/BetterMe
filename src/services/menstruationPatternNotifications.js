@@ -415,7 +415,7 @@ async function syncPatternPrefixNotifications(userId, prefix, enabled, candidate
     userId,
     candidates.filter((candidate) => candidate.kind.startsWith(prefix)),
   )
-  await insertPendingNotifications(supabase, userId, rows)
+  await insertPendingNotifications(supabase, userId, rows, { skipPerRowDedupe: true })
 }
 
 export async function rescheduleMenstruationPatternNotifications(

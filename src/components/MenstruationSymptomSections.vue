@@ -20,17 +20,27 @@ const emit = defineEmits(['select-scale', 'select-enum', 'select-boolean', 'sele
 
 const openSections = ref(new Set())
 
+function sectionsOpenKey(sections) {
+  return (sections ?? []).map((section) => `${section.id}:${section.isCurrent ? 1 : 0}`).join('|')
+}
+
 watch(
-  () => props.sections,
-  (sections) => {
+  () => sectionsOpenKey(props.sections),
+  () => {
+    const sections = props.sections
     const next = new Set()
     for (const section of sections) {
       if (section.isCurrent) next.add(section.id)
     }
     if (!next.size && sections[0]?.id) next.add(sections[0].id)
+
+    const prevKey = [...openSections.value].sort().join(',')
+    const nextKey = [...next].sort().join(',')
+    if (prevKey === nextKey) return
+
     openSections.value = next
   },
-  { immediate: true, deep: true },
+  { immediate: true },
 )
 
 function toggleSection(id) {

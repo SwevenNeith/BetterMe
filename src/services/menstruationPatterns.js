@@ -502,10 +502,7 @@ export async function maybeRecalculateMenstruationPatterns(supabase, userId, typ
   }
 
   const todayISO = getLocalTodayISO()
-  const shouldRun =
-    shouldRecalculatePatterns(cycles, todayISO, typeCycle) || cycles.length >= CYCLES_MIN
-
-  if (shouldRun) {
+  if (shouldRecalculatePatterns(cycles, todayISO, typeCycle)) {
     return recalculateMenstruationPatterns(supabase, userId, typeCycle, cycles)
   }
 

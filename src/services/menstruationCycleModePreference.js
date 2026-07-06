@@ -57,6 +57,8 @@ export async function saveMenstruationCycleModePreference(supabase, userId, mode
 
   await ensureUserSettings(userId)
 
+  const previousMode = await loadMenstruationCycleModePreference(supabase, userId)
+
   const { error } = await supabase
     .from(SETTINGS_TABLE)
     .update({ [MODE_COLUMN]: mode })
@@ -70,6 +72,8 @@ export async function saveMenstruationCycleModePreference(supabase, userId, mode
     }
     throw error
   }
+
+  if (previousMode === mode) return
 
   if (mode === 'naturel') {
     const { clearPiluleMenstruationNotifications } = await import('./menstruationNotifications.js')
