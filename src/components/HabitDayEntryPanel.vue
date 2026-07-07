@@ -4,11 +4,18 @@ import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import { listHabitLogsForRange, upsertHabitLog } from '../services/habitLogs.js'
 import { HABIT_VALUE_TYPE } from '../constants/habitOptions.js'
-import { addDaysISO, normalizeDateISO } from '../utils/habitCalendar.js'
+import {
+  addDaysISO,
+  iterateISODateRange,
+  normalizeDateISO,
+  parseISODate,
+  toISODate,
+} from '../utils/habitCalendar.js'
 import {
   buildLogPayload,
   computeHabitStats,
   formatStatNumber,
+  getEffectiveValeur,
   isHabitDayDone,
 } from '../utils/habitStats.js'
 
@@ -38,6 +45,29 @@ const loadError = ref('')
 const saveError = ref('')
 const saveMessage = ref('')
 
+const historyOpen = ref(false)
+const historyMode = ref('semaine') // 'semaine' | 'mois' | 'annee'
+const historyYear = ref(new Date().getFullYear())
+const historyLogsByDate = ref({})
+const historyLoading = ref(false)
+const historyError = ref('')
+
+const rangeStart = ref('')
+const rangeEnd = ref(getLocalTodayISO()) // si vide au calcul => aujourd'hui
+const rangeBreakdown = ref('semaine') // 'semaine' | 'mois'
+const rangeTotal = ref(null)
+const rangeDetails = ref([])
+const rangeLoading = ref(false)
+const rangeError = ref('')
+
+const HISTORY_PAGE_SIZE = 10
+const rangePage = ref(0)
+
+const filterOpen = ref(false)
+const weekPage = ref(0)
+const monthPage = ref(0)
+const yearPage = ref(0)
+
 const isBoolean = computed(() => props.habit.type_valeur === HABIT_VALUE_TYPE.BOOLEAN)
 
 const todayIso = computed(() => getLocalTodayISO())
@@ -52,16 +82,6 @@ const valueLabel = computed(() => {
 const stats = computed(() =>
   computeHabitStats(logsByDate.value, todayIso.value, selectedDate.value),
 )
-
-const formattedSelectedDate = computed(() => {
-  const [y, m, d] = selectedDate.value.split('-').map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString('fr-FR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
-})
 
 function syncInputFromLog() {
   const log = logsByDate.value[selectedDate.value]
@@ -81,13 +101,7 @@ async function loadStatsLogs() {
   const start = addDaysISO(today, -30)
 
   try {
-    const rows = await listHabitLogsForRange(
-      supabase,
-      props.userId,
-      props.habit.id,
-      start,
-      today,
-    )
+    const rows = await listHabitLogsForRange(supabase, props.userId, props.habit.id, start, today)
     const map = {}
     for (const row of rows) {
       map[normalizeDateISO(row.date_jour)] = { ...row, date_jour: normalizeDateISO(row.date_jour) }
@@ -162,6 +176,283 @@ function onBooleanToggle(event) {
   void persistValue()
 }
 
+function toLocalDateKey(date) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function parseISOToDate(iso) {
+  const { year, month, day } = parseISODate(iso)
+  return new Date(year, month - 1, day)
+}
+
+function getWeekBoundsFromDateISO(dateIso) {
+  const date = parseISOToDate(dateIso)
+  const jsDay = date.getDay()
+  const diff = jsDay === 0 ? -6 : 1 - jsDay // lundi
+  const monday = new Date(date)
+  monday.setDate(date.getDate() + diff)
+  const startIso = toLocalDateKey(monday)
+  const endIso = addDaysISO(startIso, 6)
+  return { startIso, endIso }
+}
+
+function formatDayLabelFr(iso) {
+  const date = parseISOToDate(iso)
+  return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
+function weekLabelFr(startIso) {
+  const endIso = addDaysISO(startIso, 6)
+  return `${formatDayLabelFr(startIso)} – ${formatDayLabelFr(endIso)}`
+}
+
+function monthLabelFr(year, month) {
+  return new Date(year, month - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+}
+
+function buildYearOptions(anchorYear = new Date().getFullYear(), span = 5) {
+  const years = []
+  for (let y = anchorYear - span; y <= anchorYear + span; y += 1) {
+    years.push(y)
+  }
+  return years
+}
+
+const yearOptions = computed(() => buildYearOptions(new Date().getFullYear(), 6))
+
+async function loadHistoryLogs(year) {
+  if (!props.userId || !props.habit?.id) return
+  historyLoading.value = true
+  historyError.value = ''
+
+  const start = `${year}-01-01`
+  const end = `${year}-12-31`
+
+  try {
+    const rows = await listHabitLogsForRange(supabase, props.userId, props.habit.id, start, end)
+    const map = {}
+    for (const row of rows) {
+      map[normalizeDateISO(row.date_jour)] = { ...row, date_jour: normalizeDateISO(row.date_jour) }
+    }
+    historyLogsByDate.value = map
+  } catch (err) {
+    console.error(err)
+    historyError.value = err.message || "Impossible de charger l'historique."
+    historyLogsByDate.value = {}
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+const hasRangeOverride = computed(() => String(rangeStart.value || '').trim().length > 0)
+
+const activeHistoryView = computed(() => (hasRangeOverride.value ? 'plage' : historyMode.value))
+
+function computeYearWeekSummaries() {
+  const year = historyYear.value
+  const start = toISODate(year, 1, 1)
+  const end = toISODate(year, 12, 31)
+  const byWeekStart = new Map()
+
+  for (const dateIso of iterateISODateRange(start, end)) {
+    const { startIso } = getWeekBoundsFromDateISO(dateIso)
+    if (!byWeekStart.has(startIso)) byWeekStart.set(startIso, 0)
+    const log = historyLogsByDate.value[dateIso]
+    if (isHabitDayDone(log)) byWeekStart.set(startIso, byWeekStart.get(startIso) + getEffectiveValeur(log))
+  }
+
+  return [...byWeekStart.entries()]
+    .map(([startIso, total]) => ({ startIso, total }))
+    .filter((w) => w.total > 0)
+    .sort((a, b) => (a.startIso < b.startIso ? 1 : -1))
+    .map((w, index) => ({
+      index: index + 1,
+      startIso: w.startIso,
+      label: `Semaine ${index + 1}`,
+      dateLabel: weekLabelFr(w.startIso),
+      total: w.total,
+    }))
+}
+
+function computeYearMonthSummaries() {
+  const year = historyYear.value
+  const byMonth = new Map(Array.from({ length: 12 }, (_, i) => [i + 1, 0]))
+  const start = toISODate(year, 1, 1)
+  const end = toISODate(year, 12, 31)
+  for (const dateIso of iterateISODateRange(start, end)) {
+    const log = historyLogsByDate.value[dateIso]
+    if (!isHabitDayDone(log)) continue
+    const { month } = parseISODate(dateIso)
+    byMonth.set(month, (byMonth.get(month) ?? 0) + getEffectiveValeur(log))
+  }
+  return Array.from({ length: 12 }, (_, i) => 12 - i)
+    .map((month) => ({
+      month,
+      label: monthLabelFr(year, month),
+      total: byMonth.get(month) ?? 0,
+    }))
+    .filter((m) => m.total > 0)
+}
+
+function computeYearTotal(year) {
+  const startIso = `${year}-01-01`
+  const endIso = `${year}-12-31`
+  let total = 0
+  for (const d of iterateISODateRange(startIso, endIso)) {
+    const log = historyLogsByDate.value[d]
+    if (isHabitDayDone(log)) total += getEffectiveValeur(log)
+  }
+  return total
+}
+
+const historyWeekSummaries = computed(() => (historyLoading.value ? [] : computeYearWeekSummaries()))
+const historyMonthSummaries = computed(() => (historyLoading.value ? [] : computeYearMonthSummaries()))
+const historyYearTotal = computed(() => computeYearTotal(historyYear.value))
+
+const totalWeekPages = computed(() => Math.max(1, Math.ceil(historyWeekSummaries.value.length / HISTORY_PAGE_SIZE)))
+const totalMonthPages = computed(() => Math.max(1, Math.ceil(historyMonthSummaries.value.length / HISTORY_PAGE_SIZE)))
+const totalRangePages = computed(() => Math.max(1, Math.ceil(rangeDetails.value.length / HISTORY_PAGE_SIZE)))
+
+const showWeekPagination = computed(() => historyWeekSummaries.value.length > HISTORY_PAGE_SIZE)
+const showMonthPagination = computed(() => historyMonthSummaries.value.length > HISTORY_PAGE_SIZE)
+const showRangePagination = computed(() => rangeDetails.value.length > HISTORY_PAGE_SIZE)
+
+const paginatedWeekSummaries = computed(() => {
+  const start = weekPage.value * HISTORY_PAGE_SIZE
+  return historyWeekSummaries.value.slice(start, start + HISTORY_PAGE_SIZE)
+})
+
+const paginatedMonthSummaries = computed(() => {
+  const start = monthPage.value * HISTORY_PAGE_SIZE
+  return historyMonthSummaries.value.slice(start, start + HISTORY_PAGE_SIZE)
+})
+
+const paginatedRangeDetails = computed(() => {
+  const start = rangePage.value * HISTORY_PAGE_SIZE
+  return rangeDetails.value.slice(start, start + HISTORY_PAGE_SIZE)
+})
+
+function openHistory() {
+  historyOpen.value = true
+  historyMode.value = 'semaine'
+  rangePage.value = 0
+  weekPage.value = 0
+  monthPage.value = 0
+  yearPage.value = 0
+  historyYear.value = new Date().getFullYear()
+  rangeStart.value = ''
+  rangeEnd.value = getLocalTodayISO()
+  void loadHistoryLogs(historyYear.value)
+}
+
+function closeHistory() {
+  historyOpen.value = false
+}
+
+watch(historyYear, (year) => {
+  if (!historyOpen.value) return
+  weekPage.value = 0
+  monthPage.value = 0
+  yearPage.value = 0
+  void loadHistoryLogs(year)
+})
+
+watch(
+  () => [rangeStart.value, rangeEnd.value, rangeBreakdown.value],
+  () => {
+    rangePage.value = 0
+    if (!historyOpen.value) return
+    if (!hasRangeOverride.value) return
+    void computeRangeResults()
+  },
+)
+
+function applyFilter() {
+  filterOpen.value = false
+  rangePage.value = 0
+  weekPage.value = 0
+  monthPage.value = 0
+  yearPage.value = 0
+  rangeTotal.value = null
+  rangeDetails.value = []
+  rangeError.value = ''
+
+  if (hasRangeOverride.value) {
+    if (!rangeEnd.value) rangeEnd.value = getLocalTodayISO()
+    void computeRangeResults()
+  }
+
+  // semaine/mois/année => charger l'année demandée (pour calculs rapides côté client)
+  // historyYear est directement piloté par le select "Année"
+}
+
+async function computeRangeResults() {
+  if (!props.userId || !props.habit?.id) return
+  if (!rangeStart.value) return
+  if (!rangeEnd.value) rangeEnd.value = getLocalTodayISO()
+  if (rangeStart.value > rangeEnd.value) {
+    rangeError.value = 'La date de début doit être avant la date de fin.'
+    return
+  }
+
+  rangeLoading.value = true
+  rangeError.value = ''
+  rangeTotal.value = null
+  rangeDetails.value = []
+
+  try {
+    const rows = await listHabitLogsForRange(
+      supabase,
+      props.userId,
+      props.habit.id,
+      rangeStart.value,
+      rangeEnd.value,
+    )
+    const byDate = {}
+    for (const row of rows) {
+      byDate[normalizeDateISO(row.date_jour)] = { ...row, date_jour: normalizeDateISO(row.date_jour) }
+    }
+
+    // Total sur la plage
+    let total = 0
+    for (const dateIso of iterateISODateRange(rangeStart.value, rangeEnd.value)) {
+      const log = byDate[dateIso]
+      if (isHabitDayDone(log)) total += getEffectiveValeur(log)
+    }
+    rangeTotal.value = total
+
+    // Détail semaine/mois (uniquement périodes actives)
+    const groups = new Map()
+    for (const dateIso of iterateISODateRange(rangeStart.value, rangeEnd.value)) {
+      const log = byDate[dateIso]
+      if (!isHabitDayDone(log)) continue
+      const value = getEffectiveValeur(log)
+
+      if (rangeBreakdown.value === 'mois') {
+        const { year, month } = parseISODate(dateIso)
+        const key = `${year}-${String(month).padStart(2, '0')}`
+        if (!groups.has(key)) groups.set(key, { key, label: monthLabelFr(year, month), total: 0 })
+        groups.get(key).total += value
+      } else {
+        const { startIso } = getWeekBoundsFromDateISO(dateIso)
+        const key = startIso
+        if (!groups.has(key)) groups.set(key, { key, label: weekLabelFr(startIso), total: 0 })
+        groups.get(key).total += value
+      }
+    }
+
+    rangeDetails.value = [...groups.values()].sort((a, b) => (a.key < b.key ? 1 : -1))
+  } catch (err) {
+    console.error(err)
+    rangeError.value = err.message || 'Impossible de calculer la période.'
+  } finally {
+    rangeLoading.value = false
+  }
+}
+
 watch(
   () => [props.habit?.id, props.refreshKey],
   () => {
@@ -185,14 +476,8 @@ watch(selectedDate, (date) => {
   <div class="habit-entry" :style="{ '--habit-color': habit.couleur }">
     <label class="habit-entry__field habit-entry__field--date">
       <span>Date</span>
-      <input
-        v-model="selectedDate"
-        type="date"
-        class="habit-entry__date"
-        :max="todayIso"
-      />
+      <input v-model="selectedDate" type="date" class="habit-entry__date" :max="todayIso" />
     </label>
-    <p class="habit-entry__date-label">{{ formattedSelectedDate }}</p>
 
     <div v-if="isBoolean" class="habit-entry__boolean">
       <label class="habit-entry__toggle">
@@ -242,9 +527,15 @@ watch(selectedDate, (date) => {
       </div>
     </label>
 
-    <p v-if="saveMessage" class="habit-entry__feedback habit-entry__feedback--ok">{{ saveMessage }}</p>
-    <p v-if="saveError" class="habit-entry__feedback habit-entry__feedback--error">{{ saveError }}</p>
-    <p v-if="loadError" class="habit-entry__feedback habit-entry__feedback--error">{{ loadError }}</p>
+    <p v-if="saveMessage" class="habit-entry__feedback habit-entry__feedback--ok">
+      {{ saveMessage }}
+    </p>
+    <p v-if="saveError" class="habit-entry__feedback habit-entry__feedback--error">
+      {{ saveError }}
+    </p>
+    <p v-if="loadError" class="habit-entry__feedback habit-entry__feedback--error">
+      {{ loadError }}
+    </p>
 
     <section v-if="!isLoading" class="habit-entry__stats" aria-label="Statistiques">
       <h3 class="habit-entry__stats-title">Statistiques</h3>
@@ -270,12 +561,222 @@ watch(selectedDate, (date) => {
           <dd>{{ formatStatNumber(stats.rate30Days, 2) }}</dd>
         </div>
       </dl>
-      <p v-if="!isBoolean" class="habit-entry__stats-hint">
-        Taux du jour = valeur du jour ÷ max enregistré sur les 30 derniers jours (entre 0 et 1).
-      </p>
+
+      <button type="button" class="habit-entry__history-btn" @click="openHistory">
+        Historique
+      </button>
     </section>
 
     <div v-else class="habit-entry__loading">Chargement…</div>
+
+    <Teleport to="body">
+      <div v-if="historyOpen" class="habit-history-modal" role="dialog" aria-modal="true">
+        <div class="habit-history-modal__overlay" @click="closeHistory" />
+        <div class="habit-history-modal__panel" :style="{ '--habit-color': habit.couleur }">
+          <header class="habit-history-modal__header">
+            <div>
+              <h3 class="habit-history-modal__title">Historique</h3>
+              <p class="habit-history-modal__subtitle">{{ habit.nom }}</p>
+            </div>
+            <button type="button" class="habit-history-modal__close" aria-label="Fermer" @click="closeHistory">✕</button>
+          </header>
+
+          <div class="habit-history-modal__controls">
+            <button type="button" class="habit-history-modal__filter-btn" @click="filterOpen = true">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M3 4h18v2l-7 8v5l-4 1v-6L3 6V4z"
+                />
+              </svg>
+              Filtre
+            </button>
+
+            <p class="habit-history-modal__hint">
+              {{ hasRangeOverride ? 'Période (dates)' : historyMode === 'annee' ? `Année ${historyYear}` : historyMode === 'mois' ? `Mois (année ${historyYear})` : `Semaines (année ${historyYear})` }}
+            </p>
+
+            <div v-if="filterOpen" class="habit-history-modal__filter-overlay" @click="filterOpen = false" />
+            <div v-if="filterOpen" class="habit-history-modal__filter-panel">
+              <h4 class="habit-history-modal__filter-title">Afficher</h4>
+
+              <div class="habit-history-modal__filter-grid">
+                <label class="habit-history-modal__filter-radio">
+                  <input v-model="historyMode" type="radio" value="semaine" />
+                  <span>Semaine</span>
+                </label>
+                <label class="habit-history-modal__filter-radio">
+                  <input v-model="historyMode" type="radio" value="mois" />
+                  <span>Mois</span>
+                </label>
+                <label class="habit-history-modal__filter-radio">
+                  <input v-model="historyMode" type="radio" value="annee" />
+                  <span>Année</span>
+                </label>
+              </div>
+
+              <div class="habit-history-modal__filter-range">
+                <label class="habit-history-modal__control">
+                  <span>Début (optionnel)</span>
+                  <input v-model="rangeStart" type="date" class="habit-history-modal__select" />
+                </label>
+                <label class="habit-history-modal__control">
+                  <span>Fin</span>
+                  <input v-model="rangeEnd" type="date" class="habit-history-modal__select" />
+                </label>
+                <label class="habit-history-modal__control">
+                  <span>Année</span>
+                  <select v-model.number="historyYear" class="habit-history-modal__select">
+                    <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="habit-history-modal__filter-actions">
+                <button type="button" class="habit-history-modal__apply-btn" @click="applyFilter">
+                  Appliquer
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <p v-if="historyError" class="habit-entry__feedback habit-entry__feedback--error">
+            {{ historyError }}
+          </p>
+
+          <div v-if="historyLoading" class="habit-history-modal__loading">Chargement…</div>
+
+          <div v-else class="habit-history-modal__content">
+            <template v-if="activeHistoryView === 'semaine'">
+              <ul v-if="paginatedWeekSummaries.length > 0" class="habit-history-modal__list">
+                <li v-for="w in paginatedWeekSummaries" :key="w.startIso" class="habit-history-modal__item">
+                  <div class="habit-history-modal__item-head">
+                    <span class="habit-history-modal__item-title">{{ w.label }}</span>
+                    <span class="habit-history-modal__item-value">{{ formatStatNumber(w.total, 0) }}</span>
+                  </div>
+                  <span class="habit-history-modal__item-date">{{ w.dateLabel }}</span>
+                </li>
+              </ul>
+              <p v-else class="habit-history-modal__empty">Aucune semaine avec données sur cette année.</p>
+
+              <nav v-if="showWeekPagination" class="habit-history-modal__pagination" aria-label="Pagination semaines">
+                <button
+                  type="button"
+                  class="habit-history-modal__page-btn"
+                  :disabled="weekPage === 0"
+                  aria-label="Page précédente"
+                  @click="weekPage = Math.max(0, weekPage - 1)"
+                >
+                  ‹
+                </button>
+                <span class="habit-history-modal__page-label">{{ weekPage + 1 }} / {{ totalWeekPages }}</span>
+                <button
+                  type="button"
+                  class="habit-history-modal__page-btn"
+                  :disabled="weekPage >= totalWeekPages - 1"
+                  aria-label="Page suivante"
+                  @click="weekPage = Math.min(totalWeekPages - 1, weekPage + 1)"
+                >
+                  ›
+                </button>
+              </nav>
+            </template>
+
+            <template v-else-if="activeHistoryView === 'mois'">
+              <ul v-if="paginatedMonthSummaries.length > 0" class="habit-history-modal__list">
+                <li v-for="m in paginatedMonthSummaries" :key="m.month" class="habit-history-modal__item">
+                  <div class="habit-history-modal__item-head">
+                    <span class="habit-history-modal__item-title">{{ m.label }}</span>
+                    <span class="habit-history-modal__item-value">{{ formatStatNumber(m.total, 0) }}</span>
+                  </div>
+                </li>
+              </ul>
+              <p v-else class="habit-history-modal__empty">Aucun mois avec données sur cette année.</p>
+
+              <nav v-if="showMonthPagination" class="habit-history-modal__pagination" aria-label="Pagination mois">
+                <button
+                  type="button"
+                  class="habit-history-modal__page-btn"
+                  :disabled="monthPage === 0"
+                  aria-label="Page précédente"
+                  @click="monthPage = Math.max(0, monthPage - 1)"
+                >
+                  ‹
+                </button>
+                <span class="habit-history-modal__page-label">{{ monthPage + 1 }} / {{ totalMonthPages }}</span>
+                <button
+                  type="button"
+                  class="habit-history-modal__page-btn"
+                  :disabled="monthPage >= totalMonthPages - 1"
+                  aria-label="Page suivante"
+                  @click="monthPage = Math.min(totalMonthPages - 1, monthPage + 1)"
+                >
+                  ›
+                </button>
+              </nav>
+            </template>
+
+            <template v-else-if="activeHistoryView === 'annee'">
+              <div class="habit-history-modal__single">
+                <div class="habit-history-modal__single-head">
+                  <span class="habit-history-modal__single-title">Année {{ historyYear }}</span>
+                  <span class="habit-history-modal__single-value">{{ formatStatNumber(historyYearTotal, 0) }}</span>
+                </div>
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="habit-history-modal__range">
+                <p v-if="rangeError" class="habit-entry__feedback habit-entry__feedback--error">{{ rangeError }}</p>
+                <div v-if="rangeLoading" class="habit-history-modal__loading">Calcul…</div>
+
+                <template v-else-if="rangeTotal != null">
+                  <div class="habit-history-modal__range-total">
+                    Total : <strong>{{ formatStatNumber(rangeTotal, 0) }}</strong>
+                  </div>
+
+                  <ul v-if="paginatedRangeDetails.length > 0" class="habit-history-modal__list">
+                    <li v-for="row in paginatedRangeDetails" :key="row.key" class="habit-history-modal__item">
+                      <div class="habit-history-modal__item-head">
+                        <span class="habit-history-modal__item-title">{{ row.label }}</span>
+                        <span class="habit-history-modal__item-value">{{ formatStatNumber(row.total, 0) }}</span>
+                      </div>
+                    </li>
+                  </ul>
+                  <p v-else class="habit-history-modal__empty">Aucune activité sur cette période.</p>
+
+                  <nav
+                    v-if="showRangePagination"
+                    class="habit-history-modal__pagination"
+                    aria-label="Pagination période"
+                  >
+                    <button
+                      type="button"
+                      class="habit-history-modal__page-btn"
+                      :disabled="rangePage === 0"
+                      aria-label="Page précédente"
+                      @click="goToPage('range', rangePage - 1, totalRangePages)"
+                    >
+                      ‹
+                    </button>
+                    <span class="habit-history-modal__page-label">{{ rangePage + 1 }} / {{ totalRangePages }}</span>
+                    <button
+                      type="button"
+                      class="habit-history-modal__page-btn"
+                      :disabled="rangePage >= totalRangePages - 1"
+                      aria-label="Page suivante"
+                      @click="goToPage('range', rangePage + 1, totalRangePages)"
+                    >
+                      ›
+                    </button>
+                  </nav>
+                </template>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -340,7 +841,9 @@ watch(selectedDate, (date) => {
   font-size: 1.2rem;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    opacity 0.15s ease;
 }
 
 .habit-entry__step-btn:hover:not(:disabled) {
@@ -445,6 +948,22 @@ watch(selectedDate, (date) => {
   gap: 0.55rem;
 }
 
+.habit-entry__history-btn {
+  margin-top: 0.85rem;
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--habit-color, #ad81be);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.habit-entry__history-btn:hover {
+  background: rgba(255, 255, 255, 0.9);
+}
+
 .habit-entry__stat {
   display: flex;
   justify-content: space-between;
@@ -480,6 +999,394 @@ watch(selectedDate, (date) => {
   font-size: 0.9rem;
 }
 
+.habit-history-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.habit-history-modal__overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 30, 40, 0.5);
+}
+
+.habit-history-modal__panel {
+  position: relative;
+  width: min(100%, 48rem);
+  max-height: min(88vh, 42rem);
+  overflow: auto;
+  background: white;
+  border-radius: 16px;
+  padding: 1.2rem 1.35rem 1.25rem;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+}
+
+.habit-history-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.habit-history-modal__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: var(--habit-color, #ad81be);
+}
+
+.habit-history-modal__subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  color: #6c757d;
+  font-weight: 600;
+}
+
+.habit-history-modal__close {
+  border: none;
+  background: none;
+  font-size: 1.15rem;
+  cursor: pointer;
+  color: #8c98a4;
+  padding: 0.15rem;
+}
+
+.habit-history-modal__controls {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.habit-history-modal__filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--habit-color, #ad81be);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.habit-history-modal__filter-btn svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.habit-history-modal__filter-btn:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.habit-history-modal__hint {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #6c757d;
+}
+
+.habit-history-modal__filter-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1450;
+}
+
+.habit-history-modal__filter-panel {
+  position: fixed;
+  z-index: 1451;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(92vw, 30rem);
+  max-height: min(80vh, 36rem);
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(213, 181, 234, 0.25);
+  background: white;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+  padding: 0.9rem 1rem 1rem;
+}
+
+.habit-history-modal__filter-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 900;
+  color: #2c3e50;
+}
+
+.habit-history-modal__filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.habit-history-modal__filter-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.25);
+  background: rgba(213, 181, 234, 0.08);
+  cursor: pointer;
+  font-weight: 800;
+  color: #2c3e50;
+}
+
+.habit-history-modal__filter-radio input {
+  accent-color: var(--habit-color, #ad81be);
+}
+
+.habit-history-modal__filter-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+}
+
+.habit-history-modal__filter-range {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.95rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.2);
+}
+
+.habit-history-modal__filter-grid .habit-history-modal__filter-radio {
+  justify-content: center;
+}
+
+
+.habit-history-modal__filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.85rem;
+}
+
+.habit-history-modal__apply-btn {
+  padding: 0.6rem 0.9rem;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  color: white;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.habit-history-modal__apply-btn:hover {
+  transform: translateY(-1px);
+}
+
+.habit-history-modal__single {
+  padding: 0.85rem 0.95rem;
+  border-radius: 14px;
+  border: 1px solid rgba(213, 181, 234, 0.22);
+  background: rgba(213, 181, 234, 0.08);
+}
+
+.habit-history-modal__single-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.habit-history-modal__single-title {
+  font-weight: 900;
+  color: #2c3e50;
+}
+
+.habit-history-modal__single-value {
+  font-weight: 900;
+  color: var(--habit-color, #ad81be);
+}
+
+.habit-history-modal__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.22);
+}
+
+.habit-history-modal__page-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  border-radius: 10px;
+  background: white;
+  color: var(--habit-color, #ad81be);
+  font-size: 1.25rem;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.habit-history-modal__page-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.habit-history-modal__page-label {
+  min-width: 4.5rem;
+  text-align: center;
+  font-size: 0.9rem;
+  font-weight: 900;
+  color: #2c3e50;
+}
+
+.habit-history-modal__control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.habit-history-modal__control--inline {
+  flex: 1;
+}
+
+.habit-history-modal__control span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--habit-color, #ad81be);
+}
+
+.habit-history-modal__select {
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  font-size: 0.95rem;
+  font-weight: 650;
+  background: rgba(255, 255, 255, 0.95);
+  color: #2c3e50;
+}
+
+.habit-history-modal__select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.habit-history-modal__loading {
+  text-align: center;
+  font-weight: 700;
+  color: #6c757d;
+  padding: 1.25rem 0;
+}
+
+.habit-history-modal__content {
+  min-height: 6rem;
+}
+
+.habit-history-modal__range-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.habit-history-modal__range-btn {
+  padding: 0.6rem 0.9rem;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  color: white;
+  font-weight: 900;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.habit-history-modal__range-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+}
+
+.habit-history-modal__range-total {
+  margin: 0.5rem 0 0.85rem;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #2c3e50;
+}
+
+.habit-history-modal__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.habit-history-modal__item {
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.22);
+  background: rgba(213, 181, 234, 0.08);
+}
+
+.habit-history-modal__item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.habit-history-modal__item-title {
+  font-weight: 900;
+  color: #2c3e50;
+}
+
+.habit-history-modal__item-value {
+  font-weight: 900;
+  color: var(--habit-color, #ad81be);
+}
+
+.habit-history-modal__item-date {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: #6c757d;
+}
+
+.habit-history-modal__empty {
+  margin: 0.9rem 0 0;
+  text-align: center;
+  color: #8c98a4;
+  font-weight: 650;
+}
+
+@media (max-width: 760px) {
+  .habit-history-modal__filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .habit-history-modal__filter-range {
+    grid-template-columns: 1fr;
+  }
+
+  .habit-history-modal__controls {
+    align-items: stretch;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   .habit-entry__date,
   .habit-entry__value-input {
@@ -504,6 +1411,86 @@ watch(selectedDate, (date) => {
 
   .habit-entry__stats-hint {
     color: #adb5bd;
+  }
+
+  .habit-entry__history-btn {
+    background: rgba(30, 25, 40, 0.7);
+    border-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .habit-history-modal__panel {
+    background: #1e2832;
+  }
+
+  .habit-history-modal__subtitle,
+  .habit-history-modal__loading,
+  .habit-history-modal__item-date {
+    color: #adb5bd;
+  }
+
+  .habit-history-modal__select {
+    background: rgba(30, 25, 40, 0.9);
+    border-color: rgba(213, 181, 234, 0.2);
+    color: #f0e8f8;
+  }
+
+  .habit-history-modal__filter-btn {
+    background: rgba(30, 25, 40, 0.7);
+    border-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .habit-history-modal__hint {
+    color: #adb5bd;
+  }
+
+  .habit-history-modal__filter-panel {
+    background: #1e2832;
+    border-color: rgba(213, 181, 234, 0.15);
+  }
+
+  .habit-history-modal__filter-title {
+    color: #f0e8f8;
+  }
+
+  .habit-history-modal__filter-radio {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(213, 181, 234, 0.15);
+    color: #f0e8f8;
+  }
+
+  .habit-history-modal__single {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(213, 181, 234, 0.15);
+  }
+
+  .habit-history-modal__single-title {
+    color: #f0e8f8;
+  }
+
+  .habit-history-modal__pagination {
+    border-top-color: rgba(213, 181, 234, 0.15);
+  }
+
+  .habit-history-modal__page-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(213, 181, 234, 0.15);
+  }
+
+  .habit-history-modal__page-label {
+    color: #f0e8f8;
+  }
+
+  .habit-history-modal__item {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(213, 181, 234, 0.15);
+  }
+
+  .habit-history-modal__item-title {
+    color: #f0e8f8;
+  }
+
+  .habit-history-modal__range-total {
+    color: #f0e8f8;
   }
 }
 </style>
