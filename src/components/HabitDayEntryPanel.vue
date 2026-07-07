@@ -51,6 +51,8 @@ const historyYear = ref(new Date().getFullYear())
 const historyLogsByDate = ref({})
 const historyLoading = ref(false)
 const historyError = ref('')
+let historyLoadRequestId = 0
+const historyLogsCache = new Map() // year:number -> logsByDate:Record<string, any>
 
 const rangeStart = ref('')
 const rangeEnd = ref(getLocalTodayISO()) // si vide au calcul => aujourd'hui
@@ -59,6 +61,7 @@ const rangeTotal = ref(null)
 const rangeDetails = ref([])
 const rangeLoading = ref(false)
 const rangeError = ref('')
+let rangeComputeRequestId = 0
 
 const HISTORY_PAGE_SIZE = 10
 const rangePage = ref(0)
@@ -225,6 +228,16 @@ const yearOptions = computed(() => buildYearOptions(new Date().getFullYear(), 6)
 
 async function loadHistoryLogs(year) {
   if (!props.userId || !props.habit?.id) return
+
+  const cached = historyLogsCache.get(year)
+  if (cached) {
+    historyLogsByDate.value = cached
+    historyLoading.value = false
+    historyError.value = ''
+    return
+  }
+
+  const requestId = (historyLoadRequestId += 1)
   historyLoading.value = true
   historyError.value = ''
 
@@ -233,17 +246,20 @@ async function loadHistoryLogs(year) {
 
   try {
     const rows = await listHabitLogsForRange(supabase, props.userId, props.habit.id, start, end)
+    if (requestId !== historyLoadRequestId || !historyOpen.value) return
     const map = {}
     for (const row of rows) {
       map[normalizeDateISO(row.date_jour)] = { ...row, date_jour: normalizeDateISO(row.date_jour) }
     }
     historyLogsByDate.value = map
+    historyLogsCache.set(year, map)
   } catch (err) {
+    if (requestId !== historyLoadRequestId || !historyOpen.value) return
     console.error(err)
     historyError.value = err.message || "Impossible de charger l'historique."
     historyLogsByDate.value = {}
   } finally {
-    historyLoading.value = false
+    if (requestId === historyLoadRequestId) historyLoading.value = false
   }
 }
 
@@ -360,15 +376,8 @@ watch(historyYear, (year) => {
   void loadHistoryLogs(year)
 })
 
-watch(
-  () => [rangeStart.value, rangeEnd.value, rangeBreakdown.value],
-  () => {
-    rangePage.value = 0
-    if (!historyOpen.value) return
-    if (!hasRangeOverride.value) return
-    void computeRangeResults()
-  },
-)
+// Important perf: on calcule la période uniquement via "Appliquer",
+// sinon chaque changement de date déclenche une requête réseau.
 
 function applyFilter() {
   filterOpen.value = false
@@ -398,6 +407,7 @@ async function computeRangeResults() {
     return
   }
 
+  const requestId = (rangeComputeRequestId += 1)
   rangeLoading.value = true
   rangeError.value = ''
   rangeTotal.value = null
@@ -411,6 +421,7 @@ async function computeRangeResults() {
       rangeStart.value,
       rangeEnd.value,
     )
+    if (requestId !== rangeComputeRequestId || !historyOpen.value) return
     const byDate = {}
     for (const row of rows) {
       byDate[normalizeDateISO(row.date_jour)] = { ...row, date_jour: normalizeDateISO(row.date_jour) }
@@ -446,10 +457,11 @@ async function computeRangeResults() {
 
     rangeDetails.value = [...groups.values()].sort((a, b) => (a.key < b.key ? 1 : -1))
   } catch (err) {
+    if (requestId !== rangeComputeRequestId || !historyOpen.value) return
     console.error(err)
     rangeError.value = err.message || 'Impossible de calculer la période.'
   } finally {
-    rangeLoading.value = false
+    if (requestId === rangeComputeRequestId) rangeLoading.value = false
   }
 }
 
