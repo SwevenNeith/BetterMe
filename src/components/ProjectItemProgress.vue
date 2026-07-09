@@ -1,8 +1,8 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { hasQuantiteTracking } from '../constants/projectProgress.js'
+import { hasQuantiteTracking, PROJECT_RESET_PERIODE } from '../constants/projectProgress.js'
 import { getCurrentPeriodCount } from '../services/projectProgress.js'
-import { buildHistoryEntries, computeAverageStats } from '../utils/projectProgressPeriods.js'
+import { buildHistoryEntries } from '../utils/projectProgressPeriods.js'
 
 const HISTORY_PAGE_SIZE = 10
 const FILTER_YEAR_SPAN = 6
@@ -31,10 +31,11 @@ const emit = defineEmits(['increment', 'decrement', 'toggle'])
 const historyOpen = ref(false)
 const historyPage = ref(0)
 const filterOpen = ref(false)
-const historyMode = ref('semaine') // 'semaine' | 'mois' | 'annee'
+const historyMode = ref('semaine') // 'jour' | 'semaine' | 'mois' | 'annee'
 const historyYear = ref(new Date().getFullYear())
 const rangeStart = ref('') // ISO yyyy-mm-dd (optionnel)
 const rangeEnd = ref(new Date().toISOString().slice(0, 10)) // défaut: aujourd'hui
+const dayPage = ref(0)
 const weekPage = ref(0)
 const monthPage = ref(0)
 const yearPage = ref(0)
@@ -42,13 +43,90 @@ const rangePage = ref(0)
 
 const usesQuantiteTracking = computed(() => hasQuantiteTracking(props.item))
 
+const useJourFilter = computed(() => props.item.reset_periode === PROJECT_RESET_PERIODE.JOUR)
+
 const currentCount = computed(() => getCurrentPeriodCount(props.logs, props.item.reset_periode))
 
 const quantiteLabel = computed(() => `${currentCount.value}/${props.item.quantite_cible}`)
 
-const averageStats = computed(() => computeAverageStats(props.logs, props.item.reset_periode))
-
 const historyEntries = computed(() => buildHistoryEntries(props.logs, props.item.reset_periode))
+
+function roundAverage(total, count) {
+  if (!count) return 0
+  return Math.round((total / count) * 10) / 10
+}
+
+const historyViewStats = computed(() => {
+  if (activeHistoryView.value === 'plage') {
+    const details = rangeDetails.value
+    const total = rangeTotal.value
+    if (details.length === 0) return null
+    const unit = historyMode.value === 'annee'
+      ? 'année'
+      : historyMode.value === 'mois'
+        ? 'mois'
+        : historyMode.value === 'jour'
+          ? 'jour'
+          : 'semaine'
+    const average = roundAverage(total, details.length)
+    return {
+      total,
+      average,
+      totalLabel: `Total : ${total}`,
+      averageLabel: `En moyenne : ${average} par ${unit}`,
+    }
+  }
+
+  if (historyMode.value === 'jour') {
+    const days = activeDaySummaries.value
+    if (days.length === 0) return null
+    const total = days.reduce((sum, day) => sum + day.count, 0)
+    const average = roundAverage(total, days.length)
+    return {
+      total,
+      average,
+      totalLabel: `Total : ${total}`,
+      averageLabel: `En moyenne : ${average} par jour`,
+    }
+  }
+
+  if (historyMode.value === 'semaine') {
+    const weeks = activeWeekSummaries.value
+    if (weeks.length === 0) return null
+    const total = weeks.reduce((sum, week) => sum + week.count, 0)
+    const average = roundAverage(total, weeks.length)
+    return {
+      total,
+      average,
+      totalLabel: `Total : ${total}`,
+      averageLabel: `En moyenne : ${average} par semaine`,
+    }
+  }
+
+  if (historyMode.value === 'mois') {
+    const months = activeMonthSummaries.value
+    if (months.length === 0) return null
+    const total = months.reduce((sum, month) => sum + month.count, 0)
+    const average = roundAverage(total, months.length)
+    return {
+      total,
+      average,
+      totalLabel: `Total : ${total}`,
+      averageLabel: `En moyenne : ${average} par mois`,
+    }
+  }
+
+  const years = activeYearSummaries.value
+  if (years.length === 0) return null
+  const total = years.reduce((sum, year) => sum + year.count, 0)
+  const average = roundAverage(total, years.length)
+  return {
+    total,
+    average,
+    totalLabel: `Total : ${total}`,
+    averageLabel: `En moyenne : ${average} par année`,
+  }
+})
 
 const totalHistoryPages = computed(() =>
   Math.max(1, Math.ceil(historyEntries.value.length / HISTORY_PAGE_SIZE)),
@@ -130,6 +208,28 @@ const filteredLogs = computed(() => {
 })
 
 const rangeTotal = computed(() => filteredLogs.value.length)
+
+const activeDaySummaries = computed(() => {
+  const year = Number(historyYear.value)
+  if (!Number.isFinite(year)) return []
+  const byDay = new Map()
+  for (const log of props.logs ?? []) {
+    const d = new Date(log.logged_at)
+    if (d.getFullYear() !== year) continue
+    const key = toISODateLocal(d)
+    byDay.set(key, (byDay.get(key) ?? 0) + 1)
+  }
+  return [...byDay.entries()]
+    .map(([dayIso, count]) => ({ dayIso, count }))
+    .filter((d) => d.count > 0)
+    .sort((a, b) => (a.dayIso < b.dayIso ? 1 : -1))
+    .map((d, idx) => ({
+      index: idx + 1,
+      label: `Jour ${idx + 1}`,
+      dateLabel: formatDayLabel(parseISOToDate(d.dayIso)),
+      count: d.count,
+    }))
+})
 
 const activeWeekSummaries = computed(() => {
   const year = Number(historyYear.value)
@@ -216,6 +316,18 @@ const rangeDetails = computed(() => {
       .sort((a, b) => (a.key < b.key ? 1 : -1))
   }
 
+  if (historyMode.value === 'jour') {
+    const byKey = new Map()
+    for (const log of logs) {
+      const d = new Date(log.logged_at)
+      const key = toISODateLocal(d)
+      byKey.set(key, (byKey.get(key) ?? 0) + 1)
+    }
+    return [...byKey.entries()]
+      .map(([key, count]) => ({ key, label: formatDayLabel(parseISOToDate(key)), count }))
+      .sort((a, b) => (a.key < b.key ? 1 : -1))
+  }
+
   const byKey = new Map()
   for (const log of logs) {
     const d = new Date(log.logged_at)
@@ -227,16 +339,22 @@ const rangeDetails = computed(() => {
     .sort((a, b) => (a.key < b.key ? 1 : -1))
 })
 
+const totalDayPages = computed(() => Math.max(1, Math.ceil(activeDaySummaries.value.length / HISTORY_PAGE_SIZE)))
 const totalWeekPages = computed(() => Math.max(1, Math.ceil(activeWeekSummaries.value.length / HISTORY_PAGE_SIZE)))
 const totalMonthPages = computed(() => Math.max(1, Math.ceil(activeMonthSummaries.value.length / HISTORY_PAGE_SIZE)))
 const totalYearPages = computed(() => Math.max(1, Math.ceil(activeYearSummaries.value.length / HISTORY_PAGE_SIZE)))
 const totalRangePages = computed(() => Math.max(1, Math.ceil(rangeDetails.value.length / HISTORY_PAGE_SIZE)))
 
+const showDayPagination = computed(() => activeDaySummaries.value.length > HISTORY_PAGE_SIZE)
 const showWeekPagination = computed(() => activeWeekSummaries.value.length > HISTORY_PAGE_SIZE)
 const showMonthPagination = computed(() => activeMonthSummaries.value.length > HISTORY_PAGE_SIZE)
 const showYearPagination = computed(() => activeYearSummaries.value.length > HISTORY_PAGE_SIZE)
 const showRangePagination = computed(() => rangeDetails.value.length > HISTORY_PAGE_SIZE)
 
+const paginatedDays = computed(() => {
+  const start = dayPage.value * HISTORY_PAGE_SIZE
+  return activeDaySummaries.value.slice(start, start + HISTORY_PAGE_SIZE)
+})
 const paginatedWeeks = computed(() => {
   const start = weekPage.value * HISTORY_PAGE_SIZE
   return activeWeekSummaries.value.slice(start, start + HISTORY_PAGE_SIZE)
@@ -272,12 +390,19 @@ watch(historyEntries, () => {
 
 function openHistory() {
   historyPage.value = 0
+  dayPage.value = 0
   weekPage.value = 0
   monthPage.value = 0
   yearPage.value = 0
   rangePage.value = 0
   filterOpen.value = false
-  historyMode.value = props.item.reset_periode === 'mois' ? 'mois' : 'semaine'
+  if (props.item.reset_periode === PROJECT_RESET_PERIODE.MOIS) {
+    historyMode.value = 'mois'
+  } else if (props.item.reset_periode === PROJECT_RESET_PERIODE.JOUR) {
+    historyMode.value = 'jour'
+  } else {
+    historyMode.value = 'semaine'
+  }
   historyYear.value = new Date().getFullYear()
   rangeStart.value = ''
   rangeEnd.value = new Date().toISOString().slice(0, 10)
@@ -355,7 +480,6 @@ function goToHistoryPage(page) {
       <button type="button" class="project-progress__history-btn" @click.stop="openHistory">
         Historique
       </button>
-      <p v-if="averageStats" class="project-progress__average">{{ averageStats.label }}</p>
     </div>
 
     <Teleport to="body">
@@ -366,7 +490,17 @@ function goToHistoryPage(page) {
             <div>
               <h3 class="project-history-modal__title">Historique</h3>
               <p class="project-history-modal__subtitle">
-                {{ hasRangeOverride ? 'Période (dates)' : historyMode === 'annee' ? 'Années' : historyMode === 'mois' ? `Mois (année ${historyYear})` : `Semaines (année ${historyYear})` }}
+                {{
+                  hasRangeOverride
+                    ? 'Période (dates)'
+                    : historyMode === 'annee'
+                      ? 'Années'
+                      : historyMode === 'mois'
+                        ? `Mois (année ${historyYear})`
+                        : historyMode === 'jour'
+                          ? `Jours (année ${historyYear})`
+                          : `Semaines (année ${historyYear})`
+                }}
               </p>
             </div>
             <button
@@ -392,6 +526,10 @@ function goToHistoryPage(page) {
               <h4 class="project-history-modal__filter-title">Afficher</h4>
 
               <div class="project-history-modal__filter-grid">
+                <label v-if="useJourFilter" class="project-history-modal__filter-radio">
+                  <input v-model="historyMode" type="radio" value="jour" />
+                  <span>Jour</span>
+                </label>
                 <label class="project-history-modal__filter-radio">
                   <input v-model="historyMode" type="radio" value="semaine" />
                   <span>Semaine</span>
@@ -431,11 +569,12 @@ function goToHistoryPage(page) {
             </div>
           </div>
 
-          <template v-if="activeHistoryView === 'plage'">
-            <div class="project-history-modal__range-total">
-              Total : <strong>{{ rangeTotal }}</strong>
-            </div>
+          <p v-if="historyViewStats" class="project-history-modal__stats">
+            <span>{{ historyViewStats.totalLabel }}</span>
+            <span>{{ historyViewStats.averageLabel }}</span>
+          </p>
 
+          <template v-if="activeHistoryView === 'plage'">
             <ul v-if="paginatedRangeDetails.length > 0" class="project-history-modal__list">
               <li v-for="row in paginatedRangeDetails" :key="row.key" class="project-history-modal__item">
                 <div class="project-history-modal__item-head">
@@ -463,6 +602,41 @@ function goToHistoryPage(page) {
                 :disabled="rangePage >= totalRangePages - 1"
                 aria-label="Page suivante"
                 @click="rangePage = Math.min(totalRangePages - 1, rangePage + 1)"
+              >
+                ›
+              </button>
+            </nav>
+          </template>
+
+          <template v-else-if="historyMode === 'jour'">
+            <ul v-if="paginatedDays.length > 0" class="project-history-modal__list">
+              <li v-for="d in paginatedDays" :key="d.index" class="project-history-modal__item">
+                <div class="project-history-modal__item-head">
+                  <span class="project-history-modal__item-title">{{ d.label }}</span>
+                  <span class="project-history-modal__item-count">{{ d.count }} fois</span>
+                </div>
+                <span class="project-history-modal__item-date">{{ d.dateLabel }}</span>
+              </li>
+            </ul>
+            <p v-else class="project-history-modal__empty">Aucun jour avec données.</p>
+
+            <nav v-if="showDayPagination" class="project-history-modal__pagination" aria-label="Pagination jours">
+              <button
+                type="button"
+                class="project-history-modal__page-btn"
+                :disabled="dayPage === 0"
+                aria-label="Page précédente"
+                @click="dayPage = Math.max(0, dayPage - 1)"
+              >
+                ‹
+              </button>
+              <span class="project-history-modal__page-label">{{ dayPage + 1 }} / {{ totalDayPages }}</span>
+              <button
+                type="button"
+                class="project-history-modal__page-btn"
+                :disabled="dayPage >= totalDayPages - 1"
+                aria-label="Page suivante"
+                @click="dayPage = Math.min(totalDayPages - 1, dayPage + 1)"
               >
                 ›
               </button>
@@ -747,20 +921,6 @@ function goToHistoryPage(page) {
   font-size: 0.65rem;
 }
 
-.project-progress__average {
-  margin: 0;
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: #6b7a88;
-  line-height: 1.3;
-  max-width: 9rem;
-}
-
-.project-progress--compact .project-progress__average {
-  font-size: 0.62rem;
-  max-width: 7rem;
-}
-
 .project-history-modal {
   position: fixed;
   inset: 0;
@@ -1030,11 +1190,19 @@ function goToHistoryPage(page) {
   cursor: pointer;
 }
 
-.project-history-modal__range-total {
-  margin: 0.25rem 0 0.85rem;
-  font-size: 0.95rem;
-  font-weight: 800;
+.project-history-modal__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.35rem 0 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #6b7a88;
+}
+
+.project-history-modal__stats span:first-child {
   color: #2c3e50;
+  font-weight: 800;
 }
 
 .project-history-modal__page-btn {
@@ -1071,7 +1239,6 @@ function goToHistoryPage(page) {
 }
 
 @media (max-width: 520px) {
-  .project-progress__average,
   .project-progress__reset {
     display: none;
   }
@@ -1115,8 +1282,12 @@ function goToHistoryPage(page) {
   }
 
   .project-history-modal__filter-title,
-  .project-history-modal__range-total {
+  .project-history-modal__stats span:first-child {
     color: #e8edf2;
+  }
+
+  .project-history-modal__stats {
+    color: #a8b4c0;
   }
 
   .project-history-modal__filter-radio {

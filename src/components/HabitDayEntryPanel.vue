@@ -46,7 +46,7 @@ const saveError = ref('')
 const saveMessage = ref('')
 
 const historyOpen = ref(false)
-const historyMode = ref('semaine') // 'semaine' | 'mois' | 'annee'
+const historyMode = ref('semaine') // 'jour' | 'semaine' | 'mois' | 'annee'
 const historyYear = ref(new Date().getFullYear())
 const historyLogsByDate = ref({})
 const historyLoading = ref(false)
@@ -56,7 +56,6 @@ const historyLogsCache = new Map() // year:number -> logsByDate:Record<string, a
 
 const rangeStart = ref('')
 const rangeEnd = ref(getLocalTodayISO()) // si vide au calcul => aujourd'hui
-const rangeBreakdown = ref('semaine') // 'semaine' | 'mois'
 const rangeTotal = ref(null)
 const rangeDetails = ref([])
 const rangeLoading = ref(false)
@@ -67,6 +66,7 @@ const HISTORY_PAGE_SIZE = 10
 const rangePage = ref(0)
 
 const filterOpen = ref(false)
+const dayPage = ref(0)
 const weekPage = ref(0)
 const monthPage = ref(0)
 const yearPage = ref(0)
@@ -267,6 +267,32 @@ const hasRangeOverride = computed(() => String(rangeStart.value || '').trim().le
 
 const activeHistoryView = computed(() => (hasRangeOverride.value ? 'plage' : historyMode.value))
 
+function computeYearDaySummaries() {
+  const year = historyYear.value
+  const start = toISODate(year, 1, 1)
+  const end = toISODate(year, 12, 31)
+  const days = []
+
+  for (const dateIso of iterateISODateRange(start, end)) {
+    const log = historyLogsByDate.value[dateIso]
+    if (!isHabitDayDone(log)) continue
+    days.push({
+      dateIso,
+      total: getEffectiveValeur(log),
+    })
+  }
+
+  return days
+    .sort((a, b) => (a.dateIso < b.dateIso ? 1 : -1))
+    .map((day, index) => ({
+      index: index + 1,
+      dateIso: day.dateIso,
+      label: `Jour ${index + 1}`,
+      dateLabel: formatDayLabelFr(day.dateIso),
+      total: day.total,
+    }))
+}
+
 function computeYearWeekSummaries() {
   const year = historyYear.value
   const start = toISODate(year, 1, 1)
@@ -324,17 +350,25 @@ function computeYearTotal(year) {
   return total
 }
 
+const historyDaySummaries = computed(() => (historyLoading.value ? [] : computeYearDaySummaries()))
 const historyWeekSummaries = computed(() => (historyLoading.value ? [] : computeYearWeekSummaries()))
 const historyMonthSummaries = computed(() => (historyLoading.value ? [] : computeYearMonthSummaries()))
 const historyYearTotal = computed(() => computeYearTotal(historyYear.value))
 
+const totalDayPages = computed(() => Math.max(1, Math.ceil(historyDaySummaries.value.length / HISTORY_PAGE_SIZE)))
 const totalWeekPages = computed(() => Math.max(1, Math.ceil(historyWeekSummaries.value.length / HISTORY_PAGE_SIZE)))
 const totalMonthPages = computed(() => Math.max(1, Math.ceil(historyMonthSummaries.value.length / HISTORY_PAGE_SIZE)))
 const totalRangePages = computed(() => Math.max(1, Math.ceil(rangeDetails.value.length / HISTORY_PAGE_SIZE)))
 
+const showDayPagination = computed(() => historyDaySummaries.value.length > HISTORY_PAGE_SIZE)
 const showWeekPagination = computed(() => historyWeekSummaries.value.length > HISTORY_PAGE_SIZE)
 const showMonthPagination = computed(() => historyMonthSummaries.value.length > HISTORY_PAGE_SIZE)
 const showRangePagination = computed(() => rangeDetails.value.length > HISTORY_PAGE_SIZE)
+
+const paginatedDaySummaries = computed(() => {
+  const start = dayPage.value * HISTORY_PAGE_SIZE
+  return historyDaySummaries.value.slice(start, start + HISTORY_PAGE_SIZE)
+})
 
 const paginatedWeekSummaries = computed(() => {
   const start = weekPage.value * HISTORY_PAGE_SIZE
@@ -351,10 +385,92 @@ const paginatedRangeDetails = computed(() => {
   return rangeDetails.value.slice(start, start + HISTORY_PAGE_SIZE)
 })
 
+function roundHistoryAverage(total, count) {
+  if (!count) return 0
+  return Math.round((total / count) * 10) / 10
+}
+
+const historyViewStats = computed(() => {
+  if (historyLoading.value) return null
+
+  if (activeHistoryView.value === 'plage') {
+    if (rangeLoading.value || rangeTotal.value == null) return null
+    const details = rangeDetails.value
+    if (!details.length && !rangeTotal.value) return null
+    const unit = historyMode.value === 'annee'
+      ? 'année'
+      : historyMode.value === 'mois'
+        ? 'mois'
+        : historyMode.value === 'jour'
+          ? 'jour'
+          : 'semaine'
+    if (!details.length) {
+      return {
+        totalLabel: `Total : ${formatStatNumber(rangeTotal.value, 0)}`,
+        averageLabel: null,
+      }
+    }
+    const average = roundHistoryAverage(rangeTotal.value, details.length)
+    return {
+      totalLabel: `Total : ${formatStatNumber(rangeTotal.value, 0)}`,
+      averageLabel: `En moyenne : ${formatStatNumber(average)} par ${unit}`,
+    }
+  }
+
+  if (historyMode.value === 'jour') {
+    const days = historyDaySummaries.value
+    if (!days.length) return null
+    const total = days.reduce((sum, day) => sum + day.total, 0)
+    const average = roundHistoryAverage(total, days.length)
+    return {
+      totalLabel: `Total : ${formatStatNumber(total, 0)}`,
+      averageLabel: `En moyenne : ${formatStatNumber(average)} par jour`,
+    }
+  }
+
+  if (historyMode.value === 'semaine') {
+    const weeks = historyWeekSummaries.value
+    if (!weeks.length) return null
+    const total = weeks.reduce((sum, week) => sum + week.total, 0)
+    const average = roundHistoryAverage(total, weeks.length)
+    return {
+      totalLabel: `Total : ${formatStatNumber(total, 0)}`,
+      averageLabel: `En moyenne : ${formatStatNumber(average)} par semaine`,
+    }
+  }
+
+  if (historyMode.value === 'mois') {
+    const months = historyMonthSummaries.value
+    if (!months.length) return null
+    const total = months.reduce((sum, month) => sum + month.total, 0)
+    const average = roundHistoryAverage(total, months.length)
+    return {
+      totalLabel: `Total : ${formatStatNumber(total, 0)}`,
+      averageLabel: `En moyenne : ${formatStatNumber(average)} par mois`,
+    }
+  }
+
+  const total = historyYearTotal.value
+  const months = historyMonthSummaries.value
+  if (!total) return null
+  if (!months.length) {
+    return {
+      totalLabel: `Total : ${formatStatNumber(total, 0)}`,
+      averageLabel: null,
+    }
+  }
+  const average = roundHistoryAverage(total, months.length)
+  return {
+    totalLabel: `Total : ${formatStatNumber(total, 0)}`,
+    averageLabel: `En moyenne : ${formatStatNumber(average)} par mois`,
+  }
+})
+
 function openHistory() {
   historyOpen.value = true
   historyMode.value = 'semaine'
   rangePage.value = 0
+  dayPage.value = 0
   weekPage.value = 0
   monthPage.value = 0
   yearPage.value = 0
@@ -370,6 +486,7 @@ function closeHistory() {
 
 watch(historyYear, (year) => {
   if (!historyOpen.value) return
+  dayPage.value = 0
   weekPage.value = 0
   monthPage.value = 0
   yearPage.value = 0
@@ -382,6 +499,7 @@ watch(historyYear, (year) => {
 function applyFilter() {
   filterOpen.value = false
   rangePage.value = 0
+  dayPage.value = 0
   weekPage.value = 0
   monthPage.value = 0
   yearPage.value = 0
@@ -435,17 +553,26 @@ async function computeRangeResults() {
     }
     rangeTotal.value = total
 
-    // Détail semaine/mois (uniquement périodes actives)
+    // Détail jour/semaine/mois/année (uniquement périodes actives)
     const groups = new Map()
     for (const dateIso of iterateISODateRange(rangeStart.value, rangeEnd.value)) {
       const log = byDate[dateIso]
       if (!isHabitDayDone(log)) continue
       const value = getEffectiveValeur(log)
 
-      if (rangeBreakdown.value === 'mois') {
+      if (historyMode.value === 'annee') {
+        const { year } = parseISODate(dateIso)
+        const key = String(year)
+        if (!groups.has(key)) groups.set(key, { key, label: key, total: 0 })
+        groups.get(key).total += value
+      } else if (historyMode.value === 'mois') {
         const { year, month } = parseISODate(dateIso)
         const key = `${year}-${String(month).padStart(2, '0')}`
         if (!groups.has(key)) groups.set(key, { key, label: monthLabelFr(year, month), total: 0 })
+        groups.get(key).total += value
+      } else if (historyMode.value === 'jour') {
+        const key = dateIso
+        if (!groups.has(key)) groups.set(key, { key, label: formatDayLabelFr(dateIso), total: 0 })
         groups.get(key).total += value
       } else {
         const { startIso } = getWeekBoundsFromDateISO(dateIso)
@@ -605,7 +732,17 @@ watch(selectedDate, (date) => {
             </button>
 
             <p class="habit-history-modal__hint">
-              {{ hasRangeOverride ? 'Période (dates)' : historyMode === 'annee' ? `Année ${historyYear}` : historyMode === 'mois' ? `Mois (année ${historyYear})` : `Semaines (année ${historyYear})` }}
+              {{
+                hasRangeOverride
+                  ? 'Période (dates)'
+                  : historyMode === 'annee'
+                    ? `Année ${historyYear}`
+                    : historyMode === 'mois'
+                      ? `Mois (année ${historyYear})`
+                      : historyMode === 'jour'
+                        ? `Jours (année ${historyYear})`
+                        : `Semaines (année ${historyYear})`
+              }}
             </p>
 
             <div v-if="filterOpen" class="habit-history-modal__filter-overlay" @click="filterOpen = false" />
@@ -613,6 +750,10 @@ watch(selectedDate, (date) => {
               <h4 class="habit-history-modal__filter-title">Afficher</h4>
 
               <div class="habit-history-modal__filter-grid">
+                <label class="habit-history-modal__filter-radio">
+                  <input v-model="historyMode" type="radio" value="jour" />
+                  <span>Jour</span>
+                </label>
                 <label class="habit-history-modal__filter-radio">
                   <input v-model="historyMode" type="radio" value="semaine" />
                   <span>Semaine</span>
@@ -652,6 +793,11 @@ watch(selectedDate, (date) => {
             </div>
           </div>
 
+          <p v-if="historyViewStats" class="habit-history-modal__stats">
+            <span>{{ historyViewStats.totalLabel }}</span>
+            <span v-if="historyViewStats.averageLabel">{{ historyViewStats.averageLabel }}</span>
+          </p>
+
           <p v-if="historyError" class="habit-entry__feedback habit-entry__feedback--error">
             {{ historyError }}
           </p>
@@ -659,7 +805,42 @@ watch(selectedDate, (date) => {
           <div v-if="historyLoading" class="habit-history-modal__loading">Chargement…</div>
 
           <div v-else class="habit-history-modal__content">
-            <template v-if="activeHistoryView === 'semaine'">
+            <template v-if="activeHistoryView === 'jour'">
+              <ul v-if="paginatedDaySummaries.length > 0" class="habit-history-modal__list">
+                <li v-for="d in paginatedDaySummaries" :key="d.dateIso" class="habit-history-modal__item">
+                  <div class="habit-history-modal__item-head">
+                    <span class="habit-history-modal__item-title">{{ d.label }}</span>
+                    <span class="habit-history-modal__item-value">{{ formatStatNumber(d.total, 0) }}</span>
+                  </div>
+                  <span class="habit-history-modal__item-date">{{ d.dateLabel }}</span>
+                </li>
+              </ul>
+              <p v-else class="habit-history-modal__empty">Aucun jour avec données sur cette année.</p>
+
+              <nav v-if="showDayPagination" class="habit-history-modal__pagination" aria-label="Pagination jours">
+                <button
+                  type="button"
+                  class="habit-history-modal__page-btn"
+                  :disabled="dayPage === 0"
+                  aria-label="Page précédente"
+                  @click="dayPage = Math.max(0, dayPage - 1)"
+                >
+                  ‹
+                </button>
+                <span class="habit-history-modal__page-label">{{ dayPage + 1 }} / {{ totalDayPages }}</span>
+                <button
+                  type="button"
+                  class="habit-history-modal__page-btn"
+                  :disabled="dayPage >= totalDayPages - 1"
+                  aria-label="Page suivante"
+                  @click="dayPage = Math.min(totalDayPages - 1, dayPage + 1)"
+                >
+                  ›
+                </button>
+              </nav>
+            </template>
+
+            <template v-else-if="activeHistoryView === 'semaine'">
               <ul v-if="paginatedWeekSummaries.length > 0" class="habit-history-modal__list">
                 <li v-for="w in paginatedWeekSummaries" :key="w.startIso" class="habit-history-modal__item">
                   <div class="habit-history-modal__item-head">
@@ -743,10 +924,6 @@ watch(selectedDate, (date) => {
                 <div v-if="rangeLoading" class="habit-history-modal__loading">Calcul…</div>
 
                 <template v-else-if="rangeTotal != null">
-                  <div class="habit-history-modal__range-total">
-                    Total : <strong>{{ formatStatNumber(rangeTotal, 0) }}</strong>
-                  </div>
-
                   <ul v-if="paginatedRangeDetails.length > 0" class="habit-history-modal__list">
                     <li v-for="row in paginatedRangeDetails" :key="row.key" class="habit-history-modal__item">
                       <div class="habit-history-modal__item-head">
@@ -767,7 +944,7 @@ watch(selectedDate, (date) => {
                       class="habit-history-modal__page-btn"
                       :disabled="rangePage === 0"
                       aria-label="Page précédente"
-                      @click="goToPage('range', rangePage - 1, totalRangePages)"
+                      @click="rangePage = Math.max(0, rangePage - 1)"
                     >
                       ‹
                     </button>
@@ -777,7 +954,7 @@ watch(selectedDate, (date) => {
                       class="habit-history-modal__page-btn"
                       :disabled="rangePage >= totalRangePages - 1"
                       aria-label="Page suivante"
-                      @click="goToPage('range', rangePage + 1, totalRangePages)"
+                      @click="rangePage = Math.min(totalRangePages - 1, rangePage + 1)"
                     >
                       ›
                     </button>
@@ -1105,6 +1282,21 @@ watch(selectedDate, (date) => {
   font-size: 0.85rem;
   font-weight: 700;
   color: #6c757d;
+}
+
+.habit-history-modal__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.35rem 0 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #6c757d;
+}
+
+.habit-history-modal__stats span:first-child {
+  color: #2c3e50;
+  font-weight: 800;
 }
 
 .habit-history-modal__filter-overlay {
@@ -1453,6 +1645,14 @@ watch(selectedDate, (date) => {
 
   .habit-history-modal__hint {
     color: #adb5bd;
+  }
+
+  .habit-history-modal__stats {
+    color: #a8b4c0;
+  }
+
+  .habit-history-modal__stats span:first-child {
+    color: #e8edf2;
   }
 
   .habit-history-modal__filter-panel {

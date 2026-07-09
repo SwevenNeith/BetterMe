@@ -67,7 +67,7 @@ const substepForm = reactive({
   reset_periode: DEFAULT_RESET_PERIODE,
 })
 
-const progressLogsByItemId = ref(new Map())
+const progressLogsByItemId = ref({})
 
 const editPanel = ref(null)
 
@@ -97,12 +97,21 @@ function doneCount(items) {
   return (items ?? []).filter((item) => item.is_done).length
 }
 
-/** Étapes / sous-étapes terminées en bas, ordre relatif conservé dans chaque groupe. */
+/** Étapes / sous-étapes terminées en bas (checkbox uniquement) ; avec quantité, l'ordre est conservé. */
 function sortDoneLast(items) {
   if (!items?.length) return
-  const pending = items.filter((item) => !item.is_done)
-  const done = items.filter((item) => item.is_done)
-  items.splice(0, items.length, ...pending, ...done)
+  const keepInPlace = []
+  const checkboxDoneToAppend = []
+
+  for (const item of items) {
+    if (hasQuantiteTracking(item) || !item.is_done) {
+      keepInPlace.push(item)
+    } else {
+      checkboxDoneToAppend.push(item)
+    }
+  }
+
+  items.splice(0, items.length, ...keepInPlace, ...checkboxDoneToAppend)
 }
 
 function moveItemDoneLast(list, itemId) {
@@ -189,7 +198,11 @@ function closeSubstepForm() {
 }
 
 function getItemLogs(itemId) {
-  return progressLogsByItemId.value.get(itemId) ?? []
+  return progressLogsByItemId.value[itemId] ?? []
+}
+
+function setItemLogs(itemId, logs) {
+  progressLogsByItemId.value = { ...progressLogsByItemId.value, [itemId]: logs }
 }
 
 function syncItemDoneState(item, logs) {
@@ -203,16 +216,16 @@ async function loadProgressLogs(proj) {
   const substepIds = (proj?.steps ?? []).flatMap((s) => s.substeps.map((ss) => ss.id))
 
   if (stepIds.length === 0 && substepIds.length === 0) {
-    progressLogsByItemId.value = new Map()
+    progressLogsByItemId.value = {}
     return
   }
 
   try {
     const logs = await fetchProgressLogsForProject(supabase, userId.value, stepIds, substepIds)
-    progressLogsByItemId.value = groupLogsByItemId(logs)
+    progressLogsByItemId.value = Object.fromEntries(groupLogsByItemId(logs))
   } catch (err) {
     console.warn('Historique de progression indisponible :', err)
-    progressLogsByItemId.value = new Map()
+    progressLogsByItemId.value = {}
   }
 }
 
@@ -317,6 +330,7 @@ async function saveEditPanel() {
 }
 
 async function applyItemDoneReorder(item, list, wasDone) {
+  if (hasQuantiteTracking(item)) return
   const nowDone = item.is_done
   if (nowDone && !wasDone) moveItemDoneLast(list, item.id)
   else if (!nowDone && wasDone) moveItemPendingEnd(list, item.id)
@@ -363,38 +377,48 @@ async function toggleSubstepDone(substep) {
 async function onStepIncrement(step) {
   if (!userId.value || !project.value || !hasQuantiteTracking(step)) return
   const wasDone = step.is_done
+  const previousLogs = getItemLogs(step.id)
   try {
     const log = await addProgressLog(supabase, userId.value, { stepId: step.id })
-    const logs = [...getItemLogs(step.id), log]
-    progressLogsByItemId.value.set(step.id, logs)
-    step.is_done = syncItemDoneState(step, logs)
-    await updateStepDone(supabase, userId.value, step.id, step.is_done)
-    if (wasDone !== step.is_done) await applyItemDoneReorder(step, project.value.steps, wasDone)
+    const logs = [...previousLogs, log]
+    setItemLogs(step.id, logs)
+    const nextDone = syncItemDoneState(step, logs)
+    step.is_done = nextDone
+    if (wasDone !== nextDone) {
+      await updateStepDone(supabase, userId.value, step.id, nextDone)
+      await applyItemDoneReorder(step, project.value.steps, wasDone)
+    }
   } catch (err) {
+    setItemLogs(step.id, previousLogs)
+    step.is_done = wasDone
     console.error(err)
     loadError.value = err.message || "Erreur lors de l'incrémentation."
-    await loadProject()
   }
 }
 
 async function onStepDecrement(step) {
   if (!userId.value || !project.value || !hasQuantiteTracking(step)) return
   const wasDone = step.is_done
+  const previousLogs = getItemLogs(step.id)
   try {
     const deletedId = await removeLatestLogInPeriod(supabase, userId.value, {
       stepId: step.id,
       resetPeriode: step.reset_periode,
     })
     if (!deletedId) return
-    const logs = getItemLogs(step.id).filter((log) => log.id !== deletedId)
-    progressLogsByItemId.value.set(step.id, logs)
-    step.is_done = syncItemDoneState(step, logs)
-    await updateStepDone(supabase, userId.value, step.id, step.is_done)
-    if (wasDone !== step.is_done) await applyItemDoneReorder(step, project.value.steps, wasDone)
+    const logs = previousLogs.filter((log) => log.id !== deletedId)
+    setItemLogs(step.id, logs)
+    const nextDone = syncItemDoneState(step, logs)
+    step.is_done = nextDone
+    if (wasDone !== nextDone) {
+      await updateStepDone(supabase, userId.value, step.id, nextDone)
+      await applyItemDoneReorder(step, project.value.steps, wasDone)
+    }
   } catch (err) {
+    setItemLogs(step.id, previousLogs)
+    step.is_done = wasDone
     console.error(err)
     loadError.value = err.message || 'Erreur lors de la décrémentation.'
-    await loadProject()
   }
 }
 
@@ -404,21 +428,21 @@ async function onSubstepIncrement(substep) {
   if (!step) return
 
   const wasDone = substep.is_done
+  const previousLogs = getItemLogs(substep.id)
   try {
     const log = await addProgressLog(supabase, userId.value, { substepId: substep.id })
-    const logs = [...getItemLogs(substep.id), log]
-    progressLogsByItemId.value.set(substep.id, logs)
-    substep.is_done = syncItemDoneState(substep, logs)
-    await updateSubstepDone(supabase, userId.value, substep.id, substep.is_done)
-    if (wasDone !== substep.is_done) {
-      if (substep.is_done) moveItemDoneLast(step.substeps, substep.id)
-      else moveItemPendingEnd(step.substeps, substep.id)
-      await persistSubstepOrders(supabase, userId.value, step.substeps)
+    const logs = [...previousLogs, log]
+    setItemLogs(substep.id, logs)
+    const nextDone = syncItemDoneState(substep, logs)
+    substep.is_done = nextDone
+    if (wasDone !== nextDone) {
+      await updateSubstepDone(supabase, userId.value, substep.id, nextDone)
     }
   } catch (err) {
+    setItemLogs(substep.id, previousLogs)
+    substep.is_done = wasDone
     console.error(err)
     loadError.value = err.message || "Erreur lors de l'incrémentation."
-    await loadProject()
   }
 }
 
@@ -428,25 +452,25 @@ async function onSubstepDecrement(substep) {
   if (!step) return
 
   const wasDone = substep.is_done
+  const previousLogs = getItemLogs(substep.id)
   try {
     const deletedId = await removeLatestLogInPeriod(supabase, userId.value, {
       substepId: substep.id,
       resetPeriode: substep.reset_periode,
     })
     if (!deletedId) return
-    const logs = getItemLogs(substep.id).filter((log) => log.id !== deletedId)
-    progressLogsByItemId.value.set(substep.id, logs)
-    substep.is_done = syncItemDoneState(substep, logs)
-    await updateSubstepDone(supabase, userId.value, substep.id, substep.is_done)
-    if (wasDone !== substep.is_done) {
-      if (substep.is_done) moveItemDoneLast(step.substeps, substep.id)
-      else moveItemPendingEnd(step.substeps, substep.id)
-      await persistSubstepOrders(supabase, userId.value, step.substeps)
+    const logs = previousLogs.filter((log) => log.id !== deletedId)
+    setItemLogs(substep.id, logs)
+    const nextDone = syncItemDoneState(substep, logs)
+    substep.is_done = nextDone
+    if (wasDone !== nextDone) {
+      await updateSubstepDone(supabase, userId.value, substep.id, nextDone)
     }
   } catch (err) {
+    setItemLogs(substep.id, previousLogs)
+    substep.is_done = wasDone
     console.error(err)
     loadError.value = err.message || 'Erreur lors de la décrémentation.'
-    await loadProject()
   }
 }
 
