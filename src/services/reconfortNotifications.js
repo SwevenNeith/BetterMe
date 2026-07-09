@@ -20,7 +20,7 @@ import {
 
 export const MAX_RECONFORT_NOTIFICATIONS_PER_DAY = 3
 /** Évite de renvoyer un message déjà utilisé sur les N derniers jours (si d'autres existent). */
-export const RECENT_RECONFORT_LOOKBACK_DAYS = 3
+export const RECENT_RECONFORT_LOOKBACK_DAYS = 7
 
 const RECONFORT_WINDOW_START = '09:00'
 const RECONFORT_WINDOW_END = '23:30'
@@ -422,8 +422,47 @@ export function getMostRecentlySentReconfortMessageIdFromLastSent(
   return bestId
 }
 
+function pickFromPoolAvoidingRecent(
+  messages,
+  usedTodayIds,
+  recentMessageIds,
+  lastSentMessageId,
+  count = 1,
+  { allowRepeatIfOnlyOption = true } = {},
+) {
+  if (!messages.length || count <= 0) return []
+
+  const usedToday = toRecentIdSet(usedTodayIds)
+  const recent = toRecentIdSet(recentMessageIds)
+
+  const available = messages.filter((message) => !usedToday.has(message.id))
+  if (!available.length) return []
+
+  const fresh = available.filter((message) => !recent.has(message.id))
+  if (fresh.length) {
+    return pickRandomDistinctReconfortMessages(fresh, Math.min(count, fresh.length))
+  }
+
+  const notLastSent = available.filter((message) => message.id !== lastSentMessageId)
+  if (notLastSent.length) {
+    return pickRandomDistinctReconfortMessages(
+      notLastSent,
+      Math.min(count, notLastSent.length),
+    )
+  }
+
+  if (!allowRepeatIfOnlyOption) return []
+
+  return pickRandomDistinctReconfortMessages(
+    available,
+    Math.min(count, available.length),
+  )
+}
+
 /**
- * Choisit les messages à planifier selon l'éligibilité, la rotation et le 2e palier de proximité.
+ * Choisit les messages à planifier : priorité aux symptômes, puis tirage aléatoire
+ * en évitant les messages envoyés récemment ; si le pool symptomatique est trop
+ * étroit, on ignore les symptômes et on pioche dans toute la bibliothèque.
  * @param {{
  *   messages: Array<{ id: string, qui: string, message: string, conditions?: string[] }>,
  *   context: import('./reconfortMatching.js').ReconfortMatchContext,
@@ -441,47 +480,32 @@ export function pickReconfortMessagesForScheduling({
   lastSentMessageId,
   slotsLeft,
 }) {
-  if (slotsLeft <= 0) return []
+  if (slotsLeft <= 0 || !messages.length) return []
 
-  const eligible = getEligibleReconfortMessages(messages, context).filter(
-    (message) => !usedTodayIds.has(message.id),
-  )
-
-  if (eligible.length > 1) {
-    return pickRandomDistinctReconfortMessagesAvoidingRecent(
-      eligible,
-      Math.min(slotsLeft, eligible.length),
+  const pickFrom = (pool, allowRepeatIfOnlyOption) =>
+    pickFromPoolAvoidingRecent(
+      pool,
+      usedTodayIds,
       recentMessageIds,
+      lastSentMessageId,
+      slotsLeft,
+      { allowRepeatIfOnlyOption },
     )
+
+  const eligible = getEligibleReconfortMessages(messages, context)
+  let picked = pickFrom(eligible, false)
+  if (picked.length) return picked
+
+  for (const { messages: tierMessages } of getReconfortMessagesGroupedByMatchScore(
+    messages,
+    context,
+  )) {
+    picked = pickFrom(tierMessages, false)
+    if (picked.length) return picked
   }
 
-  if (eligible.length === 1) {
-    const soleMatch = eligible[0]
-    const wouldRepeat =
-      soleMatch.id === lastSentMessageId || recentMessageIds.has(soleMatch.id)
-
-    if (wouldRepeat) {
-      const secondClosest = getNthBestPartialReconfortMessages(messages, context, 2, {
-        excludeIds: new Set([soleMatch.id, ...usedTodayIds]),
-      })
-      const alternate = pickOneRandomReconfortMessageAvoidingRecent(
-        secondClosest,
-        recentMessageIds,
-      )
-      if (alternate) return [alternate]
-    }
-
-    return [soleMatch]
-  }
-
-  const partialCandidates = getBestPartialReconfortMessages(messages, context).filter(
-    (message) => !usedTodayIds.has(message.id),
-  )
-  const picked = pickOneRandomReconfortMessageAvoidingRecent(
-    partialCandidates,
-    recentMessageIds,
-  )
-  return picked ? [picked] : []
+  picked = pickFrom(messages, true)
+  return picked
 }
 
 /**
@@ -580,8 +604,9 @@ export async function scheduleReconfortNotification(supabase, userId, payload) {
  * - Maximum 3 notifications réconfort par jour (les autres types ne comptent pas).
  * - Si 2 messages sont entièrement éligibles, seulement 2 notifications sont planifiées.
  * - Sinon, un message au hasard parmi ceux qui remplissent le plus de conditions (partiel).
- * - Si un seul message correspond parfaitement mais qu'il vient d'être envoyé, on prend le 2e palier.
- * - Évite de renvoyer un message dont last_sent remonte à moins de 3 jours (si d'autres existent).
+ * - Si le pool symptomatique ne propose qu'un message déjà envoyé récemment, on ignore
+ *   les symptômes et on pioche au hasard parmi les autres messages de la bibliothèque.
+ * - Évite de renvoyer un message dont last_sent remonte à moins de 7 jours (si d'autres existent).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {{ dateISO?: string, symptomsPartial?: Record<string, unknown>, checkinPartial?: object|null }} [options]
@@ -667,8 +692,26 @@ export async function sendRandomReconfortNotificationNow(supabase, userId) {
     throw new Error('Aucun message de réconfort enregistré.')
   }
 
+  const context = await buildReconfortContext(supabase, userId, dateISO)
   const recentMessageIds = getRecentlySentReconfortMessageIds(messages, dateISO)
-  const picked = pickOneRandomReconfortMessageAvoidingRecent(messages, recentMessageIds)
+  const lastSentMessageId = getMostRecentlySentReconfortMessageIdFromLastSent(
+    messages,
+    dateISO,
+  )
+
+  const [picked] = pickReconfortMessagesForScheduling({
+    messages,
+    context,
+    usedTodayIds: new Set(),
+    recentMessageIds,
+    lastSentMessageId,
+    slotsLeft: 1,
+  })
+
+  if (!picked) {
+    throw new Error('Aucun message de réconfort disponible pour le moment.')
+  }
+
   const ok = await envoyerNotificationManuelle(userId, picked.qui, picked.message)
   if (!ok) {
     throw new Error('Échec de l’envoi de la notification.')
