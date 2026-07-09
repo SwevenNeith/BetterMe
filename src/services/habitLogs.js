@@ -2,7 +2,7 @@ import { HABIT_VALUE_TYPE } from '../constants/habitOptions.js'
 
 const TABLE = 'habit_logs'
 
-const LOG_SELECT = 'id, habit_id, date_jour, valeur, fait'
+const LOG_SELECT = 'id, habit_id, date_jour, valeur, fait, details'
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
@@ -49,23 +49,46 @@ export async function upsertHabitLog(supabase, userId, habitId, dateJour, payloa
   const fait = payload.fait ?? false
   const valeur = fait ? (payload.valeur ?? 0) : 0
 
+  const row = {
+    user_id: userId,
+    habit_id: habitId,
+    date_jour: dateJour,
+    fait,
+    valeur,
+  }
+
+  if (payload.details !== undefined) {
+    row.details = payload.details
+  }
+
   const { data, error } = await supabase
     .from(TABLE)
-    .upsert(
-      {
-        user_id: userId,
-        habit_id: habitId,
-        date_jour: dateJour,
-        fait,
-        valeur,
-      },
-      { onConflict: 'habit_id,date_jour' },
-    )
+    .upsert(row, { onConflict: 'habit_id,date_jour' })
     .select(LOG_SELECT)
     .single()
 
   if (error) throw error
   return data
+}
+
+/**
+ * Enregistre la note détaillée d’un jour sans modifier fait/valeur.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} habitId
+ * @param {string} dateJour ISO YYYY-MM-DD
+ * @param {string|null} details HTML nettoyé
+ * @param {{ fait?: boolean, valeur?: number|null }|null|undefined} currentLog
+ */
+export async function updateHabitLogDetails(supabase, userId, habitId, dateJour, details, currentLog) {
+  const fait = currentLog?.fait ?? false
+  const valeur = fait ? (currentLog?.valeur ?? 0) : 0
+
+  return upsertHabitLog(supabase, userId, habitId, dateJour, {
+    fait,
+    valeur,
+    details: details || null,
+  })
 }
 
 /**

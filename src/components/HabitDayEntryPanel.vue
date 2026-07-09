@@ -2,7 +2,9 @@
 import { ref, computed, watch } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
-import { listHabitLogsForRange, upsertHabitLog } from '../services/habitLogs.js'
+import { listHabitLogsForRange, updateHabitLogDetails, upsertHabitLog } from '../services/habitLogs.js'
+import RichTextNoteEditor from './RichTextNoteEditor.vue'
+import { isRichNoteEmpty, sanitizeRichNoteHtml } from '../utils/sanitizeHtml.js'
 import { HABIT_VALUE_TYPE } from '../constants/habitOptions.js'
 import {
   addDaysISO,
@@ -66,6 +68,13 @@ const HISTORY_PAGE_SIZE = 10
 const rangePage = ref(0)
 
 const filterOpen = ref(false)
+const detailsOpen = ref(false)
+const detailsDraft = ref('')
+const detailsSaving = ref(false)
+const detailsError = ref('')
+const historyDetailsOpen = ref(false)
+const historyDetailsHtml = ref('')
+const historyDetailsDateLabel = ref('')
 const dayPage = ref(0)
 const weekPage = ref(0)
 const monthPage = ref(0)
@@ -85,6 +94,88 @@ const valueLabel = computed(() => {
 const stats = computed(() =>
   computeHabitStats(logsByDate.value, todayIso.value, selectedDate.value),
 )
+
+const selectedDayLog = computed(() => logsByDate.value[selectedDate.value] ?? null)
+
+const canShowDetails = computed(() => {
+  if (inputValue.value > 0) return true
+  return isHabitDayDone(selectedDayLog.value)
+})
+
+const hasSavedDetails = computed(() => !isRichNoteEmpty(selectedDayLog.value?.details))
+
+function getSavedDetailsHtml() {
+  return selectedDayLog.value?.details ?? ''
+}
+
+function openDetailsEditor() {
+  if (detailsOpen.value) return
+  detailsError.value = ''
+  detailsDraft.value = getSavedDetailsHtml()
+  detailsOpen.value = true
+}
+
+function closeDetailsEditor() {
+  detailsOpen.value = false
+  detailsError.value = ''
+  detailsDraft.value = ''
+}
+
+function cancelDetailsEditor() {
+  closeDetailsEditor()
+}
+
+function hasDetailsForDateISO(dateIso) {
+  const html = historyLogsByDate.value?.[dateIso]?.details
+  return !isRichNoteEmpty(html)
+}
+
+function openHistoryDetails(dateIso) {
+  const html = historyLogsByDate.value?.[dateIso]?.details
+  if (isRichNoteEmpty(html)) return
+
+  historyDetailsHtml.value = sanitizeRichNoteHtml(html)
+  historyDetailsDateLabel.value = formatDayLabelFr(dateIso)
+  historyDetailsOpen.value = true
+}
+
+function closeHistoryDetails() {
+  historyDetailsOpen.value = false
+  historyDetailsHtml.value = ''
+  historyDetailsDateLabel.value = ''
+}
+
+async function saveDetails() {
+  if (!props.userId || !props.habit?.id) return
+  if (!canShowDetails.value) return
+
+  detailsSaving.value = true
+  detailsError.value = ''
+
+  const sanitized = sanitizeRichNoteHtml(detailsDraft.value)
+  const details = isRichNoteEmpty(sanitized) ? null : sanitized
+
+  try {
+    const row = await updateHabitLogDetails(
+      supabase,
+      props.userId,
+      props.habit.id,
+      selectedDate.value,
+      details,
+      selectedDayLog.value ?? buildLogPayload(inputValue.value, props.habit.type_valeur),
+    )
+    logsByDate.value = {
+      ...logsByDate.value,
+      [selectedDate.value]: { ...row, date_jour: normalizeDateISO(row.date_jour) },
+    }
+    closeDetailsEditor()
+  } catch (err) {
+    console.error(err)
+    detailsError.value = err.message || 'Impossible d’enregistrer les détails.'
+  } finally {
+    detailsSaving.value = false
+  }
+}
 
 function syncInputFromLog() {
   const log = logsByDate.value[selectedDate.value]
@@ -607,7 +698,13 @@ watch(selectedDate, (date) => {
     return
   }
   saveError.value = ''
+  closeDetailsEditor()
+  closeHistoryDetails()
   syncInputFromLog()
+})
+
+watch(canShowDetails, (visible) => {
+  if (!visible) closeDetailsEditor()
 })
 </script>
 
@@ -675,6 +772,84 @@ watch(selectedDate, (date) => {
     <p v-if="loadError" class="habit-entry__feedback habit-entry__feedback--error">
       {{ loadError }}
     </p>
+
+    <div v-if="!isLoading && canShowDetails" class="habit-entry__details">
+      <button
+        type="button"
+        class="habit-entry__details-btn"
+        :class="{ 'habit-entry__details-btn--active': detailsOpen, 'habit-entry__details-btn--filled': hasSavedDetails }"
+        :aria-expanded="detailsOpen"
+        @click="openDetailsEditor"
+      >
+        <svg class="habit-entry__details-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+          />
+          <polyline
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            points="14 2 14 8 20 8"
+          />
+          <line
+            x1="16"
+            y1="13"
+            x2="8"
+            y2="13"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          />
+          <line
+            x1="16"
+            y1="17"
+            x2="8"
+            y2="17"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          />
+        </svg>
+        Détails
+        <span v-if="hasSavedDetails && !detailsOpen" class="habit-entry__details-badge" aria-hidden="true" />
+      </button>
+
+      <div v-if="detailsOpen" class="habit-entry__details-panel">
+        <RichTextNoteEditor
+          v-model="detailsDraft"
+          :disabled="detailsSaving"
+          placeholder="Notes, contexte, ressenti…"
+        />
+        <p v-if="detailsError" class="habit-entry__feedback habit-entry__feedback--error">
+          {{ detailsError }}
+        </p>
+        <div class="habit-entry__details-actions">
+          <button
+            type="button"
+            class="habit-entry__details-cancel"
+            :disabled="detailsSaving"
+            @click="cancelDetailsEditor"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            class="habit-entry__details-save"
+            :disabled="detailsSaving"
+            @click="saveDetails"
+          >
+            {{ detailsSaving ? 'Enregistrement…' : 'Valider' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <section v-if="!isLoading" class="habit-entry__stats" aria-label="Statistiques">
       <h3 class="habit-entry__stats-title">Statistiques</h3>
@@ -810,7 +985,35 @@ watch(selectedDate, (date) => {
                 <li v-for="d in paginatedDaySummaries" :key="d.dateIso" class="habit-history-modal__item">
                   <div class="habit-history-modal__item-head">
                     <span class="habit-history-modal__item-title">{{ d.label }}</span>
-                    <span class="habit-history-modal__item-value">{{ formatStatNumber(d.total, 0) }}</span>
+                    <span class="habit-history-modal__item-right">
+                      <button
+                        v-if="hasDetailsForDateISO(d.dateIso)"
+                        type="button"
+                        class="habit-history-modal__details-btn"
+                        :aria-label="`Voir les détails du ${d.dateLabel}`"
+                        @click="openHistoryDetails(d.dateIso)"
+                      >
+                        <svg class="habit-history-modal__details-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                          />
+                          <polyline
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            points="14 2 14 8 20 8"
+                          />
+                        </svg>
+                      </button>
+                      <span class="habit-history-modal__item-value">{{ formatStatNumber(d.total, 0) }}</span>
+                    </span>
                   </div>
                   <span class="habit-history-modal__item-date">{{ d.dateLabel }}</span>
                 </li>
@@ -962,6 +1165,27 @@ watch(selectedDate, (date) => {
                 </template>
               </div>
             </template>
+          </div>
+
+          <div v-if="historyDetailsOpen" class="habit-history-details" role="dialog" aria-modal="true">
+            <div class="habit-history-details__overlay" @click="closeHistoryDetails" />
+            <div class="habit-history-details__panel" :style="{ '--habit-color': habit.couleur }">
+              <header class="habit-history-details__header">
+                <div>
+                  <h4 class="habit-history-details__title">Détails</h4>
+                  <p class="habit-history-details__subtitle">{{ historyDetailsDateLabel }}</p>
+                </div>
+                <button
+                  type="button"
+                  class="habit-history-details__close"
+                  aria-label="Fermer"
+                  @click="closeHistoryDetails"
+                >
+                  ✕
+                </button>
+              </header>
+              <div class="habit-history-details__content" v-html="historyDetailsHtml" />
+            </div>
           </div>
         </div>
       </div>
@@ -1116,6 +1340,104 @@ watch(selectedDate, (date) => {
 
 .habit-entry__feedback--error {
   color: #c0392b;
+}
+
+.habit-entry__details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.habit-entry__details-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  align-self: stretch;
+  width: 100%;
+  justify-content: center;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--habit-color, #ad81be);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.habit-entry__details-btn:hover {
+  background: white;
+  transform: translateY(-1px);
+}
+
+.habit-entry__details-btn--active {
+  border-color: var(--habit-color, #ad81be);
+  background: rgba(213, 181, 234, 0.12);
+}
+
+.habit-entry__details-btn--filled {
+  padding-right: 1.1rem;
+}
+
+.habit-entry__details-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex-shrink: 0;
+}
+
+.habit-entry__details-badge {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--habit-color, #ad81be);
+  margin-left: -0.15rem;
+}
+
+.habit-entry__details-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.3);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.habit-entry__details-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.habit-entry__details-cancel,
+.habit-entry__details-save {
+  padding: 0.45rem 0.9rem;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.15s ease;
+}
+
+.habit-entry__details-cancel {
+  background: rgba(213, 181, 234, 0.2);
+  color: #5c6b7a;
+}
+
+.habit-entry__details-save {
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  color: white;
+}
+
+.habit-entry__details-cancel:disabled,
+.habit-entry__details-save:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .habit-entry__stats {
@@ -1553,6 +1875,104 @@ watch(selectedDate, (date) => {
   gap: 1rem;
 }
 
+.habit-history-modal__item-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.habit-history-modal__details-btn {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--habit-color, #ad81be);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.habit-history-modal__details-btn:hover {
+  transform: translateY(-1px);
+  background: white;
+}
+
+.habit-history-modal__details-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.habit-history-details {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.habit-history-details__overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 30, 40, 0.55);
+}
+
+.habit-history-details__panel {
+  position: relative;
+  width: min(100%, 44rem);
+  max-height: min(85vh, 36rem);
+  overflow: auto;
+  background: white;
+  border-radius: 18px;
+  border: 1px solid rgba(213, 181, 234, 0.25);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+}
+
+.habit-history-details__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem 0.75rem;
+  border-bottom: 1px solid rgba(213, 181, 234, 0.18);
+}
+
+.habit-history-details__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 900;
+  color: var(--habit-color, #ad81be);
+}
+
+.habit-history-details__subtitle {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: #6c757d;
+}
+
+.habit-history-details__close {
+  border: none;
+  background: transparent;
+  color: #6c757d;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.habit-history-details__content {
+  padding: 0.9rem 1.1rem 1.1rem;
+  color: #2c3e50;
+  line-height: 1.55;
+}
+
+.habit-history-details__content :deep(mark) {
+  background: #fff3a0;
+}
+
 .habit-history-modal__item-title {
   font-weight: 900;
   color: #2c3e50;
@@ -1620,6 +2040,20 @@ watch(selectedDate, (date) => {
   .habit-entry__history-btn {
     background: rgba(30, 25, 40, 0.7);
     border-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .habit-entry__details-btn {
+    background: rgba(30, 25, 40, 0.7);
+    border-color: rgba(213, 181, 234, 0.2);
+  }
+
+  .habit-entry__details-panel {
+    background: rgba(30, 25, 40, 0.55);
+    border-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .habit-entry__details-cancel {
+    color: #ced4da;
   }
 
   .habit-history-modal__panel {
