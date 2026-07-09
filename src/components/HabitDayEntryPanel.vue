@@ -1969,10 +1969,6 @@ watch(canShowDetails, (visible) => {
   line-height: 1.55;
 }
 
-.habit-history-details__content :deep(mark) {
-  background: #fff3a0;
-}
-
 .habit-history-modal__item-title {
   font-weight: 900;
   color: #2c3e50;
