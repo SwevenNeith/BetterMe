@@ -18,7 +18,7 @@ import {
   getLocalTodayISO,
 } from './scheduledReminders.js'
 
-export const MAX_RECONFORT_NOTIFICATIONS_PER_DAY = 3
+export const MAX_RECONFORT_NOTIFICATIONS_PER_DAY = 1
 /** Évite de renvoyer un message déjà utilisé sur les N derniers jours (si d'autres existent). */
 export const RECENT_RECONFORT_LOOKBACK_DAYS = 7
 
@@ -601,7 +601,7 @@ export async function scheduleReconfortNotification(supabase, userId, payload) {
  * Évalue les messages réconfort et planifie des notifications (kind: reconfort uniquement).
  * - Un message n'est envoyé que si toutes ses conditions sont remplies (ET).
  * - Chaque message compte pour une seule notification, même s'il a plusieurs conditions.
- * - Maximum 3 notifications réconfort par jour (les autres types ne comptent pas).
+ * - Maximum 1 notification réconfort par jour (les autres types ne comptent pas).
  * - Si 2 messages sont entièrement éligibles, seulement 2 notifications sont planifiées.
  * - Sinon, un message au hasard parmi ceux qui remplissent le plus de conditions (partiel).
  * - Si le pool symptomatique ne propose qu'un message déjà envoyé récemment, on ignore
