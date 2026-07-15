@@ -210,6 +210,22 @@ function averageRounded(values) {
   return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length)
 }
 
+const MIN_CYCLE_LEN = 15
+const MAX_CYCLE_LEN = 60
+
+/** Jours entre le début réel du cycle idx et celui du cycle suivant (durée du cycle idx). */
+export function computeDureeCycleReelleForCycle(cycles, idx) {
+  const cur = cycles[idx]
+  const next = cycles[idx + 1]
+  if (!cur || !next) return null
+  const curStart = getRealDebutReglesNaturel(cur)
+  const nextStart = getRealDebutReglesNaturel(next)
+  if (!curStart || !nextStart) return null
+  const diff = daysBetweenISO(curStart, nextStart)
+  if (diff == null || diff < MIN_CYCLE_LEN || diff > MAX_CYCLE_LEN) return null
+  return diff
+}
+
 function getDureeReglesForForecast(numeroCycle, prev, previousCycles) {
   if (numeroCycle === 2) {
     return prev[COL_NATUREL.dureeRegles] ?? DEFAULT_RULES_LEN
@@ -340,15 +356,9 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
   const cycles = await listCyclesNaturel(supabase, userId)
   if (!cycles.length) return []
 
-  const cycleRealLens = []
-  for (let i = 1; i < cycles.length; i++) {
-    const prev = cycles[i - 1]
-    const cur = cycles[i]
-    const prevStart = getRealDebutReglesNaturel(prev)
-    const curStart = getRealDebutReglesNaturel(cur)
-    const diff = prevStart && curStart ? daysBetweenISO(prevStart, curStart) : null
-    if (diff != null && diff >= 15 && diff <= 60) cycleRealLens.push(diff)
-  }
+  const cycleRealLens = cycles
+    .map((_, idx) => computeDureeCycleReelleForCycle(cycles, idx))
+    .filter((v) => v != null)
 
   const rulesLens = cycles
     .map((c) => getRealOrOngoingDureeReglesNaturel(c) ?? c[COL_NATUREL.dureeRegles])
@@ -360,15 +370,7 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
   const updates = cycles.map((c, idx) => {
     const dateDebutReglesEstimee = c[COL_NATUREL.dateDebutReglesEstimee]
     const realRulesLen = getRealOrOngoingDureeReglesNaturel(c)
-    const effectiveCycleLen =
-      idx >= 1
-        ? (() => {
-            const prevStart = getRealDebutReglesNaturel(cycles[idx - 1])
-            const curStart = getRealDebutReglesNaturel(c)
-            const diff = prevStart && curStart ? daysBetweenISO(prevStart, curStart) : null
-            return diff != null && diff >= 15 && diff <= 60 ? diff : avgCycleLen
-          })()
-        : (c[COL_NATUREL.dureeCycle] ?? avgCycleLen)
+    const effectiveCycleLen = c[COL_NATUREL.dureeCycle] ?? avgCycleLen
 
     const derived = computeNaturalCycleDerivedFields({
       dateDebutReglesEstimee,
@@ -384,15 +386,7 @@ export async function refreshAllCyclesNaturelEstimees(supabase, userId) {
       [COL_NATUREL.fenetreFertileDebut]: derived[COL_NATUREL.fenetreFertileDebut],
       [COL_NATUREL.fenetreFertileFin]: derived[COL_NATUREL.fenetreFertileFin],
       [COL_NATUREL.dateProchainesReglesEstimee]: derived[COL_NATUREL.dateProchainesReglesEstimee],
-      [COL_NATUREL.dureeCycleReelle]:
-        idx >= 1
-          ? (() => {
-              const prevStart = getRealDebutReglesNaturel(cycles[idx - 1])
-              const curStart = getRealDebutReglesNaturel(c)
-              const diff = prevStart && curStart ? daysBetweenISO(prevStart, curStart) : null
-              return diff != null && diff >= 15 && diff <= 60 ? diff : null
-            })()
-          : null,
+      [COL_NATUREL.dureeCycleReelle]: computeDureeCycleReelleForCycle(cycles, idx),
     }
 
     return { id: c.id, patch }
