@@ -476,7 +476,11 @@ function onSidebarDragStart(path, event) {
 }
 
 function onSidebarFolderHeaderDragStart(path, event) {
-  if (event.target?.closest?.('.nav-sidebar-folder__rename')) {
+  if (
+    event.target?.closest?.(
+      '.nav-sidebar-folder__rename, .nav-sidebar-folder__actions',
+    )
+  ) {
     event.preventDefault()
     return
   }
@@ -651,6 +655,21 @@ function openFolderContextMenu(event, folderId, name) {
     name: name || 'Nouveau dossier',
     x: event.clientX,
     y: event.clientY,
+  }
+}
+
+/** Ouverture du menu via le bouton ⋮ (mobile / tactile). */
+function openFolderActionsFromButton(event, folderId, name) {
+  event.preventDefault()
+  event.stopPropagation()
+  const rect = event.currentTarget?.getBoundingClientRect?.()
+  const x = rect ? Math.min(rect.left, window.innerWidth - 180) : event.clientX
+  const y = rect ? rect.bottom + 6 : event.clientY
+  folderContextMenu.value = {
+    folderId,
+    name: name || 'Nouveau dossier',
+    x: Math.max(8, x),
+    y: Math.max(8, y),
   }
 }
 
@@ -940,6 +959,25 @@ const toggleSidebar = () => {
                   <polyline points="6 9 12 15 18 9"></polyline>
                 </svg>
               </span>
+            </button>
+            <button
+              type="button"
+              class="nav-sidebar-folder__actions"
+              title="Options du dossier"
+              aria-label="Options du dossier"
+              @click.stop="openFolderActionsFromButton($event, node.id, node.name)"
+              @pointerdown.stop
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="5" r="1.6" />
+                <circle cx="12" cy="12" r="1.6" />
+                <circle cx="12" cy="19" r="1.6" />
+              </svg>
             </button>
           </div>
 
@@ -1515,6 +1553,44 @@ const toggleSidebar = () => {
   font-weight: 600;
 }
 
+.nav-sidebar-folder__actions {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  margin-right: 0.2rem;
+  padding: 0;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: #ad81be;
+  cursor: pointer;
+  opacity: 0.7;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease;
+}
+
+.nav-sidebar-folder__actions svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.nav-sidebar-folder__actions:hover,
+.nav-sidebar-folder__actions:focus-visible {
+  opacity: 1;
+  background: rgba(213, 181, 234, 0.16);
+}
+
+@media (max-width: 768px) {
+  .nav-sidebar-folder__actions {
+    display: inline-flex;
+  }
+}
+
 .sidebar-folder-context {
   position: fixed;
   z-index: 400;
@@ -1578,6 +1654,15 @@ const toggleSidebar = () => {
     background: rgba(25, 20, 35, 0.85);
     color: #f0e8f8;
     border-color: rgba(213, 181, 234, 0.3);
+  }
+
+  .nav-sidebar-folder__actions {
+    color: #d5b5ea;
+  }
+
+  .nav-sidebar-folder__actions:hover,
+  .nav-sidebar-folder__actions:focus-visible {
+    background: rgba(213, 181, 234, 0.14);
   }
 
   .sidebar-folder-context {
