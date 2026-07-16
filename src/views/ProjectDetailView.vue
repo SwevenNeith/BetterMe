@@ -13,6 +13,8 @@ import {
   PROJECT_RESET_PERIODE_OPTIONS,
 } from '../constants/projectProgress.js'
 import { supabase } from '../lib/supabase.js'
+import { listHabits } from '../services/habits.js'
+import { listHabitLogsForRange } from '../services/habitLogs.js'
 import {
   addProgressLog,
   fetchProgressLogsForProject,
@@ -30,6 +32,7 @@ import {
   persistSubstepOrders,
   updateProjectAppearance,
   updateProjectDescription,
+  updateProjectHabitId,
   updateProjectTitle,
   updateStepDescription,
   updateStepDone,
@@ -40,6 +43,13 @@ import {
   updateSubstepProgressSettings,
   updateSubstepTitle,
 } from '../services/projects.js'
+import { reconcileProjectDoneStates } from '../services/projectDoneSync.js'
+import {
+  buildHabitLogsByDate,
+  getHabitLinkedCibleForPeriode,
+  getHabitLogsFetchRangeForProject,
+  HABIT_PROJECT_TARGET_RATIO,
+} from '../utils/habitProjectLink.js'
 
 const resetPeriodeOptions = PROJECT_RESET_PERIODE_OPTIONS
 
@@ -70,16 +80,40 @@ const substepForm = reactive({
 const progressLogsByItemId = ref({})
 
 const editPanel = ref(null)
+const habitPickerOpen = ref(false)
+const activeHabits = ref([])
+const linkedHabit = ref(null)
+const habitLogsByDate = ref({})
 
 const draggingStepKey = ref(null)
 const draggingSubstepKey = ref(null)
 
 const projectId = computed(() => route.params.projectId)
 
+const isHabitLinked = computed(() => Boolean(project.value?.habit_id))
+
+const habitLinkHint = computed(() => {
+  if (!linkedHabit.value) return ''
+  const pct = Math.round(HABIT_PROJECT_TARGET_RATIO * 100)
+  return `Lié à « ${linkedHabit.value.nom} » — objectif ${pct} % de l’habitude selon la réinitialisation.`
+})
+
 const stepsProgress = computed(() => {
   const steps = project.value?.steps ?? []
   return `${doneCount(steps)}/${steps.length}`
 })
+
+function itemUsesQuantite(item) {
+  return isHabitLinked.value || hasQuantiteTracking(item)
+}
+
+function getEffectiveCible(item) {
+  if (!isHabitLinked.value) return Number(item?.quantite_cible) || 0
+  return getHabitLinkedCibleForPeriode(
+    habitLogsByDate.value,
+    item?.reset_periode || DEFAULT_RESET_PERIODE,
+  )
+}
 
 function hasDescription(text) {
   return String(text ?? '').trim().length > 0
@@ -104,7 +138,7 @@ function sortDoneLast(items) {
   const checkboxDoneToAppend = []
 
   for (const item of items) {
-    if (hasQuantiteTracking(item) || !item.is_done) {
+    if (itemUsesQuantite(item) || !item.is_done) {
       keepInPlace.push(item)
     } else {
       checkboxDoneToAppend.push(item)
@@ -154,6 +188,7 @@ function openEdit(kind, item) {
     description: item.description ?? '',
     icone: item.icone ?? null,
     couleur: item.couleur ?? '#ad81be',
+    habit_id: item.habit_id ?? null,
     quantite_cible: item.quantite_cible ?? DEFAULT_QUANTITE_CIBLE,
     reset_periode: item.reset_periode ?? DEFAULT_RESET_PERIODE,
   }
@@ -161,6 +196,7 @@ function openEdit(kind, item) {
 
 function closeEdit() {
   editPanel.value = null
+  habitPickerOpen.value = false
 }
 
 function openStepForm() {
@@ -206,9 +242,72 @@ function setItemLogs(itemId, logs) {
 }
 
 function syncItemDoneState(item, logs) {
-  if (!hasQuantiteTracking(item)) return Boolean(item.is_done)
+  if (!itemUsesQuantite(item)) return Boolean(item.is_done)
+  const cible = getEffectiveCible(item)
+  if (cible < 1) return false
   const count = getCurrentPeriodCount(logs, item.reset_periode)
-  return count >= item.quantite_cible
+  return count >= cible
+}
+
+async function loadLinkedHabitData(proj) {
+  linkedHabit.value = null
+  habitLogsByDate.value = {}
+  if (!userId.value || !proj?.habit_id) return
+
+  try {
+    const habits = await listHabits(supabase, userId.value)
+    activeHabits.value = habits
+    linkedHabit.value = habits.find((h) => h.id === proj.habit_id) ?? null
+    if (!linkedHabit.value) {
+      // Habitude archivée / introuvable : on garde l’id mais sans logs
+      const archived = await listHabits(supabase, userId.value, { includeAll: true })
+      linkedHabit.value = archived.find((h) => h.id === proj.habit_id) ?? null
+      return
+    }
+    const { start, end } = getHabitLogsFetchRangeForProject()
+    const logs = await listHabitLogsForRange(supabase, userId.value, proj.habit_id, start, end)
+    habitLogsByDate.value = buildHabitLogsByDate(logs)
+  } catch (err) {
+    console.warn('Lien habitude indisponible :', err)
+    linkedHabit.value = null
+    habitLogsByDate.value = {}
+  }
+}
+
+async function ensureActiveHabitsLoaded() {
+  if (!userId.value) return
+  try {
+    activeHabits.value = await listHabits(supabase, userId.value)
+  } catch (err) {
+    console.error(err)
+    activeHabits.value = []
+  }
+}
+
+async function openHabitPicker() {
+  await ensureActiveHabitsLoaded()
+  habitPickerOpen.value = true
+}
+
+function selectHabitForEdit(habitId) {
+  if (!editPanel.value || editPanel.value.kind !== 'project') return
+  editPanel.value.habit_id = habitId
+  habitPickerOpen.value = false
+}
+
+function clearHabitLinkInEdit() {
+  if (!editPanel.value || editPanel.value.kind !== 'project') return
+  editPanel.value.habit_id = null
+  habitPickerOpen.value = false
+}
+
+function editPanelHabitLabel() {
+  const id = editPanel.value?.habit_id
+  if (!id) return ''
+  const habit =
+    activeHabits.value.find((h) => h.id === id) ||
+    (linkedHabit.value?.id === id ? linkedHabit.value : null)
+  return habit?.nom || 'Habitude sélectionnée'
 }
 
 async function loadProgressLogs(proj) {
@@ -242,17 +341,13 @@ async function loadProject() {
       return
     }
     project.value = found
-    await loadProgressLogs(found)
-    for (const step of project.value.steps) {
-      if (hasQuantiteTracking(step)) {
-        step.is_done = syncItemDoneState(step, getItemLogs(step.id))
-      }
-      for (const substep of step.substeps) {
-        if (hasQuantiteTracking(substep)) {
-          substep.is_done = syncItemDoneState(substep, getItemLogs(substep.id))
-        }
-      }
-    }
+    await Promise.all([loadProgressLogs(found), loadLinkedHabitData(found)])
+    await reconcileProjectDoneStates(supabase, userId.value, project.value, {
+      logsByItemId: progressLogsByItemId.value,
+      habitLinked: Boolean(project.value.habit_id),
+      habitLogsByDate: habitLogsByDate.value,
+      persist: true,
+    })
     normalizeProjectStepOrder(project.value)
   } catch (err) {
     console.error(err)
@@ -277,10 +372,33 @@ async function saveEditPanel() {
       await updateProjectTitle(supabase, userId.value, project.value.id, title)
       await updateProjectDescription(supabase, userId.value, project.value.id, description)
       await updateProjectAppearance(supabase, userId.value, project.value.id, icone, couleur)
+      try {
+        await updateProjectHabitId(supabase, userId.value, project.value.id, editPanel.value.habit_id)
+        project.value.habit_id = editPanel.value.habit_id || null
+      } catch (habitErr) {
+        if (String(habitErr.message || '').includes('habit_id')) {
+          loadError.value =
+            'Colonne habit_id manquante. Exécute scripts/migrate-projects-habit-id.sql dans Supabase.'
+        } else {
+          throw habitErr
+        }
+      }
       project.value.title = title
       project.value.description = description
       project.value.icone = (icone ?? '').trim() || null
       project.value.couleur = (couleur ?? '').trim() || '#ad81be'
+      await loadLinkedHabitData(project.value)
+      for (const step of project.value.steps) {
+        if (itemUsesQuantite(step)) {
+          step.is_done = syncItemDoneState(step, getItemLogs(step.id))
+        }
+        for (const substep of step.substeps) {
+          if (itemUsesQuantite(substep)) {
+            substep.is_done = syncItemDoneState(substep, getItemLogs(substep.id))
+          }
+        }
+      }
+      normalizeProjectStepOrder(project.value)
     } else if (kind === 'step') {
       await updateStepTitle(supabase, userId.value, id, title)
       await updateStepDescription(supabase, userId.value, id, description)
@@ -297,7 +415,7 @@ async function saveEditPanel() {
         step.description = description
         step.quantite_cible = normalizeQuantiteCible(editPanel.value.quantite_cible)
         step.reset_periode = editPanel.value.reset_periode || DEFAULT_RESET_PERIODE
-        if (hasQuantiteTracking(step)) {
+        if (itemUsesQuantite(step)) {
           step.is_done = syncItemDoneState(step, getItemLogs(step.id))
         }
       }
@@ -317,7 +435,7 @@ async function saveEditPanel() {
         substep.description = description
         substep.quantite_cible = normalizeQuantiteCible(editPanel.value.quantite_cible)
         substep.reset_periode = editPanel.value.reset_periode || DEFAULT_RESET_PERIODE
-        if (hasQuantiteTracking(substep)) {
+        if (itemUsesQuantite(substep)) {
           substep.is_done = syncItemDoneState(substep, getItemLogs(substep.id))
         }
       }
@@ -330,7 +448,7 @@ async function saveEditPanel() {
 }
 
 async function applyItemDoneReorder(item, list, wasDone) {
-  if (hasQuantiteTracking(item)) return
+  if (itemUsesQuantite(item)) return
   const nowDone = item.is_done
   if (nowDone && !wasDone) moveItemDoneLast(list, item.id)
   else if (!nowDone && wasDone) moveItemPendingEnd(list, item.id)
@@ -338,7 +456,7 @@ async function applyItemDoneReorder(item, list, wasDone) {
 }
 
 async function toggleStepDone(step) {
-  if (!userId.value || !project.value || hasQuantiteTracking(step)) return
+  if (!userId.value || !project.value || itemUsesQuantite(step)) return
   const next = !step.is_done
   step.is_done = next
   if (next) moveItemDoneLast(project.value.steps, step.id)
@@ -355,7 +473,7 @@ async function toggleStepDone(step) {
 }
 
 async function toggleSubstepDone(substep) {
-  if (!userId.value || !project.value || hasQuantiteTracking(substep)) return
+  if (!userId.value || !project.value || itemUsesQuantite(substep)) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
   if (!step) return
 
@@ -375,7 +493,7 @@ async function toggleSubstepDone(substep) {
 }
 
 async function onStepIncrement(step) {
-  if (!userId.value || !project.value || !hasQuantiteTracking(step)) return
+  if (!userId.value || !project.value || !itemUsesQuantite(step)) return
   const wasDone = step.is_done
   const previousLogs = getItemLogs(step.id)
   try {
@@ -397,7 +515,7 @@ async function onStepIncrement(step) {
 }
 
 async function onStepDecrement(step) {
-  if (!userId.value || !project.value || !hasQuantiteTracking(step)) return
+  if (!userId.value || !project.value || !itemUsesQuantite(step)) return
   const wasDone = step.is_done
   const previousLogs = getItemLogs(step.id)
   try {
@@ -423,7 +541,7 @@ async function onStepDecrement(step) {
 }
 
 async function onSubstepIncrement(substep) {
-  if (!userId.value || !project.value || !hasQuantiteTracking(substep)) return
+  if (!userId.value || !project.value || !itemUsesQuantite(substep)) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
   if (!step) return
 
@@ -447,7 +565,7 @@ async function onSubstepIncrement(substep) {
 }
 
 async function onSubstepDecrement(substep) {
-  if (!userId.value || !project.value || !hasQuantiteTracking(substep)) return
+  if (!userId.value || !project.value || !itemUsesQuantite(substep)) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
   if (!step) return
 
@@ -704,6 +822,7 @@ watch(projectId, () => {
         </div>
 
         <p class="project-detail-progress">{{ stepsProgress }} étapes terminées</p>
+        <p v-if="habitLinkHint" class="project-detail-habit-link">{{ habitLinkHint }}</p>
 
         <p v-if="!(editPanel?.kind === 'project') && hasDescription(project.description)" class="project-detail-description">
           {{ project.description }}
@@ -728,6 +847,49 @@ watch(projectId, () => {
           <span class="project-form-label">Description <span class="project-form-optional">(optionnel)</span></span>
           <textarea v-model="editPanel.description" class="project-form-textarea" rows="3" maxlength="1000" />
         </label>
+
+        <div class="project-form-field">
+          <span class="project-form-label">Habitude liée</span>
+          <p v-if="editPanel.habit_id" class="project-habit-link-selected">
+            {{ editPanelHabitLabel() }}
+          </p>
+          <div class="project-habit-link-actions">
+            <button type="button" class="project-habit-link-btn" @click="openHabitPicker">
+              {{ editPanel.habit_id ? 'Changer l’habitude' : 'Lier à une habitude' }}
+            </button>
+            <button
+              v-if="editPanel.habit_id"
+              type="button"
+              class="project-cancel-btn"
+              @click="clearHabitLinkInEdit"
+            >
+              Retirer
+            </button>
+          </div>
+          <p class="project-habit-link-hint">
+            Les étapes suivront automatiquement 80&nbsp;% de cette habitude (jour / semaine / mois selon leur réinitialisation).
+          </p>
+        </div>
+
+        <div v-if="habitPickerOpen" class="project-habit-picker" role="listbox" aria-label="Choisir une habitude">
+          <p v-if="!activeHabits.length" class="project-habit-picker__empty">
+            Aucune habitude active.
+          </p>
+          <button
+            v-for="habit in activeHabits"
+            :key="habit.id"
+            type="button"
+            class="project-habit-picker__item"
+            :class="{ 'project-habit-picker__item--active': editPanel.habit_id === habit.id }"
+            role="option"
+            :aria-selected="editPanel.habit_id === habit.id"
+            @click="selectHabitForEdit(habit.id)"
+          >
+            <span class="project-habit-picker__icon" aria-hidden="true">{{ habit.icone || '•' }}</span>
+            <span class="project-habit-picker__name">{{ habit.nom }}</span>
+          </button>
+        </div>
+
         <div class="project-form-actions">
           <button type="submit" class="project-action-btn project-action-btn--small">Enregistrer</button>
           <button type="button" class="project-cancel-btn" @click="closeEdit">Annuler</button>
@@ -754,7 +916,7 @@ watch(projectId, () => {
             <textarea v-model="stepForm.description" class="project-form-textarea" rows="2" maxlength="1000" />
           </label>
           <div class="project-form-row">
-            <label class="project-form-field">
+            <label v-if="!isHabitLinked" class="project-form-field">
               <span class="project-form-label">
                 Quantité <span class="project-form-optional">(0 = une fois)</span>
               </span>
@@ -767,7 +929,10 @@ watch(projectId, () => {
                 required
               />
             </label>
-            <label v-if="stepForm.quantite_cible >= 1" class="project-form-field">
+            <p v-else class="project-habit-auto-qty">
+              Quantité auto : 80&nbsp;% de l’habitude liée
+            </p>
+            <label v-if="isHabitLinked || stepForm.quantite_cible >= 1" class="project-form-field">
               <span class="project-form-label">Réinitialiser</span>
               <select v-model="stepForm.reset_periode" class="project-form-input">
                 <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">
@@ -803,6 +968,9 @@ watch(projectId, () => {
                 :item="s"
                 :logs="getItemLogs(s.id)"
                 :project-color="project.couleur"
+                :habit-linked="isHabitLinked"
+                :habit-logs-by-date="habitLogsByDate"
+                :effective-quantite-cible="getEffectiveCible(s)"
                 @toggle="toggleStepDone(s)"
                 @increment="onStepIncrement(s)"
                 @decrement="onStepDecrement(s)"
@@ -861,7 +1029,7 @@ watch(projectId, () => {
                     <textarea v-model="editPanel.description" class="project-form-textarea" rows="2" maxlength="1000" />
                   </label>
                   <div class="project-form-row">
-                    <label class="project-form-field">
+                    <label v-if="!isHabitLinked" class="project-form-field">
                       <span class="project-form-label">
                         Quantité <span class="project-form-optional">(0 = une fois)</span>
                       </span>
@@ -874,7 +1042,10 @@ watch(projectId, () => {
                         required
                       />
                     </label>
-                    <label v-if="editPanel.quantite_cible >= 1" class="project-form-field">
+                    <p v-else class="project-habit-auto-qty">
+                      Quantité auto : 80&nbsp;% de l’habitude liée
+                    </p>
+                    <label v-if="isHabitLinked || editPanel.quantite_cible >= 1" class="project-form-field">
                       <span class="project-form-label">Réinitialiser</span>
                       <select v-model="editPanel.reset_periode" class="project-form-input">
                         <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">
@@ -908,7 +1079,7 @@ watch(projectId, () => {
                     <textarea v-model="substepForm.description" class="project-form-textarea" rows="2" maxlength="1000" />
                   </label>
                   <div class="project-form-row">
-                    <label class="project-form-field">
+                    <label v-if="!isHabitLinked" class="project-form-field">
                       <span class="project-form-label">
                         Quantité <span class="project-form-optional">(0 = une fois)</span>
                       </span>
@@ -921,7 +1092,10 @@ watch(projectId, () => {
                         required
                       />
                     </label>
-                    <label v-if="substepForm.quantite_cible >= 1" class="project-form-field">
+                    <p v-else class="project-habit-auto-qty">
+                      Quantité auto : 80&nbsp;% de l’habitude liée
+                    </p>
+                    <label v-if="isHabitLinked || substepForm.quantite_cible >= 1" class="project-form-field">
                       <span class="project-form-label">Réinitialiser</span>
                       <select v-model="substepForm.reset_periode" class="project-form-input">
                         <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">
@@ -959,6 +1133,9 @@ watch(projectId, () => {
                           :logs="getItemLogs(ss.id)"
                           :project-color="project.couleur"
                           compact
+                          :habit-linked="isHabitLinked"
+                          :habit-logs-by-date="habitLogsByDate"
+                          :effective-quantite-cible="getEffectiveCible(ss)"
                           @toggle="toggleSubstepDone(ss)"
                           @increment="onSubstepIncrement(ss)"
                           @decrement="onSubstepDecrement(ss)"
@@ -1015,7 +1192,7 @@ watch(projectId, () => {
                           <textarea v-model="editPanel.description" class="project-form-textarea" rows="2" maxlength="1000" />
                         </label>
                         <div class="project-form-row">
-                          <label class="project-form-field">
+                          <label v-if="!isHabitLinked" class="project-form-field">
                             <span class="project-form-label">
                               Quantité <span class="project-form-optional">(0 = une fois)</span>
                             </span>
@@ -1028,7 +1205,10 @@ watch(projectId, () => {
                               required
                             />
                           </label>
-                          <label v-if="editPanel.quantite_cible >= 1" class="project-form-field">
+                          <p v-else class="project-habit-auto-qty">
+                            Quantité auto : 80&nbsp;% de l’habitude liée
+                          </p>
+                          <label v-if="isHabitLinked || editPanel.quantite_cible >= 1" class="project-form-field">
                             <span class="project-form-label">Réinitialiser</span>
                             <select v-model="editPanel.reset_periode" class="project-form-input">
                               <option v-for="opt in resetPeriodeOptions" :key="opt.value" :value="opt.value">
@@ -1103,8 +1283,113 @@ watch(projectId, () => {
   font-weight: 800;
 }
 
-.project-detail-swatch {
+.project-detail-habit-link {
+  margin: -0.15rem 0 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #72a098;
+  line-height: 1.4;
+}
+
+.project-habit-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.project-habit-link-btn {
+  padding: 0.55rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  background: rgba(213, 181, 234, 0.12);
+  color: #ad81be;
+  font-weight: 700;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.project-habit-link-btn:hover {
+  background: rgba(213, 181, 234, 0.22);
+}
+
+.project-habit-link-selected {
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #2c3e50;
+}
+
+.project-habit-link-hint,
+.project-habit-auto-qty {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #8c98a4;
+  line-height: 1.4;
+}
+
+.project-habit-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: 0.45rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.3);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.project-habit-picker__empty {
+  margin: 0;
+  padding: 0.65rem;
+  text-align: center;
+  color: #8c98a4;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.project-habit-picker__item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #2c3e50;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-habit-picker__item:hover {
+  background: rgba(213, 181, 234, 0.14);
+  color: #ad81be;
+}
+
+.project-habit-picker__item--active {
+  background: linear-gradient(135deg, rgba(213, 181, 234, 0.22), rgba(149, 209, 170, 0.12));
+  color: #ad81be;
+  font-weight: 800;
+}
+
+.project-habit-picker__icon {
+  width: 1.4rem;
+  text-align: center;
   flex-shrink: 0;
+}
+
+.project-habit-picker__name {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-detail-swatch {
   display: inline-flex;
   align-items: center;
   justify-content: center;

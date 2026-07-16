@@ -3,6 +3,10 @@ import { computed, ref, watch } from 'vue'
 import { hasQuantiteTracking, PROJECT_RESET_PERIODE } from '../constants/projectProgress.js'
 import { getCurrentPeriodCount } from '../services/projectProgress.js'
 import { buildHistoryEntries } from '../utils/projectProgressPeriods.js'
+import {
+  formatHabitLinkedCountLabel,
+  getHabitLinkedCibleForRange,
+} from '../utils/habitProjectLink.js'
 
 const HISTORY_PAGE_SIZE = 10
 const FILTER_YEAR_SPAN = 6
@@ -24,6 +28,21 @@ const props = defineProps({
     type: String,
     default: '#ad81be',
   },
+  /** Projet lié à une habitude : compteur forcé + cible dynamique 80 %. */
+  habitLinked: {
+    type: Boolean,
+    default: false,
+  },
+  /** Logs habit indexés par date ISO. */
+  habitLogsByDate: {
+    type: Object,
+    default: () => ({}),
+  },
+  /** Quantité cible effective (80 % habit) ; sinon item.quantite_cible. */
+  effectiveQuantiteCible: {
+    type: Number,
+    default: null,
+  },
 })
 
 const emit = defineEmits(['increment', 'decrement', 'toggle'])
@@ -41,16 +60,56 @@ const monthPage = ref(0)
 const yearPage = ref(0)
 const rangePage = ref(0)
 
-const usesQuantiteTracking = computed(() => hasQuantiteTracking(props.item))
+const usesQuantiteTracking = computed(
+  () => props.habitLinked || hasQuantiteTracking(props.item),
+)
+
+const displayCible = computed(() => {
+  if (props.habitLinked && props.effectiveQuantiteCible != null) {
+    return Math.max(0, Number(props.effectiveQuantiteCible) || 0)
+  }
+  return Number(props.item.quantite_cible) || 0
+})
 
 const useJourFilter = computed(() => props.item.reset_periode === PROJECT_RESET_PERIODE.JOUR)
 
 const currentCount = computed(() => getCurrentPeriodCount(props.logs, props.item.reset_periode))
 
-const quantiteLabel = computed(() => `${currentCount.value}/${props.item.quantite_cible}`)
+const quantiteLabel = computed(() => `${currentCount.value}/${displayCible.value}`)
 
 const historyEntries = computed(() => buildHistoryEntries(props.logs, props.item.reset_periode))
 
+function formatCountLabel(count, startIso, endIso) {
+  if (!props.habitLinked) return `${count} fois`
+  const cible = getHabitLinkedCibleForRange(props.habitLogsByDate, startIso, endIso)
+  return formatHabitLinkedCountLabel(count, cible)
+}
+
+function monthBoundsIso(year, month) {
+  const start = `${year}-${String(month).padStart(2, '0')}-01`
+  const lastDay = new Date(year, month, 0).getDate()
+  const end = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+  return { start, end }
+}
+
+function yearBoundsIso(year) {
+  return { start: `${year}-01-01`, end: `${year}-12-31` }
+}
+
+function rangeRowBounds(row) {
+  if (historyMode.value === 'jour') return [row.key, row.key]
+  if (historyMode.value === 'mois') {
+    const b = monthBoundsIso(Number(row.key.slice(0, 4)), Number(row.key.slice(5, 7)))
+    return [b.start, b.end]
+  }
+  if (historyMode.value === 'annee') {
+    const b = yearBoundsIso(Number(row.key))
+    return [b.start, b.end]
+  }
+  // semaine : key = lundi ISO
+  const bounds = getWeekBoundsFromISO(row.key)
+  return [row.key, toISODateLocal(bounds.end)]
+}
 function roundAverage(total, count) {
   if (!count) return 0
   return Math.round((total / count) * 10) / 10
@@ -227,6 +286,7 @@ const activeDaySummaries = computed(() => {
       index: idx + 1,
       label: `Jour ${idx + 1}`,
       dateLabel: formatDayLabel(parseISOToDate(d.dayIso)),
+      dayIso: d.dayIso,
       count: d.count,
     }))
 })
@@ -251,6 +311,7 @@ const activeWeekSummaries = computed(() => {
         index: idx + 1,
         label: `Semaine ${idx + 1}`,
         dateLabel: weekLabel(bounds),
+        weekStartIso: w.weekStartIso,
         count: w.count,
       }
     })
@@ -579,7 +640,9 @@ function goToHistoryPage(page) {
               <li v-for="row in paginatedRangeDetails" :key="row.key" class="project-history-modal__item">
                 <div class="project-history-modal__item-head">
                   <span class="project-history-modal__item-title">{{ row.label }}</span>
-                  <span class="project-history-modal__item-count">{{ row.count }} fois</span>
+                  <span class="project-history-modal__item-count">{{
+                    formatCountLabel(row.count, ...rangeRowBounds(row))
+                  }}</span>
                 </div>
               </li>
             </ul>
@@ -613,7 +676,9 @@ function goToHistoryPage(page) {
               <li v-for="d in paginatedDays" :key="d.index" class="project-history-modal__item">
                 <div class="project-history-modal__item-head">
                   <span class="project-history-modal__item-title">{{ d.label }}</span>
-                  <span class="project-history-modal__item-count">{{ d.count }} fois</span>
+                  <span class="project-history-modal__item-count">{{
+                    formatCountLabel(d.count, d.dayIso, d.dayIso)
+                  }}</span>
                 </div>
                 <span class="project-history-modal__item-date">{{ d.dateLabel }}</span>
               </li>
@@ -648,7 +713,13 @@ function goToHistoryPage(page) {
               <li v-for="w in paginatedWeeks" :key="w.index" class="project-history-modal__item">
                 <div class="project-history-modal__item-head">
                   <span class="project-history-modal__item-title">{{ w.label }}</span>
-                  <span class="project-history-modal__item-count">{{ w.count }} fois</span>
+                  <span class="project-history-modal__item-count">{{
+                    formatCountLabel(
+                      w.count,
+                      w.weekStartIso,
+                      toISODateLocal(getWeekBoundsFromISO(w.weekStartIso).end),
+                    )
+                  }}</span>
                 </div>
                 <span class="project-history-modal__item-date">{{ w.dateLabel }}</span>
               </li>
@@ -683,7 +754,13 @@ function goToHistoryPage(page) {
               <li v-for="m in paginatedMonths" :key="m.month" class="project-history-modal__item">
                 <div class="project-history-modal__item-head">
                   <span class="project-history-modal__item-title">{{ m.label }}</span>
-                  <span class="project-history-modal__item-count">{{ m.count }} fois</span>
+                  <span class="project-history-modal__item-count">{{
+                    formatCountLabel(
+                      m.count,
+                      monthBoundsIso(historyYear, m.month).start,
+                      monthBoundsIso(historyYear, m.month).end,
+                    )
+                  }}</span>
                 </div>
               </li>
             </ul>
@@ -717,7 +794,13 @@ function goToHistoryPage(page) {
               <li v-for="y in paginatedYears" :key="y.year" class="project-history-modal__item">
                 <div class="project-history-modal__item-head">
                   <span class="project-history-modal__item-title">{{ y.year }}</span>
-                  <span class="project-history-modal__item-count">{{ y.count }} fois</span>
+                  <span class="project-history-modal__item-count">{{
+                    formatCountLabel(
+                      y.count,
+                      yearBoundsIso(y.year).start,
+                      yearBoundsIso(y.year).end,
+                    )
+                  }}</span>
                 </div>
               </li>
             </ul>

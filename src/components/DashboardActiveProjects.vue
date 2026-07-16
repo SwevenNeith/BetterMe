@@ -10,6 +10,7 @@ import {
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
 } from '../services/pageVisibility.js'
+import { syncProjectsListDoneStates } from '../services/projectDoneSync.js'
 import {
   applyAlphabeticalProjectOrder,
   fetchProjectsTree,
@@ -96,6 +97,7 @@ async function loadProjects() {
     if (!isProjectsCustomOrder(props.userId)) {
       list = await applyAlphabeticalProjectOrder(supabase, props.userId, list)
     }
+    await syncProjectsListDoneStates(supabase, props.userId, list)
     projects.value = list
   } catch (err) {
     console.error('dashboard projects:', err)

@@ -46,6 +46,7 @@ function normalizeProjectRow(p, index) {
     icone: iconeRaw || null,
     couleur: (p.couleur ?? '').trim() || DEFAULT_PROJECT_COLOR,
     sort_order: p.sort_order ?? index + 1,
+    habit_id: p.habit_id ?? null,
     steps: [],
   }
 }
@@ -61,10 +62,19 @@ export async function fetchProjectsTree(supabase, userId) {
 
   ;({ data: projRows, error: projError } = await supabase
     .from(PROJECTS_TABLE)
-    .select('id, title, description, icone, couleur, sort_order, created_at')
+    .select('id, title, description, icone, couleur, sort_order, habit_id, created_at')
     .eq('user_id', userId)
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true }))
+
+  if (projError?.message?.includes('habit_id')) {
+    ;({ data: projRows, error: projError } = await supabase
+      .from(PROJECTS_TABLE)
+      .select('id, title, description, icone, couleur, sort_order, created_at')
+      .eq('user_id', userId)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true }))
+  }
 
   if (projError?.message?.includes('icone') || projError?.message?.includes('couleur')) {
     ;({ data: projRows, error: projError } = await supabase
@@ -217,10 +227,12 @@ export async function createProject(
   description = '',
   icone = null,
   couleur = DEFAULT_PROJECT_COLOR,
+  habitId = null,
 ) {
   const desc = String(description ?? '').trim()
   const iconeRaw = (icone ?? '').trim()
   const color = (couleur ?? '').trim() || DEFAULT_PROJECT_COLOR
+  const habit_id = habitId || null
   let { error } = await supabase.from(PROJECTS_TABLE).insert({
     user_id: userId,
     title,
@@ -228,7 +240,18 @@ export async function createProject(
     description: desc,
     icone: iconeRaw || null,
     couleur: color,
+    habit_id,
   })
+  if (error?.message?.includes('habit_id')) {
+    ;({ error } = await supabase.from(PROJECTS_TABLE).insert({
+      user_id: userId,
+      title,
+      sort_order: sortOrder,
+      description: desc,
+      icone: iconeRaw || null,
+      couleur: color,
+    }))
+  }
   if (error?.message?.includes('icone') || error?.message?.includes('couleur')) {
     ;({ error } = await supabase.from(PROJECTS_TABLE).insert({
       user_id: userId,
@@ -250,6 +273,15 @@ export async function createProject(
       title,
     }))
   }
+  if (error) throw error
+}
+
+export async function updateProjectHabitId(supabase, userId, projectId, habitId) {
+  const { error } = await supabase
+    .from(PROJECTS_TABLE)
+    .update({ habit_id: habitId || null })
+    .eq('id', projectId)
+    .eq('user_id', userId)
   if (error) throw error
 }
 

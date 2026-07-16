@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import ColorPickerField from '../components/ColorPickerField.vue'
 import EmojiPickerField from '../components/EmojiPickerField.vue'
 import { supabase } from '../lib/supabase.js'
+import { listHabits } from '../services/habits.js'
 import {
   applyAlphabeticalProjectOrder,
   createProject,
@@ -12,6 +13,7 @@ import {
   markProjectsCustomOrder,
   persistProjectOrders,
 } from '../services/projects.js'
+import { syncProjectsListDoneStates } from '../services/projectDoneSync.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 
@@ -23,11 +25,14 @@ const loadError = ref('')
 
 const projects = ref([])
 const projectFormOpen = ref(false)
+const habitPickerOpen = ref(false)
+const activeHabits = ref([])
 const projectForm = reactive({
   title: '',
   description: '',
   icone: null,
   couleur: '#ad81be',
+  habit_id: null,
 })
 
 const draggingProjectId = ref(null)
@@ -51,15 +56,45 @@ function openProjectForm() {
   projectForm.description = ''
   projectForm.icone = null
   projectForm.couleur = '#ad81be'
+  projectForm.habit_id = null
+  habitPickerOpen.value = false
   projectFormOpen.value = true
 }
 
 function closeProjectForm() {
   projectFormOpen.value = false
+  habitPickerOpen.value = false
   projectForm.title = ''
   projectForm.description = ''
   projectForm.icone = null
   projectForm.couleur = '#ad81be'
+  projectForm.habit_id = null
+}
+
+async function openHabitPicker() {
+  if (!userId.value) return
+  try {
+    activeHabits.value = await listHabits(supabase, userId.value)
+  } catch (err) {
+    console.error(err)
+    activeHabits.value = []
+  }
+  habitPickerOpen.value = true
+}
+
+function selectHabit(habitId) {
+  projectForm.habit_id = habitId
+  habitPickerOpen.value = false
+}
+
+function clearHabitLink() {
+  projectForm.habit_id = null
+  habitPickerOpen.value = false
+}
+
+function selectedHabitLabel() {
+  if (!projectForm.habit_id) return ''
+  return activeHabits.value.find((h) => h.id === projectForm.habit_id)?.nom || 'Habitude sélectionnée'
 }
 
 async function loadProjects() {
@@ -72,6 +107,7 @@ async function loadProjects() {
     if (!isProjectsCustomOrder(userId.value)) {
       list = await applyAlphabeticalProjectOrder(supabase, userId.value, list)
     }
+    await syncProjectsListDoneStates(supabase, userId.value, list)
     projects.value = list
   } catch (err) {
     console.error(err)
@@ -98,6 +134,7 @@ async function submitProjectForm() {
       projectForm.description,
       projectForm.icone,
       projectForm.couleur,
+      projectForm.habit_id,
     )
     closeProjectForm()
     await loadProjects()
@@ -228,6 +265,42 @@ watch(userId, (id) => {
             placeholder="Contexte, objectif, notes…"
           />
         </label>
+
+        <div class="projects-form-field">
+          <span class="projects-form-label">Habitude liée <span class="projects-form-optional">(optionnel)</span></span>
+          <p v-if="projectForm.habit_id" class="projects-habit-selected">{{ selectedHabitLabel() }}</p>
+          <div class="projects-habit-actions">
+            <button type="button" class="projects-habit-btn" @click="openHabitPicker">
+              {{ projectForm.habit_id ? 'Changer l’habitude' : 'Lier à une habitude' }}
+            </button>
+            <button
+              v-if="projectForm.habit_id"
+              type="button"
+              class="projects-cancel-btn"
+              @click="clearHabitLink"
+            >
+              Retirer
+            </button>
+          </div>
+          <p class="projects-habit-hint">
+            Les étapes viseront automatiquement 80&nbsp;% de cette habitude selon leur période de réinitialisation.
+          </p>
+          <div v-if="habitPickerOpen" class="projects-habit-picker" role="listbox">
+            <p v-if="!activeHabits.length" class="projects-habit-empty">Aucune habitude active.</p>
+            <button
+              v-for="habit in activeHabits"
+              :key="habit.id"
+              type="button"
+              class="projects-habit-item"
+              :class="{ 'projects-habit-item--active': projectForm.habit_id === habit.id }"
+              @click="selectHabit(habit.id)"
+            >
+              <span aria-hidden="true">{{ habit.icone || '•' }}</span>
+              <span>{{ habit.nom }}</span>
+            </button>
+          </div>
+        </div>
+
         <div class="projects-form-actions">
           <button type="submit" class="projects-add-btn">Créer</button>
           <button type="button" class="projects-cancel-btn" @click="closeProjectForm">Annuler</button>
@@ -418,6 +491,87 @@ watch(userId, (id) => {
   resize: vertical;
   min-height: 4.5rem;
   line-height: 1.4;
+}
+
+.projects-habit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.projects-habit-btn {
+  padding: 0.55rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  background: rgba(213, 181, 234, 0.12);
+  color: #ad81be;
+  font-weight: 700;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.projects-habit-selected {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #2c3e50;
+}
+
+.projects-habit-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #8c98a4;
+  line-height: 1.4;
+}
+
+.projects-habit-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: 0.45rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.3);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.projects-habit-empty {
+  margin: 0;
+  padding: 0.65rem;
+  text-align: center;
+  color: #8c98a4;
+  font-weight: 600;
+}
+
+.projects-habit-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #2c3e50;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.projects-habit-item:hover {
+  background: rgba(213, 181, 234, 0.14);
+  color: #ad81be;
+}
+
+.projects-habit-item--active {
+  background: linear-gradient(135deg, rgba(213, 181, 234, 0.22), rgba(149, 209, 170, 0.12));
+  color: #ad81be;
+  font-weight: 800;
 }
 
 .projects-form-actions {
