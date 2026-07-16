@@ -92,7 +92,6 @@ function onCardDragEnd(event) {
         class="todo-item-quantite__btn"
         title="Augmenter"
         aria-label="Augmenter la quantité"
-        :disabled="item.occurrenceDone"
         @click.stop="emit('increment')"
       >
         +

@@ -236,8 +236,8 @@ export function isTodoCompletedOnDate(item, dateISO, progressMap) {
 }
 
 /**
- * Fraction de complétion d'une occurrence (0–1) pour les barres de progression.
- * Sans quantité : 0 ou 1. Avec quantité : actuelle / cible (ex. 3/10 → 0,3).
+ * Fraction de complétion d'une occurrence pour les barres de progression.
+ * Sans quantité : 0 ou 1. Avec quantité : actuelle / cible (ex. 3/10 → 0,3 ; 3/2 → 1,5).
  */
 export function getOccurrenceProgressFraction(item, dateISO, progressMap) {
   if (!isTodoDueOnDate(item, dateISO)) return 0
@@ -246,7 +246,7 @@ export function getOccurrenceProgressFraction(item, dateISO, progressMap) {
     const cible = Number(item.quantite_cible)
     if (!cible) return 0
     const actuelle = getOccurrenceQuantiteActuelle(item, dateISO, progressMap)
-    return Math.min(1, actuelle / cible)
+    return actuelle / cible
   }
 
   return isTodoCompletedOnDate(item, dateISO, progressMap) ? 1 : 0

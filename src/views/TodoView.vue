@@ -481,7 +481,7 @@ async function adjustItemQuantite(item, delta) {
   const key = progressMapKey(item, dateISO)
   const cible = Number(item.quantite_cible)
   const current = item.occurrenceQuantiteActuelle ?? 0
-  const next = Math.max(0, Math.min(cible, current + delta))
+  const next = Math.max(0, current + delta)
 
   const prevEntry = completionProgress.value.get(key)
   if (next > 0) {
@@ -782,7 +782,7 @@ watch(userId, (id) => {
       <div
         class="todo-progress__track"
         role="progressbar"
-        :aria-valuenow="currentProgress.percent"
+        :aria-valuenow="Math.min(currentProgress.percent, 100)"
         aria-valuemin="0"
         aria-valuemax="100"
         :aria-label="progressAriaLabel"
@@ -791,9 +791,9 @@ watch(userId, (id) => {
           class="todo-progress__fill"
           :class="{
             'todo-progress__fill--complete':
-              currentProgress.percent === 100 && currentProgress.total > 0,
+              currentProgress.percent >= 100 && currentProgress.total > 0,
           }"
-          :style="{ width: `${currentProgress.percent}%` }"
+          :style="{ width: `${Math.min(currentProgress.percent, 100)}%` }"
         />
       </div>
     </div>

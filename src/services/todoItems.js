@@ -295,7 +295,7 @@ export async function setTodoQuantiteForDate(supabase, userId, item, dateISO, qu
   const cible = Number(item.quantite_cible)
   if (!date || !Number.isInteger(cible) || cible < 1) return
 
-  const qty = Math.max(0, Math.min(cible, Math.round(Number(quantiteActuelle) || 0)))
+  const qty = Math.max(0, Math.round(Number(quantiteActuelle) || 0))
   const done = qty >= cible
 
   if (item.frequence === TODO_FREQUENCY.ONE_OFF) {

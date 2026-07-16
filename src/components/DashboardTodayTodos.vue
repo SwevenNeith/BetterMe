@@ -110,7 +110,7 @@ async function adjustItemQuantite(item, delta) {
   const key = `${item.id}:${getTodoOccurrenceKeyDate(item, dateISO) || dateISO}`
   const cible = Number(item.quantite_cible)
   const current = item.occurrenceQuantiteActuelle ?? 0
-  const next = Math.max(0, Math.min(cible, current + delta))
+  const next = Math.max(0, current + delta)
 
   const prevEntry = completionProgress.value.get(key)
   if (next > 0) {
@@ -244,7 +244,6 @@ onUnmounted(() => {
           <button
             type="button"
             class="dashboard-todos__quantite-btn"
-            :disabled="item.occurrenceDone"
             aria-label="Augmenter"
             @click="adjustItemQuantite(item, 1)"
           >
