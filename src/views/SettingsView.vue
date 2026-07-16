@@ -2324,6 +2324,10 @@ onUnmounted(() => {
 }
 
 .field input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 0.55rem 0.75rem;
   border-radius: 10px;
   border: 1px solid rgba(213, 181, 234, 0.35);

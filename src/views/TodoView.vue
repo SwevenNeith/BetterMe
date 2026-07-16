@@ -1414,6 +1414,8 @@ watch(userId, (id) => {
 .todo-form-textarea,
 .todo-form-select {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   padding: 0.65rem 0.85rem;
   border: 1px solid rgba(213, 181, 234, 0.45);
   border-radius: 10px;

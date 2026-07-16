@@ -984,7 +984,9 @@ onMounted(() => {
 
 .field--date input {
   width: 100%;
-  max-width: 220px;
+  max-width: min(220px, 100%);
+  min-width: 0;
+  box-sizing: border-box;
   padding: 0.6rem 0.75rem;
   border-radius: 12px;
   border: 1px solid rgba(213, 181, 234, 0.4);

@@ -37,3 +37,73 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/**
+ * Champs date/heure : sur mobile le libellé localisé est long
+ * et peut faire déborder l’encadré. On force le contenu à rester
+ * dans la largeur disponible.
+ */
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'],
+input[type='month'],
+input[type='week'] {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+input[type='date']::-webkit-datetime-edit,
+input[type='time']::-webkit-datetime-edit,
+input[type='datetime-local']::-webkit-datetime-edit,
+input[type='month']::-webkit-datetime-edit,
+input[type='week']::-webkit-datetime-edit,
+input[type='date']::-webkit-datetime-edit-fields-wrapper,
+input[type='time']::-webkit-datetime-edit-fields-wrapper,
+input[type='datetime-local']::-webkit-datetime-edit-fields-wrapper,
+input[type='month']::-webkit-datetime-edit-fields-wrapper,
+input[type='week']::-webkit-datetime-edit-fields-wrapper {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+}
+
+input[type='date']::-webkit-datetime-edit-text,
+input[type='date']::-webkit-datetime-edit-month-field,
+input[type='date']::-webkit-datetime-edit-day-field,
+input[type='date']::-webkit-datetime-edit-year-field,
+input[type='time']::-webkit-datetime-edit-hour-field,
+input[type='time']::-webkit-datetime-edit-minute-field,
+input[type='time']::-webkit-datetime-edit-ampm-field,
+input[type='datetime-local']::-webkit-datetime-edit-text,
+input[type='datetime-local']::-webkit-datetime-edit-month-field,
+input[type='datetime-local']::-webkit-datetime-edit-day-field,
+input[type='datetime-local']::-webkit-datetime-edit-year-field,
+input[type='datetime-local']::-webkit-datetime-edit-hour-field,
+input[type='datetime-local']::-webkit-datetime-edit-minute-field {
+  min-width: 0;
+  padding: 0 0.05em;
+}
+
+input[type='date']::-webkit-calendar-picker-indicator,
+input[type='time']::-webkit-calendar-picker-indicator,
+input[type='datetime-local']::-webkit-calendar-picker-indicator,
+input[type='month']::-webkit-calendar-picker-indicator,
+input[type='week']::-webkit-calendar-picker-indicator {
+  flex-shrink: 0;
+  margin-left: 0.15rem;
+}
+
+@media (max-width: 768px) {
+  input[type='date'],
+  input[type='time'],
+  input[type='datetime-local'],
+  input[type='month'],
+  input[type='week'] {
+    font-size: 0.9rem;
+  }
+}

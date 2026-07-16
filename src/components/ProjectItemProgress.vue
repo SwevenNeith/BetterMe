@@ -1154,6 +1154,8 @@ function goToHistoryPage(page) {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .project-history-modal__control span {
@@ -1165,6 +1167,10 @@ function goToHistoryPage(page) {
 }
 
 .project-history-modal__select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 0.55rem 0.75rem;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--project-color, #ad81be) 22%, transparent);
