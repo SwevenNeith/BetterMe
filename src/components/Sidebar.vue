@@ -1,6 +1,6 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { nextTick, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
@@ -24,6 +24,8 @@ const exercicesExpanded = ref(false)
 
 onMounted(async () => {
   window.addEventListener(PAGE_VISIBILITY_UPDATED_EVENT, onPageVisibilityUpdated)
+  window.addEventListener('pointerdown', onGlobalPointerDown, true)
+  window.addEventListener('keydown', onGlobalKeyDown)
 
   const {
     data: { user },
@@ -130,12 +132,12 @@ function getExercicesNavDisplayName() {
   )
 }
 
-// --- Sidebar order persistence (Supabase) ---
+// --- Sidebar tree persistence (Supabase positions) ---
 const POSITIONS_TABLE = 'positions'
 const SIDEBAR_SCOPE = 'Sidebar'
 const EXERCICES_SCOPE = 'Sidebar:Exercices'
 
-// Position par défaut demandée : Habit Tracker avant Projets
+// Position par défaut : Habit Tracker avant Projets
 const defaultSidebarOrder = [
   SIDEBAR_ITEM_IDS.DASHBOARD,
   SIDEBAR_ITEM_IDS.TIMETABLE,
@@ -156,8 +158,16 @@ const sidebarItemsById = {
   [SIDEBAR_ITEM_IDS.EXERCICES_GROUP]: exercicesGroup,
 }
 
-const sidebarOrder = ref([...defaultSidebarOrder])
-const draggingId = ref(null)
+const FOLDER_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`
+
+/** @type {import('vue').Ref<Array<{type:'link',id:string}|{type:'folder',id:string,name:string,children:Array<{type:'link',id:string}>}>>} */
+const sidebarTree = ref(defaultSidebarOrder.map((id) => ({ type: 'link', id })))
+const expandedFolderIds = ref([])
+const draggingSidebar = ref(null) // { path: number[] }
+const renamingFolderId = ref(null)
+const renameDraft = ref('')
+/** @type {import('vue').Ref<null | { folderId: string, name: string, x: number, y: number }>} */
+const folderContextMenu = ref(null)
 
 // --- Exercices tree (folders + reorder) ---
 // Node formats:
@@ -231,6 +241,78 @@ function flattenLinkIds(nodes) {
   }
   visit(nodes)
   return out
+}
+
+function pathsEqual(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+  return a.every((v, i) => v === b[i])
+}
+
+function isFolderExpanded(folderId) {
+  return expandedFolderIds.value.includes(folderId)
+}
+
+function toggleFolderExpanded(folderId) {
+  const next = new Set(expandedFolderIds.value)
+  if (next.has(folderId)) next.delete(folderId)
+  else next.add(folderId)
+  expandedFolderIds.value = [...next]
+}
+
+function createFolderId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `folder-${crypto.randomUUID()}`
+  }
+  return `folder-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`
+}
+
+/**
+ * Accepte l’ancien format (string[]) et le nouveau (tree nodes).
+ * Une page ne peut apparaître qu’une seule fois (hors dossiers imbriqués : 1 niveau max).
+ */
+function normalizeSidebarTree(raw) {
+  const knownLinks = new Set(Object.keys(sidebarItemsById))
+  const safe = Array.isArray(raw) ? deepClone(raw) : []
+  const seen = new Set()
+  const result = []
+
+  // Ancien format : ["dashboard", "todo", ...]
+  const looksLegacy = safe.length > 0 && safe.every((item) => typeof item === 'string')
+  const source = looksLegacy
+    ? safe.map((id) => ({ type: 'link', id }))
+    : safe
+
+  for (const node of source) {
+    if (isLinkNode(node) && knownLinks.has(node.id) && !seen.has(node.id)) {
+      seen.add(node.id)
+      result.push({ type: 'link', id: node.id })
+      continue
+    }
+    if (isFolderNode(node)) {
+      const children = []
+      for (const child of node.children) {
+        if (isLinkNode(child) && knownLinks.has(child.id) && !seen.has(child.id)) {
+          seen.add(child.id)
+          children.push({ type: 'link', id: child.id })
+        }
+      }
+      result.push({
+        type: 'folder',
+        id: typeof node.id === 'string' ? node.id : createFolderId(),
+        name: typeof node.name === 'string' && node.name.trim() ? node.name.trim() : 'Nouveau dossier',
+        children,
+      })
+    }
+  }
+
+  for (const id of defaultSidebarOrder) {
+    if (!seen.has(id)) {
+      seen.add(id)
+      result.push({ type: 'link', id })
+    }
+  }
+
+  return result
 }
 
 function normalizeExercicesTree(raw) {
@@ -307,22 +389,6 @@ async function ensureExercicesPositionRow() {
   }
 }
 
-function normalizeOrder(rawIds) {
-  const known = new Set(Object.keys(sidebarItemsById))
-  const clean = Array.isArray(rawIds) ? rawIds.filter((id) => known.has(id)) : []
-  const deduped = []
-  const seen = new Set()
-  for (const id of clean) {
-    if (seen.has(id)) continue
-    seen.add(id)
-    deduped.push(id)
-  }
-  for (const id of defaultSidebarOrder) {
-    if (!seen.has(id)) deduped.push(id)
-  }
-  return deduped
-}
-
 async function ensureSidebarPositionRow() {
   if (!userId.value) return
 
@@ -333,20 +399,19 @@ async function ensureSidebarPositionRow() {
     return
   }
 
-  const normalized = normalizeOrder(data?.order)
-  sidebarOrder.value = normalized
+  const normalized = normalizeSidebarTree(data?.order)
+  sidebarTree.value = normalized
 
-  // Si la ligne n'existe pas ou si elle est incomplète (nouvelle page ajoutée), on upsert.
+  // Si la ligne n'existe pas ou si elle est incomplète (nouvelle page / nouveau format), on upsert.
   if (!data || JSON.stringify(normalized) !== JSON.stringify(data.order ?? [])) {
     await upsertPosition(SIDEBAR_SCOPE, normalized)
   }
 }
 
-async function persistSidebarOrder() {
+async function persistSidebarTree() {
   if (!userId.value) return
-  const normalized = normalizeOrder(sidebarOrder.value)
-  sidebarOrder.value = normalized
-
+  const normalized = normalizeSidebarTree(sidebarTree.value)
+  sidebarTree.value = normalized
   await upsertPosition(SIDEBAR_SCOPE, normalized)
 }
 
@@ -365,18 +430,44 @@ function onPageVisibilityUpdated() {
   void loadNavPageVisibility()
 }
 
+function onGlobalPointerDown(event) {
+  if (!folderContextMenu.value) return
+  const target = event.target
+  if (target instanceof Element && target.closest('.sidebar-folder-context')) return
+  closeFolderContextMenu()
+}
+
+function onGlobalKeyDown(event) {
+  if (event.key === 'Escape') closeFolderContextMenu()
+}
+
 onUnmounted(() => {
   window.removeEventListener(PAGE_VISIBILITY_UPDATED_EVENT, onPageVisibilityUpdated)
+  window.removeEventListener('pointerdown', onGlobalPointerDown, true)
+  window.removeEventListener('keydown', onGlobalKeyDown)
 })
 
 function sidebarLinkForId(id) {
   return sidebarItemsById[id] ?? null
 }
 
-function onDragStart(id, event) {
-  draggingId.value = id
+function encodePath(path) {
+  return Array.isArray(path) ? path.join('.') : ''
+}
+
+function decodePath(value) {
+  if (!value) return null
+  const parts = String(value)
+    .split('.')
+    .map((n) => Number(n))
+    .filter((n) => Number.isInteger(n) && n >= 0)
+  return parts.length ? parts : null
+}
+
+function onSidebarDragStart(path, event) {
+  draggingSidebar.value = { path }
   try {
-    event.dataTransfer?.setData('text/plain', id)
+    event.dataTransfer?.setData('text/plain', encodePath(path))
     event.dataTransfer?.setDragImage?.(event.currentTarget, 16, 16)
     event.dataTransfer.effectAllowed = 'move'
   } catch {
@@ -384,8 +475,17 @@ function onDragStart(id, event) {
   }
 }
 
-function onDragOver(id, event) {
-  if (!draggingId.value || draggingId.value === id) return
+function onSidebarFolderHeaderDragStart(path, event) {
+  if (event.target?.closest?.('.nav-sidebar-folder__rename')) {
+    event.preventDefault()
+    return
+  }
+  closeFolderContextMenu()
+  onSidebarDragStart(path, event)
+}
+
+function onSidebarDragOver(event) {
+  if (!draggingSidebar.value) return
   event.preventDefault()
   try {
     event.dataTransfer.dropEffect = 'move'
@@ -394,30 +494,192 @@ function onDragOver(id, event) {
   }
 }
 
-async function onDrop(id, event) {
-  event.preventDefault()
-  const source = draggingId.value || event.dataTransfer?.getData('text/plain')
-  if (!source || source === id) {
-    draggingId.value = null
-    return
-  }
-
-  const current = [...sidebarOrder.value]
-  const from = current.indexOf(source)
-  const to = current.indexOf(id)
-  if (from === -1 || to === -1) {
-    draggingId.value = null
-    return
-  }
-  current.splice(from, 1)
-  current.splice(to, 0, source)
-  sidebarOrder.value = current
-  draggingId.value = null
-  await persistSidebarOrder()
+function onSidebarDragEnd() {
+  draggingSidebar.value = null
 }
 
-function onDragEnd() {
-  draggingId.value = null
+/**
+ * Drop sur un nœud cible :
+ * - dossier → ajoute la page dedans
+ * - page / dossier → réordonne avant la cible (même niveau)
+ */
+async function onSidebarDropOnNode(targetPath, event) {
+  event.preventDefault()
+  event.stopPropagation()
+  const sourcePath =
+    draggingSidebar.value?.path ?? decodePath(event.dataTransfer?.getData('text/plain'))
+  if (!sourcePath || pathsEqual(sourcePath, targetPath)) {
+    draggingSidebar.value = null
+    return
+  }
+
+  const tree = deepClone(sidebarTree.value)
+  const sourceNode = getNodeAtPath(tree, sourcePath)
+  const targetNode = getNodeAtPath(tree, targetPath)
+  if (!sourceNode || !targetNode) {
+    draggingSidebar.value = null
+    return
+  }
+
+  // Page déposée sur un dossier → entre dans le dossier
+  if (isFolderNode(targetNode) && isLinkNode(sourceNode)) {
+    const folderId = targetNode.id
+    removeNodeAtPath(tree, sourcePath)
+    const folder = tree.find((n) => isFolderNode(n) && n.id === folderId)
+    if (!folder) {
+      tree.push(sourceNode)
+    } else {
+      folder.children.push(sourceNode)
+      if (!isFolderExpanded(folderId)) {
+        expandedFolderIds.value = [...expandedFolderIds.value, folderId]
+      }
+    }
+    sidebarTree.value = tree
+    draggingSidebar.value = null
+    await persistSidebarTree()
+    return
+  }
+
+  // Pas de dossier imbriqué
+  if (isFolderNode(sourceNode) && targetPath.length > 1) {
+    draggingSidebar.value = null
+    return
+  }
+
+  const destParentPath = targetPath.slice(0, -1)
+  let destIndex = targetPath[targetPath.length - 1]
+  const sameParent =
+    sourcePath.length === targetPath.length &&
+    sourcePath.slice(0, -1).every((v, i) => v === targetPath[i])
+  if (sameParent && sourcePath[sourcePath.length - 1] < destIndex) {
+    destIndex -= 1
+  }
+
+  removeNodeAtPath(tree, sourcePath)
+  insertNodeAtPath(tree, destParentPath, Math.max(0, destIndex), sourceNode)
+  sidebarTree.value = tree
+  draggingSidebar.value = null
+  await persistSidebarTree()
+}
+
+async function onSidebarDropOnRoot(event) {
+  event.preventDefault()
+  const sourcePath =
+    draggingSidebar.value?.path ?? decodePath(event.dataTransfer?.getData('text/plain'))
+  if (!sourcePath) {
+    draggingSidebar.value = null
+    return
+  }
+  // Déjà à la racine : ne rien faire si drop « vide »
+  if (sourcePath.length === 1) {
+    draggingSidebar.value = null
+    return
+  }
+  const tree = deepClone(sidebarTree.value)
+  const sourceNode = removeNodeAtPath(tree, sourcePath)
+  if (!sourceNode) {
+    draggingSidebar.value = null
+    return
+  }
+  tree.push(sourceNode)
+  sidebarTree.value = tree
+  draggingSidebar.value = null
+  await persistSidebarTree()
+}
+
+async function createSidebarFolder() {
+  const id = createFolderId()
+  const name = 'Nouveau dossier'
+  sidebarTree.value = [
+    ...sidebarTree.value,
+    { type: 'folder', id, name, children: [] },
+  ]
+  expandedFolderIds.value = [...expandedFolderIds.value, id]
+  renamingFolderId.value = id
+  renameDraft.value = name
+  await persistSidebarTree()
+  await nextTick()
+  const input = document.querySelector('.nav-sidebar-folder__rename')
+  if (input instanceof HTMLInputElement) {
+    input.focus()
+    input.select()
+  }
+}
+
+function startRenameFolder(folderId, currentName) {
+  closeFolderContextMenu()
+  renamingFolderId.value = folderId
+  renameDraft.value = currentName || 'Nouveau dossier'
+  void nextTick(() => {
+    const input = document.querySelector('.nav-sidebar-folder__rename')
+    if (input instanceof HTMLInputElement) {
+      input.focus()
+      input.select()
+    }
+  })
+}
+
+async function commitRenameFolder() {
+  const folderId = renamingFolderId.value
+  if (!folderId) return
+  const name = String(renameDraft.value || '').trim() || 'Nouveau dossier'
+  const tree = deepClone(sidebarTree.value)
+  const folder = tree.find((n) => isFolderNode(n) && n.id === folderId)
+  if (folder) {
+    folder.name = name
+    sidebarTree.value = tree
+    await persistSidebarTree()
+  }
+  renamingFolderId.value = null
+  renameDraft.value = ''
+}
+
+function cancelRenameFolder() {
+  renamingFolderId.value = null
+  renameDraft.value = ''
+}
+
+function closeFolderContextMenu() {
+  folderContextMenu.value = null
+}
+
+function openFolderContextMenu(event, folderId, name) {
+  event.preventDefault()
+  event.stopPropagation()
+  folderContextMenu.value = {
+    folderId,
+    name: name || 'Nouveau dossier',
+    x: event.clientX,
+    y: event.clientY,
+  }
+}
+
+function onFolderContextRename() {
+  const menu = folderContextMenu.value
+  if (!menu) return
+  startRenameFolder(menu.folderId, menu.name)
+}
+
+async function onFolderContextDelete() {
+  const menu = folderContextMenu.value
+  if (!menu) return
+  const folderId = menu.folderId
+  closeFolderContextMenu()
+  await deleteSidebarFolder(folderId)
+}
+
+async function deleteSidebarFolder(folderId) {
+  const tree = deepClone(sidebarTree.value)
+  const idx = tree.findIndex((n) => isFolderNode(n) && n.id === folderId)
+  if (idx < 0) return
+  const folder = tree[idx]
+  const children = Array.isArray(folder.children) ? folder.children : []
+  tree.splice(idx, 1, ...children)
+  sidebarTree.value = tree
+  expandedFolderIds.value = expandedFolderIds.value.filter((id) => id !== folderId)
+  if (renamingFolderId.value === folderId) cancelRenameFolder()
+  closeFolderContextMenu()
+  await persistSidebarTree()
 }
 
 function isGroupId(id) {
@@ -442,19 +704,6 @@ function isInExercicesSection(path) {
 
 function exercicesLinkForId(id) {
   return exercicesItemsById[id] ?? null
-}
-
-function encodePath(path) {
-  return Array.isArray(path) ? path.join('.') : ''
-}
-
-function decodePath(value) {
-  if (!value) return null
-  const parts = String(value)
-    .split('.')
-    .map((n) => Number(n))
-    .filter((n) => Number.isInteger(n) && n >= 0)
-  return parts.length ? parts : null
 }
 
 function onExercicesDragStart(path, event) {
@@ -537,6 +786,22 @@ watch(
   () => route.path,
   (path) => {
     exercicesExpanded.value = isInExercicesSection(path)
+    // Ouvre le dossier contenant la page active (sans changer de page)
+    for (const node of sidebarTree.value) {
+      if (!isFolderNode(node)) continue
+      const hasActive = node.children.some((child) => {
+        if (!isLinkNode(child)) return false
+        const itemPath = getItemPath(child.id)
+        if (!itemPath) return false
+        if (child.id === SIDEBAR_ITEM_IDS.EXERCICES_GROUP) {
+          return isInExercicesSection(path)
+        }
+        return isActive(itemPath)
+      })
+      if (hasActive && !isFolderExpanded(node.id)) {
+        expandedFolderIds.value = [...expandedFolderIds.value, node.id]
+      }
+    }
   },
   { immediate: true },
 )
@@ -595,61 +860,319 @@ const toggleSidebar = () => {
 
     <div class="sidebar-divider"></div>
 
+    <div class="sidebar-toolbar">
+      <button
+        type="button"
+        class="sidebar-folder-create"
+        title="Créer un dossier"
+        aria-label="Créer un dossier"
+        @click="createSidebarFolder"
+      >
+        <span class="nav-icon" v-html="FOLDER_ICON" aria-hidden="true"></span>
+        <span class="sidebar-folder-create__plus" aria-hidden="true">+</span>
+      </button>
+    </div>
+
     <!-- Navigation -->
-    <nav class="sidebar-nav">
-      <template v-for="id in sidebarOrder" :key="id">
+    <nav
+      class="sidebar-nav"
+      @dragover="onSidebarDragOver"
+      @drop="onSidebarDropOnRoot"
+      @dragend="onSidebarDragEnd"
+    >
+      <template v-for="(node, idx) in sidebarTree" :key="`${node.type}-${node.id}`">
+        <!-- Dossier racine -->
         <div
-          v-if="isGroupId(id) && isPageVisibleInNav(id)"
-          class="nav-group nav-group--draggable"
-          :class="{ 'nav-link--dragging': draggingId === id }"
-          draggable="true"
-          @dragstart="onDragStart(id, $event)"
-          @dragover="onDragOver(id, $event)"
-          @drop="onDrop(id, $event)"
-          @dragend="onDragEnd"
-        >
-        <div
-          class="nav-group__header"
+          v-if="node.type === 'folder'"
+          class="nav-sidebar-folder"
           :class="{
-            'nav-group__header--active': isActive(exercicesGroup.path),
-            'nav-group__header--open': exercicesExpanded,
+            'nav-sidebar-folder--open': isFolderExpanded(node.id),
+            'nav-link--dragging':
+              draggingSidebar &&
+              draggingSidebar.path.length === 1 &&
+              draggingSidebar.path[0] === idx,
           }"
+          @dragover="onSidebarDragOver"
+          @drop="onSidebarDropOnNode([idx], $event)"
         >
-          <button
-            type="button"
-            class="nav-group__main"
-            :class="{ 'nav-group__main--active': isActive(exercicesGroup.path) }"
-            @click="goToExercices"
+          <div
+            class="nav-sidebar-folder__header"
+            draggable="true"
+            @dragstart="onSidebarFolderHeaderDragStart([idx], $event)"
+            @dragend="onSidebarDragEnd"
+            @contextmenu="openFolderContextMenu($event, node.id, node.name)"
           >
-            <span class="nav-icon" v-html="exercicesGroup.icon"></span>
-            <span class="nav-label">{{ getExercicesNavDisplayName() }}</span>
-            <span class="nav-indicator" v-if="isActive(exercicesGroup.path)"></span>
-          </button>
-          <button
-            type="button"
-            class="nav-chevron-btn"
-            :class="{ 'nav-chevron-btn--open': exercicesExpanded }"
-            :aria-expanded="exercicesExpanded"
-            aria-controls="exercices-submenu"
-            aria-label="Ouvrir ou fermer le sous-menu Exercices"
-            @click.stop="toggleExercicesChevron"
-          >
-            <span class="nav-chevron" :class="{ 'nav-chevron--open': exercicesExpanded }">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
+            <button
+              type="button"
+              class="nav-sidebar-folder__toggle"
+              :aria-expanded="isFolderExpanded(node.id)"
+              :aria-controls="`sidebar-folder-${node.id}`"
+              @click="toggleFolderExpanded(node.id)"
+            >
+              <span class="nav-icon" v-html="FOLDER_ICON"></span>
+              <input
+                v-if="renamingFolderId === node.id"
+                v-model="renameDraft"
+                class="nav-sidebar-folder__rename"
+                type="text"
+                maxlength="40"
+                aria-label="Nom du dossier"
+                @click.stop
+                @keydown.enter.prevent="commitRenameFolder"
+                @keydown.escape.prevent="cancelRenameFolder"
+                @blur="commitRenameFolder"
+              />
+              <span v-else class="nav-label">{{ node.name }}</span>
+              <span
+                class="nav-chevron"
+                :class="{ 'nav-chevron--open': isFolderExpanded(node.id) }"
                 aria-hidden="true"
               >
-                <polyline points="6 9 12 15 18 9"></polyline>
-              </svg>
-            </span>
-          </button>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </span>
+            </button>
+          </div>
+
+          <div
+            :id="`sidebar-folder-${node.id}`"
+            class="nav-group__children"
+            :class="{ 'nav-group__children--open': isFolderExpanded(node.id) }"
+          >
+            <div class="nav-group__children-inner">
+              <template
+                v-for="(child, cIdx) in node.children"
+                :key="`${child.type}-${child.id}`"
+              >
+                <div
+                  v-if="isGroupId(child.id) && isPageVisibleInNav(child.id)"
+                  class="nav-group nav-group--draggable"
+                  :class="{
+                    'nav-link--dragging':
+                      draggingSidebar &&
+                      pathsEqual(draggingSidebar.path, [idx, cIdx]),
+                  }"
+                  draggable="true"
+                  @dragstart="onSidebarDragStart([idx, cIdx], $event)"
+                  @dragover="onSidebarDragOver"
+                  @drop="onSidebarDropOnNode([idx, cIdx], $event)"
+                  @dragend="onSidebarDragEnd"
+                >
+                  <div
+                    class="nav-group__header"
+                    :class="{
+                      'nav-group__header--active': isActive(exercicesGroup.path),
+                      'nav-group__header--open': exercicesExpanded,
+                    }"
+                  >
+                    <button
+                      type="button"
+                      class="nav-group__main"
+                      :class="{ 'nav-group__main--active': isActive(exercicesGroup.path) }"
+                      @click="goToExercices"
+                    >
+                      <span class="nav-icon" v-html="exercicesGroup.icon"></span>
+                      <span class="nav-label">{{ getExercicesNavDisplayName() }}</span>
+                      <span class="nav-indicator" v-if="isActive(exercicesGroup.path)"></span>
+                    </button>
+                    <button
+                      type="button"
+                      class="nav-chevron-btn"
+                      :class="{ 'nav-chevron-btn--open': exercicesExpanded }"
+                      :aria-expanded="exercicesExpanded"
+                      aria-controls="exercices-submenu-nested"
+                      aria-label="Ouvrir ou fermer le sous-menu Exercices"
+                      @click.stop="toggleExercicesChevron"
+                    >
+                      <span class="nav-chevron" :class="{ 'nav-chevron--open': exercicesExpanded }">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                      </span>
+                    </button>
+                  </div>
+                  <div
+                    id="exercices-submenu-nested"
+                    class="nav-group__children"
+                    :class="{ 'nav-group__children--open': exercicesExpanded }"
+                  >
+                    <div
+                      class="nav-group__children-inner"
+                      @dragover="onExercicesDragOver"
+                      @drop="onExercicesDropOnRoot"
+                      @dragend="onExercicesDragEnd"
+                    >
+                      <template
+                        v-for="(exNode, exIdx) in exercicesTree"
+                        :key="`${exNode.type}-${exNode.id}-${exIdx}`"
+                      >
+                        <div
+                          v-if="exNode.type === 'folder'"
+                          class="nav-folder"
+                          draggable="true"
+                          @dragstart="onExercicesDragStart([exIdx], $event)"
+                          @dragover="onExercicesDragOver"
+                          @drop="onExercicesDropOnNode([exIdx], $event)"
+                          @dragend="onExercicesDragEnd"
+                        >
+                          <div class="nav-folder__header">
+                            <span class="nav-folder__name">{{ exNode.name }}</span>
+                          </div>
+                          <div class="nav-folder__children">
+                            <button
+                              v-for="(exChild, exCIdx) in exNode.children"
+                              :key="`${exChild.type}-${exChild.id}-${exCIdx}`"
+                              type="button"
+                              class="nav-link nav-link--child"
+                              :class="{
+                                'nav-link--active': isActive(exercicesLinkForId(exChild.id)?.path),
+                              }"
+                              draggable="true"
+                              @dragstart="onExercicesDragStart([exIdx, exCIdx], $event)"
+                              @dragover="onExercicesDragOver"
+                              @drop="onExercicesDropOnNode([exIdx, exCIdx], $event)"
+                              @dragend="onExercicesDragEnd"
+                              @click="navigate(exercicesLinkForId(exChild.id)?.path)"
+                            >
+                              <span
+                                class="nav-icon"
+                                v-html="exercicesLinkForId(exChild.id)?.icon"
+                              ></span>
+                              <span class="nav-label">{{
+                                exercicesLinkForId(exChild.id)?.name
+                              }}</span>
+                              <span
+                                class="nav-indicator"
+                                v-if="isActive(exercicesLinkForId(exChild.id)?.path)"
+                              ></span>
+                            </button>
+                          </div>
+                        </div>
+                        <button
+                          v-else
+                          type="button"
+                          class="nav-link nav-link--child"
+                          :class="{
+                            'nav-link--active': isActive(exercicesLinkForId(exNode.id)?.path),
+                          }"
+                          draggable="true"
+                          @dragstart="onExercicesDragStart([exIdx], $event)"
+                          @dragover="onExercicesDragOver"
+                          @drop="onExercicesDropOnNode([exIdx], $event)"
+                          @dragend="onExercicesDragEnd"
+                          @click="navigate(exercicesLinkForId(exNode.id)?.path)"
+                        >
+                          <span class="nav-icon" v-html="exercicesLinkForId(exNode.id)?.icon"></span>
+                          <span class="nav-label">{{ exercicesLinkForId(exNode.id)?.name }}</span>
+                          <span
+                            class="nav-indicator"
+                            v-if="isActive(exercicesLinkForId(exNode.id)?.path)"
+                          ></span>
+                        </button>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  v-else-if="isPageVisibleInNav(child.id)"
+                  type="button"
+                  class="nav-link nav-link--child nav-link--draggable"
+                  :class="{
+                    'nav-link--active': isActive(getItemPath(child.id)),
+                    'nav-link--dragging':
+                      draggingSidebar && pathsEqual(draggingSidebar.path, [idx, cIdx]),
+                  }"
+                  draggable="true"
+                  @dragstart="onSidebarDragStart([idx, cIdx], $event)"
+                  @dragover="onSidebarDragOver"
+                  @drop="onSidebarDropOnNode([idx, cIdx], $event)"
+                  @dragend="onSidebarDragEnd"
+                  @click="onItemClick(child.id)"
+                >
+                  <span class="nav-icon" v-html="sidebarLinkForId(child.id)?.icon"></span>
+                  <span class="nav-label">{{ getNavDisplayName(child.id) }}</span>
+                  <span class="nav-indicator" v-if="isActive(getItemPath(child.id))"></span>
+                </button>
+              </template>
+            </div>
+          </div>
         </div>
+
+        <!-- Groupe Exercices à la racine -->
+        <div
+          v-else-if="isGroupId(node.id) && isPageVisibleInNav(node.id)"
+          class="nav-group nav-group--draggable"
+          :class="{
+            'nav-link--dragging':
+              draggingSidebar && draggingSidebar.path.length === 1 && draggingSidebar.path[0] === idx,
+          }"
+          draggable="true"
+          @dragstart="onSidebarDragStart([idx], $event)"
+          @dragover="onSidebarDragOver"
+          @drop="onSidebarDropOnNode([idx], $event)"
+          @dragend="onSidebarDragEnd"
+        >
+          <div
+            class="nav-group__header"
+            :class="{
+              'nav-group__header--active': isActive(exercicesGroup.path),
+              'nav-group__header--open': exercicesExpanded,
+            }"
+          >
+            <button
+              type="button"
+              class="nav-group__main"
+              :class="{ 'nav-group__main--active': isActive(exercicesGroup.path) }"
+              @click="goToExercices"
+            >
+              <span class="nav-icon" v-html="exercicesGroup.icon"></span>
+              <span class="nav-label">{{ getExercicesNavDisplayName() }}</span>
+              <span class="nav-indicator" v-if="isActive(exercicesGroup.path)"></span>
+            </button>
+            <button
+              type="button"
+              class="nav-chevron-btn"
+              :class="{ 'nav-chevron-btn--open': exercicesExpanded }"
+              :aria-expanded="exercicesExpanded"
+              aria-controls="exercices-submenu"
+              aria-label="Ouvrir ou fermer le sous-menu Exercices"
+              @click.stop="toggleExercicesChevron"
+            >
+              <span class="nav-chevron" :class="{ 'nav-chevron--open': exercicesExpanded }">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </span>
+            </button>
+          </div>
 
           <div
             id="exercices-submenu"
@@ -662,38 +1185,43 @@ const toggleSidebar = () => {
               @drop="onExercicesDropOnRoot"
               @dragend="onExercicesDragEnd"
             >
-              <template v-for="(node, idx) in exercicesTree" :key="`${node.type}-${node.id}-${idx}`">
+              <template
+                v-for="(exNode, exIdx) in exercicesTree"
+                :key="`${exNode.type}-${exNode.id}-${exIdx}`"
+              >
                 <div
-                  v-if="node.type === 'folder'"
+                  v-if="exNode.type === 'folder'"
                   class="nav-folder"
                   draggable="true"
-                  @dragstart="onExercicesDragStart([idx], $event)"
+                  @dragstart="onExercicesDragStart([exIdx], $event)"
                   @dragover="onExercicesDragOver"
-                  @drop="onExercicesDropOnNode([idx], $event)"
+                  @drop="onExercicesDropOnNode([exIdx], $event)"
                   @dragend="onExercicesDragEnd"
                 >
                   <div class="nav-folder__header">
-                    <span class="nav-folder__name">{{ node.name }}</span>
+                    <span class="nav-folder__name">{{ exNode.name }}</span>
                   </div>
                   <div class="nav-folder__children">
                     <button
-                      v-for="(child, cIdx) in node.children"
-                      :key="`${child.type}-${child.id}-${cIdx}`"
+                      v-for="(exChild, exCIdx) in exNode.children"
+                      :key="`${exChild.type}-${exChild.id}-${exCIdx}`"
                       type="button"
                       class="nav-link nav-link--child"
-                      :class="{ 'nav-link--active': isActive(exercicesLinkForId(child.id)?.path) }"
+                      :class="{
+                        'nav-link--active': isActive(exercicesLinkForId(exChild.id)?.path),
+                      }"
                       draggable="true"
-                      @dragstart="onExercicesDragStart([idx, cIdx], $event)"
+                      @dragstart="onExercicesDragStart([exIdx, exCIdx], $event)"
                       @dragover="onExercicesDragOver"
-                      @drop="onExercicesDropOnNode([idx, cIdx], $event)"
+                      @drop="onExercicesDropOnNode([exIdx, exCIdx], $event)"
                       @dragend="onExercicesDragEnd"
-                      @click="navigate(exercicesLinkForId(child.id)?.path)"
+                      @click="navigate(exercicesLinkForId(exChild.id)?.path)"
                     >
-                      <span class="nav-icon" v-html="exercicesLinkForId(child.id)?.icon"></span>
-                      <span class="nav-label">{{ exercicesLinkForId(child.id)?.name }}</span>
+                      <span class="nav-icon" v-html="exercicesLinkForId(exChild.id)?.icon"></span>
+                      <span class="nav-label">{{ exercicesLinkForId(exChild.id)?.name }}</span>
                       <span
                         class="nav-indicator"
-                        v-if="isActive(exercicesLinkForId(child.id)?.path)"
+                        v-if="isActive(exercicesLinkForId(exChild.id)?.path)"
                       ></span>
                     </button>
                   </div>
@@ -703,44 +1231,69 @@ const toggleSidebar = () => {
                   v-else
                   type="button"
                   class="nav-link nav-link--child"
-                  :class="{ 'nav-link--active': isActive(exercicesLinkForId(node.id)?.path) }"
+                  :class="{ 'nav-link--active': isActive(exercicesLinkForId(exNode.id)?.path) }"
                   draggable="true"
-                  @dragstart="onExercicesDragStart([idx], $event)"
+                  @dragstart="onExercicesDragStart([exIdx], $event)"
                   @dragover="onExercicesDragOver"
-                  @drop="onExercicesDropOnNode([idx], $event)"
+                  @drop="onExercicesDropOnNode([exIdx], $event)"
                   @dragend="onExercicesDragEnd"
-                  @click="navigate(exercicesLinkForId(node.id)?.path)"
+                  @click="navigate(exercicesLinkForId(exNode.id)?.path)"
                 >
-                  <span class="nav-icon" v-html="exercicesLinkForId(node.id)?.icon"></span>
-                  <span class="nav-label">{{ exercicesLinkForId(node.id)?.name }}</span>
-                  <span class="nav-indicator" v-if="isActive(exercicesLinkForId(node.id)?.path)"></span>
+                  <span class="nav-icon" v-html="exercicesLinkForId(exNode.id)?.icon"></span>
+                  <span class="nav-label">{{ exercicesLinkForId(exNode.id)?.name }}</span>
+                  <span
+                    class="nav-indicator"
+                    v-if="isActive(exercicesLinkForId(exNode.id)?.path)"
+                  ></span>
                 </button>
               </template>
             </div>
           </div>
-      </div>
+        </div>
 
+        <!-- Page simple à la racine -->
         <button
-          v-else-if="isPageVisibleInNav(id)"
+          v-else-if="isPageVisibleInNav(node.id)"
           type="button"
           class="nav-link nav-link--draggable"
           :class="{
-            'nav-link--active': isActive(getItemPath(id)),
-            'nav-link--dragging': draggingId === id,
+            'nav-link--active': isActive(getItemPath(node.id)),
+            'nav-link--dragging':
+              draggingSidebar && draggingSidebar.path.length === 1 && draggingSidebar.path[0] === idx,
           }"
           draggable="true"
-          @dragstart="onDragStart(id, $event)"
-          @dragover="onDragOver(id, $event)"
-          @drop="onDrop(id, $event)"
-          @dragend="onDragEnd"
-          @click="onItemClick(id)"
+          @dragstart="onSidebarDragStart([idx], $event)"
+          @dragover="onSidebarDragOver"
+          @drop="onSidebarDropOnNode([idx], $event)"
+          @dragend="onSidebarDragEnd"
+          @click="onItemClick(node.id)"
         >
-          <span class="nav-icon" v-html="sidebarLinkForId(id)?.icon"></span>
-          <span class="nav-label">{{ getNavDisplayName(id) }}</span>
-          <span class="nav-indicator" v-if="isActive(getItemPath(id))"></span>
+          <span class="nav-icon" v-html="sidebarLinkForId(node.id)?.icon"></span>
+          <span class="nav-label">{{ getNavDisplayName(node.id) }}</span>
+          <span class="nav-indicator" v-if="isActive(getItemPath(node.id))"></span>
         </button>
       </template>
     </nav>
+
+    <div
+      v-if="folderContextMenu"
+      class="sidebar-folder-context"
+      role="menu"
+      :style="{ top: `${folderContextMenu.y}px`, left: `${folderContextMenu.x}px` }"
+      @contextmenu.prevent
+    >
+      <button type="button" class="sidebar-folder-context__item" role="menuitem" @click="onFolderContextRename">
+        Renommer
+      </button>
+      <button
+        type="button"
+        class="sidebar-folder-context__item sidebar-folder-context__item--danger"
+        role="menuitem"
+        @click="onFolderContextDelete"
+      >
+        Supprimer
+      </button>
+    </div>
 
     <!-- Réglages + déconnexion (footer) -->
     <div class="sidebar-footer">
@@ -856,6 +1409,200 @@ const toggleSidebar = () => {
   height: 1px;
   background: linear-gradient(to right, transparent, rgba(213, 181, 234, 0.4), transparent);
   margin: 0 1rem;
+}
+
+/* ─── Toolbar dossiers ─── */
+.sidebar-toolbar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.35rem 0.75rem 0;
+}
+
+.sidebar-folder-create {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #ad81be;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    transform 0.15s ease,
+    opacity 0.15s ease;
+  opacity: 0.78;
+}
+
+.sidebar-folder-create:hover {
+  opacity: 1;
+  color: #9568a8;
+  transform: translateY(-1px);
+}
+
+.sidebar-folder-create :deep(.sidebar-svg-icon) {
+  width: 15px;
+  height: 15px;
+}
+
+.sidebar-folder-create__plus {
+  position: absolute;
+  right: -0.05rem;
+  bottom: -0.05rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #72a098;
+}
+
+.nav-sidebar-folder {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  border-radius: 12px;
+  touch-action: manipulation;
+}
+
+.nav-sidebar-folder--open {
+  background: rgba(213, 181, 234, 0.06);
+}
+
+.nav-sidebar-folder__header {
+  display: flex;
+  align-items: stretch;
+  gap: 0.15rem;
+}
+
+.nav-sidebar-folder__toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.5rem 0.75rem 1rem;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: #6c757d;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.nav-sidebar-folder__toggle:hover {
+  background: rgba(213, 181, 234, 0.12);
+  color: #ad81be;
+}
+
+.nav-sidebar-folder__rename {
+  flex: 1;
+  min-width: 0;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid rgba(173, 129, 190, 0.45);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2c3e50;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.sidebar-folder-context {
+  position: fixed;
+  z-index: 400;
+  min-width: 10.25rem;
+  padding: 0.35rem;
+  border-radius: 14px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 28px rgba(173, 129, 190, 0.18);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.sidebar-folder-context__item {
+  display: block;
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #6c757d;
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.sidebar-folder-context__item:hover {
+  background: rgba(213, 181, 234, 0.14);
+  color: #ad81be;
+  transform: translateX(2px);
+}
+
+.sidebar-folder-context__item--danger {
+  color: #a86b8a;
+}
+
+.sidebar-folder-context__item--danger:hover {
+  background: linear-gradient(135deg, rgba(213, 181, 234, 0.16), rgba(192, 57, 43, 0.08));
+  color: #c0392b;
+}
+
+@media (prefers-color-scheme: dark) {
+  .sidebar-folder-create {
+    color: #d5b5ea;
+  }
+
+  .sidebar-folder-create:hover {
+    color: #e6d0f3;
+  }
+
+  .nav-sidebar-folder__toggle {
+    color: #adb5bd;
+  }
+
+  .nav-sidebar-folder__rename {
+    background: rgba(25, 20, 35, 0.85);
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.3);
+  }
+
+  .sidebar-folder-context {
+    background: rgba(25, 20, 35, 0.94);
+    border-color: rgba(213, 181, 234, 0.22);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  }
+
+  .sidebar-folder-context__item {
+    color: #adb5bd;
+  }
+
+  .sidebar-folder-context__item:hover {
+    background: rgba(213, 181, 234, 0.12);
+    color: #d5b5ea;
+  }
+
+  .sidebar-folder-context__item--danger {
+    color: #d5a0b8;
+  }
+
+  .sidebar-folder-context__item--danger:hover {
+    background: linear-gradient(135deg, rgba(213, 181, 234, 0.12), rgba(192, 57, 43, 0.14));
+    color: #ffb4ae;
+  }
 }
 
 /* ─── Nav ─── */
