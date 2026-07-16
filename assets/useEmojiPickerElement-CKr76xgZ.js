@@ -1,0 +1,1 @@
+import{ht as e}from"./index-Cw1CzjCh.js";var t=`https://cdn.jsdelivr.net/npm/emoji-picker-element-data@^1/fr/emojibase/data.json`,n=null,r=null;function i(){return r||=Promise.all([e(()=>import(`./emoji-picker-element-aSBbXJ7T.js`),[]),e(()=>import(`./fr-t6NESYix.js`),[])]).then(([,e])=>{n=e.default}),r}function a(e){!e||!n||(e.i18n=n)}export{a as n,i as r,t};
