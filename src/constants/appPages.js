@@ -5,6 +5,7 @@ export const APP_PAGE_IDS = {
   TODO: 'todo',
   HABIT: 'habit-tracker',
   PROJETS: 'projets',
+  LECTURE: 'lecture',
   MENSTRUATION: 'menstruation',
   EXERCICES_GROUP: 'exercices-group',
 }
@@ -18,6 +19,7 @@ export const APP_MAIN_PAGES = [
   { id: APP_PAGE_IDS.TODO, defaultLabel: 'TODO' },
   { id: APP_PAGE_IDS.HABIT, defaultLabel: 'Habit Tracker' },
   { id: APP_PAGE_IDS.PROJETS, defaultLabel: 'Projets' },
+  { id: APP_PAGE_IDS.LECTURE, defaultLabel: 'Lecture' },
   { id: APP_PAGE_IDS.MENSTRUATION, defaultLabel: 'Menstruation' },
   { id: APP_PAGE_IDS.EXERCICES_GROUP, defaultLabel: 'Exercices' },
 ]

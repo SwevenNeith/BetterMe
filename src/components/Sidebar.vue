@@ -55,6 +55,12 @@ const projetsLink = {
   icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
 }
 
+const lectureLink = {
+  name: 'Lecture',
+  path: '/lecture',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>`,
+}
+
 const habitTrackerLink = {
   name: 'Habit Tracker',
   path: '/habit-tracker',
@@ -144,6 +150,7 @@ const defaultSidebarOrder = [
   SIDEBAR_ITEM_IDS.TODO,
   SIDEBAR_ITEM_IDS.HABIT,
   SIDEBAR_ITEM_IDS.PROJETS,
+  SIDEBAR_ITEM_IDS.LECTURE,
   SIDEBAR_ITEM_IDS.MENSTRUATION,
   SIDEBAR_ITEM_IDS.EXERCICES_GROUP,
 ]
@@ -153,6 +160,7 @@ const sidebarItemsById = {
   [SIDEBAR_ITEM_IDS.TIMETABLE]: navLinksTop[1],
   [SIDEBAR_ITEM_IDS.TODO]: todoLink,
   [SIDEBAR_ITEM_IDS.PROJETS]: projetsLink,
+  [SIDEBAR_ITEM_IDS.LECTURE]: lectureLink,
   [SIDEBAR_ITEM_IDS.HABIT]: habitTrackerLink,
   [SIDEBAR_ITEM_IDS.MENSTRUATION]: menstruationLink,
   [SIDEBAR_ITEM_IDS.EXERCICES_GROUP]: exercicesGroup,

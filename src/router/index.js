@@ -12,6 +12,7 @@ const ProjetsView = () => import('../views/ProjetsView.vue')
 const ProjectDetailView = () => import('../views/ProjectDetailView.vue')
 const HabitTrackerView = () => import('../views/HabitTrackerView.vue')
 const TodoView = () => import('../views/TodoView.vue')
+const LectureView = () => import('../views/LectureView.vue')
 
 const CHUNK_RELOAD_KEY = 'betterme-chunk-reload'
 
@@ -61,6 +62,11 @@ const router = createRouter({
           path: 'projets/:projectId',
           name: 'projet-detail',
           component: ProjectDetailView,
+        },
+        {
+          path: 'lecture',
+          name: 'lecture',
+          component: LectureView,
         },
         {
           path: 'habit-tracker',
