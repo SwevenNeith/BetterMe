@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import ReadingBookModal from '../components/ReadingBookModal.vue'
+import { useRoute, useRouter } from 'vue-router'
 import ReadingBookFiche from '../components/ReadingBookFiche.vue'
 import ReadingPickModal from '../components/ReadingPickModal.vue'
 import { supabase } from '../lib/supabase.js'
@@ -13,14 +13,15 @@ import { listReadingCollections } from '../services/readingCollections.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.LECTURE, undefined, { setDocumentTitle: true })
 
+const route = useRoute()
+const router = useRouter()
+
 const userId = ref(null)
 const isLoading = ref(true)
 const isSaving = ref(false)
 const loadError = ref('')
 const books = ref([])
 const collections = ref([])
-const selectedBook = ref(null)
-const bookModalOpen = ref(false)
 const pickModalOpen = ref(false)
 const bookFormOpen = ref(false)
 const coverFileInputRef = ref(null)
@@ -176,34 +177,28 @@ function closePickModal() {
   pickModalOpen.value = false
 }
 
+function openBookPage(book) {
+  if (!book?.id) return
+  router.push({ name: 'lecture-livre', params: { bookId: book.id } })
+}
+
 function onPickAccepted(updated) {
-  onBookUpdated(updated)
-}
-
-function openBookModal(book) {
-  selectedBook.value = book
-  bookModalOpen.value = true
-}
-
-function closeBookModal() {
-  bookModalOpen.value = false
-  selectedBook.value = null
-}
-
-function onBookUpdated(updated) {
   const index = books.value.findIndex((book) => book.id === updated.id)
-  if (index >= 0) {
-    books.value[index] = updated
-    selectedBook.value = updated
-  } else {
-    loadBooks()
-  }
+  if (index >= 0) books.value[index] = updated
+  else loadBooks()
   loadCollections()
 }
 
-function onBookDeleted(bookId) {
-  books.value = books.value.filter((book) => book.id !== bookId)
-  closeBookModal()
+function openBookFromQuery() {
+  const bookId = String(route.query.book ?? '')
+  if (!bookId || isLoading.value) return
+
+  const book = books.value.find((item) => item.id === bookId)
+  if (book) openBookPage(book)
+
+  if (route.query.book) {
+    router.replace({ name: 'lecture' })
+  }
 }
 
 onMounted(async () => {
@@ -220,6 +215,11 @@ onUnmounted(() => {
 watch(userId, (id) => {
   if (id) loadBooks()
 })
+
+watch(
+  () => [route.query.book, books.value.length, isLoading.value],
+  () => openBookFromQuery(),
+)
 </script>
 
 <template>
@@ -292,7 +292,7 @@ watch(userId, (id) => {
             class="reading-book-btn"
             :title="book.title"
             :aria-label="`Ouvrir ${book.title}`"
-            @click="openBookModal(book)"
+            @click="openBookPage(book)"
           >
             <img
               v-if="book.coverUrl"
@@ -308,24 +308,13 @@ watch(userId, (id) => {
       </div>
     </section>
 
-    <ReadingBookModal
-      :open="bookModalOpen"
-      :book="selectedBook"
-      :user-id="userId"
-      :collections="collections"
-      @close="closeBookModal"
-      @updated="onBookUpdated"
-      @deleted="onBookDeleted"
-      @collections-changed="loadCollections"
-    />
-
     <ReadingPickModal
       :open="pickModalOpen"
       :books="books"
       :user-id="userId"
       @close="closePickModal"
       @accepted="onPickAccepted"
-      @updated="onBookUpdated"
+      @updated="onPickAccepted"
     />
   </div>
 </template>

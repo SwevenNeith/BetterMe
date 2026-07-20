@@ -1,8 +1,13 @@
 <script setup>
 import { ref, watch } from 'vue'
-import ReadingSpoilChapterModal from './ReadingSpoilChapterModal.vue'
+import { useRouter } from 'vue-router'
+import RichSpoilHtmlContent from './RichSpoilHtmlContent.vue'
 
 const props = defineProps({
+  bookId: {
+    type: String,
+    default: '',
+  },
   chapters: {
     type: Array,
     default: () => [],
@@ -21,10 +26,10 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['add-chapter', 'update-chapter', 'delete-chapter'])
+const emit = defineEmits(['delete-chapter'])
 
-const modalOpen = ref(false)
-const editingChapter = ref(null)
+const router = useRouter()
+
 const pendingDeleteChapter = ref(null)
 const expandedChapterId = ref(null)
 const expandedSections = ref({})
@@ -37,43 +42,23 @@ watch(
       expandedChapterId.value = null
       expandedSections.value = {}
     }
-    if (editingChapter.value && !ids.has(editingChapter.value.id)) {
-      editingChapter.value = null
-      modalOpen.value = false
-    }
     if (pendingDeleteChapter.value && !ids.has(pendingDeleteChapter.value.id)) {
       pendingDeleteChapter.value = null
     }
   },
 )
 
-function openAddModal() {
-  if (props.disabled || props.isSaving) return
-  editingChapter.value = null
-  modalOpen.value = true
+function openAddPage() {
+  if (!props.bookId || props.disabled || props.isSaving) return
+  router.push({ name: 'lecture-spoil-nouveau', params: { bookId: props.bookId } })
 }
 
-function openEditModal(chapter) {
-  if (props.disabled || props.isSaving || !chapter) return
-  editingChapter.value = chapter
-  modalOpen.value = true
-}
-
-function closeModal() {
-  if (props.isSaving) return
-  modalOpen.value = false
-  editingChapter.value = null
-}
-
-function onSubmitChapter(payload) {
-  const chapter = editingChapter.value
-  modalOpen.value = false
-  editingChapter.value = null
-  if (chapter?.id) {
-    emit('update-chapter', { id: chapter.id, ...payload })
-    return
-  }
-  emit('add-chapter', payload)
+function openEditPage(chapter) {
+  if (props.disabled || props.isSaving || !chapter?.id || !props.bookId) return
+  router.push({
+    name: 'lecture-spoil-edition',
+    params: { bookId: props.bookId, chapterId: chapter.id },
+  })
 }
 
 function onDeleteChapter(chapter) {
@@ -119,16 +104,28 @@ function isSectionOpen(chapterId, sectionKey) {
   return expandedChapterId.value === chapterId && Boolean(expandedSections.value[sectionKey])
 }
 
-function displayText(value) {
+function displayHtml(value) {
   return String(value ?? '').trim()
 }
 
-function closeAddAfterSuccess() {
-  modalOpen.value = false
-  editingChapter.value = null
+function isRichEmpty(value) {
+  const html = String(value ?? '')
+  const plain = html.replace(/<[^>]*>/g, '').replace(/\u00a0/g, ' ').trim()
+  return plain.length === 0
 }
 
-defineExpose({ closeAddAfterSuccess })
+function isNumericChapterNumber(value) {
+  const label = String(value ?? '').trim()
+  if (!label) return false
+  return /^-?\d+(?:[.,]\d+)?$/.test(label)
+}
+
+function formatChapterLabel(chapterNumber) {
+  const label = String(chapterNumber ?? '').trim()
+  if (!label) return ''
+  if (isNumericChapterNumber(label)) return `Chapitre ${label}`
+  return label
+}
 </script>
 
 <template>
@@ -139,7 +136,7 @@ defineExpose({ closeAddAfterSuccess })
       type="button"
       class="spoil-add-btn"
       :disabled="disabled || isSaving"
-      @click="openAddModal"
+      @click="openAddPage"
     >
       Ajouter un chapitre
     </button>
@@ -158,7 +155,7 @@ defineExpose({ closeAddAfterSuccess })
             :aria-expanded="expandedChapterId === chapter.id"
             @click="toggleChapter(chapter.id)"
           >
-            <span class="spoil-chapter-toggle__label">Chapitre {{ chapter.chapter_number }}</span>
+            <span class="spoil-chapter-toggle__label">{{ formatChapterLabel(chapter.chapter_number) }}</span>
             <span class="spoil-chapter-toggle__chevron" aria-hidden="true">▾</span>
           </button>
 
@@ -169,7 +166,7 @@ defineExpose({ closeAddAfterSuccess })
               title="Modifier"
               aria-label="Modifier le chapitre"
               :disabled="disabled || isSaving"
-              @click.stop="openEditModal(chapter)"
+              @click.stop="openEditPage(chapter)"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M12 20h9" />
@@ -207,13 +204,12 @@ defineExpose({ closeAddAfterSuccess })
               <span>Personnages rencontrés</span>
               <span aria-hidden="true">▾</span>
             </button>
-            <p
+            <RichSpoilHtmlContent
               v-if="isSectionOpen(chapter.id, 'characters')"
               class="spoil-sub-content"
-              :class="{ 'spoil-sub-content--empty': !displayText(chapter.characters_met) }"
-            >
-              {{ displayText(chapter.characters_met) }}
-            </p>
+              :class="{ 'spoil-sub-content--empty': isRichEmpty(chapter.characters_met) }"
+              :html="displayHtml(chapter.characters_met)"
+            />
           </div>
 
           <div class="spoil-sub">
@@ -227,13 +223,12 @@ defineExpose({ closeAddAfterSuccess })
               <span>World building</span>
               <span aria-hidden="true">▾</span>
             </button>
-            <p
+            <RichSpoilHtmlContent
               v-if="isSectionOpen(chapter.id, 'world')"
               class="spoil-sub-content"
-              :class="{ 'spoil-sub-content--empty': !displayText(chapter.world_building) }"
-            >
-              {{ displayText(chapter.world_building) }}
-            </p>
+              :class="{ 'spoil-sub-content--empty': isRichEmpty(chapter.world_building) }"
+              :html="displayHtml(chapter.world_building)"
+            />
           </div>
 
           <div class="spoil-sub">
@@ -247,25 +242,16 @@ defineExpose({ closeAddAfterSuccess })
               <span>Scène</span>
               <span aria-hidden="true">▾</span>
             </button>
-            <p
+            <RichSpoilHtmlContent
               v-if="isSectionOpen(chapter.id, 'scene')"
               class="spoil-sub-content"
-              :class="{ 'spoil-sub-content--empty': !displayText(chapter.scene) }"
-            >
-              {{ displayText(chapter.scene) }}
-            </p>
+              :class="{ 'spoil-sub-content--empty': isRichEmpty(chapter.scene) }"
+              :html="displayHtml(chapter.scene)"
+            />
           </div>
         </div>
       </li>
     </ul>
-
-    <ReadingSpoilChapterModal
-      :open="modalOpen"
-      :disabled="isSaving"
-      :chapter="editingChapter"
-      @close="closeModal"
-      @submit="onSubmitChapter"
-    />
 
     <Teleport to="body">
       <div

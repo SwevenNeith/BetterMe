@@ -4,6 +4,8 @@ import RichTextColorPicker from './RichTextColorPicker.vue'
 import {
   DEFAULT_TEXT_COLOR,
   normalizeHex,
+  normalizeNoteHighlightElement,
+  normalizeNoteHighlightsInHtml,
   rememberRecentTextColor,
   rgbToHex,
 } from '../utils/richNoteTextColors.js'
@@ -19,6 +21,11 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  /** Quand true : l'éditeur s'agrandit pour afficher tout le contenu (pas de scroll vertical). */
+  autoGrow: {
+    type: Boolean,
+    default: false,
+  },
   placeholder: {
     type: String,
     default: 'Ajoutez des détails…',
@@ -27,9 +34,19 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /** Affiche des lignes de carnet en arrière-plan. */
+  lined: {
+    type: Boolean,
+    default: false,
+  },
+  /** Active le bouton Note (surlignage + annotations en marge / tooltip). */
+  enableNotes: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'update:notes'])
 
 const editorRef = ref(null)
 const colorPickerAnchor = ref(null)
@@ -45,8 +62,30 @@ const formatState = ref({
   alignRight: false,
 })
 
+const notes = ref([])
+let noteIdCounter = 0
+const activeNoteId = ref(null)
+const noteInputText = ref('')
+const notePopupPos = ref({ top: 0, left: 0 })
+const showNoteInput = ref(false)
+const editingNoteId = ref(null)
+const editingMarginNoteId = ref(null)
+const marginNoteEditText = ref('')
+const marginNoteRefs = ref({})
+let savedSelectionRange = null
+
 let selectionHandler = null
 let documentMouseDownHandler = null
+
+function resizeEditorToContent() {
+  if (!props.autoGrow) return
+  const el = editorRef.value
+  if (!el) return
+
+  // Reset pour permettre aussi la contraction si on supprime du texte.
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
 
 function findColoredSpanAncestor() {
   const selection = window.getSelection()
@@ -148,13 +187,36 @@ function hasFormattingShell(el) {
   return Boolean(el.querySelector('b, strong, i, em, u'))
 }
 
+function cleanEmptyInlineTags(root) {
+  const tags = ['B', 'STRONG', 'I', 'EM', 'U']
+  let changed = true
+
+  while (changed) {
+    changed = false
+    tags.forEach((tag) => {
+      root.querySelectorAll(tag).forEach((inlineEl) => {
+        const text = (inlineEl.textContent ?? '').replace(/\u200b/g, '').trim()
+        if (!text) {
+          inlineEl.remove()
+          changed = true
+        }
+      })
+    })
+  }
+}
+
 function emitContent() {
   const el = editorRef.value
   if (!el) return
 
+  cleanEmptyInlineTags(el)
+
+  el.querySelectorAll('mark[data-note-id]').forEach(normalizeNoteHighlightElement)
+
   const plainText = (el.textContent ?? '').replace(/\u00a0/g, ' ').replace(/\u200b/g, '').trim()
   const keepShell = hasFormattingShell(el)
-  const html = plainText.length === 0 && !keepShell ? '' : el.innerHTML
+  const html =
+    plainText.length === 0 && !keepShell ? '' : normalizeNoteHighlightsInHtml(el.innerHTML)
 
   if (plainText.length === 0 && !keepShell && el.innerHTML) {
     el.innerHTML = ''
@@ -162,6 +224,8 @@ function emitContent() {
 
   syncEmptyState()
   emit('update:modelValue', html)
+
+  resizeEditorToContent()
 }
 
 function isSelectionInEditor() {
@@ -215,18 +279,47 @@ function findInlineAncestor(tags) {
 
   let node = selection.getRangeAt(0).startContainer
   const editor = editorRef.value
+  if (!editor) return null
+
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement
 
   while (node && node !== editor) {
     if (node.nodeType === Node.ELEMENT_NODE && tags.includes(node.tagName)) {
       return node
     }
-    if (node.nodeType === Node.TEXT_NODE && node.parentElement?.tagName && tags.includes(node.parentElement.tagName)) {
-      return node.parentElement
-    }
-    node = node.parentNode
+    node = node.parentElement
   }
 
   return null
+}
+
+function isFormatActiveAtCaret(tags) {
+  if (!isSelectionInEditor()) return false
+  const selection = window.getSelection()
+  if (!selection?.rangeCount) return false
+  if (!selection.getRangeAt(0).collapsed) return false
+  return Boolean(findInlineAncestor(tags))
+}
+
+function syncBrowserFormatWithCaret() {
+  if (!isSelectionInEditor()) return
+
+  const selection = window.getSelection()
+  if (!selection?.rangeCount) return
+  if (!selection.getRangeAt(0).collapsed) return
+
+  const formats = [
+    { cmd: 'bold', tags: ['B', 'STRONG'] },
+    { cmd: 'italic', tags: ['I', 'EM'] },
+    { cmd: 'underline', tags: ['U'] },
+  ]
+
+  formats.forEach(({ cmd, tags }) => {
+    const inTag = Boolean(findInlineAncestor(tags))
+    if (!inTag && document.queryCommandState(cmd)) {
+      document.execCommand(cmd, false, null)
+    }
+  })
 }
 
 function isCaretAtStartOfElement(range, element) {
@@ -320,10 +413,21 @@ function exitInlineFormat(tags) {
 }
 
 function readInlineFormatState() {
+  const selection = window.getSelection()
+  const collapsed = !selection?.rangeCount || selection.getRangeAt(0).collapsed
+
+  if (collapsed) {
+    return {
+      bold: isFormatActiveAtCaret(['B', 'STRONG']),
+      italic: isFormatActiveAtCaret(['I', 'EM']),
+      underline: isFormatActiveAtCaret(['U']),
+    }
+  }
+
   return {
-    bold: document.queryCommandState('bold'),
-    italic: document.queryCommandState('italic'),
-    underline: document.queryCommandState('underline'),
+    bold: Boolean(findInlineAncestor(['B', 'STRONG'])),
+    italic: Boolean(findInlineAncestor(['I', 'EM'])),
+    underline: Boolean(findInlineAncestor(['U'])),
   }
 }
 
@@ -346,7 +450,7 @@ function toggleInlineFormat(cmd, key) {
   if (!ensureCaretInEditor()) return
 
   const config = INLINE_FORMAT_CONFIG[key]
-  const wasActive = formatState.value[key] || document.queryCommandState(cmd)
+  const wasActive = isFormatActiveAtCaret(config.tags) || formatState.value[key]
 
   if (wasActive) {
     document.execCommand(cmd, false, null)
@@ -358,6 +462,7 @@ function toggleInlineFormat(cmd, key) {
   }
 
   emitContent()
+  nextTick(updateFormatState)
 }
 
 function applyAlignment(cmd) {
@@ -376,9 +481,328 @@ function applyAlignment(cmd) {
   emitContent()
 }
 
+function hasTextSelection() {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return false
+  const range = sel.getRangeAt(0)
+  return !range.collapsed && isSelectionInEditor()
+}
+
+function getMarkFromNode(node) {
+  const editor = editorRef.value
+  if (!editor || !node) return null
+
+  let current = node.nodeType === Node.TEXT_NODE ? node.parentElement : node
+  while (current && current !== editor) {
+    if (current.matches?.('mark.rich-note__highlight[data-note-id]')) return current
+    current = current.parentElement
+  }
+
+  return null
+}
+
+function getNoteIdFromSelection() {
+  const sel = window.getSelection()
+  if (!sel?.rangeCount || !isSelectionInEditor()) return null
+
+  const range = sel.getRangeAt(0)
+  const markAtCaret = getMarkFromNode(range.startContainer)
+  if (markAtCaret) return markAtCaret.dataset.noteId
+
+  const editor = editorRef.value
+  const marks = editor.querySelectorAll('mark.rich-note__highlight[data-note-id]')
+  for (const mark of marks) {
+    if (typeof range.intersectsNode === 'function' && range.intersectsNode(mark)) {
+      return mark.dataset.noteId
+    }
+  }
+
+  return null
+}
+
+function positionNotePopup(anchorRect) {
+  const editorRect = editorRef.value.getBoundingClientRect()
+  notePopupPos.value = {
+    top: anchorRect.top - editorRect.top + anchorRect.height + 4,
+    left: Math.max(0, anchorRect.left - editorRect.left),
+  }
+}
+
+function focusNotePopupInput() {
+  nextTick(() => {
+    const inp = editorRef.value?.parentElement?.querySelector('.rich-note__note-input-field')
+    inp?.focus()
+    inp?.select?.()
+  })
+}
+
+function openNoteInput() {
+  if (props.disabled || !props.enableNotes) return
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || sel.getRangeAt(0).collapsed) return
+  if (!isSelectionInEditor()) return
+
+  const existingNoteId = getNoteIdFromSelection()
+  if (existingNoteId) {
+    const mark = editorRef.value.querySelector(`mark[data-note-id="${existingNoteId}"]`)
+    if (!mark) return
+
+    editingNoteId.value = existingNoteId
+    savedSelectionRange = null
+    noteInputText.value = mark.dataset.noteText || notes.value.find((n) => n.id === existingNoteId)?.text || ''
+    positionNotePopup(mark.getBoundingClientRect())
+    showNoteInput.value = true
+    focusNotePopupInput()
+    return
+  }
+
+  savedSelectionRange = sel.getRangeAt(0).cloneRange()
+  editingNoteId.value = null
+  noteInputText.value = ''
+  positionNotePopup(savedSelectionRange.getBoundingClientRect())
+  showNoteInput.value = true
+  focusNotePopupInput()
+}
+
+function updateNoteText(noteId, noteText) {
+  const el = editorRef.value
+  if (!el) return
+
+  const mark = el.querySelector(`mark[data-note-id="${noteId}"]`)
+  if (mark) {
+    mark.dataset.noteText = noteText
+    mark.title = noteText
+  }
+
+  const note = notes.value.find((n) => n.id === noteId)
+  if (note) {
+    note.text = noteText
+    note.excerpt = mark?.textContent?.slice(0, 40) || ''
+  } else {
+    notes.value.push({
+      id: noteId,
+      text: noteText,
+      excerpt: mark?.textContent?.slice(0, 40) || '',
+    })
+  }
+
+  emitContent()
+  emitNotes()
+}
+
+function confirmNote() {
+  const noteText = noteInputText.value.trim()
+  if (!noteText) {
+    cancelNote()
+    return
+  }
+
+  if (editingNoteId.value) {
+    const noteId = editingNoteId.value
+    updateNoteText(noteId, noteText)
+    showNoteInput.value = false
+    editingNoteId.value = null
+    savedSelectionRange = null
+    noteInputText.value = ''
+    focusNote(noteId)
+    return
+  }
+
+  if (!savedSelectionRange) {
+    cancelNote()
+    return
+  }
+
+  const sel = window.getSelection()
+  sel.removeAllRanges()
+  sel.addRange(savedSelectionRange)
+
+  const id = `rn-note-${++noteIdCounter}`
+  const mark = document.createElement('mark')
+  mark.className = 'rich-note__highlight'
+  mark.dataset.noteId = id
+  mark.dataset.noteText = noteText
+  mark.title = noteText
+
+  const fragment = savedSelectionRange.extractContents()
+  mark.appendChild(fragment)
+  savedSelectionRange.insertNode(mark)
+
+  notes.value.push({
+    id,
+    text: noteText,
+    excerpt: mark.textContent?.slice(0, 40) || '',
+  })
+
+  showNoteInput.value = false
+  savedSelectionRange = null
+  noteInputText.value = ''
+  emitContent()
+  emitNotes()
+  focusNote(id)
+}
+
+function cancelNote() {
+  showNoteInput.value = false
+  savedSelectionRange = null
+  editingNoteId.value = null
+  noteInputText.value = ''
+}
+
+function deleteNote(noteId) {
+  const el = editorRef.value
+  if (!el) return
+  const mark = el.querySelector(`mark[data-note-id="${noteId}"]`)
+  if (mark) {
+    const parent = mark.parentNode
+    while (mark.firstChild) parent.insertBefore(mark.firstChild, mark)
+    parent.removeChild(mark)
+  }
+  notes.value = notes.value.filter((n) => n.id !== noteId)
+  if (activeNoteId.value === noteId) activeNoteId.value = null
+  if (editingMarginNoteId.value === noteId) editingMarginNoteId.value = null
+  emitContent()
+  emitNotes()
+}
+
+function setMarginNoteRef(noteId, el) {
+  if (el) marginNoteRefs.value[noteId] = el
+  else delete marginNoteRefs.value[noteId]
+}
+
+function focusNote(noteId) {
+  if (!noteId) return
+  activeNoteId.value = noteId
+  nextTick(() => {
+    marginNoteRefs.value[noteId]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  })
+}
+
+function focusHighlight(noteId) {
+  if (!noteId) return
+  activeNoteId.value = noteId
+  nextTick(() => {
+    const mark = editorRef.value?.querySelector(`mark[data-note-id="${noteId}"]`)
+    if (!mark) return
+    mark.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    mark.classList.add('rich-note__highlight--pulse')
+    window.setTimeout(() => mark.classList.remove('rich-note__highlight--pulse'), 1200)
+  })
+}
+
+function openNoteEditor(noteId) {
+  const note = notes.value.find((n) => n.id === noteId)
+  if (!note) return
+  editingMarginNoteId.value = noteId
+  marginNoteEditText.value = note.text
+  focusHighlight(noteId)
+  nextTick(() => {
+    marginNoteRefs.value[noteId]?.querySelector('textarea')?.focus()
+  })
+}
+
+function saveMarginNoteEdit(noteId) {
+  const text = marginNoteEditText.value.trim()
+  if (!text) {
+    deleteNote(noteId)
+    editingMarginNoteId.value = null
+    marginNoteEditText.value = ''
+    return
+  }
+
+  updateNoteText(noteId, text)
+  editingMarginNoteId.value = null
+  marginNoteEditText.value = ''
+}
+
+function cancelMarginNoteEdit() {
+  editingMarginNoteId.value = null
+  marginNoteEditText.value = ''
+}
+
+function onHighlightHover(noteId) {
+  activeNoteId.value = noteId
+}
+
+function onHighlightLeave() {
+  activeNoteId.value = null
+}
+
+function emitNotes() {
+  emit('update:notes', notes.value)
+}
+
+function getTooltipPosition() {
+  if (!activeNoteId.value || !editorRef.value) return { display: 'none' }
+  const mark = editorRef.value.querySelector(`mark[data-note-id="${activeNoteId.value}"]`)
+  if (!mark) return { display: 'none' }
+  const rect = mark.getBoundingClientRect()
+  return {
+    top: `${rect.bottom + window.scrollY + 6}px`,
+    left: `${rect.left + window.scrollX}px`,
+  }
+}
+
+function setupHighlightListeners() {
+  const el = editorRef.value
+  if (!el) return
+  el.addEventListener('mouseover', (e) => {
+    const mark = e.target.closest?.('mark.rich-note__highlight')
+    if (mark) onHighlightHover(mark.dataset.noteId)
+  })
+  el.addEventListener('mouseout', (e) => {
+    const mark = e.target.closest?.('mark.rich-note__highlight')
+    if (!mark) return
+    const margin = el.parentElement?.querySelector('.rich-note__margin')
+    if (margin?.contains(e.relatedTarget)) return
+    onHighlightLeave()
+  })
+  el.addEventListener('click', (e) => {
+    const mark = e.target.closest?.('mark.rich-note__highlight')
+    if (mark?.dataset.noteId) focusNote(mark.dataset.noteId)
+  })
+}
+
+function onEditorMouseDown() {
+  nextTick(() => {
+    syncBrowserFormatWithCaret()
+    updateFormatState()
+  })
+}
+
+function rebuildNotesFromDom() {
+  const el = editorRef.value
+  if (!el) return
+
+  const markEls = el.querySelectorAll('mark.rich-note__highlight[data-note-id]')
+  const nextNotes = []
+  let maxCounter = 0
+
+  markEls.forEach((mark) => {
+    const id = mark.getAttribute('data-note-id') || ''
+    if (!id) return
+
+    const text = String(mark.getAttribute('data-note-text') || '').trim()
+
+    const match = id.match(/^rn-note-(\d+)$/)
+    if (match?.[1]) maxCounter = Math.max(maxCounter, Number(match[1]))
+
+    nextNotes.push({
+      id,
+      text,
+      excerpt: String(mark.textContent || '').slice(0, 40),
+    })
+  })
+
+  notes.value = nextNotes
+  noteIdCounter = maxCounter
+  activeNoteId.value = null
+}
+
 function onInput() {
   emitContent()
   updateFormatState()
+  resizeEditorToContent()
 }
 
 function onPaste(event) {
@@ -388,17 +812,21 @@ function onPaste(event) {
   document.execCommand('insertText', false, text)
   emitContent()
   nextTick(updateFormatState)
+  resizeEditorToContent()
 }
 
 function onEditorInteraction() {
   nextTick(updateFormatState)
+  resizeEditorToContent()
 }
 
 function setHtml(html) {
   const el = editorRef.value
   if (!el) return
-  el.innerHTML = html || ''
+  el.innerHTML = normalizeNoteHighlightsInHtml(html || '')
+  el.querySelectorAll('mark[data-note-id]').forEach(normalizeNoteHighlightElement)
   syncEmptyState()
+  rebuildNotesFromDom()
 }
 
 watch(
@@ -408,12 +836,14 @@ watch(
     if (!el) return
     const next = value || ''
     if (el.innerHTML !== next) setHtml(next)
+    resizeEditorToContent()
   },
 )
 
 onMounted(async () => {
   await nextTick()
   setHtml(props.modelValue)
+  resizeEditorToContent()
 
   selectionHandler = () => {
     if (isSelectionInEditor()) updateFormatState()
@@ -422,6 +852,8 @@ onMounted(async () => {
 
   documentMouseDownHandler = onDocumentMouseDown
   document.addEventListener('mousedown', documentMouseDownHandler)
+
+  if (props.enableNotes) setupHighlightListeners()
 })
 
 onBeforeUnmount(() => {
@@ -431,7 +863,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="rich-note" :class="{ 'rich-note--disabled': disabled }">
+  <div class="rich-note" :class="{ 'rich-note--disabled': disabled, 'rich-note--with-margin': enableNotes && notes.length > 0 }">
     <div class="rich-note__toolbar" role="toolbar" aria-label="Mise en forme">
       <button
         type="button"
@@ -443,7 +875,7 @@ onBeforeUnmount(() => {
         @mousedown.prevent
         @click="toggleInlineFormat('bold', 'bold')"
       >
-        <strong>B</strong>
+        <span class="rich-note__tool-label rich-note__tool-label--bold">B</span>
       </button>
       <button
         type="button"
@@ -455,7 +887,7 @@ onBeforeUnmount(() => {
         @mousedown.prevent
         @click="toggleInlineFormat('italic', 'italic')"
       >
-        <em>I</em>
+        <span class="rich-note__tool-label rich-note__tool-label--italic">I</span>
       </button>
       <button
         type="button"
@@ -490,6 +922,22 @@ onBeforeUnmount(() => {
           @close="colorPickerOpen = false"
         />
       </div>
+      <template v-if="enableNotes">
+        <span class="rich-note__sep" aria-hidden="true" />
+        <button
+          type="button"
+          class="rich-note__tool rich-note__tool--icon"
+          title="Ajouter une note"
+          :disabled="disabled || !hasTextSelection()"
+          @mousedown.prevent
+          @click="openNoteInput"
+        >
+          <svg class="rich-note__align-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" fill="currentColor" />
+            <path d="M7 9h10v2H7z" fill="currentColor" />
+          </svg>
+        </button>
+      </template>
       <span class="rich-note__sep" aria-hidden="true" />
       <button
         type="button"
@@ -541,20 +989,94 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div
-      ref="editorRef"
-      class="rich-note__editor"
-      :class="{ 'rich-note__editor--empty': isEmpty }"
-      :contenteditable="!disabled"
-      role="textbox"
-      aria-multiline="true"
-      :data-placeholder="placeholder"
-      @input="onInput"
-      @paste="onPaste"
-      @keyup="onEditorInteraction"
-      @mouseup="onEditorInteraction"
-      @focus="onEditorInteraction"
-    />
+    <div class="rich-note__body" :class="{ 'rich-note__body--with-margin': enableNotes && notes.length > 0 }">
+      <div
+        ref="editorRef"
+        class="rich-note__editor"
+        :class="{
+          'rich-note__editor--empty': isEmpty,
+          'rich-note__editor--lined': lined,
+        }"
+        :style="props.autoGrow ? { maxHeight: 'none', overflowY: 'hidden' } : null"
+        :contenteditable="!disabled"
+        role="textbox"
+        aria-multiline="true"
+        :data-placeholder="placeholder"
+        @mousedown="onEditorMouseDown"
+        @input="onInput"
+        @paste="onPaste"
+        @keyup="onEditorInteraction"
+        @mouseup="onEditorInteraction"
+        @focus="onEditorMouseDown"
+      />
+
+      <!-- Note input popup -->
+      <div
+        v-if="showNoteInput"
+        class="rich-note__note-popup"
+        :style="{ top: notePopupPos.top + 'px', left: notePopupPos.left + 'px' }"
+      >
+        <input
+          v-model="noteInputText"
+          class="rich-note__note-input-field"
+          placeholder="Votre note…"
+          @mousedown.stop
+          @keydown.enter.prevent="confirmNote"
+          @keydown.escape="cancelNote"
+        />
+        <div class="rich-note__note-popup-actions">
+          <button type="button" class="rich-note__note-popup-btn rich-note__note-popup-btn--ok" @click="confirmNote">✓</button>
+          <button type="button" class="rich-note__note-popup-btn rich-note__note-popup-btn--cancel" @click="cancelNote">✕</button>
+        </div>
+      </div>
+
+      <!-- Margin notes (desktop) -->
+      <aside v-if="enableNotes && notes.length > 0" class="rich-note__margin">
+        <div
+          v-for="note in notes"
+          :key="note.id"
+          :ref="(el) => setMarginNoteRef(note.id, el)"
+          class="rich-note__margin-note"
+          :class="{ 'rich-note__margin-note--active': activeNoteId === note.id }"
+          @click="focusHighlight(note.id)"
+          @mouseenter="activeNoteId = note.id"
+        >
+          <textarea
+            v-if="editingMarginNoteId === note.id"
+            v-model="marginNoteEditText"
+            class="rich-note__margin-edit"
+            rows="3"
+            @click.stop
+            @keydown.enter.ctrl.prevent="saveMarginNoteEdit(note.id)"
+            @keydown.escape.prevent="cancelMarginNoteEdit"
+            @blur="saveMarginNoteEdit(note.id)"
+          />
+          <p v-else class="rich-note__margin-text">{{ note.text }}</p>
+          <div class="rich-note__margin-actions">
+            <button
+              type="button"
+              class="rich-note__margin-edit-btn"
+              title="Modifier la note"
+              @click.stop="openNoteEditor(note.id)"
+            >
+              ✎
+            </button>
+            <button type="button" class="rich-note__margin-delete" title="Supprimer la note" @click.stop="deleteNote(note.id)">✕</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Tooltip for notes (mobile) -->
+    <Teleport to="body">
+      <div
+        v-if="activeNoteId && enableNotes"
+        class="rich-note__tooltip"
+        :style="getTooltipPosition()"
+      >
+        {{ notes.find(n => n.id === activeNoteId)?.text }}
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -592,20 +1114,20 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: 0.1rem;
-  min-width: 2.1rem;
-  padding: 0.2rem 0.4rem 0.15rem;
+  min-width: 1.6rem;
+  padding: 0.15rem 0.25rem 0.1rem;
   line-height: 1;
 }
 
 .rich-note__color-letter {
-  font-size: 0.9rem;
+  font-size: 0.72rem;
   font-weight: 800;
   color: currentColor;
 }
 
 .rich-note__color-bar {
-  width: 1.15rem;
-  height: 0.2rem;
+  width: 0.95rem;
+  height: 0.16rem;
   border-radius: 999px;
 }
 
@@ -658,6 +1180,14 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
+.rich-note__tool-label--bold {
+  font-weight: 800;
+}
+
+.rich-note__tool-label--italic {
+  font-style: italic;
+}
+
 .rich-note__underline {
   text-decoration: underline;
 }
@@ -670,6 +1200,7 @@ onBeforeUnmount(() => {
 }
 
 .rich-note__editor {
+  width: 100%;
   min-height: 7rem;
   max-height: 16rem;
   overflow-y: auto;
@@ -688,9 +1219,222 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 2px rgba(173, 129, 190, 0.15);
 }
 
+.rich-note__editor :deep(mark.rich-note__highlight) {
+  background: rgba(213, 181, 234, 0.45);
+  border-bottom: 2px solid #ad81be;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.rich-note__editor :deep(mark.rich-note__highlight--pulse) {
+  box-shadow: 0 0 0 2px rgba(173, 129, 190, 0.75);
+}
+
 .rich-note__editor--empty::before {
   content: attr(data-placeholder);
   color: #9aa5b1;
   pointer-events: none;
+}
+
+/* Lined notebook background */
+.rich-note__editor--lined {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(1.5em - 1px),
+    rgba(173, 129, 190, 0.22) calc(1.5em - 1px),
+    rgba(173, 129, 190, 0.22) 1.5em
+  );
+  background-size: 100% 1.5em;
+  background-position: 0 0.65rem;
+  line-height: 1.5em;
+  padding-top: 0.65rem;
+}
+
+/* Body layout for editor + margin */
+.rich-note__body {
+  position: relative;
+  display: flex;
+  width: 100%;
+}
+
+.rich-note__body--with-margin .rich-note__editor {
+  flex: 1;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+
+/* Margin notes panel (desktop) */
+.rich-note__margin {
+  /* La marge ne doit pas dépasser ~1/4 de l'espace disponible. */
+  width: clamp(120px, 25%, 220px);
+  min-width: 120px;
+  max-width: 25%;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  border-left: 2px solid rgba(173, 129, 190, 0.55);
+  border-radius: 0 10px 10px 0;
+  background: rgba(250, 246, 255, 0.95);
+  padding: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  overflow-y: auto;
+  max-height: 16rem;
+}
+
+.rich-note__margin-note {
+  position: relative;
+  padding: 0.5rem 0.55rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(213, 181, 234, 0.16);
+  border-left: 3px solid #ad81be;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #3d2f4a;
+  transition: background 0.15s;
+  cursor: pointer;
+}
+
+.rich-note__margin-note--active {
+  background: rgba(213, 181, 234, 0.3);
+}
+
+.rich-note__margin-text {
+  margin: 0;
+  word-break: break-word;
+  padding-right: 2rem;
+}
+
+.rich-note__margin-edit {
+  width: 100%;
+  min-height: 3rem;
+  resize: vertical;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  border-radius: 6px;
+  padding: 0.35rem 0.4rem;
+  font: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.95);
+  box-sizing: border-box;
+}
+
+.rich-note__margin-actions {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.rich-note__margin-note:hover .rich-note__margin-actions,
+.rich-note__margin-note--active .rich-note__margin-actions {
+  opacity: 1;
+}
+
+.rich-note__margin-edit-btn,
+.rich-note__margin-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  border-radius: 4px;
+  cursor: pointer;
+  color: #6b4f7c;
+  font-size: 0.68rem;
+  padding: 0;
+  line-height: 1;
+}
+
+/* Note input popup */
+.rich-note__note-popup {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem;
+  border-radius: 8px;
+  background: white;
+  border: 1px solid rgba(213, 181, 234, 0.4);
+  box-shadow: 0 4px 16px rgba(20, 30, 40, 0.15);
+}
+
+.rich-note__note-input-field {
+  width: 180px;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.rich-note__note-input-field:focus {
+  border-color: #ad81be;
+}
+
+.rich-note__note-popup-actions {
+  display: flex;
+  gap: 0.2rem;
+}
+
+.rich-note__note-popup-btn {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rich-note__note-popup-btn--ok {
+  background: #ad81be;
+  color: white;
+}
+
+.rich-note__note-popup-btn--cancel {
+  background: rgba(0, 0, 0, 0.06);
+  color: #666;
+}
+
+/* Tooltip for mobile */
+.rich-note__tooltip {
+  position: absolute;
+  z-index: 9999;
+  max-width: 240px;
+  padding: 0.45rem 0.65rem;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #5a4a68, #3d2f4a);
+  color: white;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  box-shadow: 0 6px 18px rgba(61, 47, 74, 0.28);
+  pointer-events: none;
+}
+
+/* On mobile, hide margin, rely on tooltip */
+@media (max-width: 640px) {
+  .rich-note__margin {
+    display: none;
+  }
+  .rich-note__body--with-margin .rich-note__editor {
+    border-radius: 10px;
+    border-right: 1px solid rgba(213, 181, 234, 0.35);
+  }
+}
+
+/* On desktop, hide tooltip */
+@media (min-width: 641px) {
+  .rich-note__tooltip {
+    display: none;
+  }
 }
 </style>

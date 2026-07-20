@@ -1,14 +1,16 @@
 export const DEFAULT_TEXT_COLOR = '#2c3e50'
 
 export const TEXT_COLOR_PRESETS = [
-  '#2c3e50',
-  '#c0392b',
-  '#e67e22',
-  '#d4ac0d',
-  '#27ae60',
-  '#2980b9',
-  '#8e44ad',
-  '#ad81be',
+  // Row 1 — dark
+  '#000000', '#434343', '#666666', '#999999', '#b7b7b7', '#cccccc', '#d9d9d9', '#efefef', '#f3f3f3', '#ffffff',
+  // Row 2 — vivid
+  '#980000', '#ff0000', '#ff9900', '#ffff00', '#00ff00', '#00ffff', '#4a86e8', '#0000ff', '#9900ff', '#ff00ff',
+  // Row 3 — medium
+  '#e6b8af', '#f4cccc', '#fce5cd', '#fff2cc', '#d9ead3', '#d0e0e3', '#c9daf8', '#cfe2f3', '#d9d2e9', '#ead1dc',
+  // Row 4 — soft
+  '#dd7e6b', '#ea9999', '#f9cb9c', '#ffe599', '#b6d7a8', '#a2c4c9', '#a4c2f4', '#9fc5e8', '#b4a7d6', '#d5a6bd',
+  // Row 5 — deep
+  '#cc4125', '#e06666', '#f6b26b', '#ffd966', '#93c47d', '#76a5af', '#6d9eeb', '#6fa8dc', '#8e7cc3', '#c27ba0',
 ]
 
 const STORAGE_KEY = 'betterme-rich-note-recent-text-colors'
@@ -70,4 +72,21 @@ export function rememberRecentTextColor(color) {
 
 export function isSafeCssColor(value) {
   return Boolean(normalizeHex(value) || rgbToHex(value))
+}
+
+/** Retire les styles inline des surlignages note pour laisser le CSS applicatif s'appliquer. */
+export function normalizeNoteHighlightElement(mark) {
+  if (!mark?.classList) return
+  mark.classList.add('rich-note__highlight')
+  mark.removeAttribute('style')
+}
+
+export function normalizeNoteHighlightsInHtml(html) {
+  const raw = String(html ?? '')
+  if (!raw || !raw.includes('data-note-id')) return raw
+
+  const template = document.createElement('template')
+  template.innerHTML = raw
+  template.content.querySelectorAll('mark[data-note-id]').forEach(normalizeNoteHighlightElement)
+  return template.innerHTML
 }

@@ -8,6 +8,11 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  /** Pleine largeur pour la page fiche livre. */
+  page: {
+    type: Boolean,
+    default: false,
+  },
   /** Affiche la section Spoil (popup uniquement). */
   showSpoil: {
     type: Boolean,
@@ -21,6 +26,7 @@ defineProps({
     class="reading-fiche"
     :class="{
       'reading-fiche--inline': inline,
+      'reading-fiche--page': page,
       'reading-fiche--edit': edit,
       'reading-fiche--no-spoil': !showSpoil,
     }"
@@ -100,6 +106,15 @@ defineProps({
 .reading-fiche--inline {
   margin: 0 auto 1.25rem;
   max-height: none;
+  box-shadow: 0 8px 28px rgba(92, 62, 112, 0.1);
+}
+
+.reading-fiche--page {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border-radius: 16px;
   box-shadow: 0 8px 28px rgba(92, 62, 112, 0.1);
 }
 

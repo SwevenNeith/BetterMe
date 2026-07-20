@@ -131,6 +131,28 @@ export async function listReadingBooksWithCovers(supabase, userId) {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
+ * @param {string} bookId
+ */
+export async function getReadingBookWithCover(supabase, userId, bookId) {
+  if (!userId || !bookId) return null
+
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select(BOOK_SELECT)
+    .eq('id', bookId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) return null
+
+  const coverUrl = await resolveReadingCoverUrl(supabase, data)
+  return { ...data, coverUrl }
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
  * @param {File} file
  */
 async function uploadReadingCover(supabase, userId, file) {

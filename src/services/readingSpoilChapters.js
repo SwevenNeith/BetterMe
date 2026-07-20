@@ -5,17 +5,10 @@ const SELECT =
 
 function sortChapters(chapters) {
   return [...(chapters ?? [])].sort((a, b) => {
-    const na = Number.parseFloat(String(a.chapter_number).replace(',', '.'))
-    const nb = Number.parseFloat(String(b.chapter_number).replace(',', '.'))
-    const aNum = Number.isFinite(na)
-    const bNum = Number.isFinite(nb)
-    if (aNum && bNum && na !== nb) return na - nb
-    if (aNum && !bNum) return -1
-    if (!aNum && bNum) return 1
-    return String(a.chapter_number).localeCompare(String(b.chapter_number), 'fr', {
-      numeric: true,
-      sensitivity: 'base',
-    })
+    const ta = Date.parse(a?.created_at ?? '') || 0
+    const tb = Date.parse(b?.created_at ?? '') || 0
+    if (ta !== tb) return ta - tb
+    return String(a?.id ?? '').localeCompare(String(b?.id ?? ''))
   })
 }
 

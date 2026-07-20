@@ -51,6 +51,11 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /** Affiche la fiche en pleine largeur (page dédiée). */
+  page: {
+    type: Boolean,
+    default: false,
+  },
   disabled: {
     type: Boolean,
     default: false,
@@ -89,8 +94,6 @@ const emit = defineEmits([
   'rating-change',
   'is-saga-change',
   'collection-created',
-  'add-spoil-chapter',
-  'update-spoil-chapter',
   'delete-spoil-chapter',
 ])
 
@@ -165,7 +168,7 @@ function fieldClass(field) {
 </script>
 
 <template>
-  <ReadingBookSheet :edit="mode === 'create'" :inline="inline" :show-spoil="mode === 'sheet'">
+  <ReadingBookSheet :edit="mode === 'create'" :inline="inline" :page="page" :show-spoil="mode === 'sheet'">
     <template v-if="$slots.actions" #actions>
       <slot name="actions" />
     </template>
@@ -687,12 +690,11 @@ function fieldClass(field) {
 
     <template #spoil>
       <ReadingSpoilSection
+        :book-id="book?.id"
         :chapters="spoilChapters"
         :disabled="disabled"
         :is-saving="spoilSaving"
         :error-message="spoilError"
-        @add-chapter="(payload) => emit('add-spoil-chapter', payload)"
-        @update-chapter="(payload) => emit('update-spoil-chapter', payload)"
         @delete-chapter="(id) => emit('delete-spoil-chapter', id)"
       />
     </template>

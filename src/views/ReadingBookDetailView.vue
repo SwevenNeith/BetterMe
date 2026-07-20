@@ -1,33 +1,21 @@
 <script setup>
-import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
-import ReadingBookFiche from './ReadingBookFiche.vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import ReadingBookFiche from '../components/ReadingBookFiche.vue'
 import { setFilePickerActive, setFileUploadInProgress } from '../composables/useAppTabResume.js'
 import { bookToEditForm, getBookGenre, formatExtraTagsInput } from '../utils/readingBookForm.js'
-import { deleteReadingBook, updateReadingBook } from '../services/readingBooks.js'
+import { deleteReadingBook, getReadingBookWithCover, updateReadingBook } from '../services/readingBooks.js'
 import { deleteSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/readingSpoilChapters.js'
+import { listReadingCollections } from '../services/readingCollections.js'
 import { supabase } from '../lib/supabase.js'
 
-const props = defineProps({
-  book: {
-    type: Object,
-    default: null,
-  },
-  userId: {
-    type: String,
-    default: null,
-  },
-  open: {
-    type: Boolean,
-    default: false,
-  },
-  collections: {
-    type: Array,
-    default: () => [],
-  },
-})
+const route = useRoute()
+const router = useRouter()
 
-const emit = defineEmits(['close', 'updated', 'deleted', 'collections-changed'])
-
+const userId = ref(null)
+const book = ref(null)
+const collections = ref([])
+const isLoading = ref(true)
 const isSaving = ref(false)
 const errorMessage = ref('')
 const editingField = ref(null)
@@ -47,18 +35,24 @@ const coverForm = reactive({
 })
 const coverFile = ref(null)
 
+const bookId = computed(() => String(route.params.bookId ?? ''))
+
 const FIELD_GETTERS = {
-  title: (book) => book?.title ?? '',
-  author: (book) => book?.author ?? '',
-  collection: (book) => book?.collection ?? '',
-  dateStart: (book) => book?.date_start ?? '',
-  dateEnd: (book) => book?.date_end ?? '',
-  genre: (book) => getBookGenre(book),
-  pages: (book) => (book?.pages != null ? String(book.pages) : ''),
-  publicationYear: (book) => (book?.publication_year != null ? String(book.publication_year) : ''),
-  extraTags: (book) => formatExtraTagsInput(book),
-  comments: (book) => book?.comments ?? '',
-  quote: (book) => book?.quote ?? '',
+  title: (item) => item?.title ?? '',
+  author: (item) => item?.author ?? '',
+  collection: (item) => item?.collection ?? '',
+  dateStart: (item) => item?.date_start ?? '',
+  dateEnd: (item) => item?.date_end ?? '',
+  genre: (item) => getBookGenre(item),
+  pages: (item) => (item?.pages != null ? String(item.pages) : ''),
+  publicationYear: (item) => (item?.publication_year != null ? String(item.publication_year) : ''),
+  extraTags: (item) => formatExtraTagsInput(item),
+  comments: (item) => item?.comments ?? '',
+  quote: (item) => item?.quote ?? '',
+}
+
+function returnToLibrary() {
+  router.push({ name: 'lecture' })
 }
 
 function revokeCoverPreview() {
@@ -84,13 +78,43 @@ function resetInlineEdit() {
   errorMessage.value = ''
 }
 
+async function loadBook() {
+  if (!userId.value || !bookId.value) {
+    book.value = null
+    return
+  }
+
+  isLoading.value = true
+  errorMessage.value = ''
+  try {
+    book.value = await getReadingBookWithCover(supabase, userId.value, bookId.value)
+    if (!book.value) errorMessage.value = 'Livre introuvable.'
+  } catch (err) {
+    console.error(err)
+    book.value = null
+    errorMessage.value = err.message || 'Impossible de charger le livre.'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+async function loadCollections() {
+  if (!userId.value) return
+  try {
+    collections.value = await listReadingCollections(supabase, userId.value)
+  } catch (err) {
+    console.error(err)
+    collections.value = []
+  }
+}
+
 async function loadSpoilChapters() {
-  if (!props.userId || !props.book?.id) {
+  if (!userId.value || !bookId.value) {
     spoilChapters.value = []
     return
   }
   try {
-    spoilChapters.value = await listSpoilChapters(supabase, props.userId, props.book.id)
+    spoilChapters.value = await listSpoilChapters(supabase, userId.value, bookId.value)
     spoilError.value = ''
   } catch (err) {
     console.error(err)
@@ -99,73 +123,12 @@ async function loadSpoilChapters() {
   }
 }
 
-function onNavigateToAddSpoil() {
-  handleClose()
-}
-
-async function onUpdateSpoilChapter(payload) {
-  if (!props.userId || !payload?.id || spoilSaving.value) return
-
-  spoilSaving.value = true
-  spoilError.value = ''
-  try {
-    await updateSpoilChapter(supabase, props.userId, payload.id, payload)
-    await loadSpoilChapters()
-  } catch (err) {
-    console.error(err)
-    spoilError.value = err.message || 'Impossible de modifier le chapitre.'
-  } finally {
-    spoilSaving.value = false
-  }
-}
-
-async function onDeleteSpoilChapter(chapterId) {
-  if (!props.userId || !chapterId || spoilSaving.value) return
-
-  spoilSaving.value = true
-  spoilError.value = ''
-  try {
-    await deleteSpoilChapter(supabase, props.userId, chapterId)
-    await loadSpoilChapters()
-  } catch (err) {
-    console.error(err)
-    spoilError.value = err.message || 'Impossible de supprimer le chapitre.'
-  } finally {
-    spoilSaving.value = false
-  }
-}
-
-function handleClose() {
-  if (isSaving.value) return
-  if (deleteConfirmOpen.value) {
-    deleteConfirmOpen.value = false
-    return
-  }
-  resetInlineEdit()
-  emit('close')
-}
-
-function onOverlayClick(event) {
-  if (event.target === event.currentTarget) handleClose()
-}
-
-function onKeydown(event) {
-  if (!props.open || isSaving.value) return
-  if (event.key === 'Escape') {
-    if (deleteConfirmOpen.value) {
-      deleteConfirmOpen.value = false
-      return
-    }
-    if (editingField.value) {
-      cancelEdit()
-      return
-    }
-    handleClose()
-  }
+async function reloadAll() {
+  await Promise.all([loadBook(), loadCollections(), loadSpoilChapters()])
 }
 
 async function startEdit(field) {
-  if (!props.book || isSaving.value) return
+  if (!book.value || isSaving.value) return
 
   if (editingField.value && editingField.value !== field) {
     skipNextBlurCommit = true
@@ -178,11 +141,11 @@ async function startEdit(field) {
     coverForm.imageMode = 'keep'
     coverForm.imageUrl = ''
     coverFile.value = null
-    coverPreviewUrl.value = props.book.coverUrl ?? ''
+    coverPreviewUrl.value = book.value.coverUrl ?? ''
     return
   }
 
-  draft.value = FIELD_GETTERS[field]?.(props.book) ?? ''
+  draft.value = FIELD_GETTERS[field]?.(book.value) ?? ''
 }
 
 function cancelEdit() {
@@ -193,8 +156,8 @@ function cancelEdit() {
   })
 }
 
-function valuesEqual(field, nextValue, book) {
-  const current = FIELD_GETTERS[field]?.(book) ?? ''
+function valuesEqual(field, nextValue, item) {
+  const current = FIELD_GETTERS[field]?.(item) ?? ''
   return String(current) === String(nextValue ?? '')
 }
 
@@ -203,7 +166,7 @@ async function commitEdit() {
     skipNextBlurCommit = false
     return
   }
-  if (!props.userId || !props.book?.id || !editingField.value || isSaving.value) return
+  if (!userId.value || !book.value?.id || !editingField.value || isSaving.value) return
 
   const field = editingField.value
 
@@ -218,20 +181,19 @@ async function commitEdit() {
     return
   }
 
-  if (valuesEqual(field, nextValue, props.book)) {
+  if (valuesEqual(field, nextValue, book.value)) {
     resetInlineEdit()
     return
   }
 
-  const payload = bookToEditForm(props.book)
+  const payload = bookToEditForm(book.value)
   payload[field] = nextValue
 
   isSaving.value = true
   errorMessage.value = ''
   try {
-    const updated = await updateReadingBook(supabase, props.userId, props.book.id, payload)
-    emit('updated', updated)
-    if (field === 'collection') emit('collections-changed')
+    book.value = await updateReadingBook(supabase, userId.value, book.value.id, payload)
+    if (field === 'collection') await loadCollections()
     resetInlineEdit()
   } catch (err) {
     console.error(err)
@@ -242,7 +204,7 @@ async function commitEdit() {
 }
 
 async function commitCoverEdit() {
-  if (!props.userId || !props.book?.id) return
+  if (!userId.value || !book.value?.id) return
 
   if (coverForm.imageMode === 'keep' && !coverFile.value) {
     resetInlineEdit()
@@ -259,15 +221,14 @@ async function commitCoverEdit() {
   errorMessage.value = ''
 
   try {
-    const payload = bookToEditForm(props.book)
+    const payload = bookToEditForm(book.value)
     if (coverForm.imageMode === 'upload' && coverFile.value) {
       payload.file = coverFile.value
     } else if (coverForm.imageMode === 'url') {
       payload.imageUrl = coverForm.imageUrl
     }
 
-    const updated = await updateReadingBook(supabase, props.userId, props.book.id, payload)
-    emit('updated', updated)
+    book.value = await updateReadingBook(supabase, userId.value, book.value.id, payload)
     resetInlineEdit()
   } catch (err) {
     console.error(err)
@@ -279,10 +240,8 @@ async function commitCoverEdit() {
 }
 
 async function onRatingChange(value) {
-  if (!props.userId || !props.book?.id || isSaving.value) return
-  if (Number(props.book.rating) === Number(value) || (props.book.rating == null && value == null)) {
-    return
-  }
+  if (!userId.value || !book.value?.id || isSaving.value) return
+  if (Number(book.value.rating) === Number(value) || (book.value.rating == null && value == null)) return
 
   if (editingField.value) {
     skipNextBlurCommit = true
@@ -292,10 +251,9 @@ async function onRatingChange(value) {
   isSaving.value = true
   errorMessage.value = ''
   try {
-    const payload = bookToEditForm(props.book)
+    const payload = bookToEditForm(book.value)
     payload.rating = value
-    const updated = await updateReadingBook(supabase, props.userId, props.book.id, payload)
-    emit('updated', updated)
+    book.value = await updateReadingBook(supabase, userId.value, book.value.id, payload)
   } catch (err) {
     console.error(err)
     errorMessage.value = err.message || 'Erreur lors de la modification de la note.'
@@ -305,8 +263,8 @@ async function onRatingChange(value) {
 }
 
 async function onIsSagaChange(value) {
-  if (!props.userId || !props.book?.id || isSaving.value) return
-  if (Boolean(props.book.is_saga) === Boolean(value)) return
+  if (!userId.value || !book.value?.id || isSaving.value) return
+  if (Boolean(book.value.is_saga) === Boolean(value)) return
 
   if (editingField.value) {
     skipNextBlurCommit = true
@@ -316,10 +274,9 @@ async function onIsSagaChange(value) {
   isSaving.value = true
   errorMessage.value = ''
   try {
-    const payload = bookToEditForm(props.book)
+    const payload = bookToEditForm(book.value)
     payload.isSaga = Boolean(value)
-    const updated = await updateReadingBook(supabase, props.userId, props.book.id, payload)
-    emit('updated', updated)
+    book.value = await updateReadingBook(supabase, userId.value, book.value.id, payload)
   } catch (err) {
     console.error(err)
     errorMessage.value = err.message || 'Erreur lors de la modification du statut série.'
@@ -371,7 +328,7 @@ function switchImageMode(nextMode) {
     coverFile.value = null
     coverForm.imageUrl = ''
     revokeCoverPreview()
-    coverPreviewUrl.value = props.book?.coverUrl ?? ''
+    coverPreviewUrl.value = book.value?.coverUrl ?? ''
   } else {
     coverFile.value = null
     coverForm.imageUrl = ''
@@ -382,8 +339,8 @@ function switchImageMode(nextMode) {
 const coverPreview = computed(() => {
   if (coverForm.imageMode === 'upload' && coverPreviewUrl.value) return coverPreviewUrl.value
   if (coverForm.imageMode === 'url' && coverForm.imageUrl.trim()) return coverForm.imageUrl.trim()
-  if (coverForm.imageMode === 'keep') return props.book?.coverUrl ?? ''
-  return coverPreviewUrl.value || props.book?.coverUrl || ''
+  if (coverForm.imageMode === 'keep') return book.value?.coverUrl ?? ''
+  return coverPreviewUrl.value || book.value?.coverUrl || ''
 })
 
 function onDraftUpdate(value) {
@@ -391,7 +348,7 @@ function onDraftUpdate(value) {
 }
 
 function openDeleteConfirm() {
-  if (!props.userId || !props.book || isSaving.value) return
+  if (!userId.value || !book.value || isSaving.value) return
   deleteConfirmOpen.value = true
 }
 
@@ -401,16 +358,14 @@ function cancelDeleteConfirm() {
 }
 
 async function confirmDelete() {
-  if (!props.userId || !props.book || isSaving.value) return
+  if (!userId.value || !book.value || isSaving.value) return
 
   isSaving.value = true
   errorMessage.value = ''
   try {
-    await deleteReadingBook(supabase, props.userId, props.book)
+    await deleteReadingBook(supabase, userId.value, book.value)
     deleteConfirmOpen.value = false
-    emit('deleted', props.book.id)
-    resetInlineEdit()
-    emit('close')
+    returnToLibrary()
   } catch (err) {
     console.error(err)
     errorMessage.value = err.message || 'Erreur lors de la suppression.'
@@ -420,105 +375,120 @@ async function confirmDelete() {
   }
 }
 
-watch(
-  () => props.open,
-  (isOpen) => {
-    if (isOpen) {
-      resetInlineEdit()
-      spoilError.value = ''
-      deleteConfirmOpen.value = false
-      loadSpoilChapters()
-      document.addEventListener('keydown', onKeydown)
-    } else {
-      document.removeEventListener('keydown', onKeydown)
-      resetInlineEdit()
-      spoilChapters.value = []
-      spoilError.value = ''
-      deleteConfirmOpen.value = false
-    }
-  },
-)
+async function onDeleteSpoilChapter(chapterId) {
+  if (!userId.value || !chapterId || spoilSaving.value) return
+
+  spoilSaving.value = true
+  spoilError.value = ''
+  try {
+    await deleteSpoilChapter(supabase, userId.value, chapterId)
+    await loadSpoilChapters()
+  } catch (err) {
+    console.error(err)
+    spoilError.value = err.message || 'Impossible de supprimer le chapitre.'
+  } finally {
+    spoilSaving.value = false
+  }
+}
+
+function onKeydown(event) {
+  if (isSaving.value) return
+  if (event.key !== 'Escape') return
+  if (deleteConfirmOpen.value) {
+    deleteConfirmOpen.value = false
+    return
+  }
+  if (editingField.value) cancelEdit()
+}
+
+onMounted(async () => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (user) userId.value = user.id
+  document.addEventListener('keydown', onKeydown)
+})
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
   revokeCoverPreview()
 })
+
+watch([userId, bookId], () => {
+  if (userId.value && bookId.value) reloadAll()
+})
+
+watch(bookId, () => {
+  resetInlineEdit()
+  deleteConfirmOpen.value = false
+})
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
-      v-if="open && book"
-      class="reading-review-modal"
-      role="dialog"
-      aria-modal="true"
-      :aria-label="`Fiche de ${book.title}`"
-      @click="onOverlayClick"
+  <div class="reading-book-page">
+    <header class="reading-book-page__header">
+      <button type="button" class="reading-book-page__back" @click="returnToLibrary">
+        ← Retour à la bibliothèque
+      </button>
+    </header>
+
+    <div v-if="isLoading" class="reading-book-page__status">Chargement…</div>
+    <div v-else-if="!book" class="reading-book-page__error">{{ errorMessage || 'Livre introuvable.' }}</div>
+
+    <ReadingBookFiche
+      v-else
+      mode="sheet"
+      page
+      :book="book"
+      :form="coverForm"
+      :collections="collections"
+      :editing-field="editingField"
+      :draft="draft"
+      :cover-preview="coverPreview"
+      :cover-file-input-ref="coverFileInputRef"
+      :disabled="isSaving"
+      :spoil-chapters="spoilChapters"
+      :spoil-saving="spoilSaving"
+      :spoil-error="spoilError"
+      @start-edit="startEdit"
+      @commit-edit="commitEdit"
+      @cancel-edit="cancelEdit"
+      @update:draft="onDraftUpdate"
+      @rating-change="onRatingChange"
+      @is-saga-change="onIsSagaChange"
+      @switch-image-mode="switchImageMode"
+      @cover-file-change="onCoverFileChange"
+      @trigger-cover-picker="triggerCoverFilePicker"
+      @image-url-input="onImageUrlInput"
+      @delete-spoil-chapter="onDeleteSpoilChapter"
     >
-      <ReadingBookFiche
-        mode="sheet"
-        :book="book"
-        :form="coverForm"
-        :collections="collections"
-        :editing-field="editingField"
-        :draft="draft"
-        :cover-preview="coverPreview"
-        :cover-file-input-ref="coverFileInputRef"
-        :disabled="isSaving"
-        :spoil-chapters="spoilChapters"
-        :spoil-saving="spoilSaving"
-        :spoil-error="spoilError"
-        @click.stop
-        @start-edit="startEdit"
-        @commit-edit="commitEdit"
-        @cancel-edit="cancelEdit"
-        @update:draft="onDraftUpdate"
-        @rating-change="onRatingChange"
-        @is-saga-change="onIsSagaChange"
-        @switch-image-mode="switchImageMode"
-        @cover-file-change="onCoverFileChange"
-        @trigger-cover-picker="triggerCoverFilePicker"
-        @image-url-input="onImageUrlInput"
-        @navigate-to-add-spoil="onNavigateToAddSpoil"
-        @update-spoil-chapter="onUpdateSpoilChapter"
-        @delete-spoil-chapter="onDeleteSpoilChapter"
-      >
-        <template #actions>
-          <button
-            type="button"
-            class="reading-fiche-icon-btn reading-fiche-icon-btn--delete"
-            title="Supprimer le livre"
-            aria-label="Supprimer le livre"
-            :disabled="isSaving"
-            @click="openDeleteConfirm"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-              <path d="M10 11v6" />
-              <path d="M14 11v6" />
-              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="reading-fiche-close"
-            title="Fermer"
-            aria-label="Fermer"
-            :disabled="isSaving"
-            @click="handleClose"
-          >
-            ✕
-          </button>
-        </template>
+      <template #actions>
+        <button
+          type="button"
+          class="reading-fiche-icon-btn reading-fiche-icon-btn--delete"
+          title="Supprimer le livre"
+          aria-label="Supprimer le livre"
+          :disabled="isSaving"
+          @click="openDeleteConfirm"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            <path d="M10 11v6" />
+            <path d="M14 11v6" />
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+          </svg>
+        </button>
+      </template>
 
-        <template v-if="errorMessage" #alert>
-          <div class="reading-fiche-error">{{ errorMessage }}</div>
-        </template>
-      </ReadingBookFiche>
+      <template v-if="errorMessage" #alert>
+        <div class="reading-fiche-error">{{ errorMessage }}</div>
+      </template>
+    </ReadingBookFiche>
 
+    <Teleport to="body">
       <div
-        v-if="deleteConfirmOpen"
+        v-if="deleteConfirmOpen && book"
         class="reading-delete-overlay"
         @click.self="cancelDeleteConfirm"
       >
@@ -535,47 +505,66 @@ onUnmounted(() => {
             « {{ book.title }} » sera définitivement supprimé.
           </p>
           <div class="reading-delete-actions">
-            <button
-              type="button"
-              class="reading-delete-cancel"
-              :disabled="isSaving"
-              @click="cancelDeleteConfirm"
-            >
+            <button type="button" class="reading-delete-cancel" :disabled="isSaving" @click="cancelDeleteConfirm">
               Annuler
             </button>
-            <button
-              type="button"
-              class="reading-delete-confirm"
-              :disabled="isSaving"
-              @click="confirmDelete"
-            >
+            <button type="button" class="reading-delete-confirm" :disabled="isSaving" @click="confirmDelete">
               {{ isSaving ? 'Suppression…' : 'Supprimer' }}
             </button>
           </div>
         </div>
       </div>
-    </div>
-  </Teleport>
+    </Teleport>
+  </div>
 </template>
 
 <style scoped>
-.reading-review-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  background: rgba(20, 24, 32, 0.45);
-  backdrop-filter: blur(4px);
+.reading-book-page {
+  flex: 1;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 1.5rem 1.25rem 3rem;
   box-sizing: border-box;
 }
 
+.reading-book-page__header {
+  margin: 0 0 1rem;
+}
+
+.reading-book-page__back {
+  padding: 0.35rem 0;
+  border: none;
+  background: transparent;
+  color: #6b4f7c;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.reading-book-page__back:hover {
+  color: #3d2f4a;
+}
+
+.reading-book-page__status {
+  text-align: center;
+  color: #6c757d;
+  padding: 2rem 0;
+}
+
+.reading-book-page__error {
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: rgba(220, 53, 69, 0.1);
+  color: #b02a37;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
 .reading-delete-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 5;
+  z-index: 1400;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -624,7 +613,6 @@ onUnmounted(() => {
   font-weight: 700;
   font-size: 0.92rem;
   cursor: pointer;
-  transition: filter 0.15s ease, transform 0.15s ease;
 }
 
 .reading-delete-cancel {
@@ -637,11 +625,6 @@ onUnmounted(() => {
   border: none;
   background: #c0392b;
   color: #fff;
-}
-
-.reading-delete-confirm:hover:not(:disabled) {
-  transform: translateY(-1px);
-  filter: brightness(1.05);
 }
 
 .reading-delete-cancel:disabled,

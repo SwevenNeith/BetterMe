@@ -17,6 +17,7 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'close'])
 
+const wheelOpen = ref(false)
 const wheelColor = ref(DEFAULT_TEXT_COLOR)
 const recentColors = ref(loadRecentTextColors())
 
@@ -49,150 +50,188 @@ watch(
 </script>
 
 <template>
-  <div class="rich-color-picker" role="dialog" aria-label="Couleur du texte">
-    <div class="rich-color-picker__section">
-      <p class="rich-color-picker__label">Couleurs par défaut</p>
-      <div class="rich-color-picker__grid">
-        <button
-          v-for="color in TEXT_COLOR_PRESETS"
-          :key="color"
-          type="button"
-          class="rich-color-picker__swatch"
-          :class="{ 'rich-color-picker__swatch--active': color === currentColor }"
-          :style="{ backgroundColor: color }"
-          :title="color === DEFAULT_TEXT_COLOR ? 'Couleur par défaut' : color"
-          :aria-label="`Appliquer ${color}`"
-          @mousedown.prevent
-          @click="pick(color)"
-        />
-      </div>
+  <div class="rcp" role="dialog" aria-label="Couleur du texte">
+    <div class="rcp__grid">
+      <button
+        v-for="color in TEXT_COLOR_PRESETS"
+        :key="color"
+        type="button"
+        class="rcp__swatch"
+        :class="{
+          'rcp__swatch--active': color === currentColor,
+          'rcp__swatch--white': color === '#ffffff',
+        }"
+        :style="{ backgroundColor: color }"
+        :title="color === DEFAULT_TEXT_COLOR ? 'Par défaut' : color"
+        :aria-label="`Appliquer ${color}`"
+        @mousedown.prevent
+        @click="pick(color)"
+      />
     </div>
 
-    <div v-if="recentColors.length > 0" class="rich-color-picker__section">
-      <p class="rich-color-picker__label">Récentes</p>
-      <div class="rich-color-picker__grid">
-        <button
-          v-for="color in recentColors"
-          :key="`recent-${color}`"
-          type="button"
-          class="rich-color-picker__swatch"
-          :class="{ 'rich-color-picker__swatch--active': color === currentColor }"
-          :style="{ backgroundColor: color }"
-          :title="color"
-          :aria-label="`Appliquer ${color}`"
-          @mousedown.prevent
-          @click="pick(color)"
-        />
-      </div>
+    <div v-if="recentColors.length > 0" class="rcp__recent">
+      <button
+        v-for="color in recentColors"
+        :key="`r-${color}`"
+        type="button"
+        class="rcp__swatch"
+        :class="{ 'rcp__swatch--active': color === currentColor }"
+        :style="{ backgroundColor: color }"
+        :title="color"
+        :aria-label="`Appliquer ${color}`"
+        @mousedown.prevent
+        @click="pick(color)"
+      />
     </div>
 
-    <div class="rich-color-picker__section">
-      <p class="rich-color-picker__label">Roue des couleurs</p>
+    <div class="rcp__footer">
+      <button
+        type="button"
+        class="rcp__more"
+        @mousedown.prevent
+        @click="wheelOpen = !wheelOpen"
+      >
+        {{ wheelOpen ? '▴ Moins' : '▾ Plus…' }}
+      </button>
+      <button type="button" class="rcp__close" @mousedown.prevent @click="emit('close')">✕</button>
+    </div>
+
+    <div v-if="wheelOpen" class="rcp__wheel-section">
       <ColorPickerField :model-value="wheelColor" compact @update:model-value="onWheelUpdate" />
-      <button type="button" class="rich-color-picker__apply" @mousedown.prevent @click="applyWheelColor">
+      <button type="button" class="rcp__apply" @mousedown.prevent @click="applyWheelColor">
         Appliquer
       </button>
     </div>
-
-    <button type="button" class="rich-color-picker__close" @mousedown.prevent @click="emit('close')">
-      Fermer
-    </button>
   </div>
 </template>
 
 <style scoped>
-.rich-color-picker {
+.rcp {
   position: absolute;
-  top: calc(100% + 0.35rem);
+  top: calc(100% + 0.3rem);
   left: 0;
   z-index: 20;
-  width: min(16.5rem, 88vw);
-  padding: 0.75rem;
-  border-radius: 12px;
+  padding: 0.4rem;
+  border-radius: 8px;
   border: 1px solid rgba(213, 181, 234, 0.35);
   background: white;
-  box-shadow: 0 10px 28px rgba(20, 30, 40, 0.16);
+  box-shadow: 0 6px 20px rgba(20, 30, 40, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
 }
 
-.rich-color-picker__section + .rich-color-picker__section {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
+.rcp__grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+}
+
+.rcp__swatch {
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.rcp__swatch:hover {
+  transform: scale(1.25);
+  z-index: 1;
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.3);
+}
+
+.rcp__swatch--active {
+  box-shadow: 0 0 0 2px var(--habit-color, #ad81be);
+  border-color: var(--habit-color, #ad81be);
+}
+
+.rcp__swatch--white {
+  border-color: rgba(0, 0, 0, 0.18);
+}
+
+.rcp__recent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding-top: 0.25rem;
   border-top: 1px solid rgba(213, 181, 234, 0.2);
 }
 
-.rich-color-picker__label {
-  margin: 0 0 0.45rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #6c757d;
+.rcp__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
 }
 
-.rich-color-picker__grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.4rem;
-}
-
-.rich-color-picker__swatch {
-  width: 100%;
-  aspect-ratio: 1;
-  border-radius: 8px;
-  border: 2px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 0 0 1px rgba(173, 129, 190, 0.35);
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.rich-color-picker__swatch:hover {
-  transform: translateY(-1px);
-}
-
-.rich-color-picker__swatch--active {
-  box-shadow:
-    0 0 0 2px var(--habit-color, #ad81be),
-    0 0 0 4px rgba(173, 129, 190, 0.2);
-}
-
-.rich-color-picker__apply {
-  margin-top: 0.55rem;
-  width: 100%;
-  padding: 0.45rem 0.65rem;
+.rcp__more {
+  padding: 0.15rem 0.3rem;
   border: none;
-  border-radius: 8px;
+  border-radius: 4px;
+  background: transparent;
+  color: #8b7a96;
+  font-size: 0.65rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rcp__more:hover {
+  color: #5a4a68;
+  background: rgba(213, 181, 234, 0.15);
+}
+
+.rcp__close {
+  width: 1.3rem;
+  height: 1.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #8b7a96;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.rcp__close:hover {
+  background: rgba(213, 181, 234, 0.18);
+  color: #5a4a68;
+}
+
+.rcp__wheel-section {
+  padding-top: 0.3rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.rcp__apply {
+  width: 100%;
+  padding: 0.25rem 0.4rem;
+  border: none;
+  border-radius: 6px;
   background: linear-gradient(135deg, #d5b5ea, #ad81be);
   color: white;
-  font-size: 0.82rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.rich-color-picker__close {
-  margin-top: 0.65rem;
-  width: 100%;
-  padding: 0.4rem 0.65rem;
-  border: none;
-  border-radius: 8px;
-  background: rgba(213, 181, 234, 0.18);
-  color: #5c6b7a;
-  font-size: 0.82rem;
+  font-size: 0.68rem;
   font-weight: 700;
   cursor: pointer;
 }
 
 @media (prefers-color-scheme: dark) {
-  .rich-color-picker {
+  .rcp {
     background: #1e2832;
     border-color: rgba(213, 181, 234, 0.2);
   }
 
-  .rich-color-picker__label {
+  .rcp__more,
+  .rcp__close {
     color: #adb5bd;
-  }
-
-  .rich-color-picker__close {
-    color: #ced4da;
   }
 }
 </style>
