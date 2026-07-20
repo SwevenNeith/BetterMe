@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ReadingBookFiche from '../components/ReadingBookFiche.vue'
+import ReadingBooksFilterPopover from '../components/ReadingBooksFilterPopover.vue'
 import ReadingPickModal from '../components/ReadingPickModal.vue'
 import { supabase } from '../lib/supabase.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
@@ -10,6 +11,7 @@ import { setFilePickerActive, setFileUploadInProgress } from '../composables/use
 import { emptyBookForm } from '../utils/readingBookForm.js'
 import { createReadingBook, listReadingBooksWithCovers } from '../services/readingBooks.js'
 import { listReadingCollections } from '../services/readingCollections.js'
+import { applyReadingBookFilters, formatReadingFilterLabel } from '../utils/readingBookFilters.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.LECTURE, undefined, { setDocumentTitle: true })
 
@@ -26,15 +28,59 @@ const pickModalOpen = ref(false)
 const bookFormOpen = ref(false)
 const coverFileInputRef = ref(null)
 const coverPreviewUrl = ref('')
+const searchQuery = ref('')
+const bookFilters = ref([])
+const filterOpen = ref(false)
 let coverPreviewObjectUrl = ''
 
 const bookForm = reactive(emptyBookForm())
 const coverFile = ref(null)
 
+const collectionFilterOptions = computed(() =>
+  [...collections.value].sort((a, b) => {
+    const orderA = a.sort_order ?? 999
+    const orderB = b.sort_order ?? 999
+    if (orderA !== orderB) return orderA - orderB
+    return String(a.name ?? '').localeCompare(String(b.name ?? ''), 'fr', { sensitivity: 'base' })
+  }),
+)
+
+const displayedBooks = computed(() => {
+  let list = [...books.value]
+  const query = searchQuery.value.trim().toLowerCase()
+
+  if (query) {
+    list = list.filter((book) => {
+      const title = String(book.title ?? '').toLowerCase()
+      const author = String(book.author ?? '').toLowerCase()
+      const collection = String(book.collection ?? '').toLowerCase()
+      return title.includes(query) || author.includes(query) || collection.includes(query)
+    })
+  }
+
+  list = applyReadingBookFilters(list, bookFilters.value)
+
+  return list.sort((a, b) =>
+    String(a.title ?? '').localeCompare(String(b.title ?? ''), 'fr', { sensitivity: 'base' }),
+  )
+})
+
+const hasActiveFilters = computed(() => searchQuery.value.trim() !== '' || bookFilters.value.length > 0)
+
+function removeBookFilter(filterId) {
+  bookFilters.value = bookFilters.value.filter((filter) => filter.id !== filterId)
+}
+
 const booksSubtitle = computed(() => {
-  const count = books.value.length
-  if (count === 0) return 'Ta bibliothèque personnelle.'
-  return `${count} livre${count > 1 ? 's' : ''} enregistré${count > 1 ? 's' : ''}.`
+  const total = books.value.length
+  if (total === 0) return 'Ta bibliothèque personnelle.'
+
+  const displayed = displayedBooks.value.length
+  if (hasActiveFilters.value && displayed !== total) {
+    return `${displayed} livre${displayed > 1 ? 's' : ''} sur ${total} affiché${displayed > 1 ? 's' : ''}.`
+  }
+
+  return `${total} livre${total > 1 ? 's' : ''} enregistré${total > 1 ? 's' : ''}.`
 })
 
 const addCoverPreview = computed(() => {
@@ -283,10 +329,65 @@ watch(
       <div v-if="loadError" class="reading-error">{{ loadError }}</div>
       <div v-if="isLoading" class="reading-loading">Chargement…</div>
 
-      <div v-else class="reading-grid">
-        <div v-if="books.length === 0" class="reading-empty">Aucun livre pour le moment.</div>
+      <template v-else>
+        <div v-if="books.length > 0" class="reading-toolbar">
+          <label class="reading-search">
+            <span class="reading-search__label">Rechercher</span>
+            <input
+              v-model="searchQuery"
+              type="search"
+              class="reading-search__input"
+              placeholder="Titre, auteur, collection…"
+              autocomplete="off"
+            />
+          </label>
 
-        <article v-for="book in books" :key="book.id" class="reading-book">
+          <div class="reading-toolbar__filters">
+            <button
+              type="button"
+              class="reading-filter-btn"
+              :class="{ 'reading-filter-btn--active': bookFilters.length > 0 }"
+              @click="filterOpen = true"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="currentColor" d="M3 4h18v2l-7 8v5l-4 1v-6L3 6V4z" />
+              </svg>
+              Filtre
+              <span v-if="bookFilters.length > 0" class="reading-filter-btn__count">{{ bookFilters.length }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="bookFilters.length > 0" class="reading-active-filters">
+          <button
+            v-for="filter in bookFilters"
+            :key="filter.id"
+            type="button"
+            class="reading-active-filter-pill"
+            @click="filterOpen = true"
+          >
+            <span>{{ formatReadingFilterLabel(filter) }}</span>
+            <span
+              class="reading-active-filter-pill__remove"
+              role="button"
+              tabindex="0"
+              aria-label="Retirer ce filtre"
+              @click.stop="removeBookFilter(filter.id)"
+              @keydown.enter.stop.prevent="removeBookFilter(filter.id)"
+              @keydown.space.stop.prevent="removeBookFilter(filter.id)"
+            >
+              ✕
+            </span>
+          </button>
+        </div>
+
+        <div class="reading-grid">
+          <div v-if="books.length === 0" class="reading-empty">Aucun livre pour le moment.</div>
+          <div v-else-if="displayedBooks.length === 0" class="reading-empty">
+            Aucun livre ne correspond à ta recherche.
+          </div>
+
+        <article v-for="book in displayedBooks" :key="book.id" class="reading-book">
           <button
             type="button"
             class="reading-book-btn"
@@ -305,8 +406,16 @@ watch(
             </div>
           </button>
         </article>
-      </div>
+        </div>
+      </template>
     </section>
+
+    <ReadingBooksFilterPopover
+      v-model:filters="bookFilters"
+      :open="filterOpen"
+      :collections="collectionFilterOptions"
+      @close="filterOpen = false"
+    />
 
     <ReadingPickModal
       :open="pickModalOpen"
@@ -417,6 +526,130 @@ watch(
   padding: 1rem 0;
   text-align: center;
   color: #6c757d;
+}
+
+.reading-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.reading-search {
+  flex: 1 1 14rem;
+  min-width: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.reading-search__label {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #6c757d;
+}
+
+.reading-search__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.85);
+  color: #2c3e50;
+  font: inherit;
+  font-weight: 600;
+}
+
+.reading-search__input:focus {
+  outline: 2px solid rgba(173, 129, 190, 0.45);
+  outline-offset: 1px;
+}
+
+.reading-search__input::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+.reading-toolbar__filters {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.reading-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.7);
+  color: #ad81be;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.reading-filter-btn svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.reading-filter-btn:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.reading-filter-btn--active {
+  border-color: rgba(173, 129, 190, 0.55);
+  background: color-mix(in srgb, #ad81be 12%, white);
+}
+
+.reading-filter-btn__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: #ad81be;
+  color: white;
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.reading-active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.85rem;
+}
+
+.reading-active-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: color-mix(in srgb, #ad81be 10%, white);
+  color: #2c3e50;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.reading-active-filter-pill__remove {
+  color: #6c757d;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.reading-active-filter-pill__remove:hover {
+  color: #b02a37;
 }
 
 .reading-grid {
