@@ -27,6 +27,46 @@ const activePatterns = computed(() =>
   (props.patterns ?? []).filter((p) => p.actif !== false),
 )
 
+function patternGroupKey(p) {
+  if (p.type_pattern === PATTERN_TYPE.COMBINED) {
+    return `${p.type_pattern}:${p.cluster ?? ''}`
+  }
+  if (
+    p.type_pattern === PATTERN_TYPE.SIMPLE
+    || p.type_pattern === PATTERN_TYPE.INTENSITY
+    || p.type_pattern === PATTERN_TYPE.DURATION
+  ) {
+    return `${p.type_pattern}:${p.symptôme ?? ''}:${p.direction ?? ''}`
+  }
+  return p.id
+}
+
+function sortPatternsByWindow(patterns) {
+  return [...patterns].sort((a, b) => {
+    const aStart = a.jour_relatif_début ?? Number.MAX_SAFE_INTEGER
+    const bStart = b.jour_relatif_début ?? Number.MAX_SAFE_INTEGER
+    if (aStart !== bStart) return aStart - bStart
+    const aEnd = a.jour_relatif_fin ?? aStart
+    const bEnd = b.jour_relatif_fin ?? bStart
+    return aEnd - bEnd
+  })
+}
+
+const groupedPatterns = computed(() => {
+  const groups = new Map()
+
+  for (const pattern of activePatterns.value) {
+    const key = patternGroupKey(pattern)
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(pattern)
+  }
+
+  return [...groups.entries()].map(([key, patterns]) => ({
+    id: key,
+    patterns: sortPatternsByWindow(patterns),
+  }))
+})
+
 function patternTitle(p) {
   if (p.type_pattern === PATTERN_TYPE.COMBINED) {
     return CLUSTER_LABELS[p.cluster] ?? p.cluster ?? 'Cluster'
@@ -37,9 +77,16 @@ function patternTitle(p) {
 function formatRelativeWindow(p) {
   if (p.jour_relatif_début == null || p.jour_relatif_fin == null) return ''
   if (p.jour_relatif_début === p.jour_relatif_fin) {
-    return ` le J-${p.jour_relatif_début} du cycle`
+    return `le J-${p.jour_relatif_début} du cycle`
   }
-  return ` entre le J-${p.jour_relatif_début} et le J-${p.jour_relatif_fin} du cycle`
+  return `entre le J-${p.jour_relatif_début} et le J-${p.jour_relatif_fin} du cycle`
+}
+
+function formatPatternStats(patterns) {
+  const first = patterns[0]
+  const ratio = Math.round((first.ratio_répétition ?? 0) * 100)
+  const cycles = `${first.cycles_détectés}/${first.cycles_total} cycles`
+  return `${ratio} %, ${cycles}`
 }
 
 function patternTypeLabel(type) {
@@ -50,13 +97,15 @@ function patternTypeLabel(type) {
   return type
 }
 
-function patternDescription(p) {
-  const ratio = Math.round((p.ratio_répétition ?? 0) * 100)
-  const cycles = `${p.cycles_détectés}/${p.cycles_total} cycles`
+function patternDescription(patterns) {
+  const list = Array.isArray(patterns) ? patterns : [patterns]
+  const p = list[0]
+  const stats = formatPatternStats(list)
 
   if (p.type_pattern === PATTERN_TYPE.SIMPLE) {
-    const window = formatRelativeWindow(p)
-    return `Se manifeste souvent${window} (${ratio} %, ${cycles}).`
+    const windows = list.map(formatRelativeWindow).filter(Boolean)
+    const windowPart = windows.length ? ` ${windows.join(' et ')}` : ''
+    return `Se manifeste souvent${windowPart} (${stats}).`
   }
 
   if (p.type_pattern === PATTERN_TYPE.INTENSITY) {
@@ -73,10 +122,13 @@ function patternDescription(p) {
   }
 
   if (p.type_pattern === PATTERN_TYPE.COMBINED) {
-    const window = formatRelativeWindow(p)
-    return `Plusieurs symptômes apparaissent ensemble${window} (${ratio} %, ${cycles}).`
+    const windows = list.map(formatRelativeWindow).filter(Boolean)
+    const windowPart = windows.length ? ` ${windows.join(' et ')}` : ''
+    return `Plusieurs symptômes apparaissent ensemble${windowPart} (${stats}).`
   }
 
+  const ratio = Math.round((p.ratio_répétition ?? 0) * 100)
+  const cycles = `${p.cycles_détectés}/${p.cycles_total} cycles`
   return `${ratio} % · ${cycles}`
 }
 </script>
@@ -100,12 +152,12 @@ function patternDescription(p) {
     </p>
 
     <ul v-else class="patterns-panel__list">
-      <li v-for="p in activePatterns" :key="p.id" class="patterns-panel__item">
+      <li v-for="group in groupedPatterns" :key="group.id" class="patterns-panel__item">
         <div class="patterns-panel__item-head">
-          <span class="patterns-panel__badge">{{ patternTypeLabel(p.type_pattern) }}</span>
-          <strong class="patterns-panel__item-title">{{ patternTitle(p) }}</strong>
+          <span class="patterns-panel__badge">{{ patternTypeLabel(group.patterns[0].type_pattern) }}</span>
+          <strong class="patterns-panel__item-title">{{ patternTitle(group.patterns[0]) }}</strong>
         </div>
-        <p class="patterns-panel__item-desc">{{ patternDescription(p) }}</p>
+        <p class="patterns-panel__item-desc">{{ patternDescription(group.patterns) }}</p>
       </li>
     </ul>
   </section>
