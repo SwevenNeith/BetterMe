@@ -14,6 +14,7 @@ import {
   persistProjectOrders,
 } from '../services/projects.js'
 import { syncProjectsListDoneStates } from '../services/projectDoneSync.js'
+import { purgeStaleCompletedProjectItems } from '../services/projectCleanup.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 
@@ -103,6 +104,7 @@ async function loadProjects() {
   isLoading.value = true
   loadError.value = ''
   try {
+    await purgeStaleCompletedProjectItems(supabase, userId.value)
     let list = await fetchProjectsTree(supabase, userId.value)
     if (!isProjectsCustomOrder(userId.value)) {
       list = await applyAlphabeticalProjectOrder(supabase, userId.value, list)

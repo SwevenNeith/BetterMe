@@ -411,11 +411,22 @@ export async function updateStepProgressSettings(
 }
 
 export async function updateStepDone(supabase, userId, stepId, isDone) {
-  const { error } = await supabase
+  const payload = {
+    is_done: isDone,
+    done_at: isDone ? new Date().toISOString() : null,
+  }
+  let { error } = await supabase
     .from(STEPS_TABLE)
-    .update({ is_done: isDone })
+    .update(payload)
     .eq('id', stepId)
     .eq('user_id', userId)
+  if (error?.message?.includes('done_at')) {
+    ;({ error } = await supabase
+      .from(STEPS_TABLE)
+      .update({ is_done: isDone })
+      .eq('id', stepId)
+      .eq('user_id', userId))
+  }
   if (error) throw error
 }
 
@@ -507,11 +518,22 @@ export async function updateSubstepProgressSettings(
 }
 
 export async function updateSubstepDone(supabase, userId, substepId, isDone) {
-  const { error } = await supabase
+  const payload = {
+    is_done: isDone,
+    done_at: isDone ? new Date().toISOString() : null,
+  }
+  let { error } = await supabase
     .from(SUBSTEPS_TABLE)
-    .update({ is_done: isDone })
+    .update(payload)
     .eq('id', substepId)
     .eq('user_id', userId)
+  if (error?.message?.includes('done_at')) {
+    ;({ error } = await supabase
+      .from(SUBSTEPS_TABLE)
+      .update({ is_done: isDone })
+      .eq('id', substepId)
+      .eq('user_id', userId))
+  }
   if (error) throw error
 }
 
