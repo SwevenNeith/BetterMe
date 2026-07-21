@@ -15,6 +15,8 @@ const TodoView = () => import('../views/TodoView.vue')
 const LectureView = () => import('../views/LectureView.vue')
 const ReadingSpoilChapterView = () => import('../views/ReadingSpoilChapterView.vue')
 const ReadingBookDetailView = () => import('../views/ReadingBookDetailView.vue')
+const JournalView = () => import('../views/JournalView.vue')
+const JournalEntryView = () => import('../views/JournalEntryView.vue')
 
 const CHUNK_RELOAD_KEY = 'betterme-chunk-reload'
 
@@ -84,6 +86,21 @@ const router = createRouter({
           path: 'lecture/:bookId/spoil/:chapterId/edition',
           name: 'lecture-spoil-edition',
           component: ReadingSpoilChapterView,
+        },
+        {
+          path: 'journal',
+          name: 'journal',
+          component: JournalView,
+        },
+        {
+          path: 'journal/nouveau',
+          name: 'journal-nouveau',
+          component: JournalEntryView,
+        },
+        {
+          path: 'journal/:entryId',
+          name: 'journal-entree',
+          component: JournalEntryView,
         },
         {
           path: 'habit-tracker',

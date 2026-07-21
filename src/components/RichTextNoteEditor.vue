@@ -39,6 +39,11 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /** L'éditeur occupe toute la hauteur disponible du conteneur parent. */
+  fillHeight: {
+    type: Boolean,
+    default: false,
+  },
   /** Active le bouton Note (surlignage + annotations en marge / tooltip). */
   enableNotes: {
     type: Boolean,
@@ -863,7 +868,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="rich-note" :class="{ 'rich-note--disabled': disabled, 'rich-note--with-margin': enableNotes && notes.length > 0 }">
+  <div
+    class="rich-note"
+    :class="{
+      'rich-note--disabled': disabled,
+      'rich-note--with-margin': enableNotes && notes.length > 0,
+      'rich-note--fill': fillHeight,
+    }"
+  >
     <div class="rich-note__toolbar" role="toolbar" aria-label="Mise en forme">
       <button
         type="button"
@@ -1092,6 +1104,31 @@ onBeforeUnmount(() => {
   opacity: 0.65;
 }
 
+.rich-note--fill {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.rich-note--fill .rich-note__body {
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.rich-note--fill .rich-note__editor {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.rich-note--fill.rich-note--with-margin .rich-note__margin {
+  max-height: none;
+  align-self: stretch;
+}
+
 .rich-note__toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1247,6 +1284,7 @@ onBeforeUnmount(() => {
   );
   background-size: 100% 1.5em;
   background-position: 0 0.65rem;
+  background-attachment: local;
   line-height: 1.5em;
   padding-top: 0.65rem;
 }
