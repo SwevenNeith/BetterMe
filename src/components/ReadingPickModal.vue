@@ -236,15 +236,18 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: 1.5rem;
   background: rgba(20, 24, 32, 0.45);
   backdrop-filter: blur(4px);
   box-sizing: border-box;
 }
 
 .reading-pick-panel {
-  width: min(420px, 100%);
-  padding: 1.25rem 1.35rem 1.5rem;
+  width: 100%;
+  max-width: 360px;
+  max-height: min(92vh, 720px);
+  overflow-y: auto;
+  padding: 1.15rem 1.2rem 1.35rem;
   border-radius: 18px;
   border: 1px solid rgba(173, 129, 190, 0.45);
   background: linear-gradient(180deg, #fffefb 0%, #faf6ff 100%);
@@ -308,7 +311,7 @@ onUnmounted(() => {
 }
 
 .reading-pick-cover-wrap {
-  width: min(220px, 70%);
+  width: min(180px, 62%);
   margin: 0 auto 0.85rem;
   aspect-ratio: 2 / 3;
   border-radius: 10px;
@@ -427,5 +430,15 @@ onUnmounted(() => {
   background: rgba(220, 53, 69, 0.1);
   border-color: rgba(220, 53, 69, 0.3);
   color: #b02a37;
+}
+
+@media (max-width: 520px) {
+  .reading-pick-modal {
+    padding: 1.75rem 1.35rem;
+  }
+
+  .reading-pick-panel {
+    max-width: min(340px, calc(100vw - 2.75rem));
+  }
 }
 </style>
