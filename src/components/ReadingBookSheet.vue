@@ -606,6 +606,7 @@ defineProps({
   }
 
   .reading-fiche-polaroid {
+    order: -1;
     transform: none;
     max-width: 220px;
     margin: 0 auto;
