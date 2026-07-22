@@ -57,6 +57,7 @@ function updatePageMetrics() {
   }
 
   syncViewportWidth()
+  viewport.scrollTop = 0
 
   const pageWidth = viewport.clientWidth
   if (pageWidth <= 0) {
@@ -98,12 +99,23 @@ function goNextPage() {
 function handleViewportScroll() {
   const viewport = viewportRef.value
   if (!viewport) return
+  if (viewport.scrollTop !== 0) viewport.scrollTop = 0
   const pageWidth = viewport.clientWidth + COLUMN_GAP_PX
   if (pageWidth <= 0) return
   currentPage.value = Math.min(
     pageCount.value,
     Math.max(1, Math.round(viewport.scrollLeft / pageWidth) + 1),
   )
+}
+
+function handleViewportWheel(event) {
+  if (!viewportRef.value) return
+  // Empêche le scroll vertical de la page : on tourne les pages du journal.
+  if (Math.abs(event.deltaY) >= Math.abs(event.deltaX) && event.deltaY !== 0) {
+    event.preventDefault()
+    if (event.deltaY > 0) goNextPage()
+    else goPrevPage()
+  }
 }
 
 onMounted(() => {
@@ -154,7 +166,12 @@ watch(safeHtml, async () => {
     </header>
 
     <div class="journal-book__page-shell">
-      <div ref="viewportRef" class="journal-book__viewport" @scroll="handleViewportScroll">
+      <div
+        ref="viewportRef"
+        class="journal-book__viewport"
+        @scroll="handleViewportScroll"
+        @wheel="handleViewportWheel"
+      >
         <div class="journal-book__columns">
           <RichSpoilHtmlContent :html="safeHtml" />
         </div>
@@ -236,6 +253,8 @@ watch(safeHtml, async () => {
 }
 
 .journal-book__page-shell {
+  --journal-line-h: 1.5rem;
+  --journal-font-size: 1rem;
   min-height: min(64vh, 44rem);
   padding: 1.25rem;
   border-radius: 24px;
@@ -243,6 +262,7 @@ watch(safeHtml, async () => {
   border: 1px solid rgba(213, 181, 234, 0.32);
   box-shadow: 0 18px 40px rgba(92, 62, 112, 0.12);
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .journal-book__viewport {
@@ -251,34 +271,65 @@ watch(safeHtml, async () => {
   height: min(58vh, 40rem);
   overflow-x: auto;
   overflow-y: hidden;
+  overscroll-behavior: contain;
   scroll-behavior: smooth;
   scrollbar-width: none;
+  border-radius: 10px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background-color: rgba(255, 255, 255, 0.95);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--journal-line-h) - 1px),
+    rgba(173, 129, 190, 0.22) calc(var(--journal-line-h) - 1px),
+    rgba(173, 129, 190, 0.22) var(--journal-line-h)
+  );
+  background-size: 100% var(--journal-line-h);
+  background-position: 0 0;
+  font-size: var(--journal-font-size);
+  line-height: var(--journal-line-h);
 }
 
 .journal-book__viewport::-webkit-scrollbar {
   display: none;
+  width: 0;
+  height: 0;
 }
 
 .journal-book__columns {
   height: 100%;
+  max-height: 100%;
   column-width: var(--journal-page-width);
   column-gap: 32px;
   column-fill: auto;
+  column-rule: none;
+  overflow: visible;
 }
 
 .journal-book__columns :deep(.rich-spoil-html) {
+  display: block;
+  box-sizing: border-box;
+  padding: 0 0.75rem;
+  margin: 0;
   color: #3d2f4a;
-  font-size: 1rem;
-  line-height: 1.9;
+  font-size: var(--journal-font-size);
+  line-height: var(--journal-line-h);
 }
 
 .journal-book__columns :deep(.rich-spoil-html p),
-.journal-book__columns :deep(.rich-spoil-html div) {
-  margin: 0 0 0.85rem;
+.journal-book__columns :deep(.rich-spoil-html div),
+.journal-book__columns :deep(.rich-spoil-html span),
+.journal-book__columns :deep(.rich-spoil-html li) {
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .journal-book__columns :deep(.rich-spoil-html > *) {
-  break-inside: avoid;
+  break-inside: auto;
+  orphans: 1;
+  widows: 1;
 }
 
 .journal-book__footer {
