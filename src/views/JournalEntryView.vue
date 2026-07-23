@@ -271,7 +271,7 @@ watch([userId, entryId, isCreateMode], () => {
           type="text"
           class="journal-editor__title-input"
           maxlength="200"
-          placeholder="Titre"
+          placeholder="Titre (sinon la date du jour)"
         />
         <button type="button" class="journal-editor__primary journal-editor__prompt-btn" :disabled="isSaving" @click="pickRandomPrompt">
           Prompt aléatoire
