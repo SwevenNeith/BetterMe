@@ -632,4 +632,42 @@ watch(bookId, () => {
   opacity: 0.65;
   cursor: wait;
 }
+
+@media (prefers-color-scheme: dark) {
+  .reading-book-page__back {
+    color: #d5b5ea;
+  }
+
+  .reading-book-page__back:hover {
+    color: #f0e8f8;
+  }
+
+  .reading-book-page__status {
+    color: #adb5bd;
+  }
+
+  .reading-book-page__error {
+    background: rgba(220, 53, 69, 0.18);
+    color: #ff8a95;
+  }
+
+  .reading-delete-dialog {
+    background: linear-gradient(180deg, #2a2438 0%, #1f1a2c 100%);
+    border-color: rgba(213, 181, 234, 0.28);
+  }
+
+  .reading-delete-title {
+    color: #f0e8f8;
+  }
+
+  .reading-delete-message {
+    color: #adb5bd;
+  }
+
+  .reading-delete-cancel {
+    background: rgba(35, 30, 48, 0.95);
+    border-color: rgba(173, 129, 190, 0.4);
+    color: #e8dcf5;
+  }
+}
 </style>

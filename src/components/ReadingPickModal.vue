@@ -441,4 +441,65 @@ onUnmounted(() => {
     max-width: min(340px, calc(100vw - 2.75rem));
   }
 }
+
+@media (prefers-color-scheme: dark) {
+  .reading-pick-panel {
+    background: linear-gradient(180deg, #2a2438 0%, #1f1a2c 100%);
+    border-color: rgba(213, 181, 234, 0.28);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
+  }
+
+  .reading-pick-title,
+  .reading-pick-book-title {
+    color: #f0e8f8;
+  }
+
+  .reading-pick-book-author,
+  .reading-pick-empty,
+  .reading-pick-no-tags {
+    color: #adb5bd;
+  }
+
+  .reading-pick-close {
+    color: #c5b8d2;
+  }
+
+  .reading-pick-close:hover:not(:disabled) {
+    background: rgba(173, 129, 190, 0.22);
+  }
+
+  .reading-pick-secondary {
+    background: rgba(35, 30, 48, 0.95);
+    border-color: rgba(173, 129, 190, 0.45);
+    color: #e8dcf5;
+  }
+
+  .reading-pick-tag {
+    background: rgba(173, 129, 190, 0.28);
+    color: #f0e8f8;
+  }
+
+  .reading-pick-cover--placeholder {
+    background: linear-gradient(145deg, #3a3148, #2a2438);
+  }
+
+  .reading-pick-cover--placeholder strong {
+    color: #e8dcf5;
+  }
+
+  .reading-pick-error {
+    background: rgba(220, 53, 69, 0.18);
+    color: #ff8a95;
+  }
+
+  .reading-pick-thumb--yes {
+    background: rgba(40, 167, 69, 0.18);
+    color: #7dcea0;
+  }
+
+  .reading-pick-thumb--no {
+    background: rgba(220, 53, 69, 0.16);
+    color: #ff8a95;
+  }
+}
 </style>

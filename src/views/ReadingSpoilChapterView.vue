@@ -370,4 +370,43 @@ watch([userId, bookId, chapterId, isEditMode], () => {
   opacity: 0.65;
   cursor: wait;
 }
+
+@media (prefers-color-scheme: dark) {
+  .spoil-chapter-page__back {
+    color: #d5b5ea;
+  }
+
+  .spoil-chapter-page__back:hover {
+    color: #f0e8f8;
+  }
+
+  .spoil-chapter-page__book,
+  .spoil-chapter-page__status {
+    color: #adb5bd;
+  }
+
+  .spoil-chapter-page__error {
+    background: rgba(220, 53, 69, 0.18);
+    color: #ff8a95;
+  }
+
+  .spoil-leave-dialog {
+    background: linear-gradient(180deg, #2a2438 0%, #1f1a2c 100%);
+    border-color: rgba(213, 181, 234, 0.28);
+  }
+
+  .spoil-leave-title {
+    color: #f0e8f8;
+  }
+
+  .spoil-leave-message {
+    color: #adb5bd;
+  }
+
+  .spoil-leave-abandon {
+    background: rgba(35, 30, 48, 0.95);
+    border-color: rgba(173, 129, 190, 0.4);
+    color: #e8dcf5;
+  }
+}
 </style>

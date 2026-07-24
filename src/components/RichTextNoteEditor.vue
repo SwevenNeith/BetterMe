@@ -1475,4 +1475,63 @@ onBeforeUnmount(() => {
     display: none;
   }
 }
+
+@media (prefers-color-scheme: dark) {
+  .rich-note__toolbar {
+    background: rgba(61, 47, 74, 0.55);
+    border-color: rgba(213, 181, 234, 0.25);
+  }
+
+  .rich-note__tool {
+    background: rgba(35, 30, 48, 0.85);
+    color: #f0e8f8;
+  }
+
+  .rich-note__tool:hover:not(:disabled) {
+    background: rgba(61, 47, 74, 0.95);
+  }
+
+  .rich-note__tool--active {
+    background: rgba(173, 129, 190, 0.35);
+  }
+
+  .rich-note__sep {
+    background: rgba(173, 129, 190, 0.4);
+  }
+
+  .rich-note__editor {
+    background: rgba(35, 30, 48, 0.95);
+    border-color: rgba(213, 181, 234, 0.3);
+    color: #f0e8f8;
+  }
+
+  .rich-note__editor--empty::before {
+    color: #9a8aa6;
+  }
+
+  .rich-note__margin {
+    background: rgba(61, 47, 74, 0.55);
+    border-color: rgba(213, 181, 234, 0.3);
+  }
+
+  .rich-note__margin-note {
+    background: rgba(173, 129, 190, 0.22);
+    color: #f0e8f8;
+  }
+
+  .rich-note__margin-note--active {
+    background: rgba(173, 129, 190, 0.35);
+  }
+
+  .rich-note__note-popup {
+    background: #2a2438;
+    border-color: rgba(213, 181, 234, 0.35);
+  }
+
+  .rich-note__note-input-field,
+  .rich-note__margin-edit {
+    background: rgba(35, 30, 48, 0.95);
+    color: #f0e8f8;
+  }
+}
 </style>

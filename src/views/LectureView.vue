@@ -735,4 +735,73 @@ watch(
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+@media (prefers-color-scheme: dark) {
+  .reading-title {
+    color: #f0e8f8;
+  }
+
+  .reading-subtitle,
+  .reading-loading,
+  .reading-empty,
+  .reading-search__label {
+    color: #adb5bd;
+  }
+
+  .reading-card {
+    background: rgba(35, 30, 48, 0.75);
+    border-color: rgba(213, 181, 234, 0.2);
+  }
+
+  .reading-pick-btn {
+    background: rgba(35, 30, 48, 0.85);
+    border-color: rgba(173, 129, 190, 0.45);
+    color: #e8dcf5;
+  }
+
+  .reading-pick-btn:hover {
+    background: rgba(173, 129, 190, 0.28);
+  }
+
+  .reading-search__input {
+    background: rgba(35, 30, 48, 0.9);
+    border-color: rgba(213, 181, 234, 0.28);
+    color: #f0e8f8;
+  }
+
+  .reading-filter-btn {
+    background: rgba(35, 30, 48, 0.85);
+    border-color: rgba(213, 181, 234, 0.28);
+    color: #d5b5ea;
+  }
+
+  .reading-filter-btn:hover {
+    background: rgba(61, 47, 74, 0.9);
+  }
+
+  .reading-filter-btn--active {
+    background: color-mix(in srgb, #ad81be 28%, #2a2438);
+    border-color: rgba(173, 129, 190, 0.55);
+  }
+
+  .reading-active-filter-pill {
+    background: color-mix(in srgb, #ad81be 22%, #2a2438);
+    border-color: rgba(213, 181, 234, 0.3);
+    color: #f0e8f8;
+  }
+
+  .reading-active-filter-pill__remove {
+    color: #c5b8d2;
+  }
+
+  .reading-book-cover--placeholder {
+    background: linear-gradient(145deg, #3a3148, #2a2438);
+    color: #c5b8d2;
+  }
+
+  .reading-error {
+    background: rgba(220, 53, 69, 0.18);
+    color: #ff8a95;
+  }
+}
 </style>

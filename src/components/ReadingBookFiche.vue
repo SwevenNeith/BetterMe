@@ -802,4 +802,25 @@ function fieldClass(field) {
   color: transparent;
   font-style: normal;
 }
+
+@media (prefers-color-scheme: dark) {
+  .reading-fiche-value {
+    color: #f0e8f8;
+    border-bottom-color: rgba(173, 129, 190, 0.45);
+  }
+
+  .reading-fiche-value--multiline {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent calc(var(--lined-h) - 1px),
+      rgba(173, 129, 190, 0.28) calc(var(--lined-h) - 1px),
+      rgba(173, 129, 190, 0.28) var(--lined-h)
+    );
+  }
+
+  .reading-fiche-value--clickable:hover {
+    background: rgba(173, 129, 190, 0.22);
+  }
+}
 </style>

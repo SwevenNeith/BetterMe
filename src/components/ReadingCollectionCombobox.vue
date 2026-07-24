@@ -282,4 +282,36 @@ onUnmounted(() => {
   color: #8b7a96;
   font-style: italic;
 }
+
+@media (prefers-color-scheme: dark) {
+  .reading-collection-combo__toggle {
+    background: rgba(35, 30, 48, 0.95);
+    border-color: rgba(173, 129, 190, 0.4);
+    color: #e8dcf5;
+  }
+
+  .reading-collection-combo__toggle:hover:not(:disabled) {
+    background: rgba(173, 129, 190, 0.28);
+  }
+
+  .reading-collection-combo__menu {
+    background: #2a2438;
+    border-color: rgba(173, 129, 190, 0.4);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  .reading-collection-combo__option {
+    color: #f0e8f8;
+  }
+
+  .reading-collection-combo__option:hover,
+  .reading-collection-combo__option--active {
+    background: rgba(173, 129, 190, 0.3);
+  }
+
+  .reading-collection-combo__create,
+  .reading-collection-combo__empty {
+    color: #c5b8d2;
+  }
+}
 </style>

@@ -120,4 +120,14 @@ onUnmounted(() => {
 .spoil-chapter-close:hover:not(:disabled) {
   background: rgba(173, 129, 190, 0.15);
 }
+
+@media (prefers-color-scheme: dark) {
+  .spoil-chapter-close {
+    color: #c5b8d2;
+  }
+
+  .spoil-chapter-close:hover:not(:disabled) {
+    background: rgba(173, 129, 190, 0.22);
+  }
+}
 </style>

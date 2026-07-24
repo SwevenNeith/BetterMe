@@ -136,4 +136,10 @@ function onHeartClick(index, event) {
   color: #8b7a96;
   font-style: italic;
 }
+
+@media (prefers-color-scheme: dark) {
+  .reading-rating-hint {
+    color: #c5b8d2;
+  }
+}
 </style>

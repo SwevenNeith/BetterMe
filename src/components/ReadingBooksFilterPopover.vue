@@ -435,4 +435,56 @@ function toggleAddFieldMenu() {
     justify-self: end;
   }
 }
+
+@media (prefers-color-scheme: dark) {
+  .reading-books-filter__popover {
+    background: #2a2438;
+    border-color: rgba(213, 181, 234, 0.28);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  }
+
+  .reading-books-filter__title {
+    color: #f0e8f8;
+  }
+
+  .reading-books-filter__close,
+  .reading-books-filter__empty,
+  .reading-books-filter__range-sep,
+  .reading-books-filter__remove {
+    color: #adb5bd;
+  }
+
+  .reading-books-filter__select,
+  .reading-books-filter__input {
+    background: rgba(35, 30, 48, 0.95);
+    border-color: rgba(213, 181, 234, 0.32);
+    color: #f0e8f8;
+  }
+
+  .reading-books-filter__footer {
+    border-top-color: rgba(213, 181, 234, 0.2);
+  }
+
+  .reading-books-filter__add-btn {
+    color: #d5b5ea;
+  }
+
+  .reading-books-filter__add-btn:hover {
+    color: #f0e8f8;
+  }
+
+  .reading-books-filter__add-menu {
+    background: #2a2438;
+    border-color: rgba(213, 181, 234, 0.28);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  .reading-books-filter__add-option {
+    color: #f0e8f8;
+  }
+
+  .reading-books-filter__add-option:hover {
+    background: color-mix(in srgb, #ad81be 22%, #2a2438);
+  }
+}
 </style>
