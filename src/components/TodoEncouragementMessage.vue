@@ -42,6 +42,12 @@ const category = computed(() => getTodoEncouragementCategory(props.stats))
   border: 1px solid rgba(213, 181, 234, 0.22);
 }
 
+.todo-encouragement--overachieved {
+  color: #2f7a52;
+  background: rgba(149, 209, 170, 0.22);
+  border-color: rgba(114, 160, 152, 0.45);
+}
+
 .todo-encouragement--complete {
   color: #3d8b5f;
   background: rgba(149, 209, 170, 0.14);
@@ -79,6 +85,12 @@ const category = computed(() => getTodoEncouragementCategory(props.stats))
     color: #c8cdd2;
     background: rgba(213, 181, 234, 0.1);
     border-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .todo-encouragement--overachieved {
+    color: #b8e6c8;
+    background: rgba(149, 209, 170, 0.18);
+    border-color: rgba(114, 160, 152, 0.4);
   }
 
   .todo-encouragement--complete {

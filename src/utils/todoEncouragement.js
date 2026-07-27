@@ -9,6 +9,12 @@ const MESSAGES = {
     'Rien de prévu aujourd’hui. Un moment pour souffler ?',
     'Pas de tâche au programme : écoute ce dont tu as besoin.',
   ],
+  overachieved: [
+    'Plus de 100 % — tu dépasses tes objectifs, bravo !',
+    'Tu as dépassé le cap : quelle belle énergie !',
+    'Au-delà du plan — tu peux vraiment être fière de toi.',
+    'Objectifs explosés : continue comme ça, tu es en feu !',
+  ],
   complete: [
     'Bravo, toutes tes tâches sont faites !',
     'Journée bouclée — tu peux être fière de toi.',
@@ -67,6 +73,7 @@ export function getTodoEncouragementCategory(stats) {
   const remaining = total - fullyDone
 
   if (total === 0) return 'empty'
+  if (percent > 100) return 'overachieved'
   if (percent >= 100 || fullyDone >= total) return 'complete'
   if (percent >= 75 || remaining === 1) return 'almost'
   if (percent >= 50) return 'halfway'
