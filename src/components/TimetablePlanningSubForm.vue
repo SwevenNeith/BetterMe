@@ -3,11 +3,9 @@ import { computed, watch } from 'vue'
 import { addMinutesToTimeString, getDurationMinutes } from '../services/durationUtils.js'
 import { notificationsActives } from '../services/notifications.js'
 
+const model = defineModel({ type: Object, required: true })
+
 const props = defineProps({
-  modelValue: {
-    type: Object,
-    required: true,
-  },
   categories: {
     type: Array,
     default: () => [],
@@ -26,19 +24,22 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['update:modelValue'])
-
 const categoriesForPills = computed(() => props.categories.filter((cat) => cat?.name))
 
 function patch(fields) {
-  emit('update:modelValue', { ...props.modelValue, ...fields })
+  if (!model.value) return
+  Object.assign(model.value, fields)
+}
+
+function isCategoryActive(cat) {
+  if (!cat?.name) return false
+  return String(model.value?.category ?? '').toLowerCase() === String(cat.name).toLowerCase()
 }
 
 function getPillStyle(cat) {
   if (!cat) return {}
   const color = cat.color || '#d5b5ea'
-  const isActive =
-    String(props.modelValue.category ?? '').toLowerCase() === String(cat.name).toLowerCase()
+  const isActive = isCategoryActive(cat)
 
   let bg = ''
   if (color.startsWith('hsl')) {
@@ -55,13 +56,10 @@ function getPillStyle(cat) {
 }
 
 function syncEndTimeFromTimer() {
-  if (!props.modelValue.timerEnabled || props.modelValue.allDay) return
-  const duration = getDurationMinutes(
-    props.modelValue.timerHours,
-    props.modelValue.timerMinutes,
-  )
-  if (duration <= 0 || !props.modelValue.startTime) return
-  const endTime = addMinutesToTimeString(props.modelValue.startTime, duration)
+  if (!model.value?.timerEnabled || model.value?.allDay) return
+  const duration = getDurationMinutes(model.value.timerHours, model.value.timerMinutes)
+  if (duration <= 0 || !model.value.startTime) return
+  const endTime = addMinutesToTimeString(model.value.startTime, duration)
   if (endTime) {
     patch({ endTime })
   }
@@ -69,11 +67,11 @@ function syncEndTimeFromTimer() {
 
 watch(
   () => [
-    props.modelValue.timerEnabled,
-    props.modelValue.timerHours,
-    props.modelValue.timerMinutes,
-    props.modelValue.startTime,
-    props.modelValue.allDay,
+    model.value?.timerEnabled,
+    model.value?.timerHours,
+    model.value?.timerMinutes,
+    model.value?.startTime,
+    model.value?.allDay,
   ],
   () => {
     syncEndTimeFromTimer()
@@ -81,7 +79,7 @@ watch(
 )
 
 watch(
-  () => props.modelValue.allDay,
+  () => model.value?.allDay,
   (allDay) => {
     if (allDay) {
       patch({
@@ -107,54 +105,56 @@ watch(
     <label class="planning-subform__toggle">
       <input
         type="checkbox"
-        :checked="modelValue.allDay"
+        :checked="model.allDay"
         @change="patch({ allDay: $event.target.checked })"
       />
       <span>Toute la journée</span>
     </label>
 
-    <div v-if="!modelValue.allDay" class="planning-subform__field">
+    <div v-if="!model.allDay" class="planning-subform__field">
       <span class="planning-subform__label">Créneau horaire</span>
       <div class="planning-subform__time-row">
         <input
-          :value="modelValue.startTime"
+          :value="model.startTime"
           type="time"
           class="planning-subform__input"
           :required="requireStartTime"
           @input="patch({ startTime: $event.target.value })"
+          @change="patch({ startTime: $event.target.value })"
         />
         <span class="planning-subform__time-sep">à</span>
         <input
-          :value="modelValue.endTime"
+          :value="model.endTime"
           type="time"
           class="planning-subform__input"
-          :disabled="modelValue.timerEnabled"
-          :required="!modelValue.timerEnabled"
-          :title="modelValue.timerEnabled ? 'Calculée automatiquement par le timer' : ''"
+          :disabled="model.timerEnabled"
+          :required="!model.timerEnabled"
+          :title="model.timerEnabled ? 'Calculée automatiquement par le timer' : ''"
           @input="patch({ endTime: $event.target.value })"
+          @change="patch({ endTime: $event.target.value })"
         />
       </div>
-      <p v-if="requireStartTime && !modelValue.startTime" class="planning-subform__warn">
+      <p v-if="requireStartTime && !model.startTime" class="planning-subform__warn">
         Indique un créneau horaire pour le planning.
       </p>
     </div>
 
-    <div v-if="!modelValue.allDay" class="planning-subform__section">
+    <div v-if="!model.allDay" class="planning-subform__section">
       <label class="planning-subform__toggle">
         <input
           type="checkbox"
-          :checked="modelValue.reminderEnabled"
+          :checked="model.reminderEnabled"
           @change="patch({ reminderEnabled: $event.target.checked })"
         />
         <span>Rappel 🔔</span>
       </label>
 
-      <div v-if="modelValue.reminderEnabled" class="planning-subform__offset">
+      <div v-if="model.reminderEnabled" class="planning-subform__offset">
         <span class="planning-subform__offset-label">Me rappeler avant l'événement</span>
         <div class="planning-subform__duration" role="group" aria-label="Délai du rappel">
           <div class="planning-subform__duration-unit">
             <input
-              :value="modelValue.reminderHours"
+              :value="model.reminderHours"
               type="number"
               min="0"
               max="23"
@@ -167,7 +167,7 @@ watch(
           <span class="planning-subform__duration-sep">:</span>
           <div class="planning-subform__duration-unit">
             <input
-              :value="modelValue.reminderMinutes"
+              :value="model.reminderMinutes"
               type="number"
               min="0"
               max="59"
@@ -184,22 +184,22 @@ watch(
       </div>
     </div>
 
-    <div v-if="!modelValue.allDay" class="planning-subform__section">
+    <div v-if="!model.allDay" class="planning-subform__section">
       <label class="planning-subform__toggle">
         <input
           type="checkbox"
-          :checked="modelValue.timerEnabled"
+          :checked="model.timerEnabled"
           @change="patch({ timerEnabled: $event.target.checked })"
         />
         <span>Timer ⏱️</span>
       </label>
 
-      <div v-if="modelValue.timerEnabled" class="planning-subform__offset">
+      <div v-if="model.timerEnabled" class="planning-subform__offset">
         <span class="planning-subform__offset-label">Durée de l'activité</span>
         <div class="planning-subform__duration" role="group" aria-label="Durée du timer">
           <div class="planning-subform__duration-unit">
             <input
-              :value="modelValue.timerHours"
+              :value="model.timerHours"
               type="number"
               min="0"
               max="23"
@@ -212,7 +212,7 @@ watch(
           <span class="planning-subform__duration-sep">:</span>
           <div class="planning-subform__duration-unit">
             <input
-              :value="modelValue.timerMinutes"
+              :value="model.timerMinutes"
               type="number"
               min="0"
               max="59"
@@ -232,7 +232,7 @@ watch(
     <label class="planning-subform__field">
       <span class="planning-subform__label">Date de fin (optionnelle)</span>
       <input
-        :value="modelValue.dateEnd"
+        :value="model.dateEnd"
         type="date"
         class="planning-subform__input"
         :min="dateStart"
@@ -249,7 +249,9 @@ watch(
           :key="cat.id"
           type="button"
           class="planning-subform__pill"
+          :class="{ 'planning-subform__pill--active': isCategoryActive(cat) }"
           :style="getPillStyle(cat)"
+          :aria-pressed="isCategoryActive(cat)"
           @click="patch({ category: cat.name })"
         >
           <span aria-hidden="true">{{ cat.icon || '📌' }}</span>
@@ -257,7 +259,7 @@ watch(
         </button>
       </div>
       <input
-        :value="modelValue.category"
+        :value="model.category"
         type="text"
         class="planning-subform__input"
         placeholder="Ou saisis une catégorie…"
@@ -418,6 +420,15 @@ watch(
   font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.planning-subform__pill--active {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(173, 129, 190, 0.28);
+  font-weight: 800;
 }
 
 @media (prefers-color-scheme: dark) {

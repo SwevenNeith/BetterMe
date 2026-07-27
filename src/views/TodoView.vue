@@ -383,7 +383,7 @@ const planningDateStart = computed(() =>
 )
 
 const planningRequiresStartTime = computed(
-  () => addToPlanning.value && !planningForm.allDay && !planningForm.startTime,
+  () => addToPlanning.value && !planningForm.allDay,
 )
 
 function resetPlanningForm() {
