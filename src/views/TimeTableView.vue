@@ -1,6 +1,6 @@
 <!-- eslint-disable no-useless-assignment -->
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, reactive } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
 import { useTimetableCacheStore } from '../stores/timetableCache.js'
@@ -18,6 +18,19 @@ import {
   loadUserCategories,
   normalizeCategory,
 } from '../services/timetableCategories.js'
+import { createTodoItem, listTodoItems, deleteTodoItem } from '../services/todoItems.js'
+import { loadTodoPromesseLimits } from '../services/todoPromesseSettings.js'
+import { TODO_FREQUENCY } from '../constants/todoOptions.js'
+import { assertPromesseLimits } from '../utils/todoCalendar.js'
+import TodoLinkedSubForm from '../components/TodoLinkedSubForm.vue'
+import {
+  buildTodoPayloadFromTimetable,
+  createDefaultTodoLinkedForm,
+} from '../utils/todoTimetableBridge.js'
+import {
+  linkTodoAndTimetable,
+  deleteTimetableEvent,
+} from '../services/todoTimetableLink.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 
@@ -46,6 +59,46 @@ const newEventReminderMinutes = ref(15)
 const newEventTimerEnabled = ref(false)
 const newEventTimerHours = ref(0)
 const newEventTimerMinutes = ref(30)
+const addToTodo = ref(false)
+const todoLinkedForm = reactive(createDefaultTodoLinkedForm())
+const todoPromesseLimits = ref({ perDay: 3, perWeek: 3 })
+
+const todoPromesseLimitHint = computed(
+  () =>
+    `Jusqu’à ${todoPromesseLimits.value.perDay} promesse${todoPromesseLimits.value.perDay > 1 ? 's' : ''} par jour et ${todoPromesseLimits.value.perWeek} promesse${todoPromesseLimits.value.perWeek > 1 ? 's' : ''} « Cette semaine » par semaine.`,
+)
+
+const editingEventHasTodoLink = computed(() => {
+  if (!editingEventId.value) return false
+  const event = userEvents.value.find((entry) => entry.id === editingEventId.value)
+  return Boolean(event?.todo_item_id)
+})
+
+const pendingDeleteEvent = ref(null)
+const isDeletingEvent = ref(false)
+
+function resetTodoLinkedForm() {
+  Object.assign(todoLinkedForm, createDefaultTodoLinkedForm())
+  addToTodo.value = false
+}
+
+async function onAddToTodoChange(event) {
+  const checked = Boolean(event?.target?.checked)
+  addToTodo.value = checked
+  if (!checked) return
+
+  Object.assign(todoLinkedForm, createDefaultTodoLinkedForm())
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (user) {
+      todoPromesseLimits.value = await loadTodoPromesseLimits(user.id)
+    }
+  } catch (err) {
+    console.error(err)
+  }
+}
 
 const resetReminderFields = () => {
   newEventReminderEnabled.value = false
@@ -106,6 +159,7 @@ function resetEventForm() {
   newEventAllDay.value = false
   resetReminderFields()
   resetTimerFields()
+  resetTodoLinkedForm()
 }
 
 function closeEventModal() {
@@ -116,6 +170,7 @@ function closeEventModal() {
 function openEventForEdit(event) {
   const original = userEvents.value.find((e) => e.id === event.id) ?? event
 
+  resetTodoLinkedForm()
   editingEventId.value = original.id
   newEventTitle.value = original.title || ''
   newEventDetail.value = original.detail || ''
@@ -696,6 +751,46 @@ const handleAddEvent = async () => {
     }
   }
 
+  if (addToTodo.value && !editingEventHasTodoLink.value) {
+    const todoPayload = buildTodoPayloadFromTimetable(
+      {
+        title: newEventTitle.value,
+        detail: newEventDetail.value,
+        dateStart: startDStr,
+        allDay: newEventAllDay.value,
+        startTime: newEventStartTime.value,
+      },
+      todoLinkedForm,
+    )
+
+    if (todoPayload.frequence === TODO_FREQUENCY.WEEKLY && !todoPayload.jour_semaine) {
+      alert('Sélectionne un jour de la semaine pour la tâche TODO.')
+      return
+    }
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
+        alert('Veuillez vous connecter pour ajouter une activité.')
+        return
+      }
+
+      const [existingTodos, limits] = await Promise.all([
+        listTodoItems(supabase, user.id),
+        loadTodoPromesseLimits(user.id),
+      ])
+      if (todoPayload.is_promesse) {
+        assertPromesseLimits(existingTodos, todoPayload, null, limits)
+      }
+    } catch (err) {
+      console.error(err)
+      alert(err.message || 'Impossible de valider la tâche TODO.')
+      return
+    }
+  }
+
   try {
     const {
       data: { user },
@@ -854,6 +949,25 @@ const handleAddEvent = async () => {
       hobbyQuickPicks: hobbyQuickPicks.value,
     })
     await fetchEvents({ silent: true })
+
+    if (addToTodo.value && !editingEventHasTodoLink.value) {
+      const todoPayload = buildTodoPayloadFromTimetable(
+        {
+          title: newEventTitle.value,
+          detail: newEventDetail.value,
+          dateStart: startDStr,
+          allDay: newEventAllDay.value,
+          startTime: newEventStartTime.value,
+        },
+        todoLinkedForm,
+      )
+      const todo = await createTodoItem(supabase, user.id, todoPayload)
+      if (savedEvent?.id && todo?.id) {
+        await linkTodoAndTimetable(supabase, user.id, todo.id, savedEvent.id)
+        savedEvent.todo_item_id = todo.id
+      }
+    }
+
     closeEventModal()
   } catch (err) {
     console.error('Error saving event:', err)
@@ -872,21 +986,53 @@ const handleAddEvent = async () => {
   }
 }
 
-// Remove event handler from Supabase
-const deleteEvent = async (eventId) => {
+function requestDeleteEvent(eventId) {
+  const event = userEvents.value.find((entry) => entry.id === eventId)
+  if (!event || isDeletingEvent.value) return
+  pendingDeleteEvent.value = event
+}
+
+function cancelEventDelete() {
+  if (isDeletingEvent.value) return
+  pendingDeleteEvent.value = null
+}
+
+async function confirmEventDelete(alsoDeleteLinked = false) {
+  const event = pendingDeleteEvent.value
+  if (!event?.id || isDeletingEvent.value) return
+
+  isDeletingEvent.value = true
   try {
-    await supprimerRappelsEvenement(eventId)
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      alert('Veuillez vous connecter pour supprimer une activité.')
+      return
+    }
 
-    const { error } = await supabase.from('timetable_events').delete().eq('id', eventId)
+    await deleteTimetableEvent(supabase, user.id, event.id)
 
-    if (error) throw error
+    if (alsoDeleteLinked && event.todo_item_id) {
+      await deleteTodoItem(supabase, user.id, event.todo_item_id)
+    }
 
-    // Remove locally
-    userEvents.value = userEvents.value.filter((ev) => ev.id !== eventId)
+    userEvents.value = userEvents.value.filter((entry) => entry.id !== event.id)
+    pendingDeleteEvent.value = null
   } catch (err) {
     console.error('Error deleting event:', err)
     alert("Erreur lors de la suppression de l'activité.")
+  } finally {
+    isDeletingEvent.value = false
   }
+}
+
+function confirmEventDeleteOnly() {
+  void confirmEventDelete(false)
+}
+
+function confirmEventDeleteWithLinked() {
+  void confirmEventDelete(true)
 }
 
 // ─── Real Google-Calendar style Hourly Grid Layout Algorithm ───
@@ -1172,7 +1318,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                 </span>
                 <button
                   class="all-day-delete-btn"
-                  @click.stop="deleteEvent(event.id)"
+                  @click.stop="requestDeleteEvent(event.id)"
                   title="Supprimer"
                 >
                   ✕
@@ -1227,7 +1373,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                   >
                     <button
                       class="event-delete-btn"
-                      @click.stop="deleteEvent(event.id)"
+                      @click.stop="requestDeleteEvent(event.id)"
                       title="Supprimer"
                     >
                       ✕
@@ -1281,7 +1427,7 @@ const getPositionedEventsForDay = (dayIdx) => {
             </span>
             <button
               class="all-day-delete-btn"
-              @click.stop="deleteEvent(event.id)"
+              @click.stop="requestDeleteEvent(event.id)"
               title="Supprimer"
             >
               ✕
@@ -1335,7 +1481,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                   >
                     <button
                       class="event-delete-btn"
-                      @click.stop="deleteEvent(event.id)"
+                      @click.stop="requestDeleteEvent(event.id)"
                       title="Supprimer"
                     >
                       ✕
@@ -1568,10 +1714,105 @@ const getPositionedEventsForDay = (dayIdx) => {
             </span>
           </div>
 
+          <label v-if="!editingEventHasTodoLink" class="all-day-toggle-label modal-link-choice">
+            <input
+              type="checkbox"
+              class="all-day-checkbox"
+              :checked="addToTodo"
+              @change="onAddToTodoChange"
+            />
+            <span class="all-day-toggle-custom"></span>
+            <span>Ajouter en TODO</span>
+          </label>
+          <p v-else-if="editingEventId" class="category-tip category-tip--linked">
+            Cette activité est déjà liée à une tâche TODO.
+          </p>
+
+          <TodoLinkedSubForm
+            v-if="addToTodo && !editingEventHasTodoLink"
+            v-model="todoLinkedForm"
+            :date-start="newEventDay"
+            :promesse-limit-hint="todoPromesseLimitHint"
+          />
+
           <button type="submit" class="modal-submit-btn">
             {{ editingEventId ? 'Enregistrer les modifications' : 'Ajouter à mon planning' }}
           </button>
         </form>
+      </div>
+    </div>
+
+    <div
+      v-if="pendingDeleteEvent"
+      class="timetable-delete-overlay"
+      @click.self="cancelEventDelete"
+      @keydown.escape="cancelEventDelete"
+    >
+      <div
+        class="timetable-delete-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="timetable-delete-title"
+        aria-describedby="timetable-delete-message"
+      >
+        <h2 id="timetable-delete-title" class="timetable-delete-dialog__title">
+          Supprimer cette activité ?
+        </h2>
+        <p id="timetable-delete-message" class="timetable-delete-dialog__message">
+          « {{ pendingDeleteEvent.title }} » sera définitivement supprimée.
+        </p>
+        <p
+          v-if="pendingDeleteEvent.todo_item_id"
+          class="timetable-delete-dialog__message timetable-delete-dialog__message--linked"
+        >
+          Cette activité est liée à une tâche TODO. Voulez-vous aussi la supprimer de vos TODO ?
+        </p>
+        <div class="timetable-delete-dialog__actions">
+          <template v-if="pendingDeleteEvent.todo_item_id">
+            <button
+              type="button"
+              class="timetable-delete-dialog__cancel"
+              :disabled="isDeletingEvent"
+              @click="cancelEventDelete"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              class="timetable-delete-dialog__cancel"
+              :disabled="isDeletingEvent"
+              @click="confirmEventDeleteOnly"
+            >
+              Non, uniquement le planning
+            </button>
+            <button
+              type="button"
+              class="timetable-delete-dialog__confirm"
+              :disabled="isDeletingEvent"
+              @click="confirmEventDeleteWithLinked"
+            >
+              {{ isDeletingEvent ? 'Suppression…' : 'Oui, supprimer les deux' }}
+            </button>
+          </template>
+          <template v-else>
+            <button
+              type="button"
+              class="timetable-delete-dialog__cancel"
+              :disabled="isDeletingEvent"
+              @click="cancelEventDelete"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              class="timetable-delete-dialog__confirm"
+              :disabled="isDeletingEvent"
+              @click="confirmEventDeleteOnly"
+            >
+              {{ isDeletingEvent ? 'Suppression…' : 'Supprimer' }}
+            </button>
+          </template>
+        </div>
       </div>
     </div>
   </div>
@@ -2082,21 +2323,29 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .all-day-delete-btn {
-  background: transparent;
+  position: relative;
+  z-index: 20;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.88);
   border: none;
   color: currentColor;
-  opacity: 0.4;
+  opacity: 0.9;
   cursor: pointer;
-  padding: 0 0.15rem;
-  font-size: 0.7rem;
+  padding: 0.1rem 0.25rem;
+  font-size: 0.72rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.2s ease;
+  border-radius: 50%;
+  width: 1.35rem;
+  height: 1.35rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .all-day-delete-btn:hover {
   opacity: 1;
+  transform: scale(1.05);
 }
 
 .mobile-all-day-list {
@@ -2296,6 +2545,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   flex-direction: column;
   height: 100%;
   position: relative;
+  padding-top: 1rem;
 }
 
 .event-block:hover .event-content {
@@ -2306,23 +2556,33 @@ const getPositionedEventsForDay = (dayIdx) => {
 
 .event-delete-btn {
   position: absolute;
-  top: 0.4rem;
-  right: 0.4rem;
-  background: transparent;
+  top: 0.3rem;
+  right: 0.3rem;
+  z-index: 30;
+  background: rgba(255, 255, 255, 0.92);
   border: none;
   color: inherit;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
+  line-height: 1;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s ease;
+  opacity: 0.9;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
 }
 
 .event-block:hover .event-delete-btn {
-  opacity: 0.65;
+  opacity: 1;
 }
 
 .event-block:hover .event-delete-btn:hover {
   opacity: 1;
+  transform: scale(1.05);
 }
 
 .event-header {
@@ -2641,6 +2901,11 @@ const getPositionedEventsForDay = (dayIdx) => {
   font-weight: 700;
   color: #5d6d7e;
   user-select: none;
+}
+
+.modal-link-choice {
+  margin-top: 0.15rem;
+  color: #72a098;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -3050,5 +3315,108 @@ const getPositionedEventsForDay = (dayIdx) => {
   font-style: italic;
   font-weight: 500;
   letter-spacing: 0.01em;
+}
+
+.category-tip--linked {
+  font-style: normal;
+  font-weight: 700;
+  color: #ad81be;
+}
+
+.timetable-delete-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(44, 62, 80, 0.35);
+  backdrop-filter: blur(4px);
+}
+
+.timetable-delete-dialog {
+  width: 100%;
+  max-width: 30rem;
+  padding: 1.25rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  box-shadow: 0 12px 40px rgba(173, 129, 190, 0.2);
+  box-sizing: border-box;
+}
+
+.timetable-delete-dialog__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #ad81be;
+}
+
+.timetable-delete-dialog__message {
+  margin: 0.65rem 0 1.1rem;
+  font-size: 0.92rem;
+  color: #6c757d;
+  line-height: 1.45;
+}
+
+.timetable-delete-dialog__message--linked {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-weight: 700;
+  color: #ad81be;
+}
+
+.timetable-delete-dialog__actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  justify-content: stretch;
+}
+
+.timetable-delete-dialog__cancel,
+.timetable-delete-dialog__confirm {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.65rem 0.5rem;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.timetable-delete-dialog__cancel {
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  background: transparent;
+  color: #ad81be;
+}
+
+.timetable-delete-dialog__confirm {
+  border: none;
+  background: #c0392b;
+  color: #fff;
+}
+
+.timetable-delete-dialog__cancel:disabled,
+.timetable-delete-dialog__confirm:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+@media (prefers-color-scheme: dark) {
+  .timetable-delete-dialog {
+    background: rgba(35, 30, 48, 0.95);
+    border-color: rgba(213, 181, 234, 0.2);
+  }
+
+  .timetable-delete-dialog__message {
+    color: #adb5bd;
+  }
+
+  .event-delete-btn,
+  .all-day-delete-btn {
+    background: rgba(28, 24, 37, 0.92);
+  }
 }
 </style>

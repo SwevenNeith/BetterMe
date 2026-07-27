@@ -52,6 +52,21 @@ import {
 } from '../utils/habitCalendar.js'
 import TodoItemCard from '../components/TodoItemCard.vue'
 import TodoEncouragementMessage from '../components/TodoEncouragementMessage.vue'
+import TimetablePlanningSubForm from '../components/TimetablePlanningSubForm.vue'
+import { loadUserCategories } from '../services/timetableCategories.js'
+import {
+  createTimetableEvent,
+  validateTimetableEventTimes,
+  validateTimetableReminderAndTimer,
+} from '../services/timetableEvents.js'
+import { linkTodoAndTimetable, deleteTimetableEvent } from '../services/todoTimetableLink.js'
+import { useTimetableCacheStore } from '../stores/timetableCache.js'
+import {
+  createDefaultPlanningForm,
+  resolvePlanningDateFromTodo,
+  suggestEndTimeFromStart,
+  todoTimeToInput,
+} from '../utils/todoTimetableBridge.js'
 import '../styles/todo-frequency.css'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
@@ -73,6 +88,10 @@ const completionProgress = ref(new Map())
 const draggingItemId = ref(null)
 const pendingDeleteItem = ref(null)
 const promesseLimits = ref({ perDay: 3, perWeek: 3 })
+const addToPlanning = ref(false)
+const planningCategories = ref([])
+const planningCategoriesLoading = ref(false)
+const planningForm = reactive(createDefaultPlanningForm())
 
 const viewMode = ref(TODO_VIEW_MODE.DAY)
 const anchorDate = ref(getLocalTodayISO())
@@ -104,6 +123,14 @@ const formTargetWeekLabel = computed(() => {
 })
 
 const isEditMode = computed(() => Boolean(editingItemId.value))
+
+const editingItem = computed(() =>
+  editingItemId.value ? items.value.find((item) => item.id === editingItemId.value) : null,
+)
+
+const editingItemHasPlanningLink = computed(() =>
+  Boolean(editingItem.value?.timetable_event_id),
+)
 
 const periodLabel = computed(() => {
   if (viewMode.value === TODO_VIEW_MODE.MONTH) {
@@ -203,6 +230,7 @@ function resetForm() {
   todoForm.quantite_cible = 0
   editingItemId.value = null
   formError.value = ''
+  resetPlanningForm()
   applyFormDefaultsForView()
 }
 
@@ -214,6 +242,7 @@ function openForm() {
 function openEditForm(item) {
   if (!item?.id) return
 
+  resetPlanningForm()
   editingItemId.value = item.id
   todoForm.nom = item.nom ?? ''
   todoForm.description = item.description ?? ''
@@ -349,6 +378,50 @@ const promesseLimitHint = computed(
     `Jusqu’à ${promesseLimits.value.perDay} promesse${promesseLimits.value.perDay > 1 ? 's' : ''} par jour et ${promesseLimits.value.perWeek} promesse${promesseLimits.value.perWeek > 1 ? 's' : ''} « Cette semaine » par semaine.`,
 )
 
+const planningDateStart = computed(() =>
+  resolvePlanningDateFromTodo(todoForm, anchorDate.value),
+)
+
+const planningRequiresStartTime = computed(
+  () => addToPlanning.value && !planningForm.allDay && !planningForm.startTime,
+)
+
+function resetPlanningForm() {
+  Object.assign(planningForm, createDefaultPlanningForm())
+  addToPlanning.value = false
+  planningCategories.value = []
+}
+
+async function loadPlanningCategories() {
+  if (!userId.value || planningCategoriesLoading.value) return
+  planningCategoriesLoading.value = true
+  try {
+    planningCategories.value = await loadUserCategories(supabase, userId.value)
+  } catch (err) {
+    console.error(err)
+    formError.value = err.message || 'Impossible de charger les catégories du planning.'
+  } finally {
+    planningCategoriesLoading.value = false
+  }
+}
+
+function syncPlanningFormFromTodo() {
+  const startTime = todoTimeToInput(todoForm.heure)
+  planningForm.startTime = startTime
+  planningForm.endTime = suggestEndTimeFromStart(startTime)
+}
+
+async function onAddToPlanningChange(event) {
+  const checked = Boolean(event?.target?.checked)
+  addToPlanning.value = checked
+  formError.value = ''
+  if (!checked) return
+
+  Object.assign(planningForm, createDefaultPlanningForm(todoForm))
+  syncPlanningFormFromTodo()
+  await loadPlanningCategories()
+}
+
 async function loadData() {
   if (!userId.value) return
 
@@ -409,12 +482,81 @@ async function submitForm() {
     }
   }
 
-  try {
-    if (editingItemId.value) {
-      await replaceTodoItem(supabase, userId.value, editingItemId.value, payload)
-    } else {
-      await createTodoItem(supabase, userId.value, payload)
+  if (addToPlanning.value && !editingItemHasPlanningLink.value) {
+    const planningDate = planningDateStart.value
+    const startTime = planningForm.allDay ? '' : planningForm.startTime
+    const planningValidation = validateTimetableEventTimes({
+      allDay: planningForm.allDay,
+      startTime,
+      endTime: planningForm.endTime,
+      dateStart: planningDate,
+      dateEnd: planningForm.dateEnd,
+      requireStartTime: planningRequiresStartTime.value,
+    })
+    if (planningValidation) {
+      formError.value = planningValidation
+      isSaving.value = false
+      return
     }
+
+    const reminderTimerError = validateTimetableReminderAndTimer({
+      allDay: planningForm.allDay,
+      reminderEnabled: planningForm.reminderEnabled,
+      reminderHours: planningForm.reminderHours,
+      reminderMinutes: planningForm.reminderMinutes,
+      timerEnabled: planningForm.timerEnabled,
+      timerHours: planningForm.timerHours,
+      timerMinutes: planningForm.timerMinutes,
+    })
+    if (reminderTimerError) {
+      formError.value = reminderTimerError
+      isSaving.value = false
+      return
+    }
+  }
+
+  try {
+    let savedTodo
+    if (editingItemId.value) {
+      savedTodo = await replaceTodoItem(supabase, userId.value, editingItemId.value, payload)
+    } else {
+      savedTodo = await createTodoItem(supabase, userId.value, payload)
+    }
+
+    if (addToPlanning.value && !editingItemHasPlanningLink.value) {
+      const planningDate = planningDateStart.value
+      const startTime = planningForm.allDay ? '' : planningForm.startTime
+
+      const { event } = await createTimetableEvent(
+        supabase,
+        userId.value,
+        {
+          title: payload.nom,
+          detail: payload.description,
+          dateStart: planningDate,
+          dateEnd: planningForm.dateEnd,
+          allDay: planningForm.allDay,
+          startTime,
+          endTime: planningForm.endTime,
+          categoryName: planningForm.category,
+          requireStartTime: planningRequiresStartTime.value,
+          reminderEnabled: planningForm.reminderEnabled,
+          reminderHours: planningForm.reminderHours,
+          reminderMinutes: planningForm.reminderMinutes,
+          timerEnabled: planningForm.timerEnabled,
+          timerHours: planningForm.timerHours,
+          timerMinutes: planningForm.timerMinutes,
+          todoItemId: savedTodo?.id ?? null,
+        },
+        planningCategories.value,
+      )
+
+      if (savedTodo?.id && event?.id) {
+        await linkTodoAndTimetable(supabase, userId.value, savedTodo.id, event.id)
+      }
+      useTimetableCacheStore().$patch({ isValid: false })
+    }
+
     closeForm()
     await loadData()
   } catch (err) {
@@ -444,7 +586,7 @@ function cancelDelete() {
   pendingDeleteItem.value = null
 }
 
-async function confirmDelete() {
+async function confirmDelete(alsoDeleteLinked = false) {
   const item = pendingDeleteItem.value
   if (!userId.value || !item?.id || isDeletingId.value) return
 
@@ -452,6 +594,10 @@ async function confirmDelete() {
   loadError.value = ''
   try {
     await deleteTodoItem(supabase, userId.value, item.id)
+    if (alsoDeleteLinked && item.timetable_event_id) {
+      await deleteTimetableEvent(supabase, userId.value, item.timetable_event_id)
+      useTimetableCacheStore().$patch({ isValid: false })
+    }
     pendingDeleteItem.value = null
     if (editingItemId.value === item.id) {
       closeForm()
@@ -463,6 +609,14 @@ async function confirmDelete() {
   } finally {
     isDeletingId.value = null
   }
+}
+
+function confirmDeleteOnly() {
+  void confirmDelete(false)
+}
+
+function confirmDeleteWithLinked() {
+  void confirmDelete(true)
 }
 
 function applyOccurrenceProgress(item, quantiteActuelle) {
@@ -607,6 +761,19 @@ async function onItemDrop(targetId, event) {
     await loadData()
   }
 }
+
+watch(
+  () => todoForm.heure,
+  () => {
+    if (!addToPlanning.value) return
+    const startTime = todoTimeToInput(todoForm.heure)
+    if (!startTime) return
+    planningForm.startTime = startTime
+    if (!planningForm.endTime) {
+      planningForm.endTime = suggestEndTimeFromStart(startTime)
+    }
+  },
+)
 
 watch(
   () => todoForm.frequence,
@@ -908,6 +1075,30 @@ watch(userId, (id) => {
         {{ promesseLimitHint }}
       </p>
 
+      <label
+        v-if="!editingItemHasPlanningLink"
+        class="todo-form-promesse todo-form-link-choice"
+      >
+        <input
+          type="checkbox"
+          :checked="addToPlanning"
+          @change="onAddToPlanningChange"
+        />
+        <span>Ajouter au planning</span>
+      </label>
+      <p v-else-if="isEditMode" class="todo-form-hint">
+        Cette tâche est déjà liée à une activité du planning.
+      </p>
+
+      <TimetablePlanningSubForm
+        v-if="addToPlanning"
+        v-model="planningForm"
+        :categories="planningCategories"
+        :date-start="planningDateStart"
+        :loading-categories="planningCategoriesLoading"
+        :require-start-time="planningRequiresStartTime"
+      />
+
       <p v-if="formError" class="todo-error" role="alert">{{ formError }}</p>
 
       <div class="todo-form-actions">
@@ -1023,23 +1214,54 @@ watch(userId, (id) => {
         <p id="todo-delete-message" class="todo-confirm-message">
           « {{ pendingDeleteItem.nom }} » sera définitivement supprimé.
         </p>
+        <p v-if="pendingDeleteItem.timetable_event_id" class="todo-confirm-message todo-confirm-message--linked">
+          Cet élément est lié à ton emploi du temps. Voulez-vous aussi le supprimer du planning ?
+        </p>
         <div class="todo-confirm-actions">
-          <button
-            type="button"
-            class="todo-cancel-btn"
-            :disabled="Boolean(isDeletingId)"
-            @click="cancelDelete"
-          >
-            Annuler
-          </button>
-          <button
-            type="button"
-            class="todo-confirm-delete-btn"
-            :disabled="Boolean(isDeletingId)"
-            @click="confirmDelete"
-          >
-            {{ isDeletingId ? 'Suppression…' : 'Supprimer' }}
-          </button>
+          <template v-if="pendingDeleteItem.timetable_event_id">
+            <button
+              type="button"
+              class="todo-cancel-btn"
+              :disabled="Boolean(isDeletingId)"
+              @click="cancelDelete"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              class="todo-cancel-btn"
+              :disabled="Boolean(isDeletingId)"
+              @click="confirmDeleteOnly"
+            >
+              Non, uniquement la TODO
+            </button>
+            <button
+              type="button"
+              class="todo-confirm-delete-btn"
+              :disabled="Boolean(isDeletingId)"
+              @click="confirmDeleteWithLinked"
+            >
+              {{ isDeletingId ? 'Suppression…' : 'Oui, supprimer les deux' }}
+            </button>
+          </template>
+          <template v-else>
+            <button
+              type="button"
+              class="todo-cancel-btn"
+              :disabled="Boolean(isDeletingId)"
+              @click="cancelDelete"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              class="todo-confirm-delete-btn"
+              :disabled="Boolean(isDeletingId)"
+              @click="confirmDeleteOnly"
+            >
+              {{ isDeletingId ? 'Suppression…' : 'Supprimer' }}
+            </button>
+          </template>
         </div>
       </div>
     </div>
@@ -1518,6 +1740,11 @@ watch(userId, (id) => {
   accent-color: #ad81be;
 }
 
+.todo-form-link-choice {
+  margin-top: 0.15rem;
+  color: #72a098;
+}
+
 .todo-form-promesse.todo-freq--promesse input {
   accent-color: var(--todo-freq-accent, #d4a06a);
 }
@@ -1606,7 +1833,7 @@ watch(userId, (id) => {
 
 .todo-confirm-dialog {
   width: 100%;
-  max-width: 22rem;
+  max-width: 30rem;
   padding: 1.25rem;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.95);
@@ -1629,11 +1856,27 @@ watch(userId, (id) => {
   line-height: 1.45;
 }
 
+.todo-confirm-message--linked {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-weight: 700;
+  color: #ad81be;
+}
+
 .todo-confirm-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  justify-content: stretch;
+}
+
+.todo-confirm-actions .todo-cancel-btn,
+.todo-confirm-actions .todo-confirm-delete-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.65rem 0.5rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
 }
 
 .todo-confirm-delete-btn {

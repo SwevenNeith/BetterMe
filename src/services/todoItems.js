@@ -6,7 +6,7 @@ const TABLE = 'todo_items'
 const COMPLETIONS_TABLE = 'todo_item_completions'
 
 const TODO_ITEM_SELECT =
-  'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, created_at, updated_at'
+  'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, timetable_event_id, created_at, updated_at'
 
 async function refreshTodoPromesseReminder(userId) {
   if (!userId) return

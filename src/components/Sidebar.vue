@@ -1733,6 +1733,7 @@ const toggleSidebar = () => {
   font-weight: 500;
   cursor: pointer;
   text-align: left;
+  box-sizing: border-box;
   transition: all 0.2s ease;
 }
 
@@ -1932,20 +1933,24 @@ const toggleSidebar = () => {
 
 .nav-group__children-inner {
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+  padding-right: 0.15rem;
+  box-sizing: border-box;
 }
 
 .nav-link--child {
   margin-left: 0.5rem;
+  width: calc(100% - 0.5rem);
   padding-left: 2.25rem;
+  padding-right: 0.85rem;
   font-size: 0.9rem;
 }
 
 .nav-link--child:hover {
-  transform: translateX(2px);
+  transform: none;
 }
 
 .nav-folder {
