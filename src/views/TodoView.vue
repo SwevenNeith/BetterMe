@@ -51,6 +51,7 @@ import {
   toISODate,
 } from '../utils/habitCalendar.js'
 import TodoItemCard from '../components/TodoItemCard.vue'
+import TodoEncouragementMessage from '../components/TodoEncouragementMessage.vue'
 import '../styles/todo-frequency.css'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
@@ -925,25 +926,28 @@ watch(userId, (id) => {
       <p v-if="isLoading" class="todo-loading">Chargement…</p>
 
       <template v-else>
-        <div v-if="viewMode === TODO_VIEW_MODE.DAY" class="todo-list" role="list">
-          <p v-if="!dailyItems.length" class="todo-empty">Aucun élément pour ce jour.</p>
-          <TodoItemCard
-            v-for="item in dailyItems"
-            :key="`${item.id}-${item.occurrenceDate}`"
-            :item="item"
-            draggable
-            :dragging="draggingItemId === item.id"
-            role="listitem"
-            @toggle="toggleItem(item)"
-            @increment="adjustItemQuantite(item, 1)"
-            @decrement="adjustItemQuantite(item, -1)"
-            @edit="openEditForm(item)"
-            @delete="removeItem(item)"
-            @dragstart="onDragStart(item.id, $event)"
-            @dragover="onDragOver(item.id, $event)"
-            @drop="onItemDrop(item.id, $event)"
-            @dragend="onDragEnd"
-          />
+        <div v-if="viewMode === TODO_VIEW_MODE.DAY" class="todo-day">
+          <div class="todo-list" role="list">
+            <p v-if="!dailyItems.length" class="todo-empty">Aucun élément pour ce jour.</p>
+            <TodoItemCard
+              v-for="item in dailyItems"
+              :key="`${item.id}-${item.occurrenceDate}`"
+              :item="item"
+              draggable
+              :dragging="draggingItemId === item.id"
+              role="listitem"
+              @toggle="toggleItem(item)"
+              @increment="adjustItemQuantite(item, 1)"
+              @decrement="adjustItemQuantite(item, -1)"
+              @edit="openEditForm(item)"
+              @delete="removeItem(item)"
+              @dragstart="onDragStart(item.id, $event)"
+              @dragover="onDragOver(item.id, $event)"
+              @drop="onItemDrop(item.id, $event)"
+              @dragend="onDragEnd"
+            />
+          </div>
+          <TodoEncouragementMessage :stats="currentProgress" :date-iso="anchorDate" />
         </div>
 
         <div v-else-if="viewMode === TODO_VIEW_MODE.WEEK" class="todo-list" role="list">
@@ -1671,6 +1675,13 @@ watch(userId, (id) => {
   font-size: 0.95rem;
   font-weight: 600;
   padding: 1rem 0.5rem;
+}
+
+.todo-day {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .todo-list {

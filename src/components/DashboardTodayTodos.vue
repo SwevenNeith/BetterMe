@@ -20,6 +20,7 @@ import {
   getTodoOccurrenceKeyDate,
   normalizeDateISO,
 } from '../utils/todoCalendar.js'
+import TodoEncouragementMessage from './TodoEncouragementMessage.vue'
 
 const props = defineProps({
   userId: {
@@ -211,62 +212,68 @@ onUnmounted(() => {
 
     <p v-else-if="loadError" class="dashboard-todos__error">{{ loadError }}</p>
 
-    <div v-else-if="todayTodos.length === 0" class="dashboard-todos__state dashboard-todos__state--empty">
-      <span class="dashboard-todos__empty-icon" aria-hidden="true">✓</span>
-      <p>Aucune tâche prévue aujourd’hui.</p>
-    </div>
-
-    <ul v-else class="dashboard-todos__list">
-      <li
-        v-for="item in todayTodos"
-        :key="`${item.id}:${item.occurrenceDate}`"
-        class="dashboard-todos__item"
-        :class="[
-          getTodoItemColorClass(item),
-          {
-            'dashboard-todos__item--done': item.occurrenceDone,
-          },
-        ]"
+    <template v-else>
+      <div
+        v-if="todayTodos.length === 0"
+        class="dashboard-todos__state dashboard-todos__state--empty"
       >
-        <div v-if="item.occurrenceQuantiteCible" class="dashboard-todos__quantite">
-          <button
-            type="button"
-            class="dashboard-todos__quantite-btn"
-            :disabled="(item.occurrenceQuantiteActuelle ?? 0) <= 0"
-            aria-label="Diminuer"
-            @click="adjustItemQuantite(item, -1)"
-          >
-            −
-          </button>
-          <span class="dashboard-todos__quantite-value">
-            {{ item.occurrenceQuantiteActuelle ?? 0 }}/{{ item.occurrenceQuantiteCible }}
-          </span>
-          <button
-            type="button"
-            class="dashboard-todos__quantite-btn"
-            aria-label="Augmenter"
-            @click="adjustItemQuantite(item, 1)"
-          >
-            +
-          </button>
-        </div>
-        <label
-          v-else
-          class="dashboard-todos__check"
-          :title="item.occurrenceDone ? 'Marquer comme à faire' : 'Marquer comme fait'"
+        <span class="dashboard-todos__empty-icon" aria-hidden="true">✓</span>
+        <p>Aucune tâche prévue aujourd’hui.</p>
+      </div>
+
+      <ul v-else class="dashboard-todos__list">
+        <li
+          v-for="item in todayTodos"
+          :key="`${item.id}:${item.occurrenceDate}`"
+          class="dashboard-todos__item"
+          :class="[
+            getTodoItemColorClass(item),
+            {
+              'dashboard-todos__item--done': item.occurrenceDone,
+            },
+          ]"
         >
-          <input
-            type="checkbox"
-            class="dashboard-todos__check-input"
-            :checked="item.occurrenceDone"
-            @change="toggleItem(item)"
-          />
-          <span class="dashboard-todos__check-box" aria-hidden="true" />
-        </label>
-        <span class="dashboard-todos__label">{{ item.nom }}</span>
-        <span v-if="item.is_promesse" class="dashboard-todos__badge">Promesse</span>
-      </li>
-    </ul>
+          <div v-if="item.occurrenceQuantiteCible" class="dashboard-todos__quantite">
+            <button
+              type="button"
+              class="dashboard-todos__quantite-btn"
+              :disabled="(item.occurrenceQuantiteActuelle ?? 0) <= 0"
+              aria-label="Diminuer"
+              @click="adjustItemQuantite(item, -1)"
+            >
+              −
+            </button>
+            <span class="dashboard-todos__quantite-value">
+              {{ item.occurrenceQuantiteActuelle ?? 0 }}/{{ item.occurrenceQuantiteCible }}
+            </span>
+            <button
+              type="button"
+              class="dashboard-todos__quantite-btn"
+              aria-label="Augmenter"
+              @click="adjustItemQuantite(item, 1)"
+            >
+              +
+            </button>
+          </div>
+          <label
+            v-else
+            class="dashboard-todos__check"
+            :title="item.occurrenceDone ? 'Marquer comme à faire' : 'Marquer comme fait'"
+          >
+            <input
+              type="checkbox"
+              class="dashboard-todos__check-input"
+              :checked="item.occurrenceDone"
+              @change="toggleItem(item)"
+            />
+            <span class="dashboard-todos__check-box" aria-hidden="true" />
+          </label>
+          <span class="dashboard-todos__label">{{ item.nom }}</span>
+          <span v-if="item.is_promesse" class="dashboard-todos__badge">Promesse</span>
+        </li>
+      </ul>
+      <TodoEncouragementMessage :stats="progress" :date-iso="dateIso" />
+    </template>
   </section>
 </template>
 
