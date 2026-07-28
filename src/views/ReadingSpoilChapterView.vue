@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase.js'
 import { getReadingBookWithCover } from '../services/readingBooks.js'
 import { createSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/readingSpoilChapters.js'
 
-const AUTO_SAVE_DELAY_MS = 800
+const AUTO_SAVE_DELAY_MS = 2000
 
 const route = useRoute()
 const router = useRouter()
@@ -240,6 +240,7 @@ onBeforeUnmount(() => {
 
 watch([userId, bookId, chapterId, isEditMode], () => {
   if (suppressLoad.value) return
+  if (localChapterId.value && chapterId.value === localChapterId.value && chapter.value) return
   if (userId.value && bookId.value) loadData()
 })
 </script>
@@ -274,7 +275,6 @@ watch([userId, bookId, chapterId, isEditMode], () => {
         auto-save
         :title="pageTitle"
         :chapter="formChapter"
-        :disabled="isSaving"
         @change="onFormChange"
       />
     </div>
