@@ -13,6 +13,8 @@ import { createReadingBook, listReadingBooksWithCovers } from '../services/readi
 import { listReadingCollections } from '../services/readingCollections.js'
 import { applyReadingBookFilters, formatReadingFilterLabel } from '../utils/readingBookFilters.js'
 
+const BOOKS_PER_PAGE = 20
+
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.LECTURE, undefined, { setDocumentTitle: true })
 
 const route = useRoute()
@@ -31,6 +33,8 @@ const coverPreviewUrl = ref('')
 const searchQuery = ref('')
 const bookFilters = ref([])
 const filterOpen = ref(false)
+const currentPage = ref(1)
+const readingGridRef = ref(null)
 let coverPreviewObjectUrl = ''
 
 const bookForm = reactive(emptyBookForm())
@@ -65,10 +69,28 @@ const displayedBooks = computed(() => {
   )
 })
 
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(displayedBooks.value.length / BOOKS_PER_PAGE)),
+)
+
+const paginatedBooks = computed(() => {
+  const start = (currentPage.value - 1) * BOOKS_PER_PAGE
+  return displayedBooks.value.slice(start, start + BOOKS_PER_PAGE)
+})
+
+const showPagination = computed(() => displayedBooks.value.length > BOOKS_PER_PAGE)
+
 const hasActiveFilters = computed(() => searchQuery.value.trim() !== '' || bookFilters.value.length > 0)
 
 function removeBookFilter(filterId) {
   bookFilters.value = bookFilters.value.filter((filter) => filter.id !== filterId)
+}
+
+function goToPage(page) {
+  const nextPage = Math.min(Math.max(page, 1), totalPages.value)
+  if (nextPage === currentPage.value) return
+  currentPage.value = nextPage
+  readingGridRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 const booksSubtitle = computed(() => {
@@ -266,6 +288,14 @@ watch(
   () => [route.query.book, books.value.length, isLoading.value],
   () => openBookFromQuery(),
 )
+
+watch([searchQuery, bookFilters], () => {
+  currentPage.value = 1
+}, { deep: true })
+
+watch(totalPages, (pages) => {
+  if (currentPage.value > pages) currentPage.value = pages
+})
 </script>
 
 <template>
@@ -381,13 +411,13 @@ watch(
           </button>
         </div>
 
-        <div class="reading-grid">
+        <div ref="readingGridRef" class="reading-grid">
           <div v-if="books.length === 0" class="reading-empty">Aucun livre pour le moment.</div>
           <div v-else-if="displayedBooks.length === 0" class="reading-empty">
             Aucun livre ne correspond à ta recherche.
           </div>
 
-        <article v-for="book in displayedBooks" :key="book.id" class="reading-book">
+        <article v-for="book in paginatedBooks" :key="book.id" class="reading-book">
           <button
             type="button"
             class="reading-book-btn"
@@ -407,6 +437,34 @@ watch(
           </button>
         </article>
         </div>
+
+        <nav
+          v-if="showPagination"
+          class="reading-pagination"
+          aria-label="Pagination de la bibliothèque"
+        >
+          <button
+            type="button"
+            class="reading-pagination__btn"
+            :disabled="currentPage <= 1"
+            aria-label="Page précédente"
+            @click="goToPage(currentPage - 1)"
+          >
+            ‹
+          </button>
+          <span class="reading-pagination__label">
+            Page {{ currentPage }} / {{ totalPages }}
+          </span>
+          <button
+            type="button"
+            class="reading-pagination__btn"
+            :disabled="currentPage >= totalPages"
+            aria-label="Page suivante"
+            @click="goToPage(currentPage + 1)"
+          >
+            ›
+          </button>
+        </nav>
       </template>
     </section>
 
@@ -656,6 +714,48 @@ watch(
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 0.45rem;
+  scroll-margin-top: 1rem;
+}
+
+.reading-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.reading-pagination__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 10px;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  background: rgba(255, 255, 255, 0.85);
+  color: #ad81be;
+  font-size: 1.1rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.reading-pagination__btn:hover:not(:disabled) {
+  background: rgba(213, 181, 234, 0.2);
+}
+
+.reading-pagination__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.reading-pagination__label {
+  min-width: 6.5rem;
+  text-align: center;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #6c757d;
 }
 
 .reading-book {
@@ -792,6 +892,20 @@ watch(
 
   .reading-active-filter-pill__remove {
     color: #c5b8d2;
+  }
+
+  .reading-pagination__btn {
+    background: rgba(35, 30, 48, 0.85);
+    border-color: rgba(213, 181, 234, 0.28);
+    color: #d5b5ea;
+  }
+
+  .reading-pagination__btn:hover:not(:disabled) {
+    background: rgba(61, 47, 74, 0.9);
+  }
+
+  .reading-pagination__label {
+    color: #adb5bd;
   }
 
   .reading-book-cover--placeholder {
