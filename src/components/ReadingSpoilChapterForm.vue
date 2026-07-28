@@ -19,9 +19,13 @@ const props = defineProps({
     type: String,
     default: 'Valider',
   },
+  autoSave: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-const emit = defineEmits(['submit', 'cancel'])
+const emit = defineEmits(['submit', 'cancel', 'change'])
 
 const form = reactive({
   chapterNumber: '',
@@ -31,6 +35,7 @@ const form = reactive({
 })
 const errorMessage = ref('')
 const initialSnapshot = ref(null)
+const loadedChapterId = ref(null)
 
 function getSnapshot() {
   return {
@@ -60,6 +65,7 @@ function resetForm() {
   form.worldBuilding = ''
   form.scene = ''
   errorMessage.value = ''
+  loadedChapterId.value = null
   captureInitialSnapshot()
 }
 
@@ -92,10 +98,21 @@ function submit() {
 watch(
   () => props.chapter,
   (chapter) => {
+    const nextId = chapter?.id ?? null
+    if (nextId && nextId === loadedChapterId.value) return
+    loadedChapterId.value = nextId
     if (chapter) fillFromChapter(chapter)
     else resetForm()
   },
   { immediate: true },
+)
+
+watch(
+  () => [form.chapterNumber, form.charactersMet, form.worldBuilding, form.scene],
+  () => {
+    if (!props.autoSave || !initialSnapshot.value || !isDirty.value) return
+    emit('change', buildPayload())
+  },
 )
 
 defineExpose({
@@ -103,6 +120,8 @@ defineExpose({
     return isDirty.value
   },
   submit,
+  buildPayload,
+  markSaved: captureInitialSnapshot,
 })
 </script>
 
@@ -168,7 +187,7 @@ defineExpose({
       />
     </label>
 
-    <div class="reading-fiche-form-actions">
+    <div v-if="!autoSave" class="reading-fiche-form-actions">
       <button type="submit" class="reading-fiche-save-btn" :disabled="disabled">
         {{ disabled ? 'Enregistrement…' : submitLabel }}
       </button>

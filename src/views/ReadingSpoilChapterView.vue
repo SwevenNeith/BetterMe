@@ -1,10 +1,12 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import ReadingSpoilChapterForm from '../components/ReadingSpoilChapterForm.vue'
 import { supabase } from '../lib/supabase.js'
 import { getReadingBookWithCover } from '../services/readingBooks.js'
 import { createSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/readingSpoilChapters.js'
+
+const AUTO_SAVE_DELAY_MS = 800
 
 const route = useRoute()
 const router = useRouter()
@@ -12,70 +14,159 @@ const router = useRouter()
 const userId = ref(null)
 const book = ref(null)
 const chapter = ref(null)
+const formChapter = ref(null)
 const formRef = ref(null)
 const isLoading = ref(true)
 const isSaving = ref(false)
 const loadError = ref('')
 const saveError = ref('')
-const leaveConfirmOpen = ref(false)
-const skipLeaveGuard = ref(false)
-/** Callback `next()` fourni par onBeforeRouteLeave quand la navigation est interceptée. */
-let pendingRouteNext = null
+const saveState = ref('idle')
+const localChapterId = ref('')
+const suppressLoad = ref(false)
+
+let autoSaveTimer = null
+let savedStateTimer = null
+let pendingAutoSave = null
 
 const bookId = computed(() => String(route.params.bookId ?? ''))
 const chapterId = computed(() => String(route.params.chapterId ?? ''))
 const isEditMode = computed(() => route.name === 'lecture-spoil-edition')
+const effectiveChapterId = computed(() => localChapterId.value || chapterId.value)
+const isPersistedChapter = computed(() => Boolean(effectiveChapterId.value))
 
-function isFormDirty() {
-  return Boolean(formRef.value?.isDirty)
-}
+const saveStatusLabel = computed(() => {
+  if (saveError.value) return saveError.value
+  if (saveState.value === 'saving') return 'Enregistrement…'
+  if (saveState.value === 'pending') return 'Modification en cours…'
+  if (saveState.value === 'saved') return 'Enregistré automatiquement'
+  return ''
+})
+
+const pageTitle = computed(() => {
+  if (!isPersistedChapter.value) return 'Ajouter un chapitre'
+  const number =
+    chapter.value?.chapter_number ?? formRef.value?.buildPayload?.()?.chapterNumber ?? ''
+  return `Modifier le chapitre ${number}`
+})
 
 function navigateToBook() {
   router.push({ name: 'lecture-livre', params: { bookId: bookId.value } })
 }
 
-function resumeNavigationAfterLeave() {
-  skipLeaveGuard.value = true
-  leaveConfirmOpen.value = false
+function clearAutoSaveTimer() {
+  if (!autoSaveTimer) return
+  clearTimeout(autoSaveTimer)
+  autoSaveTimer = null
+}
 
-  const resume = pendingRouteNext
-  pendingRouteNext = null
+function clearSavedStateTimer() {
+  if (!savedStateTimer) return
+  clearTimeout(savedStateTimer)
+  savedStateTimer = null
+}
 
-  if (resume) {
-    resume()
-    return
-  }
+function markSavedState() {
+  saveState.value = 'saved'
+  clearSavedStateTimer()
+  savedStateTimer = setTimeout(() => {
+    if (saveState.value === 'saved') saveState.value = 'idle'
+  }, 2200)
+}
 
+async function returnToBook() {
+  await flushAutoSave()
   navigateToBook()
 }
 
-function returnToBook() {
-  if (!isFormDirty()) {
-    navigateToBook()
-    return
+function scheduleAutoSave(payload) {
+  pendingAutoSave = payload
+  saveError.value = ''
+  saveState.value = 'pending'
+  clearAutoSaveTimer()
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = null
+    performAutoSave(payload)
+  }, AUTO_SAVE_DELAY_MS)
+}
+
+async function performAutoSave(payload) {
+  const nextPayload = payload ?? pendingAutoSave ?? formRef.value?.buildPayload?.()
+  pendingAutoSave = null
+
+  if (!nextPayload?.chapterNumber?.trim()) {
+    if (saveState.value === 'pending') saveState.value = 'idle'
+    return true
   }
 
-  pendingRouteNext = null
-  leaveConfirmOpen.value = true
+  if (!userId.value || !bookId.value || isSaving.value) {
+    if (isSaving.value && nextPayload) pendingAutoSave = nextPayload
+    return false
+  }
+
+  isSaving.value = true
+  saveError.value = ''
+  saveState.value = 'saving'
+
+  try {
+    if (isPersistedChapter.value) {
+      await updateSpoilChapter(
+        supabase,
+        userId.value,
+        effectiveChapterId.value,
+        nextPayload,
+      )
+      chapter.value = {
+        ...(chapter.value ?? {}),
+        id: effectiveChapterId.value,
+        chapter_number: nextPayload.chapterNumber,
+        characters_met: nextPayload.charactersMet,
+        world_building: nextPayload.worldBuilding,
+        scene: nextPayload.scene,
+      }
+    } else {
+      const created = await createSpoilChapter(supabase, userId.value, bookId.value, nextPayload)
+      localChapterId.value = created.id
+      chapter.value = created
+      suppressLoad.value = true
+      await router.replace({
+        name: 'lecture-spoil-edition',
+        params: { bookId: bookId.value, chapterId: created.id },
+      })
+      suppressLoad.value = false
+    }
+
+    formRef.value?.markSaved?.()
+    markSavedState()
+    return true
+  } catch (err) {
+    console.error(err)
+    saveState.value = 'error'
+    saveError.value =
+      err.message ||
+      (isPersistedChapter.value
+        ? 'Impossible de modifier le chapitre.'
+        : 'Impossible d’ajouter le chapitre.')
+    return false
+  } finally {
+    isSaving.value = false
+    if (pendingAutoSave) {
+      const queued = pendingAutoSave
+      pendingAutoSave = null
+      scheduleAutoSave(queued)
+    }
+  }
 }
 
-function cancelForm() {
-  resumeNavigationAfterLeave()
+async function flushAutoSave() {
+  clearAutoSaveTimer()
+  const payload = pendingAutoSave ?? formRef.value?.buildPayload?.()
+  pendingAutoSave = null
+  if (!formRef.value?.isDirty) return true
+  return performAutoSave(payload)
 }
 
-function cancelLeaveConfirm() {
-  if (isSaving.value) return
-  leaveConfirmOpen.value = false
-  pendingRouteNext = null
-}
-
-function confirmLeaveAbandon() {
-  resumeNavigationAfterLeave()
-}
-
-function confirmLeaveSave() {
-  if (isSaving.value) return
-  formRef.value?.submit()
+function onFormChange(payload) {
+  scheduleAutoSave(payload)
 }
 
 async function loadData() {
@@ -99,9 +190,12 @@ async function loadData() {
     if (isEditMode.value) {
       const chapters = await listSpoilChapters(supabase, userId.value, bookId.value)
       chapter.value = chapters.find((item) => item.id === chapterId.value) ?? null
+      formChapter.value = chapter.value
       if (!chapter.value) loadError.value = 'Chapitre introuvable.'
     } else {
       chapter.value = null
+      formChapter.value = null
+      localChapterId.value = ''
     }
   } catch (err) {
     console.error(err)
@@ -113,44 +207,20 @@ async function loadData() {
   }
 }
 
-async function onSubmit(payload) {
-  if (!userId.value || !bookId.value || isSaving.value) return
-
-  isSaving.value = true
-  saveError.value = ''
-  try {
-    if (isEditMode.value) {
-      if (!chapterId.value) throw new Error('Chapitre introuvable.')
-      await updateSpoilChapter(supabase, userId.value, chapterId.value, payload)
-    } else {
-      await createSpoilChapter(supabase, userId.value, bookId.value, payload)
-    }
-
-    resumeNavigationAfterLeave()
-  } catch (err) {
-    console.error(err)
-    saveError.value =
-      err.message ||
-      (isEditMode.value ? 'Impossible de modifier le chapitre.' : 'Impossible d’ajouter le chapitre.')
-  } finally {
-    isSaving.value = false
-  }
+function handleBeforeUnload(event) {
+  if (!formRef.value?.isDirty) return
+  flushAutoSave()
+  event.preventDefault()
+  event.returnValue = ''
 }
 
-onBeforeRouteLeave((_to, _from, next) => {
-  if (skipLeaveGuard.value) {
-    next()
+onBeforeRouteLeave(async (_to, _from, next) => {
+  const saved = await flushAutoSave()
+  if (!saved && formRef.value?.isDirty) {
+    next(false)
     return
   }
-
-  if (!isFormDirty()) {
-    next()
-    return
-  }
-
-  pendingRouteNext = next
-  leaveConfirmOpen.value = true
-  next(false)
+  next()
 })
 
 onMounted(async () => {
@@ -158,9 +228,18 @@ onMounted(async () => {
     data: { user },
   } = await supabase.auth.getUser()
   if (user) userId.value = user.id
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeUnmount(() => {
+  clearAutoSaveTimer()
+  clearSavedStateTimer()
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  flushAutoSave()
 })
 
 watch([userId, bookId, chapterId, isEditMode], () => {
+  if (suppressLoad.value) return
   if (userId.value && bookId.value) loadData()
 })
 </script>
@@ -178,58 +257,27 @@ watch([userId, bookId, chapterId, isEditMode], () => {
     <div v-else-if="loadError" class="spoil-chapter-page__error">{{ loadError }}</div>
 
     <div v-else class="spoil-chapter-page__inner">
-      <p v-if="saveError" class="spoil-chapter-page__error spoil-chapter-page__error--inline">
-        {{ saveError }}
+      <p
+        v-if="saveStatusLabel"
+        class="spoil-chapter-page__save-status"
+        :class="{
+          'spoil-chapter-page__save-status--error': Boolean(saveError),
+          'spoil-chapter-page__save-status--saved': saveState === 'saved',
+        }"
+        role="status"
+        aria-live="polite"
+      >
+        {{ saveStatusLabel }}
       </p>
       <ReadingSpoilChapterForm
         ref="formRef"
-        :title="isEditMode ? `Modifier le chapitre ${chapter?.chapter_number ?? ''}` : 'Ajouter un chapitre'"
-        :chapter="isEditMode ? chapter : null"
+        auto-save
+        :title="pageTitle"
+        :chapter="formChapter"
         :disabled="isSaving"
-        :submit-label="isEditMode ? 'Enregistrer' : 'Valider'"
-        @submit="onSubmit"
-        @cancel="cancelForm"
+        @change="onFormChange"
       />
     </div>
-
-    <Teleport to="body">
-      <div
-        v-if="leaveConfirmOpen"
-        class="spoil-leave-overlay"
-        @click.self="cancelLeaveConfirm"
-      >
-        <div
-          class="spoil-leave-dialog"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="spoil-leave-title"
-          aria-describedby="spoil-leave-message"
-        >
-          <h2 id="spoil-leave-title" class="spoil-leave-title">Modifications non enregistrées</h2>
-          <p id="spoil-leave-message" class="spoil-leave-message">
-            Des modifications ont été faites mais pas enregistrées.
-          </p>
-          <div class="spoil-leave-actions">
-            <button
-              type="button"
-              class="spoil-leave-abandon"
-              :disabled="isSaving"
-              @click="confirmLeaveAbandon"
-            >
-              Abandonner
-            </button>
-            <button
-              type="button"
-              class="spoil-leave-save"
-              :disabled="isSaving"
-              @click="confirmLeaveSave"
-            >
-              {{ isSaving ? 'Enregistrement…' : 'Enregistrer' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
 
@@ -295,80 +343,28 @@ watch([userId, bookId, chapterId, isEditMode], () => {
   text-align: center;
 }
 
-.spoil-chapter-page__error--inline {
-  margin-bottom: 0.75rem;
-}
-
-.spoil-leave-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1400;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  background: rgba(20, 24, 32, 0.5);
-  backdrop-filter: blur(4px);
-  box-sizing: border-box;
-}
-
-.spoil-leave-dialog {
-  width: 100%;
-  max-width: 24rem;
-  padding: 1.25rem;
-  border-radius: 16px;
-  border: 1px solid rgba(173, 129, 190, 0.45);
-  background: linear-gradient(180deg, #fffefb 0%, #faf6ff 100%);
-  box-shadow: 0 18px 50px rgba(92, 62, 112, 0.18);
-  box-sizing: border-box;
-}
-
-.spoil-leave-title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 800;
-  color: #3d2f4a;
-}
-
-.spoil-leave-message {
-  margin: 0.65rem 0 1.1rem;
-  font-size: 0.92rem;
-  color: #6c757d;
-  line-height: 1.45;
-}
-
-.spoil-leave-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  justify-content: flex-end;
-}
-
-.spoil-leave-abandon,
-.spoil-leave-save {
-  padding: 0.7rem 1rem;
-  border-radius: 12px;
+.spoil-chapter-page__save-status {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  font-size: 0.85rem;
   font-weight: 700;
-  font-size: 0.92rem;
-  cursor: pointer;
+  text-align: center;
+  color: #6b4f7c;
+  background: rgba(213, 181, 234, 0.12);
+  border: 1px solid rgba(173, 129, 190, 0.22);
 }
 
-.spoil-leave-abandon {
-  border: 1px solid rgba(173, 129, 190, 0.35);
-  background: rgba(255, 255, 255, 0.85);
-  color: #5a4a68;
+.spoil-chapter-page__save-status--saved {
+  color: #3d8b5f;
+  background: rgba(149, 209, 170, 0.14);
+  border-color: rgba(149, 209, 170, 0.35);
 }
 
-.spoil-leave-save {
-  border: none;
-  background: linear-gradient(135deg, #d5b5ea, #ad81be);
-  color: #fff;
-}
-
-.spoil-leave-abandon:disabled,
-.spoil-leave-save:disabled {
-  opacity: 0.65;
-  cursor: wait;
+.spoil-chapter-page__save-status--error {
+  color: #b02a37;
+  background: rgba(220, 53, 69, 0.1);
+  border-color: rgba(220, 53, 69, 0.22);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -390,23 +386,22 @@ watch([userId, bookId, chapterId, isEditMode], () => {
     color: #ff8a95;
   }
 
-  .spoil-leave-dialog {
-    background: linear-gradient(180deg, #2a2438 0%, #1f1a2c 100%);
-    border-color: rgba(213, 181, 234, 0.28);
+  .spoil-chapter-page__save-status {
+    color: #d5b5ea;
+    background: rgba(213, 181, 234, 0.1);
+    border-color: rgba(213, 181, 234, 0.18);
   }
 
-  .spoil-leave-title {
-    color: #f0e8f8;
+  .spoil-chapter-page__save-status--saved {
+    color: #95d1aa;
+    background: rgba(149, 209, 170, 0.12);
+    border-color: rgba(149, 209, 170, 0.28);
   }
 
-  .spoil-leave-message {
-    color: #adb5bd;
-  }
-
-  .spoil-leave-abandon {
-    background: rgba(35, 30, 48, 0.95);
-    border-color: rgba(173, 129, 190, 0.4);
-    color: #e8dcf5;
+  .spoil-chapter-page__save-status--error {
+    color: #ff8a95;
+    background: rgba(220, 53, 69, 0.18);
+    border-color: rgba(220, 53, 69, 0.28);
   }
 }
 </style>
