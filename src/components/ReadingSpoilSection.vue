@@ -53,6 +53,11 @@ function openAddPage() {
   router.push({ name: 'lecture-spoil-nouveau', params: { bookId: props.bookId } })
 }
 
+function openAllSpoilsPage() {
+  if (!props.bookId || props.disabled || props.isSaving || !props.chapters.length) return
+  router.push({ name: 'lecture-spoil-lecture', params: { bookId: props.bookId } })
+}
+
 function openEditPage(chapter) {
   if (props.disabled || props.isSaving || !chapter?.id || !props.bookId) return
   router.push({
@@ -132,14 +137,25 @@ function formatChapterLabel(chapterNumber) {
   <div class="spoil-section">
     <p v-if="errorMessage" class="spoil-section-error">{{ errorMessage }}</p>
 
-    <button
-      type="button"
-      class="spoil-add-btn"
-      :disabled="disabled || isSaving"
-      @click="openAddPage"
-    >
-      Ajouter un chapitre
-    </button>
+    <div class="spoil-section__actions">
+      <button
+        type="button"
+        class="spoil-add-btn"
+        :disabled="disabled || isSaving"
+        @click="openAddPage"
+      >
+        Ajouter un chapitre
+      </button>
+      <button
+        v-if="chapters.length"
+        type="button"
+        class="spoil-view-all-btn"
+        :disabled="disabled || isSaving"
+        @click="openAllSpoilsPage"
+      >
+        Voir tous les spoils
+      </button>
+    </div>
 
     <div v-if="!chapters.length" class="spoil-empty">
       Aucun chapitre pour l’instant.
@@ -311,24 +327,42 @@ function formatChapterLabel(chapterNumber) {
   font-size: 0.8rem;
 }
 
-.spoil-add-btn {
-  align-self: stretch;
+.spoil-section__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.spoil-add-btn,
+.spoil-view-all-btn {
+  flex: 1 1 10rem;
   padding: 0.55rem 0.75rem;
   border-radius: 10px;
-  border: 1px dashed rgba(173, 129, 190, 0.55);
-  background: rgba(255, 255, 255, 0.75);
-  color: #6b4f7c;
   font-weight: 700;
   font-size: 0.85rem;
   cursor: pointer;
   transition: background 0.15s ease;
 }
 
-.spoil-add-btn:hover:not(:disabled) {
+.spoil-add-btn {
+  border: 1px dashed rgba(173, 129, 190, 0.55);
+  background: rgba(255, 255, 255, 0.75);
+  color: #6b4f7c;
+}
+
+.spoil-view-all-btn {
+  border: 1px solid rgba(173, 129, 190, 0.45);
+  background: rgba(213, 181, 234, 0.14);
+  color: #6b4f7c;
+}
+
+.spoil-add-btn:hover:not(:disabled),
+.spoil-view-all-btn:hover:not(:disabled) {
   background: rgba(213, 181, 234, 0.28);
 }
 
-.spoil-add-btn:disabled {
+.spoil-add-btn:disabled,
+.spoil-view-all-btn:disabled {
   opacity: 0.65;
   cursor: wait;
 }
@@ -568,13 +602,15 @@ function formatChapterLabel(chapterNumber) {
 }
 
 @media (prefers-color-scheme: dark) {
-  .spoil-add-btn {
+  .spoil-add-btn,
+  .spoil-view-all-btn {
     background: rgba(35, 30, 48, 0.85);
     border-color: rgba(173, 129, 190, 0.45);
     color: #e8dcf5;
   }
 
-  .spoil-add-btn:hover:not(:disabled) {
+  .spoil-add-btn:hover:not(:disabled),
+  .spoil-view-all-btn:hover:not(:disabled) {
     background: rgba(173, 129, 190, 0.28);
   }
 

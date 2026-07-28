@@ -14,6 +14,7 @@ const HabitTrackerView = () => import('../views/HabitTrackerView.vue')
 const TodoView = () => import('../views/TodoView.vue')
 const LectureView = () => import('../views/LectureView.vue')
 const ReadingSpoilChapterView = () => import('../views/ReadingSpoilChapterView.vue')
+const ReadingSpoilBookView = () => import('../views/ReadingSpoilBookView.vue')
 const ReadingBookDetailView = () => import('../views/ReadingBookDetailView.vue')
 const JournalView = () => import('../views/JournalView.vue')
 const JournalEntryView = () => import('../views/JournalEntryView.vue')
@@ -86,6 +87,11 @@ const router = createRouter({
           path: 'lecture/:bookId/spoil/:chapterId/edition',
           name: 'lecture-spoil-edition',
           component: ReadingSpoilChapterView,
+        },
+        {
+          path: 'lecture/:bookId/spoil/lire/:chapterId?',
+          name: 'lecture-spoil-lecture',
+          component: ReadingSpoilBookView,
         },
         {
           path: 'journal',
