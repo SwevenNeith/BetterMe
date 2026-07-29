@@ -101,3 +101,15 @@ onUnmounted(() => {
   }
 }
 </style>
+
+<style>
+@media (max-width: 768px) {
+  .reading-book-page__back,
+  .journal-entry-page__back,
+  .spoil-reader-page__back,
+  .spoil-chapter-page__back,
+  .project-detail-back {
+    padding-left: 2.75rem !important;
+  }
+}
+</style>

@@ -864,6 +864,26 @@ const handleLogout = async () => {
 const toggleSidebar = () => {
   isOpen.value = !isOpen.value
 }
+
+const isScrolled = ref(false)
+let scrollRaf = null
+
+function onWindowScroll() {
+  if (scrollRaf) return
+  scrollRaf = requestAnimationFrame(() => {
+    isScrolled.value = window.scrollY > 40
+    scrollRaf = null
+  })
+}
+
+onMounted(() => {
+  window.addEventListener('scroll', onWindowScroll, { passive: true })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('scroll', onWindowScroll)
+  if (scrollRaf) cancelAnimationFrame(scrollRaf)
+})
 </script>
 
 <template>
@@ -871,7 +891,7 @@ const toggleSidebar = () => {
   <button
     class="hamburger"
     @click="toggleSidebar"
-    :class="{ 'is-open': isOpen }"
+    :class="{ 'is-open': isOpen, 'is-scrolled': isScrolled && !isOpen }"
     aria-label="Ouvrir le menu"
   >
     <span></span>
@@ -2022,33 +2042,44 @@ const toggleSidebar = () => {
 .hamburger {
   display: none;
   position: fixed;
-  top: 1rem;
-  left: 1rem;
+  top: 0.55rem;
+  left: 0.55rem;
   z-index: 200;
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.9);
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(213, 181, 234, 0.35);
-  box-shadow: 0 4px 12px rgba(173, 129, 190, 0.15);
+  box-shadow: 0 2px 8px rgba(173, 129, 190, 0.15);
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: opacity 0.25s ease, transform 0.2s ease;
+}
+
+.hamburger.is-scrolled {
+  opacity: 0.45;
+  transform: scale(0.85);
+}
+
+.hamburger.is-scrolled:hover,
+.hamburger.is-scrolled:focus-visible {
+  opacity: 1;
+  transform: scale(1);
 }
 
 @media (prefers-color-scheme: dark) {
   .hamburger {
-    background: rgba(25, 20, 35, 0.9);
+    background: rgba(25, 20, 35, 0.92);
   }
 }
 
 .hamburger span {
   display: block;
-  width: 20px;
+  width: 17px;
   height: 2px;
   background: #ad81be;
   border-radius: 2px;
@@ -2057,14 +2088,14 @@ const toggleSidebar = () => {
 }
 
 .hamburger.is-open span:nth-child(1) {
-  transform: translateY(7px) rotate(45deg);
+  transform: translateY(6px) rotate(45deg);
 }
 .hamburger.is-open span:nth-child(2) {
   opacity: 0;
   transform: scaleX(0);
 }
 .hamburger.is-open span:nth-child(3) {
-  transform: translateY(-7px) rotate(-45deg);
+  transform: translateY(-6px) rotate(-45deg);
 }
 
 /* ─── Overlay (mobile) ─── */
