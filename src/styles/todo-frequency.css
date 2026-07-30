@@ -31,27 +31,32 @@
 
 @media (prefers-color-scheme: dark) {
   .todo-freq--ponctuel {
-    --todo-freq-bg: rgba(173, 129, 190, 0.16);
-    --todo-freq-border: rgba(173, 129, 190, 0.45);
+    --todo-freq-accent: #d5a8e8;
+    --todo-freq-bg: rgba(173, 129, 190, 0.24);
+    --todo-freq-border: rgba(213, 168, 232, 0.52);
   }
 
   .todo-freq--semaine {
-    --todo-freq-bg: rgba(114, 160, 152, 0.16);
-    --todo-freq-border: rgba(114, 160, 152, 0.45);
+    --todo-freq-accent: #8ec4b8;
+    --todo-freq-bg: rgba(114, 160, 152, 0.22);
+    --todo-freq-border: rgba(142, 196, 184, 0.5);
   }
 
   .todo-freq--quotidien {
-    --todo-freq-bg: rgba(106, 143, 201, 0.16);
-    --todo-freq-border: rgba(106, 143, 201, 0.45);
+    --todo-freq-accent: #8eb0e8;
+    --todo-freq-bg: rgba(106, 143, 201, 0.22);
+    --todo-freq-border: rgba(142, 176, 232, 0.5);
   }
 
   .todo-freq--hebdomadaire {
-    --todo-freq-bg: rgba(184, 136, 200, 0.16);
-    --todo-freq-border: rgba(184, 136, 200, 0.45);
+    --todo-freq-accent: #d4a0e4;
+    --todo-freq-bg: rgba(184, 136, 200, 0.22);
+    --todo-freq-border: rgba(212, 160, 228, 0.5);
   }
 
   .todo-freq--promesse {
-    --todo-freq-bg: rgba(212, 160, 106, 0.18);
-    --todo-freq-border: rgba(212, 160, 106, 0.48);
+    --todo-freq-accent: #e8b878;
+    --todo-freq-bg: rgba(212, 160, 106, 0.24);
+    --todo-freq-border: rgba(232, 184, 120, 0.55);
   }
 }

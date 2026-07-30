@@ -436,7 +436,9 @@ function onCardDragEnd(event) {
 @media (prefers-color-scheme: dark) {
   .todo-item-card {
     background: var(--todo-freq-bg, rgba(213, 181, 234, 0.08));
-    border-color: var(--todo-freq-border, rgba(213, 181, 234, 0.2));
+    border: 1px solid var(--todo-freq-border, rgba(213, 181, 234, 0.2));
+    border-left-width: 4px;
+    border-left-color: var(--todo-freq-accent, #ad81be);
   }
 
   .todo-item-title {

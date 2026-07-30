@@ -387,7 +387,7 @@ onUnmounted(() => {
   width: 1rem;
   height: 1rem;
   border-radius: 4px;
-  border: 2px solid rgba(173, 129, 190, 0.65);
+  border: 2px solid color-mix(in srgb, var(--todo-freq-accent, #ad81be) 70%, transparent);
   background: white;
 }
 
@@ -433,10 +433,10 @@ onUnmounted(() => {
   justify-content: center;
   width: 1.45rem;
   height: 1.45rem;
-  border: none;
+  border: 1px solid var(--todo-freq-border, rgba(173, 129, 190, 0.35));
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.85);
-  color: #ad81be;
+  color: var(--todo-freq-accent, #ad81be);
   font-size: 0.95rem;
   font-weight: 800;
   cursor: pointer;
@@ -481,20 +481,15 @@ onUnmounted(() => {
     color: #f0e8f8;
   }
 
-  .dashboard-todos__item {
-    background: rgba(213, 181, 234, 0.1);
-    border-color: rgba(213, 181, 234, 0.2);
-  }
-
   .dashboard-todos__check-box {
     background: rgba(0, 0, 0, 0.25);
-    border-color: rgba(213, 181, 234, 0.45);
+    border-color: color-mix(in srgb, var(--todo-freq-accent, #d5b5ea) 65%, transparent);
   }
 
   .dashboard-todos__quantite-btn {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(213, 181, 234, 0.28);
-    color: #d5b5ea;
+    background: color-mix(in srgb, var(--todo-freq-bg, rgba(213, 181, 234, 0.1)) 70%, rgba(255, 255, 255, 0.08));
+    border-color: var(--todo-freq-border, rgba(213, 181, 234, 0.28));
+    color: var(--todo-freq-accent, #d5b5ea);
   }
 
   .dashboard-todos__quantite-btn:not(:disabled):hover {

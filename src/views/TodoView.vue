@@ -9,6 +9,7 @@ import {
   TODO_WEEKDAYS,
   getDefaultTodoFrequencyForView,
   getTodoFrequencyClass,
+  getTodoItemColorClass,
 } from '../constants/todoOptions.js'
 import {
   listTodoItems,
@@ -1332,7 +1333,10 @@ watch(userId, (id) => {
                   v-for="item in cell.items.slice(0, 2)"
                   :key="`${item.id}-${item.occurrenceDate}`"
                   class="todo-month-cell__preview-item"
-                  :class="{ 'todo-month-cell__preview-item--done': item.occurrenceDone }"
+                  :class="[
+                    getTodoItemColorClass(item),
+                    { 'todo-month-cell__preview-item--done': item.occurrenceDone },
+                  ]"
                 >
                   {{ item.nom }}
                 </li>
@@ -2361,10 +2365,12 @@ watch(userId, (id) => {
 .todo-month-cell__preview-item {
   font-size: 0.62rem;
   font-weight: 600;
-  color: #6c757d;
+  color: var(--todo-freq-accent, #6c757d);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-left: 0.3rem;
+  border-left: 2px solid var(--todo-freq-accent, #ad81be);
 }
 
 .todo-month-cell__preview-item--done {
@@ -2495,7 +2501,7 @@ watch(userId, (id) => {
   }
 
   .todo-month-cell__preview-item {
-    color: #adb5bd;
+    color: var(--todo-freq-accent, #d5b5ea);
   }
 
   .todo-month-cell__badge {
