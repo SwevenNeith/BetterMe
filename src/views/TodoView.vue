@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import {
@@ -59,7 +59,7 @@ import {
   validateTimetableEventTimes,
   validateTimetableReminderAndTimer,
 } from '../services/timetableEvents.js'
-import { linkTodoAndTimetable, deleteTimetableEvent } from '../services/todoTimetableLink.js'
+import { linkTodoAndTimetable, deleteAllTimetableEventsForTodo, createTimetableEventsForTodo, syncTodoTimetableLink, hasTodoTimetableLink } from '../services/todoTimetableLink.js'
 import { useTimetableCacheStore } from '../stores/timetableCache.js'
 import {
   createDefaultPlanningForm,
@@ -67,6 +67,7 @@ import {
   suggestEndTimeFromStart,
   todoTimeToInput,
 } from '../utils/todoTimetableBridge.js'
+import { isRecurringTodoFrequency } from '../utils/todoPlanningDates.js'
 import '../styles/todo-frequency.css'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
@@ -82,6 +83,8 @@ const formError = ref('')
 const isSaving = ref(false)
 const isDeletingId = ref(null)
 const formOpen = ref(false)
+const formCardRef = ref(null)
+const formNameInputRef = ref(null)
 const editingItemId = ref(null)
 const items = ref([])
 const completionProgress = ref(new Map())
@@ -124,13 +127,96 @@ const formTargetWeekLabel = computed(() => {
 
 const isEditMode = computed(() => Boolean(editingItemId.value))
 
-const editingItem = computed(() =>
-  editingItemId.value ? items.value.find((item) => item.id === editingItemId.value) : null,
-)
+const editingItemHasPlanningLink = ref(false)
+const editingPlanningEventCount = ref(0)
+const editingPlanningNextDate = ref('')
 
-const editingItemHasPlanningLink = computed(() =>
-  Boolean(editingItem.value?.timetable_event_id),
-)
+function applyPlanningLinkState(itemId, linked, eventId, eventCount = 0, nextOccurrenceDate = null) {
+  if (editingItemId.value !== itemId) return
+
+  editingItemHasPlanningLink.value = linked
+  editingPlanningEventCount.value = linked ? eventCount : 0
+  editingPlanningNextDate.value = linked ? nextOccurrenceDate || '' : ''
+
+  const index = items.value.findIndex((item) => item.id === itemId)
+  if (index >= 0) {
+    items.value[index] = {
+      ...items.value[index],
+      timetable_event_id: eventId,
+    }
+  }
+}
+
+async function refreshEditingPlanningLink() {
+  const itemId = editingItemId.value
+  if (!userId.value || !itemId) {
+    editingItemHasPlanningLink.value = false
+    editingPlanningEventCount.value = 0
+    editingPlanningNextDate.value = ''
+    return
+  }
+
+  const previousItem = items.value.find((item) => item.id === itemId)
+  const previousLinked = editingItemHasPlanningLink.value
+  const previousEventId = previousItem?.timetable_event_id ?? null
+
+  try {
+    const { linked, eventId, eventCount, nextOccurrenceDate } = await syncTodoTimetableLink(
+      supabase,
+      userId.value,
+      itemId,
+    )
+    applyPlanningLinkState(itemId, linked, eventId, eventCount, nextOccurrenceDate)
+
+    if (previousLinked !== linked || previousEventId !== eventId) {
+      useTimetableCacheStore().$patch({ isValid: false })
+    }
+  } catch (err) {
+    console.error(err)
+    editingItemHasPlanningLink.value = false
+    editingPlanningEventCount.value = 0
+    editingPlanningNextDate.value = ''
+  }
+}
+
+async function sanitizeLoadedTodoPlanningLinks(itemsData) {
+  const linkedItems = itemsData.filter((item) => item.timetable_event_id)
+  if (!linkedItems.length) return itemsData
+
+  let cacheInvalidated = false
+  const nextItems = [...itemsData]
+
+  await Promise.all(
+    linkedItems.map(async (item) => {
+      try {
+        const { linked, eventId } = await syncTodoTimetableLink(supabase, userId.value, item.id)
+        const index = nextItems.findIndex((entry) => entry.id === item.id)
+        if (index < 0) return
+
+        if (item.timetable_event_id !== eventId) {
+          cacheInvalidated = true
+        }
+
+        nextItems[index] = {
+          ...nextItems[index],
+          timetable_event_id: eventId,
+        }
+
+        if (!linked && item.timetable_event_id) {
+          cacheInvalidated = true
+        }
+      } catch (err) {
+        console.error(err)
+      }
+    }),
+  )
+
+  if (cacheInvalidated) {
+    useTimetableCacheStore().$patch({ isValid: false })
+  }
+
+  return nextItems
+}
 
 const periodLabel = computed(() => {
   if (viewMode.value === TODO_VIEW_MODE.MONTH) {
@@ -229,14 +315,26 @@ function resetForm() {
   todoForm.is_promesse = false
   todoForm.quantite_cible = 0
   editingItemId.value = null
+  editingItemHasPlanningLink.value = false
+  editingPlanningEventCount.value = 0
+  editingPlanningNextDate.value = ''
   formError.value = ''
   resetPlanningForm()
   applyFormDefaultsForView()
 }
 
+async function revealForm() {
+  await nextTick()
+  formCardRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  requestAnimationFrame(() => {
+    formNameInputRef.value?.focus({ preventScroll: true })
+  })
+}
+
 function openForm() {
   resetForm()
   formOpen.value = true
+  void revealForm()
 }
 
 function openEditForm(item) {
@@ -252,7 +350,12 @@ function openEditForm(item) {
   todoForm.date_echeance = normalizeDateISO(item.date_echeance) || getLocalTodayISO()
   todoForm.is_promesse = Boolean(item.is_promesse)
   todoForm.quantite_cible = item.quantite_cible ?? 0
+  editingItemHasPlanningLink.value = false
+  editingPlanningEventCount.value = 0
+  editingPlanningNextDate.value = ''
   formOpen.value = true
+  void revealForm()
+  void refreshEditingPlanningLink()
 }
 
 function closeForm() {
@@ -386,6 +489,11 @@ const planningRequiresStartTime = computed(
   () => addToPlanning.value && !planningForm.allDay,
 )
 
+const editingPlanningNextDateLabel = computed(() => {
+  if (!editingPlanningNextDate.value) return ''
+  return formatDayLabelFr(editingPlanningNextDate.value)
+})
+
 function resetPlanningForm() {
   Object.assign(planningForm, createDefaultPlanningForm())
   addToPlanning.value = false
@@ -434,7 +542,7 @@ async function loadData() {
       listTodoCompletionsInRange(supabase, userId.value, start, end),
       loadTodoPromesseLimits(userId.value),
     ])
-    items.value = itemsData
+    items.value = await sanitizeLoadedTodoPlanningLinks(itemsData)
     completionProgress.value = buildCompletionProgressMap(completionsData)
     promesseLimits.value = limits
   } catch (err) {
@@ -524,36 +632,61 @@ async function submitForm() {
     }
 
     if (addToPlanning.value && !editingItemHasPlanningLink.value) {
+      const alreadyOnPlanning = await hasTodoTimetableLink(
+        supabase,
+        userId.value,
+        savedTodo?.id ?? editingItemId.value,
+      )
+      if (alreadyOnPlanning) {
+        formError.value = 'Cette tâche est déjà liée au planning.'
+        isSaving.value = false
+        editingItemHasPlanningLink.value = true
+        return
+      }
+
       const planningDate = planningDateStart.value
       const startTime = planningForm.allDay ? '' : planningForm.startTime
 
-      const { event } = await createTimetableEvent(
-        supabase,
-        userId.value,
-        {
-          title: payload.nom,
-          detail: payload.description,
-          dateStart: planningDate,
-          dateEnd: planningForm.dateEnd,
-          allDay: planningForm.allDay,
-          startTime,
-          endTime: planningForm.endTime,
-          categoryName: planningForm.category,
-          requireStartTime: planningRequiresStartTime.value,
-          reminderEnabled: planningForm.reminderEnabled,
-          reminderHours: planningForm.reminderHours,
-          reminderMinutes: planningForm.reminderMinutes,
-          timerEnabled: planningForm.timerEnabled,
-          timerHours: planningForm.timerHours,
-          timerMinutes: planningForm.timerMinutes,
-          todoItemId: savedTodo?.id ?? null,
-        },
-        planningCategories.value,
-      )
-
-      if (savedTodo?.id && event?.id) {
-        await linkTodoAndTimetable(supabase, userId.value, savedTodo.id, event.id)
+      const planningInput = {
+        title: payload.nom,
+        detail: payload.description,
+        dateStart: planningDate,
+        dateEnd: planningForm.dateEnd,
+        allDay: planningForm.allDay,
+        startTime,
+        endTime: planningForm.endTime,
+        categoryName: planningForm.category,
+        requireStartTime: planningRequiresStartTime.value,
+        reminderEnabled: planningForm.reminderEnabled,
+        reminderHours: planningForm.reminderHours,
+        reminderMinutes: planningForm.reminderMinutes,
+        timerEnabled: planningForm.timerEnabled,
+        timerHours: planningForm.timerHours,
+        timerMinutes: planningForm.timerMinutes,
+        todoItemId: savedTodo?.id ?? null,
       }
+
+      if (isRecurringTodoFrequency(payload.frequence)) {
+        await createTimetableEventsForTodo(
+          supabase,
+          userId.value,
+          { ...savedTodo, ...payload },
+          planningInput,
+          planningCategories.value,
+        )
+      } else {
+        const { event } = await createTimetableEvent(
+          supabase,
+          userId.value,
+          planningInput,
+          planningCategories.value,
+        )
+
+        if (savedTodo?.id && event?.id) {
+          await linkTodoAndTimetable(supabase, userId.value, savedTodo.id, event.id)
+        }
+      }
+
       useTimetableCacheStore().$patch({ isValid: false })
     }
 
@@ -593,11 +726,16 @@ async function confirmDelete(alsoDeleteLinked = false) {
   isDeletingId.value = item.id
   loadError.value = ''
   try {
-    await deleteTodoItem(supabase, userId.value, item.id)
-    if (alsoDeleteLinked && item.timetable_event_id) {
-      await deleteTimetableEvent(supabase, userId.value, item.timetable_event_id)
-      useTimetableCacheStore().$patch({ isValid: false })
+    if (alsoDeleteLinked) {
+      const linkedOnPlanning =
+        item.timetable_event_id ||
+        (await hasTodoTimetableLink(supabase, userId.value, item.id))
+      if (linkedOnPlanning) {
+        await deleteAllTimetableEventsForTodo(supabase, userId.value, item.id)
+        useTimetableCacheStore().$patch({ isValid: false })
+      }
     }
+    await deleteTodoItem(supabase, userId.value, item.id)
     pendingDeleteItem.value = null
     if (editingItemId.value === item.id) {
       closeForm()
@@ -966,7 +1104,12 @@ watch(userId, (id) => {
       </div>
     </div>
 
-    <form v-if="formOpen" class="todo-form-card" @submit.prevent="submitForm">
+    <form
+      v-if="formOpen"
+      ref="formCardRef"
+      class="todo-form-card"
+      @submit.prevent="submitForm"
+    >
       <h2 class="todo-form-title">
         {{ isEditMode ? 'Modifier l’élément' : 'Nouvel élément' }}
       </h2>
@@ -975,13 +1118,13 @@ watch(userId, (id) => {
         <span class="todo-form-label">Nom</span>
         <div class="todo-form-nom-row">
           <input
+            ref="formNameInputRef"
             v-model="todoForm.nom"
             type="text"
             class="todo-form-input todo-form-input--nom"
             maxlength="120"
             placeholder="Ex : Méditer 10 min, Appeler le médecin…"
             required
-            autofocus
           />
           <input
             v-model.number="todoForm.quantite_cible"
@@ -1086,8 +1229,14 @@ watch(userId, (id) => {
         />
         <span>Ajouter au planning</span>
       </label>
-      <p v-else-if="isEditMode" class="todo-form-hint">
-        Cette tâche est déjà liée à une activité du planning.
+      <p v-else-if="isEditMode && editingItemHasPlanningLink" class="todo-form-hint">
+        Cette tâche est liée au planning
+        <template v-if="editingPlanningEventCount > 1">
+          ({{ editingPlanningEventCount }} occurrences à venir)
+        </template>
+        <template v-else-if="editingPlanningNextDateLabel">
+          (prochaine : {{ editingPlanningNextDateLabel }})
+        </template>.
       </p>
 
       <TimetablePlanningSubForm
@@ -1215,7 +1364,12 @@ watch(userId, (id) => {
           « {{ pendingDeleteItem.nom }} » sera définitivement supprimé.
         </p>
         <p v-if="pendingDeleteItem.timetable_event_id" class="todo-confirm-message todo-confirm-message--linked">
-          Cet élément est lié à ton emploi du temps. Voulez-vous aussi le supprimer du planning ?
+          Cet élément est lié à ton emploi du temps. Voulez-vous aussi supprimer
+          <template v-if="isRecurringTodoFrequency(pendingDeleteItem.frequence)">
+            toutes les occurrences du planning
+          </template>
+          <template v-else>l'activité du planning</template>
+          ?
         </p>
         <div class="todo-confirm-actions">
           <template v-if="pendingDeleteItem.timetable_event_id">

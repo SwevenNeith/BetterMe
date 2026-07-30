@@ -1,6 +1,8 @@
 import { addMinutesToTimeString } from '../services/durationUtils.js'
 import { TODO_FREQUENCY } from '../constants/todoOptions.js'
 import { getWeekStartISO } from './todoCalendar.js'
+import { clampPlanningStartDate } from './todoPlanningDates.js'
+import { getLocalTodayISO } from '../services/scheduledReminders.js'
 
 export function todoTimeToInput(value) {
   if (value == null || value === '') return ''
@@ -44,10 +46,13 @@ export function createDefaultTodoLinkedForm() {
  * Date utilisée pour l'événement planning à partir du formulaire TODO.
  */
 export function resolvePlanningDateFromTodo(todoForm, anchorDate) {
+  const today = getLocalTodayISO()
+
   if (todoForm?.frequence === TODO_FREQUENCY.WEEK_GOAL) {
-    return anchorDate || todoForm.date_echeance || ''
+    return clampPlanningStartDate(todoForm?.date_echeance, anchorDate, today)
   }
-  return todoForm?.date_echeance || anchorDate || ''
+
+  return clampPlanningStartDate(todoForm?.date_echeance, anchorDate, today)
 }
 
 /**

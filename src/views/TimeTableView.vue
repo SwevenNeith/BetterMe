@@ -30,7 +30,10 @@ import {
 import {
   linkTodoAndTimetable,
   deleteTimetableEvent,
+  deleteAllTimetableEventsForTodo,
+  createTimetableEventsForTodo,
 } from '../services/todoTimetableLink.js'
+import { isRecurringTodoFrequency } from '../utils/todoPlanningDates.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 
@@ -558,6 +561,15 @@ watch(currentDate, () => {
   fetchEvents()
 })
 
+watch(
+  () => timetableCache.isValid,
+  (isValid) => {
+    if (!isValid) {
+      fetchEvents()
+    }
+  },
+)
+
 onMounted(() => {
   const cached = timetableCache.applyToView({ userEvents, userCategories, hobbyQuickPicks })
   if (cached) isLoading.value = false
@@ -863,6 +875,58 @@ const handleAddEvent = async () => {
       newEventReminderEnabled.value && !newEventAllDay.value
     const reminderMinutes = reminderActive ? getReminderMinutesBefore() : null
 
+    if (
+      !editingEventId.value &&
+      addToTodo.value &&
+      !editingEventHasTodoLink.value
+    ) {
+      const todoPayload = buildTodoPayloadFromTimetable(
+        {
+          title: newEventTitle.value,
+          detail: newEventDetail.value,
+          dateStart: startDStr,
+          allDay: newEventAllDay.value,
+          startTime: newEventStartTime.value,
+        },
+        todoLinkedForm,
+      )
+
+      if (isRecurringTodoFrequency(todoPayload.frequence)) {
+        const todo = await createTodoItem(supabase, user.id, todoPayload)
+        const { categories } = await createTimetableEventsForTodo(
+          supabase,
+          user.id,
+          { ...todo, ...todoPayload },
+          {
+            title: newEventTitle.value,
+            detail: newEventDetail.value,
+            dateStart: startDStr,
+            dateEnd: endDStr || null,
+            allDay: newEventAllDay.value,
+            startTime: newEventStartTime.value,
+            endTime: newEventEndTime.value,
+            categoryName,
+            reminderEnabled: newEventReminderEnabled.value,
+            reminderHours: newEventReminderHours.value,
+            reminderMinutes: newEventReminderMinutes.value,
+            timerEnabled: newEventTimerEnabled.value,
+            timerHours: newEventTimerHours.value,
+            timerMinutes: newEventTimerMinutes.value,
+          },
+          userCategories.value,
+        )
+        userCategories.value = categories
+        timetableCache.publish({
+          userEvents: userEvents.value,
+          userCategories: userCategories.value,
+          hobbyQuickPicks: hobbyQuickPicks.value,
+        })
+        await fetchEvents({ silent: true })
+        closeEventModal()
+        return
+      }
+    }
+
     const eventPayload = {
       title: newEventTitle.value,
       date_start: startDStr,
@@ -1011,14 +1075,27 @@ async function confirmEventDelete(alsoDeleteLinked = false) {
       return
     }
 
-    await deleteTimetableEvent(supabase, user.id, event.id)
-
     if (alsoDeleteLinked && event.todo_item_id) {
-      await deleteTodoItem(supabase, user.id, event.todo_item_id)
+      const todoId = event.todo_item_id
+      await deleteAllTimetableEventsForTodo(supabase, user.id, todoId)
+      await deleteTodoItem(supabase, user.id, todoId)
+      userEvents.value = userEvents.value.filter((entry) => entry.todo_item_id !== todoId)
+    } else if (event.todo_item_id) {
+      const todoId = event.todo_item_id
+      await deleteAllTimetableEventsForTodo(supabase, user.id, todoId)
+      userEvents.value = userEvents.value.filter((entry) => entry.todo_item_id !== todoId)
+      timetableCache.$patch({ isValid: false })
+    } else {
+      await deleteTimetableEvent(supabase, user.id, event.id)
+      userEvents.value = userEvents.value.filter((entry) => entry.id !== event.id)
     }
 
-    userEvents.value = userEvents.value.filter((entry) => entry.id !== event.id)
     pendingDeleteEvent.value = null
+    timetableCache.publish({
+      userEvents: userEvents.value,
+      userCategories: userCategories.value,
+      hobbyQuickPicks: hobbyQuickPicks.value,
+    })
   } catch (err) {
     console.error('Error deleting event:', err)
     alert("Erreur lors de la suppression de l'activité.")
@@ -1765,7 +1842,7 @@ const getPositionedEventsForDay = (dayIdx) => {
           v-if="pendingDeleteEvent.todo_item_id"
           class="timetable-delete-dialog__message timetable-delete-dialog__message--linked"
         >
-          Cette activité est liée à une tâche TODO. Voulez-vous aussi la supprimer de vos TODO ?
+          Cette activité est liée à une tâche TODO. Voulez-vous aussi supprimer la tâche et toutes les occurrences du planning ?
         </p>
         <div class="timetable-delete-dialog__actions">
           <template v-if="pendingDeleteEvent.todo_item_id">
