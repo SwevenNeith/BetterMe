@@ -18,6 +18,8 @@ import {
   getTodoProgressStats,
   hasTodoQuantiteCible,
   getTodoOccurrenceKeyDate,
+  getWeekEndISO,
+  getWeekStartISO,
   normalizeDateISO,
 } from '../utils/todoCalendar.js'
 import TodoEncouragementMessage from './TodoEncouragementMessage.vue'
@@ -83,9 +85,13 @@ async function loadTodos() {
   isLoading.value = true
   loadError.value = ''
   try {
+    // Inclure toute la semaine : les objectifs « Cette semaine » sont
+    // stockés sur le lundi (clé d’occurrence), pas sur le jour courant.
+    const weekStart = getWeekStartISO(dateISO)
+    const weekEnd = getWeekEndISO(dateISO)
     const [todoRows, completions] = await Promise.all([
       listTodoItems(supabase, props.userId),
-      listTodoCompletionsInRange(supabase, props.userId, dateISO, dateISO),
+      listTodoCompletionsInRange(supabase, props.userId, weekStart, weekEnd),
     ])
     items.value = todoRows
     completionProgress.value = buildCompletionProgressMap(completions)
