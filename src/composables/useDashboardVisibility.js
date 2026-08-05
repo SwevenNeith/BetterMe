@@ -1,8 +1,9 @@
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import {
   loadDashboardVisibility,
   isDashboardWidgetVisible,
+  getDashboardLayout,
   DASHBOARD_VISIBILITY_UPDATED_EVENT,
   mergeDashboardVisibility,
 } from '../services/dashboardVisibility.js'
@@ -14,6 +15,8 @@ import {
 export function useDashboardVisibility({ userId }) {
   const dashboardVisibility = ref(mergeDashboardVisibility(null))
   const isDashboardVisibilityLoading = ref(false)
+
+  const dashboardLayout = computed(() => getDashboardLayout(dashboardVisibility.value))
 
   async function reloadDashboardVisibility() {
     if (!userId.value) {
@@ -36,6 +39,10 @@ export function useDashboardVisibility({ userId }) {
     return isDashboardWidgetVisible(widgetId, dashboardVisibility.value)
   }
 
+  function visibleWidgetIds(ids) {
+    return (ids ?? []).filter((id) => isWidgetVisible(id))
+  }
+
   onMounted(() => {
     window.addEventListener(DASHBOARD_VISIBILITY_UPDATED_EVENT, reloadDashboardVisibility)
   })
@@ -55,8 +62,10 @@ export function useDashboardVisibility({ userId }) {
 
   return {
     dashboardVisibility,
+    dashboardLayout,
     isDashboardVisibilityLoading,
     isWidgetVisible,
+    visibleWidgetIds,
     reloadDashboardVisibility,
   }
 }

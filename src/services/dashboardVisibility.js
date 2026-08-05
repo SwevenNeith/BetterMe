@@ -1,4 +1,9 @@
-import { DASHBOARD_WIDGETS } from '../constants/dashboardWidgets.js'
+import {
+  DASHBOARD_WIDGETS,
+  DASHBOARD_WIDGET_ID_SET,
+  DASHBOARD_DESKTOP_ZONES,
+  createDefaultDashboardLayout,
+} from '../constants/dashboardWidgets.js'
 import { ensureUserSettings } from './menstruationNotifications.js'
 
 const SETTINGS_TABLE = 'settings'
@@ -7,7 +12,11 @@ export const DASHBOARD_VISIBILITY_UPDATED_EVENT = 'betterme-dashboard-visibility
 
 /**
  * @typedef {{ visible: boolean }} DashboardVisibilityEntry
- * @typedef {Record<string, DashboardVisibilityEntry>} DashboardVisibilityMap
+ * @typedef {{
+ *   desktop: { top: string[], left: string[], right: string[], bottom: string[] },
+ *   mobile: string[],
+ * }} DashboardLayout
+ * @typedef {Record<string, DashboardVisibilityEntry> & { layout?: DashboardLayout }} DashboardVisibilityMap
  */
 
 function isMissingColumnError(error) {
@@ -18,6 +27,77 @@ function isMissingColumnError(error) {
   )
 }
 
+function sanitizeWidgetIds(ids) {
+  if (!Array.isArray(ids)) return []
+  const seen = new Set()
+  const result = []
+  for (const id of ids) {
+    if (typeof id !== 'string' || !DASHBOARD_WIDGET_ID_SET.has(id) || seen.has(id)) continue
+    seen.add(id)
+    result.push(id)
+  }
+  return result
+}
+
+/**
+ * Garantit que chaque widget apparaît exactement une fois (desktop + mobile).
+ * @param {unknown} rawLayout
+ * @returns {DashboardLayout}
+ */
+export function normalizeDashboardLayout(rawLayout) {
+  const defaults = createDefaultDashboardLayout()
+  const raw =
+    rawLayout && typeof rawLayout === 'object' && !Array.isArray(rawLayout) ? rawLayout : {}
+  const rawDesktop =
+    raw.desktop && typeof raw.desktop === 'object' && !Array.isArray(raw.desktop)
+      ? raw.desktop
+      : {}
+
+  // Compat ancienne clé `center` / `full` → bottom
+  const rawBottom =
+    rawDesktop.bottom ?? rawDesktop.center ?? rawDesktop.full ?? defaults.desktop.bottom
+
+  const desktop = {
+    top: sanitizeWidgetIds(rawDesktop.top ?? defaults.desktop.top),
+    left: sanitizeWidgetIds(rawDesktop.left ?? defaults.desktop.left),
+    right: sanitizeWidgetIds(rawDesktop.right ?? defaults.desktop.right),
+    bottom: sanitizeWidgetIds(rawBottom),
+  }
+
+  // Un widget ne peut être que dans une zone desktop : priorité top → left → right → bottom
+  const claimed = new Set()
+  for (const zone of [
+    DASHBOARD_DESKTOP_ZONES.TOP,
+    DASHBOARD_DESKTOP_ZONES.LEFT,
+    DASHBOARD_DESKTOP_ZONES.RIGHT,
+    DASHBOARD_DESKTOP_ZONES.BOTTOM,
+  ]) {
+    desktop[zone] = desktop[zone].filter((id) => {
+      if (claimed.has(id)) return false
+      claimed.add(id)
+      return true
+    })
+  }
+
+  for (const widget of DASHBOARD_WIDGETS) {
+    if (!claimed.has(widget.id)) {
+      desktop.left.push(widget.id)
+      claimed.add(widget.id)
+    }
+  }
+
+  let mobile = sanitizeWidgetIds(raw.mobile ?? defaults.mobile)
+  const mobileSeen = new Set(mobile)
+  for (const widget of DASHBOARD_WIDGETS) {
+    if (!mobileSeen.has(widget.id)) {
+      mobile.push(widget.id)
+      mobileSeen.add(widget.id)
+    }
+  }
+
+  return { desktop, mobile }
+}
+
 /** @returns {DashboardVisibilityMap} */
 export function createDefaultDashboardVisibility() {
   /** @type {DashboardVisibilityMap} */
@@ -25,6 +105,7 @@ export function createDefaultDashboardVisibility() {
   for (const widget of DASHBOARD_WIDGETS) {
     map[widget.id] = { visible: true }
   }
+  map.layout = createDefaultDashboardLayout()
   return map
 }
 
@@ -44,7 +125,16 @@ export function mergeDashboardVisibility(raw) {
     }
   }
 
+  defaults.layout = normalizeDashboardLayout(raw.layout)
   return defaults
+}
+
+/**
+ * @param {DashboardVisibilityMap} visibility
+ * @returns {DashboardLayout}
+ */
+export function getDashboardLayout(visibility) {
+  return normalizeDashboardLayout(visibility?.layout)
 }
 
 /**
@@ -98,6 +188,54 @@ export async function saveDashboardVisibility(supabase, userId, visibility) {
   }
 
   notifyDashboardVisibilityUpdated()
+}
+
+/**
+ * Déplace un widget dans le layout desktop (entre zones et/ou réordonne).
+ * @param {DashboardLayout} layout
+ * @param {string} widgetId
+ * @param {'top'|'left'|'right'|'bottom'} targetZone
+ * @param {string|null} beforeWidgetId — insérer avant cet id ; null = à la fin
+ */
+export function moveDesktopWidget(layout, widgetId, targetZone, beforeWidgetId = null) {
+  const next = normalizeDashboardLayout(layout)
+  if (!DASHBOARD_WIDGET_ID_SET.has(widgetId)) return next
+  if (!Object.values(DASHBOARD_DESKTOP_ZONES).includes(targetZone)) return next
+
+  for (const zone of Object.values(DASHBOARD_DESKTOP_ZONES)) {
+    next.desktop[zone] = next.desktop[zone].filter((id) => id !== widgetId)
+  }
+
+  const targetList = next.desktop[targetZone]
+  const insertAt =
+    beforeWidgetId && beforeWidgetId !== widgetId
+      ? targetList.indexOf(beforeWidgetId)
+      : -1
+
+  if (insertAt >= 0) targetList.splice(insertAt, 0, widgetId)
+  else targetList.push(widgetId)
+
+  return next
+}
+
+/**
+ * Réordonne la liste mobile.
+ * @param {DashboardLayout} layout
+ * @param {string} sourceId
+ * @param {string} targetId
+ */
+export function reorderMobileWidget(layout, sourceId, targetId) {
+  const next = normalizeDashboardLayout(layout)
+  if (sourceId === targetId) return next
+
+  const list = next.mobile
+  const from = list.indexOf(sourceId)
+  const to = list.indexOf(targetId)
+  if (from < 0 || to < 0) return next
+
+  const [moved] = list.splice(from, 1)
+  list.splice(to, 0, moved)
+  return next
 }
 
 /**

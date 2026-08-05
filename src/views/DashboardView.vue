@@ -5,25 +5,18 @@ import { supabase } from '../lib/supabase.js'
 import { useRouter } from 'vue-router'
 import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
 import { useDashboardCacheStore } from '../stores/dashboardCache.js'
-import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
 import { listCyclesPilule, countMenstruationCyclesPilule } from '../services/menstruationCycles.js'
-import MenstruationNaturalCycleCalendar from '../components/MenstruationNaturalCycleCalendar.vue'
 import {
   countMenstruationCyclesNaturel,
   listCyclesNaturel,
 } from '../services/menstruationCyclesNaturel.js'
 import { resolveMenstruationCycleMode } from '../services/menstruationCycleModePreference.js'
-import DashboardEmotionalCheckin from '../components/DashboardEmotionalCheckin.vue'
-import DashboardComfortImages from '../components/DashboardComfortImages.vue'
-import DashboardTodayTodos from '../components/DashboardTodayTodos.vue'
-import DashboardHabitsAnnual from '../components/DashboardHabitsAnnual.vue'
-import DashboardActiveProjects from '../components/DashboardActiveProjects.vue'
+import DashboardWidgetBlock from '../components/DashboardWidgetBlock.vue'
 import { useDashboardEmotionalCheckin } from '../composables/useDashboardEmotionalCheckin.js'
 import { useEmotionalCheckinPersistence } from '../composables/useEmotionalCheckinPersistence.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { useDashboardVisibility } from '../composables/useDashboardVisibility.js'
-import { DASHBOARD_WIDGET_IDS } from '../constants/dashboardWidgets.js'
 
 usePageDisplayLabel(APP_PAGE_IDS.DASHBOARD, undefined, { setDocumentTitle: true })
 
@@ -33,20 +26,21 @@ const userId = ref(null)
 let saveMessageTimeoutId = null
 let dashboardLoadGen = 0
 
-const { dashboardVisibility, isWidgetVisible } = useDashboardVisibility({ userId })
+const { dashboardVisibility, dashboardLayout, visibleWidgetIds } = useDashboardVisibility({
+  userId,
+})
 
-const showComfort = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.COMFORT))
-const showTodo = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.TODO))
-const showTimetable = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.TIMETABLE))
-const showCheckin = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.CHECKIN))
-const showHabits = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.HABITS))
-const showMenstruation = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.MENSTRUATION))
-const showProjects = computed(() => isWidgetVisible(DASHBOARD_WIDGET_IDS.PROJECTS))
-const showIntroColumn = computed(() => showComfort.value || showTodo.value)
-const showRightGroup = computed(() => showHabits.value || showMenstruation.value)
-const showLeftGroup = computed(
-  () => showIntroColumn.value || showTimetable.value || showProjects.value,
+const desktopTopWidgets = computed(() => visibleWidgetIds(dashboardLayout.value.desktop.top))
+const desktopLeftWidgets = computed(() => visibleWidgetIds(dashboardLayout.value.desktop.left))
+const desktopRightWidgets = computed(() => visibleWidgetIds(dashboardLayout.value.desktop.right))
+const desktopBottomWidgets = computed(() =>
+  visibleWidgetIds(dashboardLayout.value.desktop.bottom),
 )
+const mobileWidgets = computed(() => visibleWidgetIds(dashboardLayout.value.mobile))
+
+const showLeftGroup = computed(() => desktopLeftWidgets.value.length > 0)
+const showRightGroup = computed(() => desktopRightWidgets.value.length > 0)
+const showDesktopColumns = computed(() => showLeftGroup.value || showRightGroup.value)
 
 const { setCheckinPayload, resetCheckin } = useDashboardEmotionalCheckin()
 
@@ -489,119 +483,161 @@ const onCancelEmotionalCheckin = () => {
 
       <div ref="carouselViewport" class="dashboard-content" @scroll.passive="onCarouselScroll">
         <div ref="carouselTrack" class="carousel-track">
-          <div v-if="showLeftGroup" class="dashboard-left-group">
-            <!-- Slide 1 mobile : réconfort + TODO -->
-            <div v-if="showIntroColumn" class="dashboard-column intro-column">
-              <DashboardComfortImages v-if="showComfort" :user-id="userId" />
-              <DashboardTodayTodos v-if="showTodo" :user-id="userId" :date-iso="todayStr" />
-            </div>
-
-            <!-- Slide 2 mobile : emploi du temps -->
-            <div v-if="showTimetable" class="dashboard-column edt-column">
-              <h2 class="column-title">
-                <span>Aujourd'hui</span>
-                <span class="column-date">{{ formattedToday }}</span>
-              </h2>
-              <div class="today-events-container">
-                <div v-if="isLoadingEvents" class="loading-state">
-                  <span class="spinner"></span> Chargement de ton planning...
-                </div>
-                <div v-else-if="userEvents.length === 0" class="empty-state">
-                  <span class="empty-icon">☕</span>
-                  <p>Aucun événement prévu aujourd'hui. Profite de ton temps libre !</p>
-                </div>
-                <div v-else class="today-events-list">
-                  <div
-                    v-for="event in userEvents"
-                    :key="event.id"
-                    class="dashboard-event-card"
-                    :style="getCategoryStyle(event.category)"
-                  >
-                    <div class="event-time">
-                      <span v-if="event.all_day" class="time-badge">Toute la journée</span>
-                      <span v-else class="time-badge">{{ event.time }}</span>
-                    </div>
-                    <div class="event-details">
-                      <div class="event-title-row">
-                        <span class="event-icon">{{ getCategoryIcon(event.category) }}</span>
-                        <h4 class="event-title">{{ event.title }}</h4>
-                      </div>
-                      <p v-if="event.detail" class="event-description">{{ event.detail }}</p>
-                      <div v-if="event.category" class="event-tags">
-                        <span class="event-category-tag">
-                          {{ getCategoryName(event.category) }}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Sous l'EDT (desktop) ; dernière slide mobile -->
-            <div v-if="showProjects" class="dashboard-column projects-column">
-              <DashboardActiveProjects :user-id="userId" />
-            </div>
-          </div>
-
-          <!-- Slide 3 mobile : check-in émotionnel -->
-          <div v-if="isMobileCarousel && showCheckin" class="dashboard-column checkin-column">
-            <DashboardEmotionalCheckin
-              compact
-              show-footer
-              show-note
+          <!-- Mobile : ordre personnalisé (1 widget = 1 slide) -->
+          <template v-if="isMobileCarousel">
+            <DashboardWidgetBlock
+              v-for="widgetId in mobileWidgets"
+              :key="`mobile-${widgetId}`"
+              :widget-id="widgetId"
+              :user-id="userId"
+              :date-iso="todayStr"
+              :formatted-today="formattedToday"
+              :user-events="userEvents"
+              :is-loading-events="isLoadingEvents"
+              :get-category-style="getCategoryStyle"
+              :get-category-icon="getCategoryIcon"
+              :get-category-name="getCategoryName"
+              :is-loading-menstruation-board="isLoadingMenstruationBoard"
+              :has-menstruation-cycle-data="hasMenstruationCycleData"
+              :menstruation-mode="menstruationMode"
+              :menstruation-cycles="menstruationCycles"
+              :menstruation-cycles-naturel="menstruationCyclesNaturel"
               :pattern-message="patternMessage"
               :saved-today="savedToday"
               :status-message="saveMessage"
               :saving="isCheckinSaving"
-              @save="onSaveEmotionalCheckin"
-              @cancel="onCancelEmotionalCheckin"
+              checkin-compact
+              @save-checkin="onSaveEmotionalCheckin"
+              @cancel-checkin="onCancelEmotionalCheckin"
             />
-          </div>
+          </template>
 
-          <!-- Slide 4 mobile : habitudes (vue mensuelle) / colonne droite desktop -->
-          <div v-if="showRightGroup" class="dashboard-right-group">
-            <div v-if="showHabits" class="dashboard-column habits-column">
-              <DashboardHabitsAnnual :user-id="userId" />
-            </div>
+          <!-- Desktop : zones top / left / right / bottom -->
+          <template v-else>
+            <section
+              v-if="desktopTopWidgets.length"
+              class="dashboard-center-band dashboard-center-band--top"
+              aria-label="Bandeau haut du dashboard"
+            >
+              <DashboardWidgetBlock
+                v-for="widgetId in desktopTopWidgets"
+                :key="`top-${widgetId}`"
+                :widget-id="widgetId"
+                :user-id="userId"
+                :date-iso="todayStr"
+                :formatted-today="formattedToday"
+                :user-events="userEvents"
+                :is-loading-events="isLoadingEvents"
+                :get-category-style="getCategoryStyle"
+                :get-category-icon="getCategoryIcon"
+                :get-category-name="getCategoryName"
+                :is-loading-menstruation-board="isLoadingMenstruationBoard"
+                :has-menstruation-cycle-data="hasMenstruationCycleData"
+                :menstruation-mode="menstruationMode"
+                :menstruation-cycles="menstruationCycles"
+                :menstruation-cycles-naturel="menstruationCyclesNaturel"
+                :pattern-message="patternMessage"
+                :saved-today="savedToday"
+                :status-message="saveMessage"
+                :saving="isCheckinSaving"
+                @save-checkin="onSaveEmotionalCheckin"
+                @cancel-checkin="onCancelEmotionalCheckin"
+              />
+            </section>
 
-            <!-- Slide 5 mobile : menstruation -->
-            <div v-if="showMenstruation" class="dashboard-column menstruation-column right-column">
-              <div class="mini-calendar-wrapper dashboard-menstruation-wrap">
-                <div
-                  v-if="isLoadingMenstruationBoard"
-                  class="dashboard-menstruation-loading"
-                  aria-live="polite"
-                >
-                  <span class="spinner"></span>
-                  Chargement de ton suivi cycle…
-                </div>
-                <div v-else-if="!hasMenstruationCycleData" class="dashboard-menstruation-empty">
-                  <p class="dashboard-menstruation-empty-text">
-                    Tu n’as pas encore renseigné ton suivi cycle. Configure la
-                    <strong>première configuration</strong> sur la page Menstruation pour afficher
-                    ton calendrier ici.
-                  </p>
-                  <router-link
-                    class="dashboard-menstruation-empty-link"
-                    :to="{ name: 'menstruation' }"
-                  >
-                    Compléter la configuration
-                  </router-link>
-                </div>
-                <MenstruationCycleCalendar
-                  v-else-if="menstruationMode === 'pilule'"
-                  :cycles="menstruationCycles"
-                  :compact="true"
+            <div
+              v-if="showDesktopColumns"
+              class="dashboard-columns-grid"
+              :class="{
+                'dashboard-columns-grid--single': !(showLeftGroup && showRightGroup),
+              }"
+            >
+              <div v-if="showLeftGroup" class="dashboard-left-group">
+                <DashboardWidgetBlock
+                  v-for="widgetId in desktopLeftWidgets"
+                  :key="`left-${widgetId}`"
+                  :widget-id="widgetId"
+                  :user-id="userId"
+                  :date-iso="todayStr"
+                  :formatted-today="formattedToday"
+                  :user-events="userEvents"
+                  :is-loading-events="isLoadingEvents"
+                  :get-category-style="getCategoryStyle"
+                  :get-category-icon="getCategoryIcon"
+                  :get-category-name="getCategoryName"
+                  :is-loading-menstruation-board="isLoadingMenstruationBoard"
+                  :has-menstruation-cycle-data="hasMenstruationCycleData"
+                  :menstruation-mode="menstruationMode"
+                  :menstruation-cycles="menstruationCycles"
+                  :menstruation-cycles-naturel="menstruationCyclesNaturel"
+                  :pattern-message="patternMessage"
+                  :saved-today="savedToday"
+                  :status-message="saveMessage"
+                  :saving="isCheckinSaving"
+                  @save-checkin="onSaveEmotionalCheckin"
+                  @cancel-checkin="onCancelEmotionalCheckin"
                 />
-                <MenstruationNaturalCycleCalendar
-                  v-else-if="menstruationMode === 'naturel'"
-                  :cycles="menstruationCyclesNaturel"
-                  :compact="true"
+              </div>
+
+              <div v-if="showRightGroup" class="dashboard-right-group">
+                <DashboardWidgetBlock
+                  v-for="widgetId in desktopRightWidgets"
+                  :key="`right-${widgetId}`"
+                  :widget-id="widgetId"
+                  :user-id="userId"
+                  :date-iso="todayStr"
+                  :formatted-today="formattedToday"
+                  :user-events="userEvents"
+                  :is-loading-events="isLoadingEvents"
+                  :get-category-style="getCategoryStyle"
+                  :get-category-icon="getCategoryIcon"
+                  :get-category-name="getCategoryName"
+                  :is-loading-menstruation-board="isLoadingMenstruationBoard"
+                  :has-menstruation-cycle-data="hasMenstruationCycleData"
+                  :menstruation-mode="menstruationMode"
+                  :menstruation-cycles="menstruationCycles"
+                  :menstruation-cycles-naturel="menstruationCyclesNaturel"
+                  :pattern-message="patternMessage"
+                  :saved-today="savedToday"
+                  :status-message="saveMessage"
+                  :saving="isCheckinSaving"
+                  @save-checkin="onSaveEmotionalCheckin"
+                  @cancel-checkin="onCancelEmotionalCheckin"
                 />
               </div>
             </div>
-          </div>
+
+            <section
+              v-if="desktopBottomWidgets.length"
+              class="dashboard-center-band dashboard-center-band--bottom"
+              aria-label="Bandeau bas du dashboard"
+            >
+              <DashboardWidgetBlock
+                v-for="widgetId in desktopBottomWidgets"
+                :key="`bottom-${widgetId}`"
+                :widget-id="widgetId"
+                :user-id="userId"
+                :date-iso="todayStr"
+                :formatted-today="formattedToday"
+                :user-events="userEvents"
+                :is-loading-events="isLoadingEvents"
+                :get-category-style="getCategoryStyle"
+                :get-category-icon="getCategoryIcon"
+                :get-category-name="getCategoryName"
+                :is-loading-menstruation-board="isLoadingMenstruationBoard"
+                :has-menstruation-cycle-data="hasMenstruationCycleData"
+                :menstruation-mode="menstruationMode"
+                :menstruation-cycles="menstruationCycles"
+                :menstruation-cycles-naturel="menstruationCyclesNaturel"
+                :pattern-message="patternMessage"
+                :saved-today="savedToday"
+                :status-message="saveMessage"
+                :saving="isCheckinSaving"
+                @save-checkin="onSaveEmotionalCheckin"
+                @cancel-checkin="onCancelEmotionalCheckin"
+              />
+            </section>
+          </template>
         </div>
       </div>
 
@@ -622,24 +658,6 @@ const onCancelEmotionalCheckin = () => {
         ></span>
       </div>
     </div>
-
-    <!-- Desktop : check-in puis message + boutons, sous les 2 colonnes -->
-    <section
-      v-if="!isMobileCarousel && showCheckin"
-      class="dashboard-checkin-desktop"
-      aria-label="Check-in émotionnel (desktop)"
-    >
-      <DashboardEmotionalCheckin
-        show-footer
-        show-note
-        :pattern-message="patternMessage"
-        :saved-today="savedToday"
-        :status-message="saveMessage"
-        :saving="isCheckinSaving"
-        @save="onSaveEmotionalCheckin"
-        @cancel="onCancelEmotionalCheckin"
-      />
-    </section>
   </div>
 </template>
 
@@ -710,23 +728,17 @@ const onCancelEmotionalCheckin = () => {
   margin-bottom: 0;
 }
 
-.dashboard-checkin-desktop {
+.dashboard-center-band {
   position: relative;
   z-index: 1;
   width: 100%;
   box-sizing: border-box;
   flex-shrink: 0;
-  margin-top: 0.25rem;
 }
 
 @media (max-width: 768px) {
   .welcome-subtitle {
     margin-bottom: 0.25rem;
-  }
-
-  /* Desktop uniquement : ne pas afficher hors carrousel sur mobile */
-  .dashboard-checkin-desktop {
-    display: none;
   }
 }
 
@@ -752,11 +764,30 @@ const onCancelEmotionalCheckin = () => {
 }
 
 .carousel-track {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  width: 100%;
+  align-items: stretch;
+}
+
+.dashboard-columns-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2rem;
   width: 100%;
   align-items: start;
+}
+
+.dashboard-columns-grid--single {
+  grid-template-columns: 1fr;
+}
+
+.dashboard-center-band {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
 }
 
 .dashboard-column {
@@ -783,7 +814,10 @@ const onCancelEmotionalCheckin = () => {
 .intro-column,
 .edt-column,
 .habits-column,
-.projects-column {
+.projects-column,
+.todo-column,
+.comfort-column,
+.checkin-column {
   gap: 1rem;
 }
 
@@ -884,6 +918,7 @@ const onCancelEmotionalCheckin = () => {
   /* Piste = N × largeur du conteneur (cqi) ; ne pas hériter du width:100% desktop */
   .carousel-track {
     display: flex;
+    flex-direction: row;
     grid-template-columns: none;
     grid-template-rows: none;
     gap: 0;
@@ -896,6 +931,11 @@ const onCancelEmotionalCheckin = () => {
     box-sizing: border-box;
   }
 
+  .dashboard-columns-grid,
+  .dashboard-center-band {
+    display: contents;
+  }
+
   .dashboard-left-group {
     display: contents;
   }
@@ -904,31 +944,7 @@ const onCancelEmotionalCheckin = () => {
     display: contents;
   }
 
-  .intro-column {
-    order: 1;
-  }
-
-  .edt-column {
-    order: 2;
-  }
-
-  .checkin-column {
-    order: 3;
-  }
-
-  .habits-column {
-    order: 4;
-  }
-
-  .menstruation-column {
-    order: 5;
-  }
-
-  .projects-column {
-    order: 6;
-  }
-
-  .dashboard-column {
+  .carousel-track :deep(.dashboard-column) {
     align-self: flex-start;
     height: auto;
     min-height: 0;
@@ -944,7 +960,7 @@ const onCancelEmotionalCheckin = () => {
   }
 
   @supports (width: 1cqi) {
-    .dashboard-content .carousel-track .dashboard-column {
+    .dashboard-content .carousel-track :deep(.dashboard-column) {
       flex: 0 0 100cqi;
       width: 100cqi;
       min-width: 100cqi;
@@ -952,16 +968,16 @@ const onCancelEmotionalCheckin = () => {
     }
   }
 
-  .today-events-container,
-  .mini-calendar-wrapper,
-  .dashboard-menstruation-wrap,
-  .dashboard-legend {
+  .carousel-track :deep(.today-events-container),
+  .carousel-track :deep(.mini-calendar-wrapper),
+  .carousel-track :deep(.dashboard-menstruation-wrap),
+  .carousel-track :deep(.dashboard-legend) {
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
   }
 
-  .dashboard-event-card {
+  .carousel-track :deep(.dashboard-event-card) {
     max-width: 100%;
     overflow-wrap: anywhere;
   }

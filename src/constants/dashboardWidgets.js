@@ -9,6 +9,14 @@ export const DASHBOARD_WIDGET_IDS = {
   PROJECTS: 'projects',
 }
 
+/** Zones desktop du layout Dashboard. */
+export const DASHBOARD_DESKTOP_ZONES = {
+  TOP: 'top',
+  LEFT: 'left',
+  RIGHT: 'right',
+  BOTTOM: 'bottom',
+}
+
 /** @typedef {{ id: string, defaultLabel: string }} DashboardWidget */
 
 /** @type {DashboardWidget[]} */
@@ -21,6 +29,8 @@ export const DASHBOARD_WIDGETS = [
   { id: DASHBOARD_WIDGET_IDS.MENSTRUATION, defaultLabel: 'Menstruation' },
   { id: DASHBOARD_WIDGET_IDS.PROJECTS, defaultLabel: 'Projets actifs' },
 ]
+
+export const DASHBOARD_WIDGET_ID_SET = new Set(DASHBOARD_WIDGETS.map((widget) => widget.id))
 
 /** Ordre d’apparition sur mobile (carrousel / liste réglages). */
 export const DASHBOARD_WIDGET_MOBILE_ORDER = [
@@ -47,5 +57,24 @@ export const DASHBOARD_WIDGET_DESKTOP_RIGHT = [
   DASHBOARD_WIDGET_IDS.MENSTRUATION,
 ]
 
-/** Pleine largeur sous les colonnes (desktop). */
-export const DASHBOARD_WIDGET_DESKTOP_FULL = [DASHBOARD_WIDGET_IDS.CHECKIN]
+/** Bandeau pleine largeur au-dessus des colonnes (desktop). */
+export const DASHBOARD_WIDGET_DESKTOP_TOP = []
+
+/** Bandeau pleine largeur sous les colonnes (desktop). */
+export const DASHBOARD_WIDGET_DESKTOP_BOTTOM = [DASHBOARD_WIDGET_IDS.CHECKIN]
+
+/** @deprecated Utiliser DASHBOARD_WIDGET_DESKTOP_BOTTOM */
+export const DASHBOARD_WIDGET_DESKTOP_FULL = DASHBOARD_WIDGET_DESKTOP_BOTTOM
+
+/** @returns {{ desktop: { top: string[], left: string[], right: string[], bottom: string[] }, mobile: string[] }} */
+export function createDefaultDashboardLayout() {
+  return {
+    desktop: {
+      top: [...DASHBOARD_WIDGET_DESKTOP_TOP],
+      left: [...DASHBOARD_WIDGET_DESKTOP_LEFT],
+      right: [...DASHBOARD_WIDGET_DESKTOP_RIGHT],
+      bottom: [...DASHBOARD_WIDGET_DESKTOP_BOTTOM],
+    },
+    mobile: [...DASHBOARD_WIDGET_MOBILE_ORDER],
+  }
+}

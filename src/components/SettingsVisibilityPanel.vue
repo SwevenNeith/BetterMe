@@ -5,10 +5,7 @@ import { APP_MAIN_PAGES, APP_PAGE_IDS } from '../constants/appPages.js'
 import {
   DASHBOARD_WIDGETS,
   DASHBOARD_WIDGET_IDS,
-  DASHBOARD_WIDGET_MOBILE_ORDER,
-  DASHBOARD_WIDGET_DESKTOP_LEFT,
-  DASHBOARD_WIDGET_DESKTOP_RIGHT,
-  DASHBOARD_WIDGET_DESKTOP_FULL,
+  DASHBOARD_DESKTOP_ZONES,
 } from '../constants/dashboardWidgets.js'
 import DashboardVisibilityWidgetRow from './DashboardVisibilityWidgetRow.vue'
 import {
@@ -21,6 +18,9 @@ import {
   loadDashboardVisibility,
   saveDashboardVisibility,
   mergeDashboardVisibility,
+  getDashboardLayout,
+  moveDesktopWidget,
+  reorderMobileWidget,
 } from '../services/dashboardVisibility.js'
 
 const DASHBOARD_WIDGET_PAGE_IDS = {
@@ -58,6 +58,13 @@ const dashboardVisibility = ref(mergeDashboardVisibility(null))
 const editingPageId = ref(null)
 const editingLabel = ref('')
 
+const dragState = ref({
+  widgetId: null,
+  fromZone: null,
+  overZone: null,
+  overWidgetId: null,
+})
+
 const pagesForList = computed(() =>
   APP_MAIN_PAGES.map((page) => ({
     ...page,
@@ -83,17 +90,31 @@ const dashboardWidgetMap = computed(() =>
   Object.fromEntries(dashboardWidgetsForList.value.map((widget) => [widget.id, widget])),
 )
 
+const dashboardLayout = computed(() => getDashboardLayout(dashboardVisibility.value))
+
 function orderedDashboardWidgets(ids) {
   return ids.map((id) => dashboardWidgetMap.value[id]).filter(Boolean)
 }
 
-const dashboardMobileWidgets = computed(() => orderedDashboardWidgets(DASHBOARD_WIDGET_MOBILE_ORDER))
+const dashboardMobileWidgets = computed(() =>
+  orderedDashboardWidgets(dashboardLayout.value.mobile),
+)
 
-const dashboardLeftWidgets = computed(() => orderedDashboardWidgets(DASHBOARD_WIDGET_DESKTOP_LEFT))
+const dashboardTopWidgets = computed(() =>
+  orderedDashboardWidgets(dashboardLayout.value.desktop.top),
+)
 
-const dashboardRightWidgets = computed(() => orderedDashboardWidgets(DASHBOARD_WIDGET_DESKTOP_RIGHT))
+const dashboardLeftWidgets = computed(() =>
+  orderedDashboardWidgets(dashboardLayout.value.desktop.left),
+)
 
-const dashboardFullWidgets = computed(() => orderedDashboardWidgets(DASHBOARD_WIDGET_DESKTOP_FULL))
+const dashboardRightWidgets = computed(() =>
+  orderedDashboardWidgets(dashboardLayout.value.desktop.right),
+)
+
+const dashboardBottomWidgets = computed(() =>
+  orderedDashboardWidgets(dashboardLayout.value.desktop.bottom),
+)
 
 function toggleSection(section) {
   expandedSections.value[section] = !expandedSections.value[section]
@@ -170,6 +191,143 @@ async function onToggleDashboardVisible(widgetId, visible) {
     },
   }
   await persistDashboard()
+}
+
+async function applyLayout(nextLayout) {
+  dashboardVisibility.value = {
+    ...dashboardVisibility.value,
+    layout: nextLayout,
+  }
+  await persistDashboard()
+}
+
+function onWidgetDragStart(widgetId, fromZone, event) {
+  dragState.value = {
+    widgetId,
+    fromZone,
+    overZone: fromZone,
+    overWidgetId: widgetId,
+  }
+  try {
+    event.dataTransfer?.setData(
+      'text/plain',
+      JSON.stringify({ widgetId, fromZone }),
+    )
+    event.dataTransfer.effectAllowed = 'move'
+  } catch {
+    /* ignore */
+  }
+}
+
+function onWidgetDragOver(zone, widgetId, event) {
+  if (!dragState.value.widgetId) return
+  event.preventDefault()
+  try {
+    event.dataTransfer.dropEffect = 'move'
+  } catch {
+    /* ignore */
+  }
+  dragState.value = {
+    ...dragState.value,
+    overZone: zone,
+    overWidgetId: widgetId ?? null,
+  }
+}
+
+function onZoneDragOver(zone, event) {
+  if (!dragState.value.widgetId) return
+  event.preventDefault()
+  try {
+    event.dataTransfer.dropEffect = 'move'
+  } catch {
+    /* ignore */
+  }
+  if (dragState.value.overZone !== zone || dragState.value.overWidgetId) {
+    dragState.value = {
+      ...dragState.value,
+      overZone: zone,
+      overWidgetId: null,
+    }
+  }
+}
+
+function onWidgetDragEnd() {
+  dragState.value = {
+    widgetId: null,
+    fromZone: null,
+    overZone: null,
+    overWidgetId: null,
+  }
+}
+
+async function onDesktopDrop(targetZone, beforeWidgetId, event) {
+  event.preventDefault()
+  event.stopPropagation()
+
+  let sourceId = dragState.value.widgetId
+  if (!sourceId) {
+    try {
+      const raw = event.dataTransfer?.getData('text/plain')
+      const parsed = raw ? JSON.parse(raw) : null
+      sourceId = parsed?.widgetId ?? null
+    } catch {
+      sourceId = null
+    }
+  }
+
+  onWidgetDragEnd()
+  if (!sourceId || !Object.values(DASHBOARD_DESKTOP_ZONES).includes(targetZone)) return
+
+  const nextLayout = moveDesktopWidget(
+    dashboardLayout.value,
+    sourceId,
+    targetZone,
+    beforeWidgetId,
+  )
+  await applyLayout(nextLayout)
+}
+
+async function onMobileDrop(targetWidgetId, event) {
+  event.preventDefault()
+  event.stopPropagation()
+
+  let sourceId = dragState.value.widgetId
+  if (!sourceId) {
+    try {
+      const raw = event.dataTransfer?.getData('text/plain')
+      const parsed = raw ? JSON.parse(raw) : null
+      sourceId = parsed?.widgetId ?? null
+    } catch {
+      sourceId = null
+    }
+  }
+
+  onWidgetDragEnd()
+  if (!sourceId || !targetWidgetId || sourceId === targetWidgetId) return
+
+  const nextLayout = reorderMobileWidget(dashboardLayout.value, sourceId, targetWidgetId)
+  await applyLayout(nextLayout)
+}
+
+function isDragging(widgetId) {
+  return dragState.value.widgetId === widgetId
+}
+
+function isDropTarget(zone, widgetId) {
+  return (
+    Boolean(dragState.value.widgetId) &&
+    dragState.value.widgetId !== widgetId &&
+    dragState.value.overZone === zone &&
+    dragState.value.overWidgetId === widgetId
+  )
+}
+
+function isZoneDropTarget(zone) {
+  return (
+    Boolean(dragState.value.widgetId) &&
+    dragState.value.overZone === zone &&
+    !dragState.value.overWidgetId
+  )
 }
 
 async function onToggleVisible(pageId, visible) {
@@ -391,7 +549,9 @@ watch(
         class="card-body"
       >
         <p class="card-body__desc">
-          Affiche ou masque chaque bloc du tableau de bord (ordinateur et téléphone).
+          Affiche ou masque chaque bloc, et glisse-les pour choisir leur place sur le tableau de
+          bord (colonnes à gauche / droite, bandeaux centraux en haut ou en bas sur ordinateur ;
+          ordre du carrousel sur téléphone).
         </p>
 
         <p v-if="isLoading" class="visibility-state">Chargement…</p>
@@ -400,55 +560,156 @@ watch(
         </p>
 
         <template v-else>
-          <!-- Desktop : même disposition que le dashboard -->
+          <!-- Desktop : disposition miroir du dashboard -->
           <div class="dashboard-visibility-grid" aria-label="Blocs du dashboard (ordinateur)">
-            <div class="dashboard-visibility-col dashboard-visibility-col--left">
+            <div
+              class="dashboard-visibility-col dashboard-visibility-col--full"
+              :class="{ 'dashboard-visibility-col--drop': isZoneDropTarget(DASHBOARD_DESKTOP_ZONES.TOP) }"
+              @dragover="onZoneDragOver(DASHBOARD_DESKTOP_ZONES.TOP, $event)"
+              @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.TOP, null, $event)"
+            >
+              <p class="dashboard-visibility-zone-label">Centre · haut</p>
+              <ul class="visibility-pages-list">
+                <DashboardVisibilityWidgetRow
+                  v-for="widget in dashboardTopWidgets"
+                  :key="`top-${widget.id}`"
+                  :widget="widget"
+                  :disabled="isSaving"
+                  draggable
+                  :dragging="isDragging(widget.id)"
+                  :drop-target="isDropTarget(DASHBOARD_DESKTOP_ZONES.TOP, widget.id)"
+                  @toggle="onToggleDashboardVisible"
+                  @dragstart="onWidgetDragStart(widget.id, DASHBOARD_DESKTOP_ZONES.TOP, $event)"
+                  @dragover="onWidgetDragOver(DASHBOARD_DESKTOP_ZONES.TOP, widget.id, $event)"
+                  @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.TOP, widget.id, $event)"
+                  @dragend="onWidgetDragEnd"
+                />
+                <li
+                  v-if="!dashboardTopWidgets.length"
+                  class="dashboard-visibility-empty"
+                >
+                  Dépose un bloc ici
+                </li>
+              </ul>
+            </div>
+
+            <div
+              class="dashboard-visibility-col dashboard-visibility-col--left"
+              :class="{ 'dashboard-visibility-col--drop': isZoneDropTarget(DASHBOARD_DESKTOP_ZONES.LEFT) }"
+              @dragover="onZoneDragOver(DASHBOARD_DESKTOP_ZONES.LEFT, $event)"
+              @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.LEFT, null, $event)"
+            >
+              <p class="dashboard-visibility-zone-label">Colonne gauche</p>
               <ul class="visibility-pages-list">
                 <DashboardVisibilityWidgetRow
                   v-for="widget in dashboardLeftWidgets"
-                  :key="widget.id"
+                  :key="`left-${widget.id}`"
                   :widget="widget"
                   :disabled="isSaving"
+                  draggable
+                  :dragging="isDragging(widget.id)"
+                  :drop-target="isDropTarget(DASHBOARD_DESKTOP_ZONES.LEFT, widget.id)"
                   @toggle="onToggleDashboardVisible"
+                  @dragstart="onWidgetDragStart(widget.id, DASHBOARD_DESKTOP_ZONES.LEFT, $event)"
+                  @dragover="onWidgetDragOver(DASHBOARD_DESKTOP_ZONES.LEFT, widget.id, $event)"
+                  @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.LEFT, widget.id, $event)"
+                  @dragend="onWidgetDragEnd"
                 />
+                <li
+                  v-if="!dashboardLeftWidgets.length"
+                  class="dashboard-visibility-empty"
+                >
+                  Dépose un bloc ici
+                </li>
               </ul>
             </div>
 
-            <div class="dashboard-visibility-col dashboard-visibility-col--right">
+            <div
+              class="dashboard-visibility-col dashboard-visibility-col--right"
+              :class="{ 'dashboard-visibility-col--drop': isZoneDropTarget(DASHBOARD_DESKTOP_ZONES.RIGHT) }"
+              @dragover="onZoneDragOver(DASHBOARD_DESKTOP_ZONES.RIGHT, $event)"
+              @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.RIGHT, null, $event)"
+            >
+              <p class="dashboard-visibility-zone-label">Colonne droite</p>
               <ul class="visibility-pages-list">
                 <DashboardVisibilityWidgetRow
                   v-for="widget in dashboardRightWidgets"
-                  :key="widget.id"
+                  :key="`right-${widget.id}`"
                   :widget="widget"
                   :disabled="isSaving"
+                  draggable
+                  :dragging="isDragging(widget.id)"
+                  :drop-target="isDropTarget(DASHBOARD_DESKTOP_ZONES.RIGHT, widget.id)"
                   @toggle="onToggleDashboardVisible"
+                  @dragstart="onWidgetDragStart(widget.id, DASHBOARD_DESKTOP_ZONES.RIGHT, $event)"
+                  @dragover="onWidgetDragOver(DASHBOARD_DESKTOP_ZONES.RIGHT, widget.id, $event)"
+                  @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.RIGHT, widget.id, $event)"
+                  @dragend="onWidgetDragEnd"
                 />
+                <li
+                  v-if="!dashboardRightWidgets.length"
+                  class="dashboard-visibility-empty"
+                >
+                  Dépose un bloc ici
+                </li>
               </ul>
             </div>
 
-            <div class="dashboard-visibility-col dashboard-visibility-col--full">
+            <div
+              class="dashboard-visibility-col dashboard-visibility-col--full"
+              :class="{ 'dashboard-visibility-col--drop': isZoneDropTarget(DASHBOARD_DESKTOP_ZONES.BOTTOM) }"
+              @dragover="onZoneDragOver(DASHBOARD_DESKTOP_ZONES.BOTTOM, $event)"
+              @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.BOTTOM, null, $event)"
+            >
+              <p class="dashboard-visibility-zone-label">Centre · bas</p>
               <ul class="visibility-pages-list">
                 <DashboardVisibilityWidgetRow
-                  v-for="widget in dashboardFullWidgets"
-                  :key="widget.id"
+                  v-for="widget in dashboardBottomWidgets"
+                  :key="`bottom-${widget.id}`"
                   :widget="widget"
                   :disabled="isSaving"
+                  draggable
+                  :dragging="isDragging(widget.id)"
+                  :drop-target="isDropTarget(DASHBOARD_DESKTOP_ZONES.BOTTOM, widget.id)"
                   @toggle="onToggleDashboardVisible"
+                  @dragstart="onWidgetDragStart(widget.id, DASHBOARD_DESKTOP_ZONES.BOTTOM, $event)"
+                  @dragover="onWidgetDragOver(DASHBOARD_DESKTOP_ZONES.BOTTOM, widget.id, $event)"
+                  @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.BOTTOM, widget.id, $event)"
+                  @dragend="onWidgetDragEnd"
                 />
+                <li
+                  v-if="!dashboardBottomWidgets.length"
+                  class="dashboard-visibility-empty"
+                >
+                  Dépose un bloc ici
+                </li>
               </ul>
             </div>
           </div>
 
-          <!-- Mobile : liste dans l’ordre du carrousel -->
-          <ul class="visibility-pages-list dashboard-visibility-mobile-list" aria-label="Blocs du dashboard (téléphone)">
-            <DashboardVisibilityWidgetRow
-              v-for="widget in dashboardMobileWidgets"
-              :key="`mobile-${widget.id}`"
-              :widget="widget"
-              :disabled="isSaving"
-              @toggle="onToggleDashboardVisible"
-            />
-          </ul>
+          <!-- Mobile : ordre du carrousel -->
+          <div class="dashboard-visibility-mobile">
+            <p class="dashboard-visibility-zone-label">Ordre sur téléphone</p>
+            <ul
+              class="visibility-pages-list dashboard-visibility-mobile-list"
+              aria-label="Blocs du dashboard (téléphone)"
+            >
+              <DashboardVisibilityWidgetRow
+                v-for="widget in dashboardMobileWidgets"
+                :key="`mobile-${widget.id}`"
+                :widget="widget"
+                :disabled="isSaving"
+                draggable
+                :dragging="isDragging(widget.id)"
+                :drop-target="isDropTarget('mobile', widget.id)"
+                @toggle="onToggleDashboardVisible"
+                @dragstart="onWidgetDragStart(widget.id, 'mobile', $event)"
+                @dragover="onWidgetDragOver('mobile', widget.id, $event)"
+                @drop="onMobileDrop(widget.id, $event)"
+                @dragend="onWidgetDragEnd"
+              />
+            </ul>
+          </div>
         </template>
 
         <p v-if="saveError" class="settings-feedback settings-feedback--error" role="alert">
@@ -696,20 +957,61 @@ watch(
   display: none;
 }
 
+.dashboard-visibility-mobile {
+  display: block;
+}
+
 .dashboard-visibility-mobile-list {
   display: flex;
   flex-direction: column;
+}
+
+.dashboard-visibility-zone-label {
+  margin: 0 0 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ad81be;
+}
+
+.dashboard-visibility-empty {
+  list-style: none;
+  margin: 0;
+  padding: 0.7rem 0.75rem;
+  border-radius: 12px;
+  border: 1px dashed rgba(173, 129, 190, 0.4);
+  background: rgba(213, 181, 234, 0.08);
+  color: #8c98a4;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.dashboard-visibility-col {
+  min-height: 3.5rem;
+  padding: 0.55rem;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.dashboard-visibility-col--drop {
+  border-color: rgba(173, 129, 190, 0.55);
+  background: rgba(213, 181, 234, 0.12);
 }
 
 @media (min-width: 769px) {
   .dashboard-visibility-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1.25rem 1.5rem;
+    gap: 1rem 1.25rem;
     align-items: start;
   }
 
-  .dashboard-visibility-mobile-list {
+  .dashboard-visibility-mobile {
     display: none;
   }
 
@@ -762,6 +1064,16 @@ watch(
     color: #f0e8f8;
     background: rgba(25, 20, 35, 0.6);
     border-color: rgba(213, 181, 234, 0.25);
+  }
+
+  .dashboard-visibility-empty {
+    border-color: rgba(213, 181, 234, 0.28);
+    background: rgba(213, 181, 234, 0.06);
+    color: #adb5bd;
+  }
+
+  .dashboard-visibility-col--drop {
+    background: rgba(213, 181, 234, 0.1);
   }
 }
 </style>
