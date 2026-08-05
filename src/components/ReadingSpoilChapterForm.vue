@@ -148,7 +148,7 @@ defineExpose({
       />
     </label>
 
-    <label class="spoil-chapter-field">
+    <div class="spoil-chapter-field">
       <span class="spoil-chapter-label">Personnages rencontrés</span>
       <RichTextNoteEditor
         v-model="form.charactersMet"
@@ -159,9 +159,9 @@ defineExpose({
         lined
         enable-notes
       />
-    </label>
+    </div>
 
-    <label class="spoil-chapter-field">
+    <div class="spoil-chapter-field">
       <span class="spoil-chapter-label">World building</span>
       <RichTextNoteEditor
         v-model="form.worldBuilding"
@@ -172,9 +172,9 @@ defineExpose({
         lined
         enable-notes
       />
-    </label>
+    </div>
 
-    <label class="spoil-chapter-field">
+    <div class="spoil-chapter-field">
       <span class="spoil-chapter-label">Scène</span>
       <RichTextNoteEditor
         v-model="form.scene"
@@ -185,7 +185,7 @@ defineExpose({
         :disabled="disabled"
         auto-grow
       />
-    </label>
+    </div>
 
     <div v-if="!autoSave" class="reading-fiche-form-actions">
       <button type="submit" class="reading-fiche-save-btn" :disabled="disabled">

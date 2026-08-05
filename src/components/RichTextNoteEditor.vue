@@ -314,16 +314,40 @@ function syncBrowserFormatWithCaret() {
   if (!selection.getRangeAt(0).collapsed) return
 
   const formats = [
-    { cmd: 'bold', tags: ['B', 'STRONG'] },
-    { cmd: 'italic', tags: ['I', 'EM'] },
-    { cmd: 'underline', tags: ['U'] },
+    { cmd: 'bold', key: 'bold', tags: ['B', 'STRONG'] },
+    { cmd: 'italic', key: 'italic', tags: ['I', 'EM'] },
+    { cmd: 'underline', key: 'underline', tags: ['U'] },
   ]
 
-  formats.forEach(({ cmd, tags }) => {
+  formats.forEach(({ cmd, key, tags }) => {
     const inTag = Boolean(findInlineAncestor(tags))
-    if (!inTag && document.queryCommandState(cmd)) {
+    let browserActive = false
+    try {
+      browserActive = document.queryCommandState(cmd)
+    } catch {
+      browserActive = false
+    }
+
+    // Gras « fantôme » (souvent mobile) : le navigateur croit que le gras est actif
+    // sans balise. On le désactive, sauf si l'utilisateur vient de l'activer via la toolbar.
+    if (!inTag && browserActive && !formatState.value[key]) {
       document.execCommand(cmd, false, null)
     }
+  })
+}
+
+function scheduleSyncBrowserFormat() {
+  const run = () => {
+    syncBrowserFormatWithCaret()
+    updateFormatState()
+  }
+  nextTick(() => {
+    run()
+    requestAnimationFrame(() => {
+      run()
+      // Second frame : le caret mobile n'est parfois prêt qu'après l'ouverture du clavier.
+      requestAnimationFrame(run)
+    })
   })
 }
 
@@ -769,10 +793,20 @@ function setupHighlightListeners() {
 }
 
 function onEditorMouseDown() {
-  nextTick(() => {
+  scheduleSyncBrowserFormat()
+}
+
+function onBeforeInput(event) {
+  const type = event?.inputType || ''
+  if (
+    type.startsWith('insert') ||
+    type === 'insertText' ||
+    type === 'insertCompositionText' ||
+    type === 'insertFromPaste' ||
+    type === 'insertReplacementText'
+  ) {
     syncBrowserFormatWithCaret()
-    updateFormatState()
-  })
+  }
 }
 
 function rebuildNotesFromDom() {
@@ -805,6 +839,7 @@ function rebuildNotesFromDom() {
 }
 
 function onInput() {
+  syncBrowserFormatWithCaret()
   emitContent()
   updateFormatState()
   resizeEditorToContent()
@@ -821,7 +856,7 @@ function onPaste(event) {
 }
 
 function onEditorInteraction() {
-  nextTick(updateFormatState)
+  scheduleSyncBrowserFormat()
   resizeEditorToContent()
 }
 
@@ -851,7 +886,10 @@ onMounted(async () => {
   resizeEditorToContent()
 
   selectionHandler = () => {
-    if (isSelectionInEditor()) updateFormatState()
+    if (isSelectionInEditor()) {
+      syncBrowserFormatWithCaret()
+      updateFormatState()
+    }
   }
   document.addEventListener('selectionchange', selectionHandler)
 
@@ -1015,6 +1053,7 @@ onBeforeUnmount(() => {
         aria-multiline="true"
         :data-placeholder="placeholder"
         @mousedown="onEditorMouseDown"
+        @beforeinput="onBeforeInput"
         @input="onInput"
         @paste="onPaste"
         @keyup="onEditorInteraction"
@@ -1246,9 +1285,24 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(213, 181, 234, 0.35);
   background: rgba(255, 255, 255, 0.95);
   font-size: 0.95rem;
+  font-weight: 400;
   line-height: 1.5;
   color: #2c3e50;
   outline: none;
+}
+
+.rich-note__editor :deep(b),
+.rich-note__editor :deep(strong) {
+  font-weight: 700;
+}
+
+.rich-note__editor :deep(i),
+.rich-note__editor :deep(em) {
+  font-style: italic;
+}
+
+.rich-note__editor :deep(u) {
+  text-decoration: underline;
 }
 
 .rich-note__editor:focus {
