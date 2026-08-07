@@ -10,10 +10,24 @@ import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { setFilePickerActive, setFileUploadInProgress } from '../composables/useAppTabResume.js'
 import { emptyBookForm } from '../utils/readingBookForm.js'
 import { createReadingBook, listReadingBooksWithCovers } from '../services/readingBooks.js'
-import { listReadingCollections } from '../services/readingCollections.js'
+import {
+  listReadingCollections,
+  READING_COLLECTION_EN_COURS,
+} from '../services/readingCollections.js'
 import { applyReadingBookFilters, formatReadingFilterLabel } from '../utils/readingBookFilters.js'
 
 const BOOKS_PER_PAGE = 20
+
+function isEnCoursBook(book) {
+  return (
+    String(book.collection ?? '').trim().toLowerCase() ===
+    READING_COLLECTION_EN_COURS.toLowerCase()
+  )
+}
+
+function sortBooksByTitle(a, b) {
+  return String(a.title ?? '').localeCompare(String(b.title ?? ''), 'fr', { sensitivity: 'base' })
+}
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.LECTURE, undefined, { setDocumentTitle: true })
 
@@ -64,21 +78,23 @@ const displayedBooks = computed(() => {
 
   list = applyReadingBookFilters(list, bookFilters.value)
 
-  return list.sort((a, b) =>
-    String(a.title ?? '').localeCompare(String(b.title ?? ''), 'fr', { sensitivity: 'base' }),
-  )
+  return list.sort(sortBooksByTitle)
 })
 
+const inProgressBooks = computed(() => displayedBooks.value.filter(isEnCoursBook))
+
+const libraryBooks = computed(() => displayedBooks.value.filter((book) => !isEnCoursBook(book)))
+
 const totalPages = computed(() =>
-  Math.max(1, Math.ceil(displayedBooks.value.length / BOOKS_PER_PAGE)),
+  Math.max(1, Math.ceil(libraryBooks.value.length / BOOKS_PER_PAGE)),
 )
 
 const paginatedBooks = computed(() => {
   const start = (currentPage.value - 1) * BOOKS_PER_PAGE
-  return displayedBooks.value.slice(start, start + BOOKS_PER_PAGE)
+  return libraryBooks.value.slice(start, start + BOOKS_PER_PAGE)
 })
 
-const showPagination = computed(() => displayedBooks.value.length > BOOKS_PER_PAGE)
+const showPagination = computed(() => libraryBooks.value.length > BOOKS_PER_PAGE)
 
 const hasActiveFilters = computed(() => searchQuery.value.trim() !== '' || bookFilters.value.length > 0)
 
@@ -411,60 +427,102 @@ watch(totalPages, (pages) => {
           </button>
         </div>
 
-        <div ref="readingGridRef" class="reading-grid">
-          <div v-if="books.length === 0" class="reading-empty">Aucun livre pour le moment.</div>
-          <div v-else-if="displayedBooks.length === 0" class="reading-empty">
-            Aucun livre ne correspond à ta recherche.
-          </div>
-
-        <article v-for="book in paginatedBooks" :key="book.id" class="reading-book">
-          <button
-            type="button"
-            class="reading-book-btn"
-            :title="book.title"
-            :aria-label="`Ouvrir ${book.title}`"
-            @click="openBookPage(book)"
-          >
-            <img
-              v-if="book.coverUrl"
-              :src="book.coverUrl"
-              :alt="`Couverture de ${book.title}`"
-              class="reading-book-cover"
-            />
-            <div v-else class="reading-book-cover reading-book-cover--placeholder" aria-hidden="true">
-              <span>📖</span>
-            </div>
-          </button>
-        </article>
+        <div v-if="books.length === 0" class="reading-empty">Aucun livre pour le moment.</div>
+        <div v-else-if="displayedBooks.length === 0" class="reading-empty">
+          Aucun livre ne correspond à ta recherche.
         </div>
 
-        <nav
-          v-if="showPagination"
-          class="reading-pagination"
-          aria-label="Pagination de la bibliothèque"
-        >
-          <button
-            type="button"
-            class="reading-pagination__btn"
-            :disabled="currentPage <= 1"
-            aria-label="Page précédente"
-            @click="goToPage(currentPage - 1)"
-          >
-            ‹
-          </button>
-          <span class="reading-pagination__label">
-            Page {{ currentPage }} / {{ totalPages }}
-          </span>
-          <button
-            type="button"
-            class="reading-pagination__btn"
-            :disabled="currentPage >= totalPages"
-            aria-label="Page suivante"
-            @click="goToPage(currentPage + 1)"
-          >
-            ›
-          </button>
-        </nav>
+        <template v-else>
+          <section v-if="inProgressBooks.length > 0" class="reading-section reading-section--en-cours">
+            <h2 class="reading-section__title">En cours</h2>
+            <div class="reading-grid">
+              <article
+                v-for="book in inProgressBooks"
+                :key="book.id"
+                class="reading-book reading-book--en-cours"
+              >
+                <button
+                  type="button"
+                  class="reading-book-btn"
+                  :title="book.title"
+                  :aria-label="`Ouvrir ${book.title}`"
+                  @click="openBookPage(book)"
+                >
+                  <img
+                    v-if="book.coverUrl"
+                    :src="book.coverUrl"
+                    :alt="`Couverture de ${book.title}`"
+                    class="reading-book-cover"
+                  />
+                  <div
+                    v-else
+                    class="reading-book-cover reading-book-cover--placeholder"
+                    aria-hidden="true"
+                  >
+                    <span>📖</span>
+                  </div>
+                </button>
+              </article>
+            </div>
+          </section>
+
+          <section v-if="libraryBooks.length > 0" class="reading-section">
+            <h2 v-if="inProgressBooks.length > 0" class="reading-section__title">Bibliothèque</h2>
+            <div ref="readingGridRef" class="reading-grid">
+              <article v-for="book in paginatedBooks" :key="book.id" class="reading-book">
+                <button
+                  type="button"
+                  class="reading-book-btn"
+                  :title="book.title"
+                  :aria-label="`Ouvrir ${book.title}`"
+                  @click="openBookPage(book)"
+                >
+                  <img
+                    v-if="book.coverUrl"
+                    :src="book.coverUrl"
+                    :alt="`Couverture de ${book.title}`"
+                    class="reading-book-cover"
+                  />
+                  <div
+                    v-else
+                    class="reading-book-cover reading-book-cover--placeholder"
+                    aria-hidden="true"
+                  >
+                    <span>📖</span>
+                  </div>
+                </button>
+              </article>
+            </div>
+
+            <nav
+              v-if="showPagination"
+              class="reading-pagination"
+              aria-label="Pagination de la bibliothèque"
+            >
+              <button
+                type="button"
+                class="reading-pagination__btn"
+                :disabled="currentPage <= 1"
+                aria-label="Page précédente"
+                @click="goToPage(currentPage - 1)"
+              >
+                ‹
+              </button>
+              <span class="reading-pagination__label">
+                Page {{ currentPage }} / {{ totalPages }}
+              </span>
+              <button
+                type="button"
+                class="reading-pagination__btn"
+                :disabled="currentPage >= totalPages"
+                aria-label="Page suivante"
+                @click="goToPage(currentPage + 1)"
+              >
+                ›
+              </button>
+            </nav>
+          </section>
+        </template>
       </template>
     </section>
 
@@ -710,6 +768,39 @@ watch(totalPages, (pages) => {
   color: #b02a37;
 }
 
+.reading-section {
+  margin-top: 0.35rem;
+}
+
+.reading-section + .reading-section {
+  margin-top: 1.35rem;
+}
+
+.reading-section__title {
+  margin: 0 0 0.65rem;
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #6b4f7c;
+}
+
+.reading-section--en-cours {
+  padding: 0.85rem 0.85rem 1rem;
+  margin: 0 -0.15rem 0;
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(213, 181, 234, 0.22), rgba(173, 129, 190, 0.1));
+  border: 1px solid rgba(173, 129, 190, 0.28);
+}
+
+.reading-section--en-cours .reading-section__title {
+  color: #7a4f8f;
+}
+
+.reading-book--en-cours .reading-book-cover {
+  border-color: rgba(173, 129, 190, 0.45);
+  box-shadow: 0 2px 10px rgba(173, 129, 190, 0.18);
+}
+
 .reading-grid {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
@@ -906,6 +997,24 @@ watch(totalPages, (pages) => {
 
   .reading-pagination__label {
     color: #adb5bd;
+  }
+
+  .reading-section__title {
+    color: #d5b5ea;
+  }
+
+  .reading-section--en-cours {
+    background: linear-gradient(145deg, rgba(173, 129, 190, 0.22), rgba(61, 47, 74, 0.55));
+    border-color: rgba(213, 181, 234, 0.28);
+  }
+
+  .reading-section--en-cours .reading-section__title {
+    color: #e8dcf5;
+  }
+
+  .reading-book--en-cours .reading-book-cover {
+    border-color: rgba(213, 181, 234, 0.4);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   }
 
   .reading-book-cover--placeholder {
