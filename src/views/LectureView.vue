@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ReadingBookFiche from '../components/ReadingBookFiche.vue'
 import ReadingBooksFilterPopover from '../components/ReadingBooksFilterPopover.vue'
@@ -16,7 +16,10 @@ import {
 } from '../services/readingCollections.js'
 import { applyReadingBookFilters, formatReadingFilterLabel } from '../utils/readingBookFilters.js'
 
-const BOOKS_PER_PAGE = 20
+/** Nombre de lignes toujours remplies dans la grille bibliothèque. */
+const GRID_ROWS = 5
+/** Largeur mini d’une couverture — le nombre de colonnes s’adapte à l’écran. */
+const MIN_BOOK_COL_PX = 96
 
 function isEnCoursBook(book) {
   return (
@@ -27,6 +30,12 @@ function isEnCoursBook(book) {
 
 function sortBooksByTitle(a, b) {
   return String(a.title ?? '').localeCompare(String(b.title ?? ''), 'fr', { sensitivity: 'base' })
+}
+
+function computeGridColumnCount(widthPx, gapPx = 7.2) {
+  const width = Math.max(0, Number(widthPx) || 0)
+  const gap = Number.isFinite(gapPx) ? gapPx : 7.2
+  return Math.max(2, Math.floor((width + gap) / (MIN_BOOK_COL_PX + gap)))
 }
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.LECTURE, undefined, { setDocumentTitle: true })
@@ -49,10 +58,19 @@ const bookFilters = ref([])
 const filterOpen = ref(false)
 const currentPage = ref(1)
 const readingGridRef = ref(null)
+const readingLayoutRef = ref(null)
+const gridColumnCount = ref(4)
 let coverPreviewObjectUrl = ''
+let gridResizeObserver = null
 
 const bookForm = reactive(emptyBookForm())
 const coverFile = ref(null)
+
+const booksPerPage = computed(() => Math.max(2, gridColumnCount.value) * GRID_ROWS)
+
+const readingGridStyle = computed(() => ({
+  '--reading-cols': String(gridColumnCount.value),
+}))
 
 const collectionFilterOptions = computed(() =>
   [...collections.value].sort((a, b) => {
@@ -86,15 +104,42 @@ const inProgressBooks = computed(() => displayedBooks.value.filter(isEnCoursBook
 const libraryBooks = computed(() => displayedBooks.value.filter((book) => !isEnCoursBook(book)))
 
 const totalPages = computed(() =>
-  Math.max(1, Math.ceil(libraryBooks.value.length / BOOKS_PER_PAGE)),
+  Math.max(1, Math.ceil(libraryBooks.value.length / booksPerPage.value)),
 )
 
 const paginatedBooks = computed(() => {
-  const start = (currentPage.value - 1) * BOOKS_PER_PAGE
-  return libraryBooks.value.slice(start, start + BOOKS_PER_PAGE)
+  const start = (currentPage.value - 1) * booksPerPage.value
+  return libraryBooks.value.slice(start, start + booksPerPage.value)
 })
 
-const showPagination = computed(() => libraryBooks.value.length > BOOKS_PER_PAGE)
+const showPagination = computed(() => libraryBooks.value.length > booksPerPage.value)
+
+function updateGridColumnCount() {
+  const el = readingLayoutRef.value
+  if (!el) return
+  const styles = getComputedStyle(el)
+  const gap = parseFloat(styles.columnGap || styles.gap) || 7.2
+  const nextCols = computeGridColumnCount(el.clientWidth, gap)
+  if (nextCols !== gridColumnCount.value) {
+    gridColumnCount.value = nextCols
+  }
+}
+
+function bindGridResizeObserver() {
+  gridResizeObserver?.disconnect()
+  gridResizeObserver = null
+
+  const el = readingLayoutRef.value
+  if (!el) return
+
+  updateGridColumnCount()
+
+  if (typeof ResizeObserver === 'undefined') return
+  gridResizeObserver = new ResizeObserver(() => {
+    updateGridColumnCount()
+  })
+  gridResizeObserver.observe(el)
+}
 
 const hasActiveFilters = computed(() => searchQuery.value.trim() !== '' || bookFilters.value.length > 0)
 
@@ -290,10 +335,14 @@ onMounted(async () => {
     data: { user },
   } = await supabase.auth.getUser()
   if (user) userId.value = user.id
+  await nextTick()
+  bindGridResizeObserver()
 })
 
 onUnmounted(() => {
   revokeCoverPreview()
+  gridResizeObserver?.disconnect()
+  gridResizeObserver = null
 })
 
 watch(userId, (id) => {
@@ -311,6 +360,18 @@ watch([searchQuery, bookFilters], () => {
 
 watch(totalPages, (pages) => {
   if (currentPage.value > pages) currentPage.value = pages
+})
+
+watch(
+  () => [isLoading.value],
+  async () => {
+    await nextTick()
+    bindGridResizeObserver()
+  },
+)
+
+watch(booksPerPage, () => {
+  if (currentPage.value > totalPages.value) currentPage.value = totalPages.value
 })
 </script>
 
@@ -371,7 +432,8 @@ watch(totalPages, (pages) => {
       </ReadingBookFiche>
     </form>
 
-    <section class="reading-card">
+    <section class="reading-card" :style="readingGridStyle">
+      <div ref="readingLayoutRef" class="reading-layout-measure" aria-hidden="true"></div>
       <div v-if="loadError" class="reading-error">{{ loadError }}</div>
       <div v-if="isLoading" class="reading-loading">Chargement…</div>
 
@@ -801,9 +863,16 @@ watch(totalPages, (pages) => {
   box-shadow: 0 2px 10px rgba(173, 129, 190, 0.18);
 }
 
+.reading-layout-measure {
+  width: 100%;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .reading-grid {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--reading-cols, 4), minmax(0, 1fr));
   gap: 0.45rem;
   scroll-margin-top: 1rem;
 }
@@ -889,42 +958,6 @@ watch(totalPages, (pages) => {
   justify-content: center;
   background: linear-gradient(145deg, #f4eef8, #e8d9f0);
   font-size: 1.15rem;
-}
-
-@media (max-width: 1280px) {
-  .reading-grid {
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 1100px) {
-  .reading-grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 900px) {
-  .reading-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 720px) {
-  .reading-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 540px) {
-  .reading-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 400px) {
-  .reading-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (prefers-color-scheme: dark) {
