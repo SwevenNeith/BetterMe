@@ -17,6 +17,7 @@ import { useEmotionalCheckinPersistence } from '../composables/useEmotionalCheck
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { useDashboardVisibility } from '../composables/useDashboardVisibility.js'
+import { buildMobileCarouselSlides } from '../services/dashboardVisibility.js'
 
 usePageDisplayLabel(APP_PAGE_IDS.DASHBOARD, undefined, { setDocumentTitle: true })
 
@@ -37,6 +38,7 @@ const desktopBottomWidgets = computed(() =>
   visibleWidgetIds(dashboardLayout.value.desktop.bottom),
 )
 const mobileWidgets = computed(() => visibleWidgetIds(dashboardLayout.value.mobile))
+const mobileSlides = computed(() => buildMobileCarouselSlides(mobileWidgets.value))
 
 const showLeftGroup = computed(() => desktopLeftWidgets.value.length > 0)
 const showRightGroup = computed(() => desktopRightWidgets.value.length > 0)
@@ -483,33 +485,41 @@ const onCancelEmotionalCheckin = () => {
 
       <div ref="carouselViewport" class="dashboard-content" @scroll.passive="onCarouselScroll">
         <div ref="carouselTrack" class="carousel-track">
-          <!-- Mobile : ordre personnalisé (1 widget = 1 slide) -->
+          <!-- Mobile : image figée en page 1 (+ compagnon), puis 1 slide / bloc -->
           <template v-if="isMobileCarousel">
-            <DashboardWidgetBlock
-              v-for="widgetId in mobileWidgets"
-              :key="`mobile-${widgetId}`"
-              :widget-id="widgetId"
-              :user-id="userId"
-              :date-iso="todayStr"
-              :formatted-today="formattedToday"
-              :user-events="userEvents"
-              :is-loading-events="isLoadingEvents"
-              :get-category-style="getCategoryStyle"
-              :get-category-icon="getCategoryIcon"
-              :get-category-name="getCategoryName"
-              :is-loading-menstruation-board="isLoadingMenstruationBoard"
-              :has-menstruation-cycle-data="hasMenstruationCycleData"
-              :menstruation-mode="menstruationMode"
-              :menstruation-cycles="menstruationCycles"
-              :menstruation-cycles-naturel="menstruationCyclesNaturel"
-              :pattern-message="patternMessage"
-              :saved-today="savedToday"
-              :status-message="saveMessage"
-              :saving="isCheckinSaving"
-              checkin-compact
-              @save-checkin="onSaveEmotionalCheckin"
-              @cancel-checkin="onCancelEmotionalCheckin"
-            />
+            <div
+              v-for="(slide, slideIndex) in mobileSlides"
+              :key="`mobile-slide-${slideIndex}-${slide.join('-')}`"
+              class="dashboard-column"
+              :class="{ 'intro-column': slideIndex === 0 && slide.length > 1 }"
+            >
+              <DashboardWidgetBlock
+                v-for="widgetId in slide"
+                :key="`mobile-${slideIndex}-${widgetId}`"
+                :widget-id="widgetId"
+                :as-column="false"
+                :user-id="userId"
+                :date-iso="todayStr"
+                :formatted-today="formattedToday"
+                :user-events="userEvents"
+                :is-loading-events="isLoadingEvents"
+                :get-category-style="getCategoryStyle"
+                :get-category-icon="getCategoryIcon"
+                :get-category-name="getCategoryName"
+                :is-loading-menstruation-board="isLoadingMenstruationBoard"
+                :has-menstruation-cycle-data="hasMenstruationCycleData"
+                :menstruation-mode="menstruationMode"
+                :menstruation-cycles="menstruationCycles"
+                :menstruation-cycles-naturel="menstruationCyclesNaturel"
+                :pattern-message="patternMessage"
+                :saved-today="savedToday"
+                :status-message="saveMessage"
+                :saving="isCheckinSaving"
+                checkin-compact
+                @save-checkin="onSaveEmotionalCheckin"
+                @cancel-checkin="onCancelEmotionalCheckin"
+              />
+            </div>
           </template>
 
           <!-- Desktop : zones top / left / right / bottom -->

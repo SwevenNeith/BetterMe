@@ -43,8 +43,8 @@ function onRowDragStart(event) {
     }"
     :draggable="draggable && !disabled"
     @dragstart="onRowDragStart"
-    @dragover="draggable ? emit('dragover', $event) : undefined"
-    @drop="draggable ? emit('drop', $event) : undefined"
+    @dragover="emit('dragover', $event)"
+    @drop="emit('drop', $event)"
     @dragend="draggable ? emit('dragend', $event) : undefined"
   >
     <span

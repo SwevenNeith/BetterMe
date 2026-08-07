@@ -1,5 +1,6 @@
 import {
   DASHBOARD_WIDGETS,
+  DASHBOARD_WIDGET_IDS,
   DASHBOARD_WIDGET_ID_SET,
   DASHBOARD_DESKTOP_ZONES,
   createDefaultDashboardLayout,
@@ -95,7 +96,55 @@ export function normalizeDashboardLayout(rawLayout) {
     }
   }
 
+  // L'image de réconfort est toujours en première position sur mobile.
+  mobile = pinComfortFirstInMobileOrder(mobile)
+
   return { desktop, mobile }
+}
+
+/**
+ * Force l'image de réconfort en tête de la liste mobile.
+ * @param {string[]} ids
+ * @returns {string[]}
+ */
+export function pinComfortFirstInMobileOrder(ids) {
+  const list = sanitizeWidgetIds(ids)
+  const withoutComfort = list.filter((id) => id !== DASHBOARD_WIDGET_IDS.COMFORT)
+  return [DASHBOARD_WIDGET_IDS.COMFORT, ...withoutComfort]
+}
+
+/**
+ * Construit les slides du carrousel mobile.
+ * Slide 1 = image (+ éventuellement le bloc placé juste en dessous).
+ * Les autres blocs = une slide chacun.
+ * @param {string[]} visibleMobileIds — ids visibles déjà dans l'ordre mobile
+ * @returns {string[][]}
+ */
+export function buildMobileCarouselSlides(visibleMobileIds) {
+  const ids = sanitizeWidgetIds(visibleMobileIds)
+  if (!ids.length) return []
+
+  const comfortId = DASHBOARD_WIDGET_IDS.COMFORT
+  const comfortVisible = ids.includes(comfortId)
+  const rest = ids.filter((id) => id !== comfortId)
+
+  /** @type {string[][]} */
+  const slides = []
+
+  if (comfortVisible) {
+    const companion = rest[0] ?? null
+    const firstSlide = companion ? [comfortId, companion] : [comfortId]
+    slides.push(firstSlide)
+    for (const id of rest.slice(companion ? 1 : 0)) {
+      slides.push([id])
+    }
+    return slides
+  }
+
+  for (const id of rest) {
+    slides.push([id])
+  }
+  return slides
 }
 
 /** @returns {DashboardVisibilityMap} */
@@ -219,7 +268,7 @@ export function moveDesktopWidget(layout, widgetId, targetZone, beforeWidgetId =
 }
 
 /**
- * Réordonne la liste mobile.
+ * Réordonne la liste mobile (l'image de réconfort reste figée en première position).
  * @param {DashboardLayout} layout
  * @param {string} sourceId
  * @param {string} targetId
@@ -227,14 +276,28 @@ export function moveDesktopWidget(layout, widgetId, targetZone, beforeWidgetId =
 export function reorderMobileWidget(layout, sourceId, targetId) {
   const next = normalizeDashboardLayout(layout)
   if (sourceId === targetId) return next
+  if (sourceId === DASHBOARD_WIDGET_IDS.COMFORT) return next
 
-  const list = next.mobile
+  const list = next.mobile.filter((id) => id !== DASHBOARD_WIDGET_IDS.COMFORT)
   const from = list.indexOf(sourceId)
-  const to = list.indexOf(targetId)
-  if (from < 0 || to < 0) return next
+  let to = list.indexOf(targetId)
+
+  // Si on vise l'image (figée), on place le bloc juste en dessous.
+  if (targetId === DASHBOARD_WIDGET_IDS.COMFORT) {
+    to = 0
+  }
+
+  if (from < 0 || to < 0) {
+    next.mobile = pinComfortFirstInMobileOrder([
+      DASHBOARD_WIDGET_IDS.COMFORT,
+      ...list,
+    ])
+    return next
+  }
 
   const [moved] = list.splice(from, 1)
   list.splice(to, 0, moved)
+  next.mobile = pinComfortFirstInMobileOrder([DASHBOARD_WIDGET_IDS.COMFORT, ...list])
   return next
 }
 

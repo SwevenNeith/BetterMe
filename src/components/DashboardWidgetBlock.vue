@@ -81,6 +81,10 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  asColumn: {
+    type: Boolean,
+    default: true,
+  },
   checkinCompact: {
     type: Boolean,
     default: false,
@@ -101,13 +105,14 @@ const COLUMN_CLASS_BY_ID = {
   [IDS.PROJECTS]: 'projects-column',
 }
 
-function columnClass(widgetId) {
-  return COLUMN_CLASS_BY_ID[widgetId] || `${widgetId}-column`
+function rootClass(widgetId, asColumn) {
+  if (!asColumn) return 'dashboard-widget-inner'
+  return ['dashboard-column', COLUMN_CLASS_BY_ID[widgetId] || `${widgetId}-column`]
 }
 </script>
 
 <template>
-  <div class="dashboard-column" :class="columnClass(widgetId)">
+  <div :class="rootClass(widgetId, asColumn)">
     <DashboardComfortImages v-if="widgetId === IDS.COMFORT" :user-id="userId" />
 
     <DashboardTodayTodos
@@ -211,11 +216,17 @@ function columnClass(widgetId) {
 </template>
 
 <style scoped>
-.dashboard-column {
+.dashboard-column,
+.dashboard-widget-inner {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
   min-width: 0;
+}
+
+.dashboard-widget-inner {
+  gap: 1rem;
+  width: 100%;
 }
 
 .intro-column,

@@ -100,6 +100,20 @@ const dashboardMobileWidgets = computed(() =>
   orderedDashboardWidgets(dashboardLayout.value.mobile),
 )
 
+/** Image figée en tête sur mobile. */
+const dashboardMobilePinnedWidget = computed(
+  () => dashboardWidgetMap.value[DASHBOARD_WIDGET_IDS.COMFORT] ?? null,
+)
+
+/** Blocs réordonnables sous l'image (le premier = compagnon de la slide 1). */
+const dashboardMobileReorderableWidgets = computed(() =>
+  dashboardMobileWidgets.value.filter((widget) => widget.id !== DASHBOARD_WIDGET_IDS.COMFORT),
+)
+
+const dashboardMobileCompanionId = computed(
+  () => dashboardMobileReorderableWidgets.value[0]?.id ?? null,
+)
+
 const dashboardTopWidgets = computed(() =>
   orderedDashboardWidgets(dashboardLayout.value.desktop.top),
 )
@@ -202,6 +216,10 @@ async function applyLayout(nextLayout) {
 }
 
 function onWidgetDragStart(widgetId, fromZone, event) {
+  if (fromZone === 'mobile' && widgetId === DASHBOARD_WIDGET_IDS.COMFORT) {
+    event.preventDefault()
+    return
+  }
   dragState.value = {
     widgetId,
     fromZone,
@@ -303,7 +321,8 @@ async function onMobileDrop(targetWidgetId, event) {
   }
 
   onWidgetDragEnd()
-  if (!sourceId || !targetWidgetId || sourceId === targetWidgetId) return
+  if (!sourceId || sourceId === DASHBOARD_WIDGET_IDS.COMFORT) return
+  if (!targetWidgetId || sourceId === targetWidgetId) return
 
   const nextLayout = reorderMobileWidget(dashboardLayout.value, sourceId, targetWidgetId)
   await applyLayout(nextLayout)
@@ -687,15 +706,37 @@ watch(
             </div>
           </div>
 
-          <!-- Mobile : ordre du carrousel -->
+          <!-- Mobile : image figée + ordre des autres blocs -->
           <div class="dashboard-visibility-mobile">
             <p class="dashboard-visibility-zone-label">Ordre sur téléphone</p>
+            <p class="dashboard-visibility-mobile-hint">
+              L’image de réconfort reste en première page. Le bloc placé juste en dessous
+              s’affiche sur la même page, sous l’image.
+            </p>
             <ul
               class="visibility-pages-list dashboard-visibility-mobile-list"
               aria-label="Blocs du dashboard (téléphone)"
             >
               <DashboardVisibilityWidgetRow
-                v-for="widget in dashboardMobileWidgets"
+                v-if="dashboardMobilePinnedWidget"
+                :key="`mobile-pinned-${dashboardMobilePinnedWidget.id}`"
+                :widget="dashboardMobilePinnedWidget"
+                :disabled="isSaving"
+                :drop-target="isDropTarget('mobile', dashboardMobilePinnedWidget.id)"
+                @toggle="onToggleDashboardVisible"
+                @dragover="onWidgetDragOver('mobile', dashboardMobilePinnedWidget.id, $event)"
+                @drop="onMobileDrop(dashboardMobilePinnedWidget.id, $event)"
+              />
+              <li
+                v-if="dashboardMobilePinnedWidget"
+                class="dashboard-visibility-mobile-pin-note"
+                aria-hidden="true"
+              >
+                Position figée · page 1
+              </li>
+
+              <DashboardVisibilityWidgetRow
+                v-for="widget in dashboardMobileReorderableWidgets"
                 :key="`mobile-${widget.id}`"
                 :widget="widget"
                 :disabled="isSaving"
@@ -709,6 +750,13 @@ watch(
                 @dragend="onWidgetDragEnd"
               />
             </ul>
+            <p
+              v-if="dashboardMobileCompanionId"
+              class="dashboard-visibility-mobile-companion-hint"
+            >
+              « {{ dashboardWidgetMap[dashboardMobileCompanionId]?.displayLabel }} » sera sous
+              l’image sur la première page.
+            </p>
           </div>
         </template>
 
@@ -961,6 +1009,33 @@ watch(
   display: block;
 }
 
+.dashboard-visibility-mobile-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #6c757d;
+}
+
+.dashboard-visibility-mobile-pin-note {
+  list-style: none;
+  margin: -0.15rem 0 0.35rem;
+  padding: 0 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #ad81be;
+  opacity: 0.85;
+}
+
+.dashboard-visibility-mobile-companion-hint {
+  margin: 0.65rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #8c98a4;
+  line-height: 1.4;
+}
+
 .dashboard-visibility-mobile-list {
   display: flex;
   flex-direction: column;
@@ -1039,7 +1114,9 @@ watch(
   }
 
   .card-body__desc,
-  .visibility-state {
+  .visibility-state,
+  .dashboard-visibility-mobile-hint,
+  .dashboard-visibility-mobile-companion-hint {
     color: #adb5bd;
   }
 
