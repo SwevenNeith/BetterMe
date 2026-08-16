@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { setFilePickerActive, setFileUploadInProgress } from '../composables/useAppTabResume.js'
+import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import { emptyBookForm } from '../utils/readingBookForm.js'
 import { createReadingBook, listReadingBooksWithCovers } from '../services/readingBooks.js'
 import {
@@ -65,6 +66,59 @@ let gridResizeObserver = null
 
 const bookForm = reactive(emptyBookForm())
 const coverFile = ref(null)
+
+const bookDraftKey = computed(() => {
+  if (!userId.value || !bookFormOpen.value) return null
+  return formDraftKey('book-form', userId.value, 'new')
+})
+
+const { clearDraft: clearBookDraft, restoreDraft: restoreBookDraft } = useFormDraft(bookDraftKey, {
+  enabled: computed(() => Boolean(userId.value) && bookFormOpen.value && !isSaving.value),
+  getState: () => ({
+    title: bookForm.title,
+    author: bookForm.author,
+    collection: bookForm.collection,
+    isSaga: bookForm.isSaga,
+    dateStart: bookForm.dateStart,
+    dateEnd: bookForm.dateEnd,
+    rating: bookForm.rating,
+    genre: bookForm.genre,
+    extraTags: bookForm.extraTags,
+    pages: bookForm.pages,
+    publicationYear: bookForm.publicationYear,
+    comments: bookForm.comments,
+    quote: bookForm.quote,
+    spoil: bookForm.spoil,
+    imageMode: bookForm.imageMode,
+    imageUrl: bookForm.imageUrl,
+  }),
+  setState: (state) => {
+    if (!state || typeof state !== 'object') return
+    Object.assign(bookForm, emptyBookForm(), {
+      title: state.title ?? '',
+      author: state.author ?? '',
+      collection: state.collection ?? '',
+      isSaga: Boolean(state.isSaga),
+      dateStart: state.dateStart ?? '',
+      dateEnd: state.dateEnd ?? '',
+      rating: state.rating ?? null,
+      genre: state.genre ?? '',
+      extraTags: state.extraTags ?? '',
+      pages: state.pages ?? '',
+      publicationYear: state.publicationYear ?? '',
+      comments: state.comments ?? '',
+      quote: state.quote ?? '',
+      spoil: state.spoil ?? '',
+      imageMode: state.imageMode === 'url' ? 'url' : 'upload',
+      imageUrl: state.imageUrl ?? '',
+    })
+    coverFile.value = null
+    revokeCoverPreview()
+    if (bookForm.imageMode === 'url' && bookForm.imageUrl.trim()) {
+      coverPreviewUrl.value = bookForm.imageUrl.trim()
+    }
+  },
+})
 
 const booksPerPage = computed(() => Math.max(2, gridColumnCount.value) * GRID_ROWS)
 
@@ -187,13 +241,16 @@ function resetCoverSelection() {
   if (coverFileInputRef.value) coverFileInputRef.value.value = ''
 }
 
-function openBookForm() {
+async function openBookForm() {
   Object.assign(bookForm, emptyBookForm())
   resetCoverSelection()
   bookFormOpen.value = true
+  await nextTick()
+  restoreBookDraft()
 }
 
 function closeBookForm() {
+  clearBookDraft()
   bookFormOpen.value = false
   Object.assign(bookForm, emptyBookForm())
   resetCoverSelection()
@@ -285,6 +342,7 @@ async function submitBookForm() {
       file: bookForm.imageMode === 'upload' ? coverFile.value : null,
       imageUrl: bookForm.imageMode === 'url' ? bookForm.imageUrl : null,
     })
+    clearBookDraft()
     closeBookForm()
     await loadBooks()
     await loadCollections()

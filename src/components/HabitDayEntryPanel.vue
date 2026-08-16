@@ -1,11 +1,12 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import { listHabitLogsForRange, updateHabitLogDetails, upsertHabitLog } from '../services/habitLogs.js'
 import RichTextNoteEditor from './RichTextNoteEditor.vue'
 import { isRichNoteEmpty, sanitizeRichNoteHtml } from '../utils/sanitizeHtml.js'
 import { HABIT_VALUE_TYPE } from '../constants/habitOptions.js'
+import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import {
   addDaysISO,
   iterateISODateRange,
@@ -80,6 +81,22 @@ const weekPage = ref(0)
 const monthPage = ref(0)
 const yearPage = ref(0)
 
+const habitDetailsDraftKey = computed(() => {
+  if (!props.userId || !props.habit?.id || !selectedDate.value || !detailsOpen.value) return null
+  return formDraftKey('habit-day-details', props.userId, props.habit.id, selectedDate.value)
+})
+
+const { clearDraft: clearHabitDetailsDraft, restoreDraft: restoreHabitDetailsDraft } = useFormDraft(
+  habitDetailsDraftKey,
+  {
+    enabled: computed(() => detailsOpen.value && !detailsSaving.value),
+    getState: () => detailsDraft.value,
+    setState: (state) => {
+      detailsDraft.value = typeof state === 'string' ? state : ''
+    },
+  },
+)
+
 const isBoolean = computed(() => props.habit.type_valeur === HABIT_VALUE_TYPE.BOOLEAN)
 
 const todayIso = computed(() => getLocalTodayISO())
@@ -108,11 +125,13 @@ function getSavedDetailsHtml() {
   return selectedDayLog.value?.details ?? ''
 }
 
-function openDetailsEditor() {
+async function openDetailsEditor() {
   if (detailsOpen.value) return
   detailsError.value = ''
   detailsDraft.value = getSavedDetailsHtml()
   detailsOpen.value = true
+  await nextTick()
+  restoreHabitDetailsDraft()
 }
 
 function closeDetailsEditor() {
@@ -122,6 +141,7 @@ function closeDetailsEditor() {
 }
 
 function cancelDetailsEditor() {
+  clearHabitDetailsDraft()
   closeDetailsEditor()
 }
 
@@ -168,6 +188,7 @@ async function saveDetails() {
       ...logsByDate.value,
       [selectedDate.value]: { ...row, date_jour: normalizeDateISO(row.date_jour) },
     }
+    clearHabitDetailsDraft()
     closeDetailsEditor()
   } catch (err) {
     console.error(err)

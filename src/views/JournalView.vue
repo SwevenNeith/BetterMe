@@ -1,9 +1,10 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import { listJournalEntries } from '../services/journalEntries.js'
 import { createJournalPrompt } from '../services/journalPrompts.js'
 
@@ -19,6 +20,22 @@ const promptFormOpen = ref(false)
 const promptText = ref('')
 const promptSaving = ref(false)
 const promptError = ref('')
+
+const promptDraftKey = computed(() => {
+  if (!userId.value || !promptFormOpen.value) return null
+  return formDraftKey('journal-prompt', userId.value, 'new')
+})
+
+const { clearDraft: clearPromptDraft, restoreDraft: restorePromptDraft } = useFormDraft(
+  promptDraftKey,
+  {
+    enabled: computed(() => Boolean(userId.value) && promptFormOpen.value && !promptSaving.value),
+    getState: () => promptText.value,
+    setState: (state) => {
+      promptText.value = typeof state === 'string' ? state : ''
+    },
+  },
+)
 
 const subtitle = computed(() => {
   const count = entries.value.length
@@ -59,10 +76,20 @@ function openEntry(entry) {
   router.push({ name: 'journal-entree', params: { entryId: entry.id } })
 }
 
-function togglePromptForm() {
-  promptFormOpen.value = !promptFormOpen.value
+async function togglePromptForm() {
+  if (promptFormOpen.value) {
+    clearPromptDraft()
+    promptFormOpen.value = false
+    promptText.value = ''
+    promptError.value = ''
+    return
+  }
+
+  promptFormOpen.value = true
   promptText.value = ''
   promptError.value = ''
+  await nextTick()
+  restorePromptDraft()
 }
 
 async function submitPrompt() {
@@ -74,6 +101,7 @@ async function submitPrompt() {
   promptError.value = ''
   try {
     await createJournalPrompt(supabase, userId.value, text)
+    clearPromptDraft()
     promptText.value = ''
     promptFormOpen.value = false
   } catch (err) {

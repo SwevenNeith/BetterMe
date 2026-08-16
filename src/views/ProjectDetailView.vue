@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ColorPickerField from '../components/ColorPickerField.vue'
 import EmojiPickerField from '../components/EmojiPickerField.vue'
@@ -13,6 +13,7 @@ import {
   PROJECT_RESET_PERIODE_OPTIONS,
 } from '../constants/projectProgress.js'
 import { supabase } from '../lib/supabase.js'
+import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import { listHabits } from '../services/habits.js'
 import { listHabitLogsForRange } from '../services/habitLogs.js'
 import {
@@ -89,6 +90,86 @@ const draggingStepKey = ref(null)
 const draggingSubstepKey = ref(null)
 
 const projectId = computed(() => route.params.projectId)
+
+const editPanelDraftKey = computed(() => {
+  if (!userId.value || !editPanel.value?.kind || !editPanel.value?.id) return null
+  return formDraftKey(
+    'project-edit',
+    userId.value,
+    editPanel.value.kind,
+    editPanel.value.id,
+  )
+})
+
+const stepFormDraftKey = computed(() => {
+  if (!userId.value || !stepFormOpen.value || !projectId.value) return null
+  return formDraftKey('project-step-new', userId.value, projectId.value)
+})
+
+const substepFormDraftKey = computed(() => {
+  if (!userId.value || !substepFormStepId.value) return null
+  return formDraftKey('project-substep-new', userId.value, substepFormStepId.value)
+})
+
+const { clearDraft: clearEditPanelDraft, restoreDraft: restoreEditPanelDraft } = useFormDraft(
+  editPanelDraftKey,
+  {
+    enabled: computed(() => Boolean(editPanel.value)),
+    getState: () => {
+      if (!editPanel.value) return null
+      return { ...editPanel.value }
+    },
+    setState: (state) => {
+      if (!state || typeof state !== 'object' || !editPanel.value) return
+      editPanel.value = {
+        ...editPanel.value,
+        ...state,
+        kind: editPanel.value.kind,
+        id: editPanel.value.id,
+      }
+    },
+  },
+)
+
+const { clearDraft: clearStepFormDraft, restoreDraft: restoreStepFormDraft } = useFormDraft(
+  stepFormDraftKey,
+  {
+    enabled: computed(() => stepFormOpen.value),
+    getState: () => ({
+      title: stepForm.title,
+      description: stepForm.description,
+      quantite_cible: stepForm.quantite_cible,
+      reset_periode: stepForm.reset_periode,
+    }),
+    setState: (state) => {
+      if (!state || typeof state !== 'object') return
+      stepForm.title = state.title ?? ''
+      stepForm.description = state.description ?? ''
+      stepForm.quantite_cible = state.quantite_cible ?? DEFAULT_QUANTITE_CIBLE
+      stepForm.reset_periode = state.reset_periode ?? DEFAULT_RESET_PERIODE
+    },
+  },
+)
+
+const { clearDraft: clearSubstepFormDraft, restoreDraft: restoreSubstepFormDraft } = useFormDraft(
+  substepFormDraftKey,
+  {
+    enabled: computed(() => Boolean(substepFormStepId.value)),
+    getState: () => ({
+      title: substepForm.title,
+      description: substepForm.description,
+      quantite_cible: substepForm.quantite_cible,
+      reset_periode: substepForm.reset_periode,
+    }),
+    setState: (state) => {
+      if (!state || typeof state !== 'object') return
+      substepForm.title = state.title ?? ''
+      substepForm.description = state.description ?? ''
+      substepForm.quantite_cible = state.quantite_cible ?? DEFAULT_QUANTITE_CIBLE
+      substepForm.reset_periode = state.reset_periode ?? DEFAULT_RESET_PERIODE
+    },
+  },
+)
 
 const isHabitLinked = computed(() => Boolean(project.value?.habit_id))
 
@@ -180,7 +261,7 @@ function editPanelTitle(kind) {
   return 'Modifier la sous-étape'
 }
 
-function openEdit(kind, item) {
+async function openEdit(kind, item) {
   editPanel.value = {
     kind,
     id: item.id,
@@ -192,23 +273,29 @@ function openEdit(kind, item) {
     quantite_cible: item.quantite_cible ?? DEFAULT_QUANTITE_CIBLE,
     reset_periode: item.reset_periode ?? DEFAULT_RESET_PERIODE,
   }
+  await nextTick()
+  restoreEditPanelDraft()
 }
 
 function closeEdit() {
+  clearEditPanelDraft()
   editPanel.value = null
   habitPickerOpen.value = false
 }
 
-function openStepForm() {
+async function openStepForm() {
   stepForm.title = ''
   stepForm.description = ''
   stepForm.quantite_cible = DEFAULT_QUANTITE_CIBLE
   stepForm.reset_periode = DEFAULT_RESET_PERIODE
   stepFormOpen.value = true
   substepFormStepId.value = null
+  await nextTick()
+  restoreStepFormDraft()
 }
 
 function closeStepForm() {
+  clearStepFormDraft()
   stepFormOpen.value = false
   stepForm.title = ''
   stepForm.description = ''
@@ -216,16 +303,19 @@ function closeStepForm() {
   stepForm.reset_periode = DEFAULT_RESET_PERIODE
 }
 
-function openSubstepForm(stepId) {
+async function openSubstepForm(stepId) {
   substepFormStepId.value = stepId
   substepForm.title = ''
   substepForm.description = ''
   substepForm.quantite_cible = DEFAULT_QUANTITE_CIBLE
   substepForm.reset_periode = DEFAULT_RESET_PERIODE
   stepFormOpen.value = false
+  await nextTick()
+  restoreSubstepFormDraft()
 }
 
 function closeSubstepForm() {
+  clearSubstepFormDraft()
   substepFormStepId.value = null
   substepForm.title = ''
   substepForm.description = ''
@@ -440,6 +530,7 @@ async function saveEditPanel() {
         }
       }
     }
+    clearEditPanelDraft()
     closeEdit()
   } catch (err) {
     console.error(err)
@@ -611,6 +702,7 @@ async function submitStepForm() {
       stepForm.quantite_cible,
       stepForm.reset_periode,
     )
+    clearStepFormDraft()
     closeStepForm()
     await loadProject()
   } catch (err) {
@@ -652,6 +744,7 @@ async function submitSubstepForm(stepId) {
       substepForm.quantite_cible,
       substepForm.reset_periode,
     )
+    clearSubstepFormDraft()
     closeSubstepForm()
     await loadProject()
   } catch (err) {

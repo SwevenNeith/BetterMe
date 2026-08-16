@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import ColorPickerField from '../components/ColorPickerField.vue'
 import EmojiPickerField from '../components/EmojiPickerField.vue'
 import { supabase } from '../lib/supabase.js'
@@ -17,6 +17,7 @@ import { syncProjectsListDoneStates } from '../services/projectDoneSync.js'
 import { purgeStaleCompletedProjectItems } from '../services/projectCleanup.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.PROJETS, undefined, { setDocumentTitle: true })
 
@@ -36,6 +37,33 @@ const projectForm = reactive({
   habit_id: null,
 })
 
+const projectDraftKey = computed(() => {
+  if (!userId.value || !projectFormOpen.value) return null
+  return formDraftKey('project-form', userId.value, 'new')
+})
+
+const { clearDraft: clearProjectDraft, restoreDraft: restoreProjectDraft } = useFormDraft(
+  projectDraftKey,
+  {
+    enabled: computed(() => Boolean(userId.value) && projectFormOpen.value),
+    getState: () => ({
+      title: projectForm.title,
+      description: projectForm.description,
+      icone: projectForm.icone,
+      couleur: projectForm.couleur,
+      habit_id: projectForm.habit_id,
+    }),
+    setState: (state) => {
+      if (!state || typeof state !== 'object') return
+      projectForm.title = state.title ?? ''
+      projectForm.description = state.description ?? ''
+      projectForm.icone = state.icone ?? null
+      projectForm.couleur = state.couleur ?? '#ad81be'
+      projectForm.habit_id = state.habit_id ?? null
+    },
+  },
+)
+
 const draggingProjectId = ref(null)
 
 const projectsSubtitle = computed(() => {
@@ -52,7 +80,7 @@ function hasDescription(text) {
   return String(text ?? '').trim().length > 0
 }
 
-function openProjectForm() {
+async function openProjectForm() {
   projectForm.title = ''
   projectForm.description = ''
   projectForm.icone = null
@@ -60,9 +88,12 @@ function openProjectForm() {
   projectForm.habit_id = null
   habitPickerOpen.value = false
   projectFormOpen.value = true
+  await nextTick()
+  restoreProjectDraft()
 }
 
 function closeProjectForm() {
+  clearProjectDraft()
   projectFormOpen.value = false
   habitPickerOpen.value = false
   projectForm.title = ''
@@ -138,6 +169,7 @@ async function submitProjectForm() {
       projectForm.couleur,
       projectForm.habit_id,
     )
+    clearProjectDraft()
     closeProjectForm()
     await loadProjects()
   } catch (err) {

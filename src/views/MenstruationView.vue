@@ -1,11 +1,12 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
 import { useMenstruationCacheStore } from '../stores/menstruationCache.js'
 import { withTimeout } from '../utils/asyncTimeout.js'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
+import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
 import MenstruationNaturalCycleCalendar from '../components/MenstruationNaturalCycleCalendar.vue'
 import MenstruationPiluleSymptoms from '../components/MenstruationPiluleSymptoms.vue'
@@ -65,6 +66,25 @@ const hasNaturelCycles = ref(false)
 const isSwitchingMode = ref(false)
 
 const form = ref(createEmptyOnboardingForm(localToday))
+
+const onboardingDraftKey = computed(() => {
+  if (!userId.value || hasCycleData.value || isLoading.value) return null
+  return formDraftKey('menstruation-onboarding', userId.value)
+})
+
+const { clearDraft: clearOnboardingDraft, restoreDraft: restoreOnboardingDraft } = useFormDraft(
+  onboardingDraftKey,
+  {
+    enabled: computed(
+      () => Boolean(userId.value) && !hasCycleData.value && !isLoading.value && !isSaving.value,
+    ),
+    getState: () => ({ ...form.value }),
+    setState: (state) => {
+      if (!state || typeof state !== 'object') return
+      form.value = { ...createEmptyOnboardingForm(localToday), ...state }
+    },
+  },
+)
 
 const cycleLengthDaysModel = computed({
   get: () => form.value.cycleLengthDays,
@@ -296,6 +316,11 @@ async function initMenstruationPage() {
   }
 
   await loadPage({ silent: cached })
+
+  if (!hasCycleData.value) {
+    await nextTick()
+    restoreOnboardingDraft()
+  }
 }
 
 const onSubmitRulesDates = async (payload) => {
@@ -344,6 +369,7 @@ const resetForm = () => {
 }
 
 const onCancel = () => {
+  clearOnboardingDraft()
   resetForm()
   saveError.value = ''
 }
@@ -438,6 +464,7 @@ const onSubmit = async () => {
         dureeRegles: rulesLen,
       })
 
+      clearOnboardingDraft()
       hasCycleData.value = true
       hasNaturelCycles.value = true
       cycleMode.value = 'naturel'
@@ -473,6 +500,7 @@ const onSubmit = async () => {
       dureeReglesUnknown: rulesDurationUnknown,
     })
 
+    clearOnboardingDraft()
     hasCycleData.value = true
     hasPiluleCycles.value = true
     cycleMode.value = 'pilule'

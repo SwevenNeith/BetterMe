@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
+import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import {
   listDailyReminders,
   saveDailyReminders,
@@ -190,14 +191,16 @@ function createEmptyReconfortForm() {
   }
 }
 
-function openReconfortForm() {
+async function openReconfortForm() {
   reconfortFormError.value = ''
   editingReconfortId.value = null
   reconfortForm.value = createEmptyReconfortForm()
   showReconfortForm.value = true
+  await nextTick()
+  restoreReconfortDraft()
 }
 
-function openReconfortFormForEdit(msg) {
+async function openReconfortFormForEdit(msg) {
   if (!msg?.id) return
   reconfortFormError.value = ''
   editingReconfortId.value = msg.id
@@ -207,9 +210,12 @@ function openReconfortFormForEdit(msg) {
     conditions: Array.isArray(msg.conditions) ? [...msg.conditions] : [],
   }
   showReconfortForm.value = true
+  await nextTick()
+  restoreReconfortDraft()
 }
 
 function closeReconfortForm() {
+  clearReconfortDraft()
   showReconfortForm.value = false
   editingReconfortId.value = null
   reconfortFormError.value = ''
@@ -263,6 +269,7 @@ const onSaveReconfortForm = async () => {
       reconfortSaveMessage.value = 'Message de réconfort enregistré.'
     }
 
+    clearReconfortDraft()
     closeReconfortForm()
     await loadReconfortMessages()
     setTimeout(() => {
@@ -333,6 +340,34 @@ const isLoading = ref(true)
 const isSaving = ref(false)
 const userId = ref(null)
 const reminders = ref([])
+
+const reconfortDraftKey = computed(() => {
+  if (!userId.value || !showReconfortForm.value) return null
+  return formDraftKey('reconfort-form', userId.value, editingReconfortId.value || 'new')
+})
+
+const { clearDraft: clearReconfortDraft, restoreDraft: restoreReconfortDraft } = useFormDraft(
+  reconfortDraftKey,
+  {
+    enabled: computed(
+      () => Boolean(userId.value) && showReconfortForm.value && !isSavingReconfort.value,
+    ),
+    getState: () => ({
+      who: reconfortForm.value.who,
+      message: reconfortForm.value.message,
+      conditions: [...(reconfortForm.value.conditions ?? [])],
+    }),
+    setState: (state) => {
+      if (!state || typeof state !== 'object') return
+      reconfortForm.value = {
+        who: state.who ?? '',
+        message: state.message ?? '',
+        conditions: Array.isArray(state.conditions) ? [...state.conditions] : [],
+      }
+    },
+  },
+)
+
 const saveMessage = ref('')
 const saveError = ref('')
 const isTestingPush = ref(false)
@@ -419,6 +454,48 @@ const oneTimeForm = ref({
   scheduled_date: localToday,
   scheduled_time: '12:00',
 })
+
+const oneTimeDraftKey = computed(() => {
+  if (!userId.value) return null
+  return formDraftKey('settings-one-time', userId.value)
+})
+
+const { clearDraft: clearOneTimeDraft, restoreDraft: restoreOneTimeDraft } = useFormDraft(
+  oneTimeDraftKey,
+  {
+    enabled: computed(() => Boolean(userId.value) && !isPlanningOneTime.value),
+    getState: () => ({ ...oneTimeForm.value }),
+    setState: (state) => {
+      if (!state || typeof state !== 'object') return
+      oneTimeForm.value = {
+        title: state.title ?? 'BetterMe',
+        body: state.body ?? '',
+        scheduled_date: state.scheduled_date || getLocalTodayISO(),
+        scheduled_time: state.scheduled_time || '12:00',
+      }
+    },
+  },
+)
+
+const standaloneTimerDraftKey = computed(() => {
+  if (!userId.value) return null
+  return formDraftKey('settings-standalone-timer', userId.value)
+})
+
+const { clearDraft: clearStandaloneTimerDraft, restoreDraft: restoreStandaloneTimerDraft } =
+  useFormDraft(standaloneTimerDraftKey, {
+    enabled: computed(() => Boolean(userId.value) && !isStartingTimer.value),
+    getState: () => ({ ...standaloneTimerForm.value }),
+    setState: (state) => {
+      if (!state || typeof state !== 'object') return
+      standaloneTimerForm.value = {
+        title: state.title ?? 'BetterMe',
+        body: state.body ?? '',
+        duration_hours: Number(state.duration_hours) || 0,
+        duration_minutes: Number(state.duration_minutes) || 15,
+      }
+    },
+  })
 
 function newEmptyReminder() {
   return {
@@ -562,6 +639,7 @@ const onPlanOneTimeReminder = async () => {
       scheduledTime: oneTimeForm.value.scheduled_time,
     })
     await loadOneTimeReminders()
+    clearOneTimeDraft()
     resetOneTimeForm()
     oneTimeMessage.value = `Rappel planifié pour le ${formatScheduledAtLocal(created.scheduled_at)}.`
     setTimeout(() => {
@@ -592,6 +670,7 @@ const onStartStandaloneTimer = async () => {
       durationMinutes: standaloneTimerForm.value.duration_minutes,
     })
     await loadStandaloneScheduled()
+    clearStandaloneTimerDraft()
     standaloneTimerForm.value = {
       title: 'BetterMe',
       body: '',
@@ -797,6 +876,9 @@ onMounted(async () => {
     return
   }
   userId.value = user.id
+  await nextTick()
+  restoreOneTimeDraft()
+  restoreStandaloneTimerDraft()
   await Promise.all([
     loadReminders(),
     loadOneTimeReminders(),

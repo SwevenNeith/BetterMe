@@ -21,6 +21,7 @@ import {
 } from '../constants/habitOptions.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.HABIT, undefined, { setDocumentTitle: true })
 
@@ -101,6 +102,29 @@ function createEmptyForm() {
 }
 
 const habitForm = ref(createEmptyForm())
+
+const habitDraftKey = computed(() => {
+  if (!userId.value || !showForm.value) return null
+  return formDraftKey('habit-form', userId.value, editingHabitId.value || 'new')
+})
+
+const { clearDraft: clearHabitDraft, restoreDraft: restoreHabitDraft } = useFormDraft(habitDraftKey, {
+  enabled: computed(() => Boolean(userId.value) && showForm.value && !isSaving.value),
+  getState: () => ({ ...habitForm.value }),
+  setState: (state) => {
+    if (!state || typeof state !== 'object') return
+    const jours = Array.isArray(state.jours_actifs) ? [...state.jours_actifs] : []
+    habitForm.value = {
+      ...createEmptyForm(),
+      ...state,
+      jours_actifs: jours,
+    }
+    // Le watch sur frequence peut réinitialiser jours_actifs : on les réapplique.
+    void nextTick(() => {
+      habitForm.value.jours_actifs = jours
+    })
+  },
+})
 
 const showUnitField = computed(() => habitForm.value.type_valeur !== HABIT_VALUE_TYPE.BOOLEAN)
 
@@ -222,25 +246,30 @@ function habitToForm(habit) {
   }
 }
 
-function openForm() {
+async function openForm() {
   editingHabitId.value = null
   habitForm.value = createEmptyForm()
   formError.value = ''
   saveMessage.value = ''
   manageView.value = null
   showForm.value = true
+  await nextTick()
+  restoreHabitDraft()
 }
 
-function openEditForm(habit) {
+async function openEditForm(habit) {
   editingHabitId.value = habit.id
   habitForm.value = habitToForm(habit)
   formError.value = ''
   saveMessage.value = ''
   manageView.value = null
   showForm.value = true
+  await nextTick()
+  restoreHabitDraft()
 }
 
 function closeForm() {
+  clearHabitDraft()
   showForm.value = false
   editingHabitId.value = null
   formError.value = ''
@@ -382,6 +411,7 @@ async function onSaveHabit() {
     if (editingHabitId.value) {
       activeHabitId.value = editingHabitId.value
     }
+    clearHabitDraft()
     showForm.value = false
     editingHabitId.value = null
     habitForm.value = createEmptyForm()

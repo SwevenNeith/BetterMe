@@ -72,6 +72,7 @@ import { isRecurringTodoFrequency } from '../utils/todoPlanningDates.js'
 import '../styles/todo-frequency.css'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.TODO, undefined, { setDocumentTitle: true })
 
@@ -116,6 +117,39 @@ const todoForm = reactive({
   date_echeance: getLocalTodayISO(),
   is_promesse: false,
   quantite_cible: 0,
+})
+
+const todoDraftKey = computed(() => {
+  if (!userId.value || !formOpen.value) return null
+  return formDraftKey('todo-form', userId.value, editingItemId.value || 'new')
+})
+
+const { clearDraft: clearTodoDraft, restoreDraft: restoreTodoDraft } = useFormDraft(todoDraftKey, {
+  enabled: computed(() => Boolean(userId.value) && formOpen.value && !isSaving.value),
+  getState: () => ({
+    todoForm: {
+      nom: todoForm.nom,
+      description: todoForm.description,
+      frequence: todoForm.frequence,
+      jour_semaine: todoForm.jour_semaine,
+      heure: todoForm.heure,
+      date_echeance: todoForm.date_echeance,
+      is_promesse: todoForm.is_promesse,
+      quantite_cible: todoForm.quantite_cible,
+    },
+    addToPlanning: addToPlanning.value,
+    planningForm: { ...planningForm },
+  }),
+  setState: (state) => {
+    if (!state || typeof state !== 'object') return
+    if (state.todoForm && typeof state.todoForm === 'object') {
+      Object.assign(todoForm, state.todoForm)
+    }
+    addToPlanning.value = Boolean(state.addToPlanning)
+    if (state.planningForm && typeof state.planningForm === 'object') {
+      Object.assign(planningForm, createDefaultPlanningForm(), state.planningForm)
+    }
+  },
 })
 
 const showWeekdayPicker = computed(() => todoForm.frequence === TODO_FREQUENCY.WEEKLY)
@@ -332,13 +366,15 @@ async function revealForm() {
   })
 }
 
-function openForm() {
+async function openForm() {
   resetForm()
   formOpen.value = true
+  await nextTick()
+  restoreTodoDraft()
   void revealForm()
 }
 
-function openEditForm(item) {
+async function openEditForm(item) {
   if (!item?.id) return
 
   resetPlanningForm()
@@ -355,11 +391,14 @@ function openEditForm(item) {
   editingPlanningEventCount.value = 0
   editingPlanningNextDate.value = ''
   formOpen.value = true
+  await nextTick()
+  restoreTodoDraft()
   void revealForm()
   void refreshEditingPlanningLink()
 }
 
 function closeForm() {
+  clearTodoDraft()
   formOpen.value = false
   resetForm()
 }
@@ -691,6 +730,7 @@ async function submitForm() {
       useTimetableCacheStore().$patch({ isValid: false })
     }
 
+    clearTodoDraft()
     closeForm()
     await loadData()
   } catch (err) {

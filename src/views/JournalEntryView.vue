@@ -1,11 +1,12 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import JournalEntryBook from '../components/JournalEntryBook.vue'
 import JournalPromptPickerModal from '../components/JournalPromptPickerModal.vue'
 import RichTextNoteEditor from '../components/RichTextNoteEditor.vue'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import { supabase } from '../lib/supabase.js'
 import {
   createJournalEntry,
@@ -49,6 +50,32 @@ const isCreateMode = computed(() => route.name === 'journal-nouveau')
 const currentEntryIndex = computed(() => entries.value.findIndex((entry) => entry.id === entryId.value))
 const canGoPrevEntry = computed(() => currentEntryIndex.value >= 0 && currentEntryIndex.value < entries.value.length - 1)
 const canGoNextEntry = computed(() => currentEntryIndex.value > 0)
+
+const journalDraftKey = computed(() => {
+  if (!userId.value || !isEditing.value) return null
+  return formDraftKey(
+    'journal-entry',
+    userId.value,
+    isCreateMode.value ? 'new' : entryId.value || 'unknown',
+  )
+})
+
+const { clearDraft: clearJournalDraft, restoreDraft: restoreJournalDraft } = useFormDraft(
+  journalDraftKey,
+  {
+    enabled: computed(() => Boolean(userId.value) && isEditing.value && !isLoading.value),
+    getState: () => ({
+      title: form.title,
+      contentHtml: form.contentHtml,
+      promptId: form.promptId,
+    }),
+    setState: (state) => {
+      form.title = state?.title ?? ''
+      form.contentHtml = state?.contentHtml ?? ''
+      form.promptId = state?.promptId ?? null
+    },
+  },
+)
 
 function resetFormFromEntry(entry) {
   form.title = entry?.title ?? ''
@@ -94,6 +121,8 @@ async function loadCurrentEntry() {
       currentEntry.value = null
       isEditing.value = true
       resetFormFromEntry(null)
+      await nextTick()
+      restoreJournalDraft()
       return
     }
 
@@ -166,12 +195,14 @@ async function saveEntry() {
   try {
     if (isCreateMode.value) {
       const created = await createJournalEntry(supabase, userId.value, form)
+      clearJournalDraft()
       await loadEntries()
       router.replace({ name: 'journal-entree', params: { entryId: created.id } })
       return
     }
 
     currentEntry.value = await updateJournalEntry(supabase, userId.value, entryId.value, form)
+    clearJournalDraft()
     await loadEntries()
     isEditing.value = false
   } catch (err) {
@@ -183,6 +214,7 @@ async function saveEntry() {
 }
 
 function cancelEdit() {
+  clearJournalDraft()
   if (isCreateMode.value) {
     returnToJournal()
     return
@@ -192,11 +224,13 @@ function cancelEdit() {
   isEditing.value = false
 }
 
-function startEdit() {
+async function startEdit() {
   if (!currentEntry.value) return
   resetFormFromEntry(currentEntry.value)
   errorMessage.value = ''
   isEditing.value = true
+  await nextTick()
+  restoreJournalDraft()
 }
 
 function askDeleteEntry() {
@@ -218,6 +252,7 @@ async function confirmDeleteEntry() {
   errorMessage.value = ''
   try {
     await deleteJournalEntry(supabase, userId.value, currentEntry.value.id)
+    clearJournalDraft()
     await loadEntries()
     deleteConfirmOpen.value = false
 

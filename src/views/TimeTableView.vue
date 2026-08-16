@@ -1,9 +1,10 @@
 <!-- eslint-disable no-useless-assignment -->
 <script setup>
-import { ref, computed, watch, onMounted, reactive } from 'vue'
+import { ref, computed, watch, onMounted, reactive, nextTick } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
 import { useTimetableCacheStore } from '../stores/timetableCache.js'
+import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import {
   notificationsActives,
   planifierNotificationActivite,
@@ -65,6 +66,70 @@ const newEventTimerMinutes = ref(30)
 const addToTodo = ref(false)
 const todoLinkedForm = reactive(createDefaultTodoLinkedForm())
 const todoPromesseLimits = ref({ perDay: 3, perWeek: 3 })
+const userId = ref(null)
+
+const eventDraftKey = computed(() => {
+  if (!userId.value || !isModalOpen.value) return null
+  return formDraftKey('timetable-event', userId.value, editingEventId.value || 'new')
+})
+
+const { clearDraft: clearEventDraft, restoreDraft: restoreEventDraft } = useFormDraft(eventDraftKey, {
+  enabled: computed(() => Boolean(userId.value) && isModalOpen.value),
+  getState: () => ({
+    title: newEventTitle.value,
+    detail: newEventDetail.value,
+    startTime: newEventStartTime.value,
+    endTime: newEventEndTime.value,
+    category: newEventCategory.value,
+    day: newEventDay.value,
+    dateEnd: newEventDateEnd.value,
+    allDay: newEventAllDay.value,
+    reminderEnabled: newEventReminderEnabled.value,
+    reminderHours: newEventReminderHours.value,
+    reminderMinutes: newEventReminderMinutes.value,
+    timerEnabled: newEventTimerEnabled.value,
+    timerHours: newEventTimerHours.value,
+    timerMinutes: newEventTimerMinutes.value,
+    addToTodo: addToTodo.value,
+    todoLinkedForm: { ...todoLinkedForm },
+  }),
+  setState: (state) => {
+    if (!state || typeof state !== 'object') return
+    newEventTitle.value = state.title ?? ''
+    newEventDetail.value = state.detail ?? ''
+    newEventStartTime.value = state.startTime ?? '10:00'
+    newEventEndTime.value = state.endTime ?? '11:30'
+    newEventCategory.value = state.category ?? 'Travail'
+    newEventDay.value = state.day ?? newEventDay.value
+    newEventDateEnd.value = state.dateEnd ?? ''
+    newEventAllDay.value = Boolean(state.allDay)
+    newEventReminderEnabled.value = Boolean(state.reminderEnabled)
+    newEventReminderHours.value = Number(state.reminderHours) || 0
+    newEventReminderMinutes.value = Number(state.reminderMinutes) || 0
+    newEventTimerEnabled.value = Boolean(state.timerEnabled)
+    newEventTimerHours.value = Number(state.timerHours) || 0
+    newEventTimerMinutes.value = Number(state.timerMinutes) || 30
+    addToTodo.value = Boolean(state.addToTodo)
+    if (state.todoLinkedForm && typeof state.todoLinkedForm === 'object') {
+      Object.assign(todoLinkedForm, createDefaultTodoLinkedForm(), state.todoLinkedForm)
+    }
+  },
+})
+
+async function ensureEventDraftUserId() {
+  if (userId.value) return userId.value
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (user) userId.value = user.id
+  return userId.value
+}
+
+async function restoreEventFormDraft() {
+  await ensureEventDraftUserId()
+  await nextTick()
+  restoreEventDraft()
+}
 
 const todoPromesseLimitHint = computed(
   () =>
@@ -166,11 +231,12 @@ function resetEventForm() {
 }
 
 function closeEventModal() {
+  clearEventDraft()
   isModalOpen.value = false
   resetEventForm()
 }
 
-function openEventForEdit(event) {
+async function openEventForEdit(event) {
   const original = userEvents.value.find((e) => e.id === event.id) ?? event
 
   resetTodoLinkedForm()
@@ -201,6 +267,7 @@ function openEventForEdit(event) {
   }
 
   isModalOpen.value = true
+  await restoreEventFormDraft()
 }
 
 const getReminderMinutesBefore = () => {
@@ -233,6 +300,7 @@ const openModalWithDefaultDate = async () => {
   resetTimerFields()
   await fetchEvents()
   isModalOpen.value = true
+  await restoreEventFormDraft()
 }
 
 // User-created events list, loaded from Supabase
@@ -247,7 +315,7 @@ const categoriesForPills = computed(() =>
   userCategories.value.filter((c) => c?.name),
 )
 
-const openModalWithHobby = (hobbyTitle) => {
+const openModalWithHobby = async (hobbyTitle) => {
   resetEventForm()
   newEventTitle.value = hobbyTitle
   newEventCategory.value = 'Hobbies'
@@ -262,6 +330,7 @@ const openModalWithHobby = (hobbyTitle) => {
   resetReminderFields()
   resetTimerFields()
   isModalOpen.value = true
+  await restoreEventFormDraft()
 }
 
 const handleDragStart = (event, hobbyTitle) => {
@@ -269,7 +338,7 @@ const handleDragStart = (event, hobbyTitle) => {
   event.dataTransfer.effectAllowed = 'copy'
 }
 
-const handleDrop = (event, dayIdx, startHour) => {
+const handleDrop = async (event, dayIdx, startHour) => {
   event.preventDefault()
   const hobbyTitle = event.dataTransfer.getData('text/plain')
   if (!hobbyTitle) return
@@ -295,6 +364,7 @@ const handleDrop = (event, dayIdx, startHour) => {
   resetTimerFields()
 
   isModalOpen.value = true
+  await restoreEventFormDraft()
 }
 
 watch(newEventAllDay, (allDay) => {
@@ -471,6 +541,8 @@ const fetchTimetableMeta = async (gen) => {
       hobbyQuickPicks.value = []
       return
     }
+
+    userId.value = user.id
 
     const { categories, hobbyPicks } = await loadTimetableMeta(supabase, user.id)
     if (gen !== timetableLoadGen) return
@@ -922,6 +994,7 @@ const handleAddEvent = async () => {
           hobbyQuickPicks: hobbyQuickPicks.value,
         })
         await fetchEvents({ silent: true })
+        clearEventDraft()
         closeEventModal()
         return
       }
@@ -1032,6 +1105,7 @@ const handleAddEvent = async () => {
       }
     }
 
+    clearEventDraft()
     closeEventModal()
   } catch (err) {
     console.error('Error saving event:', err)
