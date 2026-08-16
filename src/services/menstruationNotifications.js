@@ -5,7 +5,10 @@ import {
   deletePendingByKinds,
   insertPendingNotifications,
 } from './scheduledReminders.js'
-import { computeNaturalPhaseStartDates } from './menstruationCyclesNaturel.js'
+import {
+  COL_NATUREL,
+  computeNaturalPhaseStartDates,
+} from './menstruationCyclesNaturel.js'
 
 export const MENSTRUATION_KIND = {
   SPM_ESTIMEE: 'menstruation_spm_estimee',
@@ -138,6 +141,9 @@ export const PILULE_MENSTRUATION_KINDS = [
   MENSTRUATION_KIND.REGLES_ESTIMEES,
 ]
 
+/** SPM uniquement — le kind règles estimées est partagé avec le cycle naturel. */
+export const PILULE_SPM_KINDS = [MENSTRUATION_KIND.SPM_ESTIMEE]
+
 export const NATURAL_MENSTRUATION_KINDS = [
   MENSTRUATION_KIND.PHASE_FOLLICULAIRE,
   MENSTRUATION_KIND.PHASE_OVULATOIRE,
@@ -146,6 +152,10 @@ export const NATURAL_MENSTRUATION_KINDS = [
 
 export async function clearPiluleMenstruationNotifications(userId) {
   await deletePendingByKinds(supabase, userId, PILULE_MENSTRUATION_KINDS)
+}
+
+export async function clearPiluleSpmNotifications(userId) {
+  await deletePendingByKinds(supabase, userId, PILULE_SPM_KINDS)
 }
 
 export async function clearNaturalMenstruationNotifications(userId) {
@@ -162,7 +172,8 @@ export async function rescheduleMenstruationNotificationsByMode(
   { cyclesPilule = [], cyclesNaturel = [], settings },
 ) {
   if (cycleMode === 'naturel') {
-    await clearPiluleMenstruationNotifications(userId)
+    // Ne pas effacer REGLES_ESTIMEES ici : replanifié juste après pour le mode naturel
+    await clearPiluleSpmNotifications(userId)
     await rescheduleMenstruationNaturalPhaseNotifications(userId, cyclesNaturel, settings)
     return
   }
@@ -297,6 +308,36 @@ export async function rescheduleMenstruationNaturalPhaseNotifications(userId, na
           kind: MENSTRUATION_KIND.PHASE_LUTEALE,
           title: 'BetterMe - Phase lutéale',
           body: '🌙 Tu entres en phase lutéale aujourd’hui.',
+          scheduled_at: when.toISOString(),
+        })
+      }
+      return rows
+    },
+  )
+
+  await syncMenstruationKindNotifications(
+    userId,
+    MENSTRUATION_KIND.REGLES_ESTIMEES,
+    settings.menstruation_notify_regles_estimees,
+    () => {
+      const rows = []
+      const seenDates = new Set()
+      for (const cycle of naturalCycles || []) {
+        const dateEstimee =
+          cycle[COL_NATUREL.dateDebutReglesEstimee] ||
+          cycle[COL_NATUREL.dateProchainesReglesEstimee]
+        if (!dateEstimee) continue
+        const dateKey = String(dateEstimee).slice(0, 10)
+        if (seenDates.has(dateKey)) continue
+        seenDates.add(dateKey)
+        const when = dateTimeLocalToDate(dateKey, hhmm)
+        if (when.getTime() <= now) continue
+        rows.push({
+          user_id: userId,
+          event_id: null,
+          kind: MENSTRUATION_KIND.REGLES_ESTIMEES,
+          title: 'BetterMe - Règles',
+          body: '🩸 Tes règles devraient commencer aujourd’hui.',
           scheduled_at: when.toISOString(),
         })
       }

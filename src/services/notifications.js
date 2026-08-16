@@ -2,6 +2,7 @@
 import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase.js'
 import {
   dateTimeLocalToDate,
+  deletePendingActiviteNotifications,
   deletePendingScheduledDuplicate,
   deletePendingTimerEndNotifications,
   deletePendingTimerStartNotifications,
@@ -310,6 +311,10 @@ export async function planifierNotificationActivite(userId, activite) {
 
   if (activite.eventId) {
     await supprimerRappelsEvenement(activite.eventId)
+    await deletePendingActiviteNotifications(supabase, {
+      eventId: activite.eventId,
+      userId,
+    })
   }
 
   const heureActivite =
@@ -325,15 +330,31 @@ export async function planifierNotificationActivite(userId, activite) {
   }
 
   const delaiLabel = activite.delaiLabel ?? formatDelaiDepuisMinutes(minutesAvant)
+  const scheduledAtIso = heureNotification.toISOString()
+  const title = 'BetterMe - Rappel'
+  const body = `Dans ${delaiLabel} : ${activite.nom}`
 
-  return callEdgeFunction({
-    type: 'activite',
-    userId,
-    eventId: activite.eventId,
-    title: 'BetterMe - Rappel',
-    body: `Dans ${delaiLabel} : ${activite.nom}`,
-    scheduledAt: heureNotification.toISOString(),
+  await deletePendingScheduledDuplicate(supabase, userId, {
+    scheduledAt: scheduledAtIso,
+    kind: SCHEDULED_KIND.ACTIVITE,
+    eventId: activite.eventId ?? null,
   })
+
+  const { error } = await supabase.from('scheduled_notifications').insert({
+    user_id: userId,
+    event_id: activite.eventId ?? null,
+    title,
+    body,
+    scheduled_at: scheduledAtIso,
+    kind: SCHEDULED_KIND.ACTIVITE,
+    sent: false,
+  })
+
+  if (error) {
+    console.error('planifierNotificationActivite:', error)
+    return false
+  }
+  return true
 }
 
 /** Supprime les rappels planifiés non envoyés liés à un événement */
@@ -407,34 +428,62 @@ export async function planifierNotificationFinTimer(
 
   const start = dateTimeLocalToDate(dateStart, timeStart)
   const heureFin = new Date(start.getTime() + durationMinutes * 60 * 1000)
+  const scheduledAtIso = heureFin.toISOString()
+  const title = `⏱️ ${label}`
 
   await deletePendingTimerEndNotifications(supabase, { eventId, userId })
-
-  return callEdgeFunction({
-    type: 'timer',
-    userId,
-    eventId,
+  await deletePendingScheduledDuplicate(supabase, userId, {
+    scheduledAt: scheduledAtIso,
     kind: SCHEDULED_KIND.TIMER,
-    title: `⏱️ ${label}`,
-    body,
-    scheduledAt: heureFin.toISOString(),
+    eventId: eventId ?? null,
   })
+
+  const { error } = await supabase.from('scheduled_notifications').insert({
+    user_id: userId,
+    event_id: eventId ?? null,
+    title,
+    body,
+    scheduled_at: scheduledAtIso,
+    kind: SCHEDULED_KIND.TIMER,
+    sent: false,
+  })
+
+  if (error) {
+    console.error('planifierNotificationFinTimer:', error)
+    return false
+  }
+  return true
 }
 
 /** @deprecated Préférer createStandaloneTimer (Réglages) */
 export async function lancerTimer(userId, dureeEnMinutes, label) {
   const heureFin = new Date(Date.now() + dureeEnMinutes * 60 * 1000)
+  const scheduledAtIso = heureFin.toISOString()
+  const title = `⏱️ ${label}`
+  const body = 'Le timer est terminé !'
 
   await deletePendingTimerEndNotifications(supabase, { userId })
-
-  return callEdgeFunction({
-    type: 'timer',
-    userId,
+  await deletePendingScheduledDuplicate(supabase, userId, {
+    scheduledAt: scheduledAtIso,
     kind: SCHEDULED_KIND.TIMER,
-    title: `⏱️ ${label}`,
-    body: 'Le timer est terminé !',
-    scheduledAt: heureFin.toISOString(),
+    eventId: null,
   })
+
+  const { error } = await supabase.from('scheduled_notifications').insert({
+    user_id: userId,
+    event_id: null,
+    title,
+    body,
+    scheduled_at: scheduledAtIso,
+    kind: SCHEDULED_KIND.TIMER,
+    sent: false,
+  })
+
+  if (error) {
+    console.error('lancerTimer:', error)
+    return false
+  }
+  return true
 }
 
 /** Déclenche l'envoi des rappels dus (quotidiens + planifiés). À appeler chaque minute (cron serveur ou app ouverte). */

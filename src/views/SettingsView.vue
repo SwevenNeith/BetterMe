@@ -1594,7 +1594,7 @@ onUnmounted(() => {
               v-model="menstruationNotifSettings.menstruation_notify_regles_estimees"
               type="checkbox"
             />
-            <span>Notifier le début estimé des règles</span>
+            <span>Notifier le début estimé des règles (pilule et naturel)</span>
           </label>
           <label class="choice-check choice-check--card">
             <input

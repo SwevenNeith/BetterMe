@@ -278,8 +278,40 @@ function subscriptionsForUser(
   subscriptions: Array<{ user_id?: string | null; subscription: unknown }>,
   userId: string | null | undefined,
 ) {
-  if (!userId) return subscriptions
+  if (!userId) return []
   return subscriptions.filter((row) => row.user_id === userId)
+}
+
+function uniqueSubscriptionsByEndpoint(
+  rows: Array<{ user_id?: string | null; subscription: unknown }>,
+) {
+  const seen = new Set<string>()
+  const unique: Array<{ user_id?: string | null; subscription: unknown }> = []
+  for (const row of rows) {
+    const endpoint =
+      row?.subscription &&
+      typeof row.subscription === 'object' &&
+      row.subscription !== null &&
+      'endpoint' in row.subscription
+        ? String((row.subscription as { endpoint?: string }).endpoint ?? '')
+        : ''
+    if (endpoint) {
+      if (seen.has(endpoint)) continue
+      seen.add(endpoint)
+    }
+    unique.push(row)
+  }
+  return unique
+}
+
+function notificationPushTag(notif: {
+  id?: string | number
+  kind?: string | null
+  event_id?: string | null
+}) {
+  if (notif.event_id && notif.kind) return `betterme-${notif.kind}-${notif.event_id}`
+  if (notif.kind) return `betterme-${notif.kind}-${notif.id ?? 'x'}`
+  return `betterme-${notif.id ?? 'default'}`
 }
 
 Deno.serve(async (req) => {
@@ -292,7 +324,16 @@ Deno.serve(async (req) => {
     const body = await req.json()
     console.log('Body reçu :', JSON.stringify(body))
 
-    const { type, title, body: msgBody, scheduledAt, heureRappel } = body
+    const {
+      type,
+      title,
+      body: msgBody,
+      scheduledAt,
+      heureRappel,
+      userId,
+      eventId,
+      kind,
+    } = body
 
     const { data: subscriptions, error } = await supabase
       .from('push_subscriptions')
@@ -322,9 +363,36 @@ Deno.serve(async (req) => {
       }
     } else if (type === 'activite' || type === 'timer') {
       // Stocke la notification planifiée, le cron l'enverra au bon moment
+      const resolvedKind = kind || (type === 'timer' ? 'timer' : 'activite')
+
+      if (eventId) {
+        await supabase
+          .from('scheduled_notifications')
+          .delete()
+          .eq('event_id', eventId)
+          .eq('sent', false)
+          .eq('kind', resolvedKind)
+      } else if (userId) {
+        await supabase
+          .from('scheduled_notifications')
+          .delete()
+          .eq('user_id', userId)
+          .is('event_id', null)
+          .eq('sent', false)
+          .eq('kind', resolvedKind)
+      }
+
       const { error: insertError } = await supabase
         .from('scheduled_notifications')
-        .insert({ title, body: msgBody, scheduled_at: scheduledAt })
+        .insert({
+          user_id: userId ?? null,
+          event_id: eventId ?? null,
+          kind: resolvedKind,
+          title,
+          body: msgBody,
+          scheduled_at: scheduledAt,
+          sent: false,
+        })
 
       if (insertError) {
         console.error('Erreur insertion scheduled_notification :', insertError)
@@ -365,28 +433,42 @@ Deno.serve(async (req) => {
       }
 
       for (const notif of notificationsAEnvoyer ?? []) {
-        const targets = subscriptionsForUser(subscriptions ?? [], notif.user_id)
-        if (!targets.length) {
-          console.log('Aucune subscription pour', notif.user_id ?? 'tous')
+        // Verrou optimiste : un seul cron (pg_cron ou client) envoie la notif
+        const { data: claimed, error: claimError } = await supabase
+          .from('scheduled_notifications')
+          .update({ sent: true })
+          .eq('id', notif.id)
+          .eq('sent', false)
+          .select('id')
+          .maybeSingle()
+
+        if (claimError) {
+          console.error('Erreur claim notification :', claimError)
+          continue
         }
+        if (!claimed) continue
+
+        const targets = uniqueSubscriptionsByEndpoint(
+          subscriptionsForUser(subscriptions ?? [], notif.user_id),
+        )
+        if (!targets.length) {
+          console.log('Aucune subscription pour', notif.user_id ?? 'inconnu')
+        }
+
+        const pushPayload = JSON.stringify({
+          title: notif.title,
+          body: notif.body,
+          tag: notificationPushTag(notif),
+        })
 
         for (const row of targets) {
           try {
-            await webpush.sendNotification(
-              row.subscription,
-              JSON.stringify({
-                title: notif.title,
-                body: notif.body,
-              }),
-            )
+            await webpush.sendNotification(row.subscription, pushPayload)
             console.log('Notification planifiée envoyée :', notif.id)
           } catch (e) {
             console.error('Erreur envoi notification planifiée :', e)
           }
         }
-
-        // Marque comme envoyée pour ne pas renvoyer
-        await supabase.from('scheduled_notifications').update({ sent: true }).eq('id', notif.id)
 
         if (notif.kind === 'reconfort' && notif.user_id) {
           const sentDate =
@@ -406,8 +488,8 @@ Deno.serve(async (req) => {
               console.error('Mise à jour last_sent (reconfort_id) :', reconfortError)
             }
           } else {
-            const title = (notif.title || '').trim()
-            const body = (notif.body || '').trim()
+            const notifTitle = (notif.title || '').trim()
+            const notifBody = (notif.body || '').trim()
             const { data: rows, error: listError } = await supabase
               .from('reconfort')
               .select('id, qui, message, last_sent')
@@ -418,8 +500,8 @@ Deno.serve(async (req) => {
             } else {
               const match = (rows ?? []).find(
                 (row) =>
-                  (row.qui || '').trim() === title &&
-                  (row.message || '').trim() === body &&
+                  (row.qui || '').trim() === notifTitle &&
+                  (row.message || '').trim() === notifBody &&
                   (!row.last_sent || row.last_sent < sentDate),
               )
               if (match?.id) {

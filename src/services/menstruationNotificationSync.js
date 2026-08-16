@@ -6,6 +6,7 @@ import {
   loadMenstruationNotifSettings,
   rescheduleMenstruationNotificationsByMode,
   clearPiluleMenstruationNotifications,
+  clearPiluleSpmNotifications,
   clearNaturalMenstruationNotifications,
 } from './menstruationNotifications.js'
 
@@ -52,7 +53,8 @@ export async function purgeStaleMenstruationNotificationsOnStartup(userId) {
       const { cycleMode } = await resolveCycleModeForUser(userId)
 
       if (cycleMode === 'naturel') {
-        await clearPiluleMenstruationNotifications(userId)
+        // SPM pilule uniquement — garder / laisser replanifier les règles estimées naturelles
+        await clearPiluleSpmNotifications(userId)
       } else if (cycleMode === 'pilule') {
         await clearNaturalMenstruationNotifications(userId)
       } else {

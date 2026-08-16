@@ -5,6 +5,7 @@ const LEGACY_TIMER_BODY_MARKER = '__betterme_kind:timer__'
 
 export const SCHEDULED_KIND = {
   PONCTUEL: 'ponctuel',
+  ACTIVITE: 'activite',
   TIMER: 'timer',
   TIMER_START: 'timer_start',
   RECONFORT: 'reconfort',
@@ -385,6 +386,7 @@ export async function deletePendingTimerStartNotifications(supabase, { eventId, 
       .eq('event_id', eventId)
       .eq('sent', false)
       .like('body', "C'est parti ! Timer de%")
+    return
   }
 
   if (userId) {
@@ -392,6 +394,7 @@ export async function deletePendingTimerStartNotifications(supabase, { eventId, 
       .from('scheduled_notifications')
       .delete()
       .eq('user_id', userId)
+      .is('event_id', null)
       .eq('sent', false)
       .eq('kind', SCHEDULED_KIND.TIMER_START)
 
@@ -399,8 +402,40 @@ export async function deletePendingTimerStartNotifications(supabase, { eventId, 
       .from('scheduled_notifications')
       .delete()
       .eq('user_id', userId)
+      .is('event_id', null)
       .eq('sent', false)
       .like('body', "C'est parti ! Timer de%")
+  }
+}
+
+/** Supprime les rappels d’activité (EDT) non envoyés pour un événement. */
+export async function deletePendingActiviteNotifications(supabase, { eventId, userId }) {
+  if (eventId) {
+    await supabase
+      .from('scheduled_notifications')
+      .delete()
+      .eq('event_id', eventId)
+      .eq('sent', false)
+      .eq('kind', SCHEDULED_KIND.ACTIVITE)
+
+    // Anciennes lignes créées via Edge sans kind / event_id fiable
+    await supabase
+      .from('scheduled_notifications')
+      .delete()
+      .eq('event_id', eventId)
+      .eq('sent', false)
+      .like('title', 'BetterMe - Rappel%')
+    return
+  }
+
+  if (userId) {
+    await supabase
+      .from('scheduled_notifications')
+      .delete()
+      .eq('user_id', userId)
+      .is('event_id', null)
+      .eq('sent', false)
+      .eq('kind', SCHEDULED_KIND.ACTIVITE)
   }
 }
 
