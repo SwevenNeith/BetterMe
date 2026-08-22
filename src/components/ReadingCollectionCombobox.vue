@@ -18,6 +18,19 @@ const props = defineProps({
     type: String,
     default: 'WishList, En cours…',
   },
+  emptyMessage: {
+    type: String,
+    default: 'Aucune collection',
+  },
+  toggleAriaLabel: {
+    type: String,
+    default: 'Ouvrir les collections',
+  },
+  appearance: {
+    type: String,
+    default: 'reading',
+    validator: (value) => ['reading', 'form'].includes(value),
+  },
   autofocus: {
     type: Boolean,
     default: false,
@@ -148,13 +161,23 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="rootRef" class="reading-collection-combo" :class="{ 'reading-collection-combo--open': open }">
+  <div
+    ref="rootRef"
+    class="reading-collection-combo"
+    :class="{
+      'reading-collection-combo--open': open,
+      'reading-collection-combo--form': appearance === 'form',
+    }"
+  >
     <div class="reading-collection-combo__row">
       <input
         ref="inputRef"
         v-model="inputValue"
         type="text"
-        class="reading-fiche-input reading-collection-combo__input"
+        :class="[
+          'reading-collection-combo__input',
+          appearance === 'reading' ? 'reading-fiche-input' : 'reading-collection-combo__input--form',
+        ]"
         maxlength="120"
         :placeholder="placeholder"
         :disabled="disabled"
@@ -169,7 +192,7 @@ onUnmounted(() => {
         class="reading-collection-combo__toggle"
         :disabled="disabled"
         :aria-expanded="open"
-        aria-label="Ouvrir les collections"
+        :aria-label="toggleAriaLabel"
         @mousedown.prevent
         @click="open ? closeDropdown() : openDropdown()"
       >
@@ -197,7 +220,7 @@ onUnmounted(() => {
         Créer « {{ inputValue.trim() }} »
       </p>
       <p v-else-if="!filteredCollections.length" class="reading-collection-combo__empty">
-        Aucune collection
+        {{ emptyMessage }}
       </p>
     </div>
   </div>
@@ -218,6 +241,41 @@ onUnmounted(() => {
 .reading-collection-combo__input {
   flex: 1;
   min-width: 0;
+}
+
+.reading-collection-combo--form .reading-collection-combo__row {
+  gap: 0;
+}
+
+.reading-collection-combo--form .reading-collection-combo__input--form {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px 0 0 10px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  border-right: none;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2c3e50;
+  font: inherit;
+}
+
+.reading-collection-combo--form .reading-collection-combo__input--form:focus {
+  outline: none;
+  border-color: rgba(173, 129, 190, 0.55);
+  box-shadow: 0 0 0 2px rgba(173, 129, 190, 0.18);
+}
+
+.reading-collection-combo--form .reading-collection-combo__toggle {
+  width: 2.5rem;
+  border-radius: 0 10px 10px 0;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  border-left: none;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.reading-collection-combo--form.reading-collection-combo--open .reading-collection-combo__input--form,
+.reading-collection-combo--form.reading-collection-combo--open .reading-collection-combo__toggle {
+  border-color: rgba(173, 129, 190, 0.55);
 }
 
 .reading-collection-combo__toggle {
@@ -284,6 +342,13 @@ onUnmounted(() => {
 }
 
 @media (prefers-color-scheme: dark) {
+  .reading-collection-combo--form .reading-collection-combo__input--form,
+  .reading-collection-combo--form .reading-collection-combo__toggle {
+    background: rgba(35, 30, 48, 0.9);
+    border-color: rgba(213, 181, 234, 0.28);
+    color: #f0e8f8;
+  }
+
   .reading-collection-combo__toggle {
     background: rgba(35, 30, 48, 0.95);
     border-color: rgba(173, 129, 190, 0.4);
