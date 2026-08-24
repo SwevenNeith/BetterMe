@@ -73,6 +73,12 @@ const journalLink = {
   icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path><path d="M8 7h8"></path><path d="M8 11h8"></path><path d="M8 15h5"></path></svg>`,
 }
 
+const dictionnaireLink = {
+  name: 'Dictionnaire',
+  path: '/dictionnaire',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>`,
+}
+
 const habitTrackerLink = {
   name: 'Habit Tracker',
   path: '/habit-tracker',
@@ -115,6 +121,7 @@ const isActive = (path) => {
   if (path === '/lecture') return route.path === path || route.path.startsWith('/lecture/')
   if (path === '/ressources') return route.path === path || route.path.startsWith('/ressources/')
   if (path === '/journal') return route.path === path || route.path.startsWith('/journal/')
+  if (path === '/dictionnaire') return route.path === path || route.path.startsWith('/dictionnaire/')
   return route.path === path
 }
 
@@ -168,6 +175,7 @@ const defaultSidebarOrder = [
   SIDEBAR_ITEM_IDS.LECTURE,
   SIDEBAR_ITEM_IDS.RESSOURCES,
   SIDEBAR_ITEM_IDS.JOURNAL,
+  SIDEBAR_ITEM_IDS.DICTIONNAIRE,
   SIDEBAR_ITEM_IDS.MENSTRUATION,
   SIDEBAR_ITEM_IDS.EXERCICES_GROUP,
 ]
@@ -180,6 +188,7 @@ const sidebarItemsById = {
   [SIDEBAR_ITEM_IDS.LECTURE]: lectureLink,
   [SIDEBAR_ITEM_IDS.RESSOURCES]: ressourcesLink,
   [SIDEBAR_ITEM_IDS.JOURNAL]: journalLink,
+  [SIDEBAR_ITEM_IDS.DICTIONNAIRE]: dictionnaireLink,
   [SIDEBAR_ITEM_IDS.HABIT]: habitTrackerLink,
   [SIDEBAR_ITEM_IDS.MENSTRUATION]: menstruationLink,
   [SIDEBAR_ITEM_IDS.EXERCICES_GROUP]: exercicesGroup,

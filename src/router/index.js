@@ -20,6 +20,7 @@ const ReadingBookDetailView = () => import('../views/ReadingBookDetailView.vue')
 const RessourcesView = () => import('../views/RessourcesView.vue')
 const JournalView = () => import('../views/JournalView.vue')
 const JournalEntryView = () => import('../views/JournalEntryView.vue')
+const DictionnaireView = () => import('../views/DictionnaireView.vue')
 const WorkspaceView = () => import('../views/WorkspaceView.vue')
 
 const CHUNK_RELOAD_KEY = 'betterme-chunk-reload'
@@ -106,6 +107,11 @@ function createAppChildRoutes(namePrefix = '') {
       path: 'journal/:entryId',
       name: n('journal-entree'),
       component: JournalEntryView,
+    },
+    {
+      path: 'dictionnaire',
+      name: n('dictionnaire'),
+      component: DictionnaireView,
     },
     {
       path: 'habit-tracker',

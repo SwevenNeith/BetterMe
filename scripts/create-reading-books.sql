@@ -30,6 +30,9 @@ CREATE INDEX IF NOT EXISTS reading_books_user_id_idx ON public.reading_books (us
 CREATE INDEX IF NOT EXISTS reading_books_user_id_created_at_idx
   ON public.reading_books (user_id, created_at DESC);
 
+CREATE UNIQUE INDEX IF NOT EXISTS reading_books_user_title_author_unique
+  ON public.reading_books (user_id, lower(trim(title)), lower(trim(author)));
+
 COMMENT ON TABLE public.reading_books IS 'Livres de la page Lecture';
 COMMENT ON COLUMN public.reading_books.cover_storage_path IS 'Couverture uploadée dans le bucket reading-covers';
 COMMENT ON COLUMN public.reading_books.cover_image_url IS 'URL externe de la couverture (si pas d''upload)';

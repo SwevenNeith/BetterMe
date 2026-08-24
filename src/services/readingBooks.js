@@ -16,6 +16,41 @@ const ALLOWED_MIME = new Set([
 const BOOK_SELECT =
   'id, user_id, title, author, collection, is_saga, date_start, date_end, rating, pages, publication_year, comments, quote, spoil, cover_storage_path, cover_image_url, tags, created_at'
 
+const DUPLICATE_BOOK_MESSAGE =
+  'Un livre avec le même titre et le même auteur existe déjà dans ta bibliothèque.'
+
+function normalizeBookIdentity(title, author) {
+  return {
+    title: String(title ?? '').trim().toLowerCase(),
+    author: String(author ?? '').trim().toLowerCase(),
+  }
+}
+
+function isUniqueViolation(error) {
+  return error?.code === '23505'
+}
+
+/**
+ * Empêche deux livres du même utilisateur d’avoir le même titre et le même auteur.
+ * @param {string|null} [excludeId]
+ */
+async function assertUniqueTitleAuthor(supabase, userId, title, author, excludeId = null) {
+  const target = normalizeBookIdentity(title, author)
+  if (!target.title) return
+
+  const { data, error } = await supabase.from(TABLE).select('id, title, author').eq('user_id', userId)
+
+  if (error) throw error
+
+  const duplicate = (data ?? []).some((row) => {
+    if (excludeId && row.id === excludeId) return false
+    const key = normalizeBookIdentity(row.title, row.author)
+    return key.title === target.title && key.author === target.author
+  })
+
+  if (duplicate) throw new Error(DUPLICATE_BOOK_MESSAGE)
+}
+
 function sanitizeFileName(name) {
   return (name || 'cover')
     .trim()
@@ -215,6 +250,10 @@ async function resolveCollectionName(supabase, userId, collection) {
 export async function createReadingBook(supabase, userId, input) {
   if (!userId) throw new Error('Utilisateur non connecté.')
 
+  const row = buildBookRowFromInput(input)
+  row.collection = await resolveCollectionName(supabase, userId, row.collection)
+  await assertUniqueTitleAuthor(supabase, userId, row.title, row.author)
+
   let coverStoragePath = null
   let coverImageUrl = null
 
@@ -223,9 +262,6 @@ export async function createReadingBook(supabase, userId, input) {
   } else if (input?.imageUrl) {
     coverImageUrl = assertImageUrl(input.imageUrl)
   }
-
-  const row = buildBookRowFromInput(input)
-  row.collection = await resolveCollectionName(supabase, userId, row.collection)
 
   const { data, error } = await supabase
     .from(TABLE)
@@ -242,6 +278,7 @@ export async function createReadingBook(supabase, userId, input) {
     if (coverStoragePath) {
       await supabase.storage.from(BUCKET).remove([coverStoragePath])
     }
+    if (isUniqueViolation(error)) throw new Error(DUPLICATE_BOOK_MESSAGE)
     throw error
   }
 
@@ -278,6 +315,7 @@ export async function updateReadingBook(supabase, userId, bookId, input) {
 
   const row = buildBookRowFromInput(input, existing)
   row.collection = await resolveCollectionName(supabase, userId, row.collection)
+  await assertUniqueTitleAuthor(supabase, userId, row.title, row.author, bookId)
 
   const oldStoragePath = existing.cover_storage_path
   let coverStoragePath = existing.cover_storage_path
@@ -313,6 +351,7 @@ export async function updateReadingBook(supabase, userId, bookId, input) {
     if (input?.file && coverStoragePath && coverStoragePath !== oldStoragePath) {
       await supabase.storage.from(BUCKET).remove([coverStoragePath])
     }
+    if (isUniqueViolation(error)) throw new Error(DUPLICATE_BOOK_MESSAGE)
     throw error
   }
 

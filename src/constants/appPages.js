@@ -8,6 +8,7 @@ export const APP_PAGE_IDS = {
   LECTURE: 'lecture',
   RESSOURCES: 'ressources',
   JOURNAL: 'journal',
+  DICTIONNAIRE: 'dictionnaire',
   MENSTRUATION: 'menstruation',
   EXERCICES_GROUP: 'exercices-group',
 }
@@ -24,6 +25,7 @@ export const APP_MAIN_PAGES = [
   { id: APP_PAGE_IDS.LECTURE, defaultLabel: 'Lecture' },
   { id: APP_PAGE_IDS.RESSOURCES, defaultLabel: 'Ressources' },
   { id: APP_PAGE_IDS.JOURNAL, defaultLabel: 'Journaling' },
+  { id: APP_PAGE_IDS.DICTIONNAIRE, defaultLabel: 'Dictionnaire' },
   { id: APP_PAGE_IDS.MENSTRUATION, defaultLabel: 'Menstruation' },
   { id: APP_PAGE_IDS.EXERCICES_GROUP, defaultLabel: 'Exercices' },
 ]
