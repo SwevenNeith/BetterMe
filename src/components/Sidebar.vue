@@ -185,6 +185,8 @@ const sidebarItemsById = {
   [SIDEBAR_ITEM_IDS.EXERCICES_GROUP]: exercicesGroup,
 }
 
+const WORKSPACE_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>`
+
 const FOLDER_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`
 
 /** @type {import('vue').Ref<Array<{type:'link',id:string}|{type:'folder',id:string,name:string,children:Array<{type:'link',id:string}>}>>} */
@@ -860,6 +862,14 @@ const goToExercices = () => {
   navigate(exercicesGroup.path)
 }
 
+const goToWorkspace = () => {
+  if (isActive('/plan-de-travail')) {
+    navigate('/dashboard')
+    return
+  }
+  navigate('/plan-de-travail')
+}
+
 const navigate = (path) => {
   router.push(path)
   isOpen.value = false
@@ -936,6 +946,16 @@ onUnmounted(() => {
       >
         <span class="nav-icon" v-html="FOLDER_ICON" aria-hidden="true"></span>
         <span class="sidebar-folder-create__plus" aria-hidden="true">+</span>
+      </button>
+      <button
+        type="button"
+        class="sidebar-workspace-btn"
+        :class="{ 'sidebar-workspace-btn--active': isActive('/plan-de-travail') }"
+        title="Plan de travail"
+        aria-label="Plan de travail"
+        @click="goToWorkspace"
+      >
+        <span class="nav-icon" v-html="WORKSPACE_ICON" aria-hidden="true"></span>
       </button>
     </div>
 
@@ -1501,6 +1521,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   align-items: center;
+  gap: 0.45rem;
   padding: 0.35rem 0.75rem 0;
 }
 
@@ -1543,6 +1564,43 @@ onUnmounted(() => {
   font-weight: 800;
   line-height: 1;
   color: #72a098;
+}
+
+.sidebar-workspace-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #ad81be;
+  cursor: pointer;
+  opacity: 0.78;
+  transition:
+    color 0.15s ease,
+    transform 0.15s ease,
+    opacity 0.15s ease,
+    background 0.15s ease;
+}
+
+.sidebar-workspace-btn:hover {
+  opacity: 1;
+  color: #9568a8;
+  transform: translateY(-1px);
+}
+
+.sidebar-workspace-btn--active {
+  opacity: 1;
+  color: #6b4f7c;
+  background: rgba(213, 181, 234, 0.28);
+}
+
+.sidebar-workspace-btn :deep(.sidebar-svg-icon) {
+  width: 15px;
+  height: 15px;
 }
 
 .nav-sidebar-folder {
@@ -1685,12 +1743,19 @@ onUnmounted(() => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .sidebar-folder-create {
+  .sidebar-folder-create,
+  .sidebar-workspace-btn {
     color: #d5b5ea;
   }
 
-  .sidebar-folder-create:hover {
+  .sidebar-folder-create:hover,
+  .sidebar-workspace-btn:hover {
     color: #e6d0f3;
+  }
+
+  .sidebar-workspace-btn--active {
+    color: #e8dcf5;
+    background: rgba(173, 129, 190, 0.28);
   }
 
   .nav-sidebar-folder__toggle {
@@ -2127,6 +2192,9 @@ onUnmounted(() => {
   }
   .sidebar--open {
     transform: translateX(0);
+  }
+  .sidebar-workspace-btn {
+    display: none;
   }
   .hamburger {
     display: flex;
