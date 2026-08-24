@@ -298,7 +298,7 @@ function detectIntensityPatterns(timeline, currentCycleId, todayISO) {
       jour_relatif_début: null,
       jour_relatif_fin: null,
       intensité_moyenne: currentAvg,
-      durée_moyenne: null,
+      durée_moyenne: baseline,
       direction,
       cycles_détectés: pastIds.length,
       cycles_total: pastIds.length,
@@ -348,7 +348,7 @@ function detectDurationPatterns(timeline, currentCycleId) {
       cluster: null,
       jour_relatif_début: null,
       jour_relatif_fin: null,
-      intensité_moyenne: null,
+      intensité_moyenne: baselineDur,
       durée_moyenne: currentDur,
       direction,
       cycles_détectés: pastIds.length,
@@ -501,10 +501,25 @@ export async function maybeRecalculateMenstruationPatterns(supabase, userId, typ
     return listMenstruationPatterns(supabase, userId, typeCycle)
   }
 
+  const existing = await listMenstruationPatterns(supabase, userId, typeCycle)
   const todayISO = getLocalTodayISO()
-  if (shouldRecalculatePatterns(cycles, todayISO, typeCycle)) {
+  const needsBaseline =
+    existing.some(
+      (p) =>
+        (p.type_pattern === PATTERN_TYPE.DURATION &&
+          p.durée_moyenne != null &&
+          p.intensité_moyenne == null) ||
+        (p.type_pattern === PATTERN_TYPE.INTENSITY &&
+          p.intensité_moyenne != null &&
+          p.durée_moyenne == null),
+    )
+  if (
+    !existing.length ||
+    needsBaseline ||
+    shouldRecalculatePatterns(cycles, todayISO, typeCycle)
+  ) {
     return recalculateMenstruationPatterns(supabase, userId, typeCycle, cycles)
   }
 
-  return listMenstruationPatterns(supabase, userId, typeCycle)
+  return existing
 }

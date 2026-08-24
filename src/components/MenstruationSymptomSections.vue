@@ -1,5 +1,6 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, watch } from 'vue'
+import { useMenstruationAccordions } from '../composables/useMenstruationAccordions.js'
 
 const props = defineProps({
   sections: {
@@ -18,40 +19,26 @@ const props = defineProps({
 
 const emit = defineEmits(['select-scale', 'select-enum', 'select-boolean', 'select-side'])
 
-const openSections = ref(new Set())
+const { isOpen: isAccordionOpen, toggle, ensureDefaults } = useMenstruationAccordions()
 
-function sectionsOpenKey(sections) {
-  return (sections ?? []).map((section) => `${section.id}:${section.isCurrent ? 1 : 0}`).join('|')
-}
+const currentSectionId = computed(
+  () => props.sections.find((section) => section.isCurrent)?.id ?? props.sections[0]?.id ?? '',
+)
 
 watch(
-  () => sectionsOpenKey(props.sections),
-  () => {
-    const sections = props.sections
-    const next = new Set()
-    for (const section of sections) {
-      if (section.isCurrent) next.add(section.id)
-    }
-    if (!next.size && sections[0]?.id) next.add(sections[0].id)
-
-    const prevKey = [...openSections.value].sort().join(',')
-    const nextKey = [...next].sort().join(',')
-    if (prevKey === nextKey) return
-
-    openSections.value = next
+  currentSectionId,
+  (id) => {
+    if (id) ensureDefaults({ symptomCurrentId: id })
   },
   { immediate: true },
 )
 
 function toggleSection(id) {
-  const next = new Set(openSections.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  openSections.value = next
+  toggle('symptom', id)
 }
 
 function isOpen(id) {
-  return openSections.value.has(id)
+  return isAccordionOpen('symptom', id)
 }
 
 function scaleRange(def) {

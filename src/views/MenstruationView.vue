@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
 import { useMenstruationCacheStore } from '../stores/menstruationCache.js'
@@ -36,11 +36,12 @@ import {
 import { rescheduleMenstruationPatternNotifications } from '../services/menstruationPatternNotifications.js'
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
 import {
+  listMenstruationPatterns,
   maybeRecalculateMenstruationPatterns,
   recalculateMenstruationPatterns,
 } from '../services/menstruationPatterns.js'
 import MenstruationPatternsPanel from '../components/MenstruationPatternsPanel.vue'
-import { switchMenstruationCycleMode } from '../services/menstruationCycleModeSwitch.js'
+import { useMenstruationAccordions } from '../composables/useMenstruationAccordions.js'
 import {
   resolveMenstruationCycleMode,
   saveMenstruationCycleModePreference,
@@ -49,6 +50,8 @@ import {
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.MENSTRUATION, undefined, {
   setDocumentTitle: true,
 })
+
+const { reset: resetAccordions } = useMenstruationAccordions()
 
 const router = useRouter()
 const localToday = getLocalTodayISO()
@@ -108,15 +111,36 @@ const patternsError = ref('')
 let pageLoadGen = 0
 let backgroundSyncInFlight = false
 
+function currentTypeCycle() {
+  if (cycleMode.value === 'pilule') return TYPE_CYCLE.PILULE
+  if (cycleMode.value === 'naturel') return TYPE_CYCLE.NATUREL
+  return null
+}
+
+function currentCycleList() {
+  return cycleMode.value === 'pilule' ? cycles.value : cyclesNaturel.value
+}
+
+async function hydrateStoredPatterns() {
+  if (!userId.value || !cycleMode.value) return
+  const typeCycle = currentTypeCycle()
+  if (!typeCycle) return
+  try {
+    menstruationPatterns.value = await listMenstruationPatterns(supabase, userId.value, typeCycle)
+    if (!menstruationPatterns.value.length) patternsLoading.value = true
+  } catch (err) {
+    console.error(err)
+  }
+}
+
 async function loadPatterns(forceRecalc = false) {
   if (!userId.value || !cycleMode.value) return
   const gen = pageLoadGen
-  patternsLoading.value = true
+  if (!menstruationPatterns.value.length) patternsLoading.value = true
   patternsError.value = ''
   try {
-    const typeCycle =
-      cycleMode.value === 'pilule' ? TYPE_CYCLE.PILULE : TYPE_CYCLE.NATUREL
-    const cycleList = cycleMode.value === 'pilule' ? cycles.value : cyclesNaturel.value
+    const typeCycle = currentTypeCycle()
+    const cycleList = currentCycleList()
     menstruationPatterns.value = forceRecalc
       ? await recalculateMenstruationPatterns(supabase, userId.value, typeCycle, cycleList)
       : await maybeRecalculateMenstruationPatterns(supabase, userId.value, typeCycle, cycleList)
@@ -276,6 +300,9 @@ const loadPage = async ({ silent = false } = {}) => {
   }
 
   if (gen === pageLoadGen && hasCycleData.value) {
+    await hydrateStoredPatterns()
+    if (gen !== pageLoadGen) return
+    void loadPatterns()
     scheduleBackground(() => {
       if (gen === pageLoadGen) void runMenstruationBackgroundSync(gen)
     })
@@ -408,6 +435,7 @@ async function switchCycleMode(target) {
     await saveMenstruationCycleModePreference(supabase, userId.value, target)
     hasCycleData.value = true
     menstruationPatterns.value = []
+    resetAccordions()
     menstruationCache.publish({
       cycles: cycles.value,
       cyclesNaturel: cyclesNaturel.value,
@@ -517,6 +545,10 @@ const onSubmit = async () => {
 
 onMounted(() => {
   void initMenstruationPage()
+})
+
+onUnmounted(() => {
+  resetAccordions()
 })
 </script>
 
