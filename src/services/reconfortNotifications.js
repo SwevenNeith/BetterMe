@@ -1,15 +1,4 @@
-import {
-  SYMPTOM_UI_TO_DB,
-  TYPE_CYCLE,
-  dbValueToUi,
-  fetchSymptomEntriesForDate,
-} from './menstruationSymptoms.js'
-import { getEmotionLogForDate } from './emotionLogs.js'
 import { listReconfortMessages, markReconfortMessageSent } from './reconfortMessages.js'
-import {
-  matchesAllReconfortConditions,
-  matchesReconfortCondition,
-} from './reconfortMatching.js'
 import { envoyerNotificationManuelle } from './notifications.js'
 import { addDaysToISODate, daysBetweenISO } from './menstruationCycles.js'
 import {
@@ -33,6 +22,13 @@ function normalizeReconfortText(value) {
 function localDateParisFromIso(iso) {
   if (!iso) return null
   return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE }).format(new Date(iso))
+}
+
+function getDayBoundsIso(dateISO) {
+  return {
+    dayStart: dateTimeLocalToDate(dateISO, '00:00').toISOString(),
+    dayEnd: dateTimeLocalToDate(dateISO, '23:59').toISOString(),
+  }
 }
 
 /**
@@ -108,135 +104,6 @@ export async function syncReconfortLastSentFromSentNotifications(supabase, userI
     if (current?.last_sent && current.last_sent >= sentDate) continue
     await markReconfortMessageSent(supabase, userId, { messageId, sentDateISO: sentDate })
   }
-}
-
-function rowToSymptomsMap(row) {
-  const map = {}
-  for (const [uiKey, dbCol] of Object.entries(SYMPTOM_UI_TO_DB)) {
-    if (row?.[dbCol] != null && row[dbCol] !== '') {
-      map[uiKey] = dbValueToUi(uiKey, row[dbCol])
-    }
-  }
-  return map
-}
-
-function mapEmotionRowToCheckin(row) {
-  if (!row) return null
-  return {
-    humeurGenerale: row['humeur_générale'],
-    energieEmotionnelle: row['énergie_émotionnelle'],
-    besoinReassurance: row['besoin_réassurance'],
-    sentimentGeneral: row['sentiment_général'],
-  }
-}
-
-function getDayBoundsIso(dateISO) {
-  return {
-    dayStart: dateTimeLocalToDate(dateISO, '00:00').toISOString(),
-    dayEnd: dateTimeLocalToDate(dateISO, '23:59').toISOString(),
-  }
-}
-
-/**
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase
- * @param {string} userId
- * @param {string} dateISO
- * @param {{ symptomsPartial?: Record<string, unknown>, checkinPartial?: object|null }} [overrides]
- */
-export async function buildReconfortContext(supabase, userId, dateISO, overrides = {}) {
-  let symptoms = {}
-
-  for (const typeCycle of [TYPE_CYCLE.PILULE, TYPE_CYCLE.NATUREL]) {
-    const entries = await fetchSymptomEntriesForDate(supabase, userId, dateISO, typeCycle)
-    for (const entry of entries) {
-      symptoms = { ...symptoms, ...rowToSymptomsMap(entry) }
-    }
-  }
-
-  if (overrides.symptomsPartial) {
-    symptoms = { ...symptoms, ...overrides.symptomsPartial }
-  }
-
-  let checkin = overrides.checkinPartial ?? null
-  if (!checkin) {
-    const row = await getEmotionLogForDate(supabase, userId, dateISO)
-    checkin = mapEmotionRowToCheckin(row)
-  }
-
-  return {
-    symptoms,
-    checkin: checkin || {},
-  }
-}
-
-/**
- * Messages dont toutes les conditions sont satisfaites (logique ET).
- * Un message 3/5 n'est pas éligible tant que ses 5 conditions ne le sont pas.
- * @param {Array<{ id: string, qui: string, message: string, conditions?: string[] }>} messages
- * @param {import('./reconfortMatching.js').ReconfortMatchContext} context
- */
-export function getEligibleReconfortMessages(messages, context) {
-  return messages.filter((message) => {
-    const conditions = message.conditions ?? []
-    if (conditions.length < 1) return false
-    return matchesAllReconfortConditions(conditions, context)
-  })
-}
-
-/**
- * @param {string[]} conditionIds
- * @param {import('./reconfortMatching.js').ReconfortMatchContext} context
- */
-export function countSatisfiedReconfortConditions(conditionIds, context) {
-  return (conditionIds ?? []).filter((id) => matchesReconfortCondition(id, context)).length
-}
-
-/**
- * Messages regroupés par nombre de conditions satisfaites (du plus au moins proche).
- * @param {Array<{ id: string, qui: string, message: string, conditions?: string[] }>} messages
- * @param {import('./reconfortMatching.js').ReconfortMatchContext} context
- */
-export function getReconfortMessagesGroupedByMatchScore(messages, context) {
-  /** @type {Map<number, Array<{ id: string, qui: string, message: string, conditions?: string[] }>>} */
-  const groups = new Map()
-
-  for (const message of messages) {
-    const conditions = message.conditions ?? []
-    if (!conditions.length) continue
-
-    const score = countSatisfiedReconfortConditions(conditions, context)
-    if (score <= 0) continue
-
-    if (!groups.has(score)) groups.set(score, [])
-    groups.get(score).push(message)
-  }
-
-  return [...groups.entries()]
-    .sort(([a], [b]) => b - a)
-    .map(([score, tierMessages]) => ({ score, messages: tierMessages }))
-}
-
-/**
- * Messages du N-ième palier de proximité (1 = le plus proche, 2 = le suivant, etc.).
- * @param {Array<{ id: string, qui: string, message: string, conditions?: string[] }>} messages
- * @param {import('./reconfortMatching.js').ReconfortMatchContext} context
- * @param {number} tier
- * @param {{ excludeIds?: Set<string>|string[] }} [options]
- */
-export function getNthBestPartialReconfortMessages(messages, context, tier = 1, options = {}) {
-  const excluded = toRecentIdSet(options.excludeIds)
-  const groups = getReconfortMessagesGroupedByMatchScore(messages, context)
-  if (tier < 1 || tier > groups.length) return []
-  return (groups[tier - 1]?.messages ?? []).filter((message) => !excluded.has(message.id))
-}
-
-/**
- * Messages avec le plus grand nombre de conditions satisfaites (sans exiger 100 %).
- * @param {Array<{ id: string, qui: string, message: string, conditions?: string[] }>} messages
- * @param {import('./reconfortMatching.js').ReconfortMatchContext} context
- */
-export function getBestPartialReconfortMessages(messages, context) {
-  return getNthBestPartialReconfortMessages(messages, context, 1)
 }
 
 /**
@@ -460,12 +327,9 @@ function pickFromPoolAvoidingRecent(
 }
 
 /**
- * Choisit les messages à planifier : priorité aux symptômes, puis tirage aléatoire
- * en évitant les messages envoyés récemment ; si le pool symptomatique est trop
- * étroit, on ignore les symptômes et on pioche dans toute la bibliothèque.
+ * Choisit les messages à planifier : tirage aléatoire en évitant les messages envoyés récemment.
  * @param {{
- *   messages: Array<{ id: string, qui: string, message: string, conditions?: string[] }>,
- *   context: import('./reconfortMatching.js').ReconfortMatchContext,
+ *   messages: Array<{ id: string, qui: string, message: string }>,
  *   usedTodayIds: Set<string>,
  *   recentMessageIds: Set<string>,
  *   lastSentMessageId: string|null,
@@ -474,7 +338,6 @@ function pickFromPoolAvoidingRecent(
  */
 export function pickReconfortMessagesForScheduling({
   messages,
-  context,
   usedTodayIds,
   recentMessageIds,
   lastSentMessageId,
@@ -482,30 +345,14 @@ export function pickReconfortMessagesForScheduling({
 }) {
   if (slotsLeft <= 0 || !messages.length) return []
 
-  const pickFrom = (pool, allowRepeatIfOnlyOption) =>
-    pickFromPoolAvoidingRecent(
-      pool,
-      usedTodayIds,
-      recentMessageIds,
-      lastSentMessageId,
-      slotsLeft,
-      { allowRepeatIfOnlyOption },
-    )
-
-  const eligible = getEligibleReconfortMessages(messages, context)
-  let picked = pickFrom(eligible, false)
-  if (picked.length) return picked
-
-  for (const { messages: tierMessages } of getReconfortMessagesGroupedByMatchScore(
+  return pickFromPoolAvoidingRecent(
     messages,
-    context,
-  )) {
-    picked = pickFrom(tierMessages, false)
-    if (picked.length) return picked
-  }
-
-  picked = pickFrom(messages, true)
-  return picked
+    usedTodayIds,
+    recentMessageIds,
+    lastSentMessageId,
+    slotsLeft,
+    { allowRepeatIfOnlyOption: true },
+  )
 }
 
 /**
@@ -563,7 +410,7 @@ export async function deletePendingReconfortForDay(supabase, userId, dateISO) {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
- * @param {{ title: string, body: string, scheduledAt: Date }} payload
+ * @param {{ title: string, body: string, scheduledAt: Date, reconfortId?: string }} payload
  */
 export async function scheduleReconfortNotification(supabase, userId, payload) {
   const title = (payload.title || '').trim()
@@ -598,18 +445,13 @@ export async function scheduleReconfortNotification(supabase, userId, payload) {
 }
 
 /**
- * Évalue les messages réconfort et planifie des notifications (kind: reconfort uniquement).
- * - Un message n'est envoyé que si toutes ses conditions sont remplies (ET).
- * - Chaque message compte pour une seule notification, même s'il a plusieurs conditions.
- * - Maximum 1 notification réconfort par jour (les autres types ne comptent pas).
- * - Si 2 messages sont entièrement éligibles, seulement 2 notifications sont planifiées.
- * - Sinon, un message au hasard parmi ceux qui remplissent le plus de conditions (partiel).
- * - Si le pool symptomatique ne propose qu'un message déjà envoyé récemment, on ignore
- *   les symptômes et on pioche au hasard parmi les autres messages de la bibliothèque.
+ * Planifie une notification réconfort après check-in Dashboard ou saisie de symptômes.
+ * - Maximum 1 notification réconfort par jour.
+ * - Tirage aléatoire parmi les messages disponibles.
  * - Évite de renvoyer un message dont last_sent remonte à moins de 7 jours (si d'autres existent).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
- * @param {{ dateISO?: string, symptomsPartial?: Record<string, unknown>, checkinPartial?: object|null }} [options]
+ * @param {{ dateISO?: string }} [options]
  */
 export async function maybeScheduleReconfortNotification(supabase, userId, options = {}) {
   if (!userId) return
@@ -617,13 +459,11 @@ export async function maybeScheduleReconfortNotification(supabase, userId, optio
   const dateISO = options.dateISO || getLocalTodayISO()
 
   try {
-    const [context, existingNotifications] = await Promise.all([
-      buildReconfortContext(supabase, userId, dateISO, {
-        symptomsPartial: options.symptomsPartial,
-        checkinPartial: options.checkinPartial,
-      }),
-      listReconfortNotificationsForDay(supabase, userId, dateISO),
-    ])
+    const existingNotifications = await listReconfortNotificationsForDay(
+      supabase,
+      userId,
+      dateISO,
+    )
 
     await syncReconfortLastSentFromSentNotifications(supabase, userId)
 
@@ -648,7 +488,6 @@ export async function maybeScheduleReconfortNotification(supabase, userId, optio
 
     const toSchedule = pickReconfortMessagesForScheduling({
       messages: messagesFresh,
-      context,
       usedTodayIds,
       recentMessageIds,
       lastSentMessageId,
@@ -692,7 +531,6 @@ export async function sendRandomReconfortNotificationNow(supabase, userId) {
     throw new Error('Aucun message de réconfort enregistré.')
   }
 
-  const context = await buildReconfortContext(supabase, userId, dateISO)
   const recentMessageIds = getRecentlySentReconfortMessageIds(messages, dateISO)
   const lastSentMessageId = getMostRecentlySentReconfortMessageIdFromLastSent(
     messages,
@@ -701,7 +539,6 @@ export async function sendRandomReconfortNotificationNow(supabase, userId) {
 
   const [picked] = pickReconfortMessagesForScheduling({
     messages,
-    context,
     usedTodayIds: new Set(),
     recentMessageIds,
     lastSentMessageId,

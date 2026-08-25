@@ -5,9 +5,6 @@ const TABLE = 'reconfort'
 function normalizeReconfortPayload(payload) {
   const qui = (payload.who || '').trim()
   const message = (payload.message || '').trim()
-  const conditions = Array.isArray(payload.conditions)
-    ? payload.conditions.filter((id) => typeof id === 'string' && id.length > 0)
-    : []
 
   if (!qui) {
     throw new Error('Indique qui tu es.')
@@ -15,11 +12,8 @@ function normalizeReconfortPayload(payload) {
   if (!message) {
     throw new Error('Indique ton message de réconfort.')
   }
-  if (conditions.length < 1) {
-    throw new Error('Sélectionne au moins une condition.')
-  }
 
-  return { qui, message, conditions }
+  return { qui, message }
 }
 
 /**
@@ -29,7 +23,7 @@ function normalizeReconfortPayload(payload) {
 export async function listReconfortMessages(supabase, userId) {
   const { data, error } = await supabase
     .from(TABLE)
-    .select('id, user_id, qui, message, conditions, last_sent, created_at, updated_at')
+    .select('id, user_id, qui, message, last_sent, created_at, updated_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
 
@@ -40,14 +34,14 @@ export async function listReconfortMessages(supabase, userId) {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
- * @param {{ who: string, message: string, conditions: string[] }} payload
+ * @param {{ who: string, message: string }} payload
  */
 export async function createReconfortMessage(supabase, userId, payload) {
   if (!userId) {
     throw new Error('Utilisateur non connecté.')
   }
 
-  const { qui, message, conditions } = normalizeReconfortPayload(payload)
+  const { qui, message } = normalizeReconfortPayload(payload)
 
   const { data, error } = await supabase
     .from(TABLE)
@@ -55,9 +49,8 @@ export async function createReconfortMessage(supabase, userId, payload) {
       user_id: userId,
       qui,
       message,
-      conditions,
     })
-    .select('id, user_id, qui, message, conditions, last_sent, created_at, updated_at')
+    .select('id, user_id, qui, message, last_sent, created_at, updated_at')
     .single()
 
   if (error) throw error
@@ -74,7 +67,7 @@ export async function createReconfortMessage(supabase, userId, payload) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {string} messageId
- * @param {{ who: string, message: string, conditions: string[] }} payload
+ * @param {{ who: string, message: string }} payload
  */
 export async function updateReconfortMessage(supabase, userId, messageId, payload) {
   if (!userId) {
@@ -84,18 +77,17 @@ export async function updateReconfortMessage(supabase, userId, messageId, payloa
     throw new Error('Message introuvable.')
   }
 
-  const { qui, message, conditions } = normalizeReconfortPayload(payload)
+  const { qui, message } = normalizeReconfortPayload(payload)
 
   const { data, error } = await supabase
     .from(TABLE)
     .update({
       qui,
       message,
-      conditions,
     })
     .eq('id', messageId)
     .eq('user_id', userId)
-    .select('id, user_id, qui, message, conditions, last_sent, created_at, updated_at')
+    .select('id, user_id, qui, message, last_sent, created_at, updated_at')
     .single()
 
   if (error) throw error

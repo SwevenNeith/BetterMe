@@ -37,7 +37,6 @@ import { rescheduleMenstruationPatternNotifications } from '../services/menstrua
 import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
 import { listMenstruationPatterns } from '../services/menstruationPatterns.js'
 import { resolveMenstruationCycleMode } from '../services/menstruationCycleModePreference.js'
-import { RECONFORT_CONDITION_GROUPS } from '../constants/reconfortConditions.js'
 import {
   createReconfortMessage,
   updateReconfortMessage,
@@ -118,18 +117,7 @@ const expandedReconfortSenders = ref({})
 const reconfortForm = ref({
   who: '',
   message: '',
-  conditions: [],
 })
-
-const reconfortConditionLabels = (() => {
-  const map = new Map()
-  for (const group of RECONFORT_CONDITION_GROUPS) {
-    for (const option of group.options) {
-      map.set(option.id, option.label)
-    }
-  }
-  return map
-})()
 
 const reconfortGroupsBySender = computed(() => {
   const bySender = new Map()
@@ -152,8 +140,11 @@ const reconfortGroupsBySender = computed(() => {
     }))
 })
 
-function getReconfortConditionLabel(conditionId) {
-  return reconfortConditionLabels.get(conditionId) ?? conditionId
+function createEmptyReconfortForm() {
+  return {
+    who: '',
+    message: '',
+  }
 }
 
 function isReconfortSenderExpanded(qui) {
@@ -183,14 +174,6 @@ const loadReconfortMessages = async () => {
   }
 }
 
-function createEmptyReconfortForm() {
-  return {
-    who: '',
-    message: '',
-    conditions: [],
-  }
-}
-
 async function openReconfortForm() {
   reconfortFormError.value = ''
   editingReconfortId.value = null
@@ -207,7 +190,6 @@ async function openReconfortFormForEdit(msg) {
   reconfortForm.value = {
     who: msg.qui ?? '',
     message: msg.message ?? '',
-    conditions: Array.isArray(msg.conditions) ? [...msg.conditions] : [],
   }
   showReconfortForm.value = true
   await nextTick()
@@ -220,24 +202,6 @@ function closeReconfortForm() {
   editingReconfortId.value = null
   reconfortFormError.value = ''
   reconfortForm.value = createEmptyReconfortForm()
-}
-
-function isReconfortConditionSelected(conditionId) {
-  return reconfortForm.value.conditions.includes(conditionId)
-}
-
-function toggleReconfortCondition(conditionId) {
-  const conditions = [...reconfortForm.value.conditions]
-  const index = conditions.indexOf(conditionId)
-  if (index >= 0) {
-    conditions.splice(index, 1)
-  } else {
-    conditions.push(conditionId)
-  }
-  reconfortForm.value.conditions = conditions
-  if (conditions.length > 0) {
-    reconfortFormError.value = ''
-  }
 }
 
 function onCancelReconfortForm() {
@@ -258,7 +222,6 @@ const onSaveReconfortForm = async () => {
     const payload = {
       who: reconfortForm.value.who,
       message: reconfortForm.value.message,
-      conditions: [...reconfortForm.value.conditions],
     }
 
     if (editingReconfortId.value) {
@@ -355,14 +318,12 @@ const { clearDraft: clearReconfortDraft, restoreDraft: restoreReconfortDraft } =
     getState: () => ({
       who: reconfortForm.value.who,
       message: reconfortForm.value.message,
-      conditions: [...(reconfortForm.value.conditions ?? [])],
     }),
     setState: (state) => {
       if (!state || typeof state !== 'object') return
       reconfortForm.value = {
         who: state.who ?? '',
         message: state.message ?? '',
-        conditions: Array.isArray(state.conditions) ? [...state.conditions] : [],
       }
     },
   },
@@ -1848,6 +1809,10 @@ onUnmounted(() => {
             Ajouter un message de réconfort
           </button>
         </div>
+        <p class="reconfort-conditions__hint">
+          Un message est envoyé automatiquement après ton check-in Dashboard ou la saisie de
+          symptômes (1 notification par jour, le même message n’est pas renvoyé avant 7 jours).
+        </p>
         <p v-if="reconfortSaveMessage" class="settings-feedback settings-feedback--ok">
           {{ reconfortSaveMessage }}
         </p>
@@ -1881,35 +1846,6 @@ onUnmounted(() => {
               placeholder="Ton message de réconfort"
             />
           </label>
-
-          <fieldset class="reconfort-conditions">
-            <legend class="reconfort-conditions__legend">Condition(s) ?</legend>
-            <p class="reconfort-conditions__hint">
-              Sélectionne au moins une condition (plusieurs possibles).
-            </p>
-
-            <div
-              v-for="group in RECONFORT_CONDITION_GROUPS"
-              :key="group.id"
-              class="reconfort-conditions__group"
-            >
-              <h3 class="reconfort-conditions__group-title">{{ group.label }}</h3>
-              <div class="reconfort-conditions__grid">
-                <label
-                  v-for="option in group.options"
-                  :key="option.id"
-                  class="choice-check choice-check--card"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="isReconfortConditionSelected(option.id)"
-                    @change="toggleReconfortCondition(option.id)"
-                  />
-                  <span>{{ option.label }}</span>
-                </label>
-              </div>
-            </div>
-          </fieldset>
 
           <p v-if="reconfortFormError" class="settings-feedback settings-feedback--error">
             {{ reconfortFormError }}
@@ -1996,15 +1932,6 @@ onUnmounted(() => {
                 <div class="reconfort-message__row">
                   <div class="reconfort-message__content">
                     <p class="reconfort-message__text">{{ msg.message }}</p>
-                    <ul v-if="msg.conditions?.length" class="reconfort-message__conditions">
-                      <li
-                        v-for="conditionId in msg.conditions"
-                        :key="`${msg.id}-${conditionId}`"
-                        class="reconfort-message__condition"
-                      >
-                        {{ getReconfortConditionLabel(conditionId) }}
-                      </li>
-                    </ul>
                   </div>
                   <div class="reconfort-message__actions">
                     <button
