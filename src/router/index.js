@@ -20,6 +20,7 @@ const ReadingBookDetailView = () => import('../views/ReadingBookDetailView.vue')
 const RessourcesView = () => import('../views/RessourcesView.vue')
 const JournalView = () => import('../views/JournalView.vue')
 const JournalEntryView = () => import('../views/JournalEntryView.vue')
+const NotesView = () => import('../views/NotesView.vue')
 const DictionnaireView = () => import('../views/DictionnaireView.vue')
 const WorkspaceView = () => import('../views/WorkspaceView.vue')
 
@@ -107,6 +108,16 @@ function createAppChildRoutes(namePrefix = '') {
       path: 'journal/:entryId',
       name: n('journal-entree'),
       component: JournalEntryView,
+    },
+    {
+      path: 'notes',
+      name: n('notes'),
+      component: NotesView,
+    },
+    {
+      path: 'notes/:noteId',
+      name: n('notes-detail'),
+      component: NotesView,
     },
     {
       path: 'dictionnaire',

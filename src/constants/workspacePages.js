@@ -48,6 +48,12 @@ export const WORKSPACE_PAGE_OPTIONS = [
     icon: 'journal',
   },
   {
+    id: APP_PAGE_IDS.NOTES,
+    path: '/notes',
+    defaultLabel: 'Notes',
+    icon: 'notes',
+  },
+  {
     id: APP_PAGE_IDS.DICTIONNAIRE,
     path: '/dictionnaire',
     defaultLabel: 'Dictionnaire',

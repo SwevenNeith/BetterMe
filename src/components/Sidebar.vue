@@ -73,6 +73,12 @@ const journalLink = {
   icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path><path d="M8 7h8"></path><path d="M8 11h8"></path><path d="M8 15h5"></path></svg>`,
 }
 
+const notesLink = {
+  name: 'Notes',
+  path: '/notes',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>`,
+}
+
 const dictionnaireLink = {
   name: 'Dictionnaire',
   path: '/dictionnaire',
@@ -121,6 +127,7 @@ const isActive = (path) => {
   if (path === '/lecture') return route.path === path || route.path.startsWith('/lecture/')
   if (path === '/ressources') return route.path === path || route.path.startsWith('/ressources/')
   if (path === '/journal') return route.path === path || route.path.startsWith('/journal/')
+  if (path === '/notes') return route.path === path || route.path.startsWith('/notes/')
   if (path === '/dictionnaire') return route.path === path || route.path.startsWith('/dictionnaire/')
   return route.path === path
 }
@@ -175,6 +182,7 @@ const defaultSidebarOrder = [
   SIDEBAR_ITEM_IDS.LECTURE,
   SIDEBAR_ITEM_IDS.RESSOURCES,
   SIDEBAR_ITEM_IDS.JOURNAL,
+  SIDEBAR_ITEM_IDS.NOTES,
   SIDEBAR_ITEM_IDS.DICTIONNAIRE,
   SIDEBAR_ITEM_IDS.MENSTRUATION,
   SIDEBAR_ITEM_IDS.EXERCICES_GROUP,
@@ -188,6 +196,7 @@ const sidebarItemsById = {
   [SIDEBAR_ITEM_IDS.LECTURE]: lectureLink,
   [SIDEBAR_ITEM_IDS.RESSOURCES]: ressourcesLink,
   [SIDEBAR_ITEM_IDS.JOURNAL]: journalLink,
+  [SIDEBAR_ITEM_IDS.NOTES]: notesLink,
   [SIDEBAR_ITEM_IDS.DICTIONNAIRE]: dictionnaireLink,
   [SIDEBAR_ITEM_IDS.HABIT]: habitTrackerLink,
   [SIDEBAR_ITEM_IDS.MENSTRUATION]: menstruationLink,
