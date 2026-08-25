@@ -47,11 +47,12 @@ export function getIntensityTier(intensity, fait) {
 }
 
 export function computeHabitStats(logsByDate, todayIso, referenceDate = todayIso) {
-  const weekStart = addDaysISO(todayIso, -7)
-  const monthStart = addDaysISO(todayIso, -30)
+  const endDate = referenceDate > todayIso ? todayIso : referenceDate
+  const weekStart = addDaysISO(endDate, -7)
+  const monthStart = addDaysISO(endDate, -30)
 
-  const weekDates = iterateISODateRange(weekStart, todayIso)
-  const monthDates = iterateISODateRange(monthStart, todayIso)
+  const weekDates = iterateISODateRange(weekStart, endDate)
+  const monthDates = iterateISODateRange(monthStart, endDate)
 
   const weekValues = []
   const monthValues = []

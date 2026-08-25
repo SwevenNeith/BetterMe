@@ -42,6 +42,7 @@ const emit = defineEmits(['saved'])
 const selectedDate = ref(getLocalTodayISO())
 const inputValue = ref(0)
 const logsByDate = ref({})
+const loadedStatsStart = ref('')
 const isLoading = ref(false)
 const isSaving = ref(false)
 const loadError = ref('')
@@ -207,26 +208,51 @@ function syncInputFromLog() {
   inputValue.value = Math.max(0, Number(log.valeur ?? 0))
 }
 
-async function loadStatsLogs() {
+function mergeLogsRows(rows, base = {}) {
+  const map = { ...base }
+  for (const row of rows) {
+    const key = normalizeDateISO(row.date_jour)
+    map[key] = { ...row, date_jour: key }
+  }
+  return map
+}
+
+function computeStatsLoadStart(selectedIso, today) {
+  const monthStartFromToday = addDaysISO(today, -30)
+  const monthStartFromSelected = addDaysISO(selectedIso, -30)
+  return monthStartFromSelected < monthStartFromToday ? monthStartFromSelected : monthStartFromToday
+}
+
+async function loadStatsLogs(force = false) {
   if (!props.userId || !props.habit?.id) return
+
+  const today = todayIso.value
+  const requiredStart = computeStatsLoadStart(selectedDate.value, today)
+
+  if (!force && loadedStatsStart.value && requiredStart >= loadedStatsStart.value) {
+    syncInputFromLog()
+    return
+  }
 
   isLoading.value = true
   loadError.value = ''
-  const today = todayIso.value
-  const start = addDaysISO(today, -30)
 
   try {
-    const rows = await listHabitLogsForRange(supabase, props.userId, props.habit.id, start, today)
-    const map = {}
-    for (const row of rows) {
-      map[normalizeDateISO(row.date_jour)] = { ...row, date_jour: normalizeDateISO(row.date_jour) }
-    }
-    logsByDate.value = map
+    const rows = await listHabitLogsForRange(
+      supabase,
+      props.userId,
+      props.habit.id,
+      requiredStart,
+      today,
+    )
+    logsByDate.value = mergeLogsRows(rows)
+    loadedStatsStart.value = requiredStart
     syncInputFromLog()
   } catch (err) {
     console.error(err)
     loadError.value = err.message || 'Impossible de charger les statistiques.'
     logsByDate.value = {}
+    loadedStatsStart.value = ''
   } finally {
     isLoading.value = false
   }
@@ -707,7 +733,8 @@ async function computeRangeResults() {
 watch(
   () => [props.habit?.id, props.refreshKey],
   () => {
-    loadStatsLogs()
+    loadedStatsStart.value = ''
+    void loadStatsLogs(true)
   },
   { immediate: true },
 )
@@ -721,7 +748,7 @@ watch(selectedDate, (date) => {
   saveError.value = ''
   closeDetailsEditor()
   closeHistoryDetails()
-  syncInputFromLog()
+  void loadStatsLogs()
 })
 
 watch(canShowDetails, (visible) => {
