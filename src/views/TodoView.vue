@@ -60,6 +60,12 @@ import {
   validateTimetableEventTimes,
   validateTimetableReminderAndTimer,
 } from '../services/timetableEvents.js'
+import {
+  reminderFieldsFromForm,
+  reminderFormFromItem,
+  validateTodoReminderInput,
+} from '../services/todoItemReminders.js'
+import { notificationsActives } from '../services/notifications.js'
 import { linkTodoAndTimetable, deleteAllTimetableEventsForTodo, createTimetableEventsForTodo, syncTodoTimetableLink, hasTodoTimetableLink } from '../services/todoTimetableLink.js'
 import { useTimetableCacheStore } from '../stores/timetableCache.js'
 import {
@@ -114,6 +120,9 @@ const todoForm = reactive({
   frequence: TODO_FREQUENCY.ONE_OFF,
   jour_semaine: null,
   heure: '',
+  reminderEnabled: false,
+  reminderHours: 0,
+  reminderMinutes: 15,
   date_echeance: getLocalTodayISO(),
   is_promesse: false,
   quantite_cible: 0,
@@ -133,6 +142,9 @@ const { clearDraft: clearTodoDraft, restoreDraft: restoreTodoDraft } = useFormDr
       frequence: todoForm.frequence,
       jour_semaine: todoForm.jour_semaine,
       heure: todoForm.heure,
+      reminderEnabled: todoForm.reminderEnabled,
+      reminderHours: todoForm.reminderHours,
+      reminderMinutes: todoForm.reminderMinutes,
       date_echeance: todoForm.date_echeance,
       is_promesse: todoForm.is_promesse,
       quantite_cible: todoForm.quantite_cible,
@@ -347,6 +359,9 @@ function resetForm() {
   todoForm.nom = ''
   todoForm.description = ''
   todoForm.heure = ''
+  todoForm.reminderEnabled = false
+  todoForm.reminderHours = 0
+  todoForm.reminderMinutes = 15
   todoForm.is_promesse = false
   todoForm.quantite_cible = 0
   editingItemId.value = null
@@ -384,6 +399,10 @@ async function openEditForm(item) {
   todoForm.frequence = item.frequence ?? TODO_FREQUENCY.ONE_OFF
   todoForm.jour_semaine = item.jour_semaine ?? null
   todoForm.heure = formatTimeForInput(item.heure)
+  const reminder = reminderFormFromItem(item)
+  todoForm.reminderEnabled = reminder.reminderEnabled
+  todoForm.reminderHours = reminder.reminderHours
+  todoForm.reminderMinutes = reminder.reminderMinutes
   todoForm.date_echeance = normalizeDateISO(item.date_echeance) || getLocalTodayISO()
   todoForm.is_promesse = Boolean(item.is_promesse)
   todoForm.quantite_cible = item.quantite_cible ?? 0
@@ -608,6 +627,25 @@ async function submitForm() {
         )
       : todoForm.date_echeance
 
+  const reminderError = validateTodoReminderInput({
+    reminderEnabled: todoForm.reminderEnabled,
+    reminderHours: todoForm.reminderHours,
+    reminderMinutes: todoForm.reminderMinutes,
+    heure: todoForm.heure,
+  })
+  if (reminderError) {
+    formError.value = reminderError
+    isSaving.value = false
+    return
+  }
+
+  const reminderFields = reminderFieldsFromForm({
+    reminderEnabled: todoForm.reminderEnabled,
+    reminderHours: todoForm.reminderHours,
+    reminderMinutes: todoForm.reminderMinutes,
+    heure: todoForm.heure,
+  })
+
   const payload = {
     nom: todoForm.nom,
     description: todoForm.description,
@@ -618,6 +656,8 @@ async function submitForm() {
     is_promesse: todoForm.is_promesse,
     quantite_cible:
       todoForm.quantite_cible > 0 ? Math.round(Number(todoForm.quantite_cible)) : null,
+    reminder: reminderFields.reminder,
+    reminder_time: reminderFields.reminder_time,
   }
 
   if (payload.is_promesse) {
@@ -943,7 +983,10 @@ async function onItemDrop(targetId, event) {
 
 watch(
   () => todoForm.heure,
-  () => {
+  (heure) => {
+    if (!heure) {
+      todoForm.reminderEnabled = false
+    }
     if (!addToPlanning.value) return
     const startTime = todoTimeToInput(todoForm.heure)
     if (!startTime) return
@@ -1247,6 +1290,52 @@ watch(userId, (id) => {
         </span>
         <input v-model="todoForm.heure" type="time" class="todo-form-input todo-form-input--time" />
       </label>
+
+      <div class="todo-form-field todo-form-reminder">
+        <label class="todo-form-promesse">
+          <input
+            v-model="todoForm.reminderEnabled"
+            type="checkbox"
+            :disabled="!todoForm.heure"
+            @change="formError = ''"
+          />
+          <span>Rappel 🔔</span>
+        </label>
+        <p v-if="!todoForm.heure" class="todo-form-hint">
+          Ajoute un horaire pour activer un rappel.
+        </p>
+        <div v-else-if="todoForm.reminderEnabled" class="todo-form-reminder__offset">
+          <span class="todo-form-reminder__label">Délai avant l’horaire (0 h 0 min = à l’heure)</span>
+          <div class="todo-form-reminder__duration" role="group" aria-label="Délai du rappel">
+            <div class="todo-form-reminder__unit">
+              <input
+                v-model.number="todoForm.reminderHours"
+                type="number"
+                min="0"
+                max="23"
+                class="todo-form-input todo-form-reminder__input"
+                aria-label="Heures"
+              />
+              <span>h</span>
+            </div>
+            <span class="todo-form-reminder__sep">:</span>
+            <div class="todo-form-reminder__unit">
+              <input
+                v-model.number="todoForm.reminderMinutes"
+                type="number"
+                min="0"
+                max="59"
+                class="todo-form-input todo-form-reminder__input"
+                aria-label="Minutes"
+              />
+              <span>min</span>
+            </div>
+          </div>
+          <p v-if="!notificationsActives()" class="todo-form-hint">
+            Active les notifications dans Réglages pour recevoir ce rappel.
+          </p>
+        </div>
+      </div>
 
       <label
         class="todo-form-promesse choice-check"
@@ -1959,6 +2048,51 @@ watch(userId, (id) => {
   font-size: 0.82rem;
   color: #6c757d;
   line-height: 1.4;
+}
+
+.todo-form-reminder {
+  gap: 0.45rem;
+}
+
+.todo-form-reminder__offset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.todo-form-reminder__label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #6b4f7c;
+}
+
+.todo-form-reminder__duration {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.todo-form-reminder__unit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-weight: 700;
+  color: #6c757d;
+}
+
+.todo-form-reminder__input {
+  width: 4.25rem;
+  text-align: center;
+}
+
+.todo-form-reminder__sep {
+  font-weight: 800;
+  color: #8b7a96;
 }
 
 .todo-form-week-label {

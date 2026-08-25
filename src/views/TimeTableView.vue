@@ -195,11 +195,11 @@ function parseEventTimeRange(timeStr) {
 }
 
 function setReminderFieldsFromMinutes(totalMinutes) {
-  const mins = Math.max(0, Number(totalMinutes) || 0)
-  if (mins <= 0) {
+  if (totalMinutes == null) {
     resetReminderFields()
     return
   }
+  const mins = Math.max(0, Number(totalMinutes) || 0)
   newEventReminderEnabled.value = true
   newEventReminderHours.value = Math.floor(mins / 60)
   newEventReminderMinutes.value = mins % 60
@@ -375,9 +375,6 @@ watch(newEventAllDay, (allDay) => {
 })
 
 watch(newEventReminderEnabled, (enabled) => {
-  if (enabled && getReminderMinutesBefore() === 0) {
-    newEventReminderMinutes.value = 15
-  }
   if (enabled) {
     newEventTimerEnabled.value = false
   }
@@ -829,8 +826,8 @@ const handleAddEvent = async () => {
   }
 
   if (newEventReminderEnabled.value && !newEventAllDay.value) {
-    if (getReminderMinutesBefore() <= 0) {
-      alert('Indique un délai de rappel (au moins 1 minute) ou désactive le rappel.')
+    if (getReminderMinutesBefore() < 0) {
+      alert('Indique un délai de rappel valide ou désactive le rappel.')
       return
     }
   }
@@ -1756,7 +1753,7 @@ const getPositionedEventsForDay = (dayIdx) => {
             </label>
 
             <div v-if="newEventReminderEnabled" class="reminder-offset">
-              <span class="reminder-offset-label">Me rappeler avant l'événement</span>
+              <span class="reminder-offset-label">Délai avant l’événement (0 h 0 min = à l’heure)</span>
               <div class="reminder-timer" role="group" aria-label="Délai du rappel">
                 <div class="reminder-timer-unit">
                   <input

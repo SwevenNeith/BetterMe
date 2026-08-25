@@ -280,9 +280,19 @@ export async function envoyerNotificationManuelle(userId, title, body) {
 export function formatDelaiAvantEvenement(heures, minutes) {
   const h = Math.min(23, Math.max(0, Number(heures) || 0))
   const m = Math.min(59, Math.max(0, Number(minutes) || 0))
+  if (h === 0 && m === 0) return 'à l’heure'
   if (h > 0 && m > 0) return `${h} h ${m} min`
   if (h > 0) return `${h} h`
   return `${m} min`
+}
+
+/** Corps de notification pour un rappel d’activité ou de tâche */
+export function formatRappelNotificationBody(nom, minutesAvant, delaiLabel) {
+  if (minutesAvant <= 0) {
+    return `C’est l’heure : ${nom}`
+  }
+  const label = delaiLabel ?? formatDelaiDepuisMinutes(minutesAvant)
+  return `Dans ${label} : ${nom}`
 }
 
 /** Décompose un délai stocké en minutes (ex. 60 → 1 h 0 min) */
@@ -307,7 +317,7 @@ export function formatDelaiDepuisMinutes(totalMinutes) {
  */
 export async function planifierNotificationActivite(userId, activite) {
   const minutesAvant = activite.minutesAvant ?? 15
-  if (minutesAvant <= 0) return false
+  if (minutesAvant < 0) return false
 
   if (activite.eventId) {
     await supprimerRappelsEvenement(activite.eventId)
@@ -324,7 +334,7 @@ export async function planifierNotificationActivite(userId, activite) {
 
   const heureNotification = new Date(heureActivite.getTime() - minutesAvant * 60 * 1000)
 
-  if (heureNotification.getTime() >= heureActivite.getTime()) {
+  if (minutesAvant > 0 && heureNotification.getTime() >= heureActivite.getTime()) {
     console.warn('planifierNotificationActivite: rappel après le début de l’événement, ignoré')
     return false
   }
@@ -332,7 +342,7 @@ export async function planifierNotificationActivite(userId, activite) {
   const delaiLabel = activite.delaiLabel ?? formatDelaiDepuisMinutes(minutesAvant)
   const scheduledAtIso = heureNotification.toISOString()
   const title = 'BetterMe - Rappel'
-  const body = `Dans ${delaiLabel} : ${activite.nom}`
+  const body = formatRappelNotificationBody(activite.nom, minutesAvant, delaiLabel)
 
   await deletePendingScheduledDuplicate(supabase, userId, {
     scheduledAt: scheduledAtIso,

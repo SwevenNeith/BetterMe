@@ -99,5 +99,18 @@ export function formatTodoSchedule(item) {
     parts.push(hhmm)
   }
 
+  if (item.reminder && item.reminder_time != null) {
+    const total = Math.max(0, Number(item.reminder_time) || 0)
+    if (total === 0) {
+      parts.push('rappel à l’heure')
+    } else {
+      const h = Math.floor(total / 60)
+      const m = total % 60
+      const delay =
+        h > 0 && m > 0 ? `${h} h ${m} min` : h > 0 ? `${h} h` : `${m} min`
+      parts.push(`rappel ${delay} avant`)
+    }
+  }
+
   return parts.filter(Boolean).join(' · ')
 }

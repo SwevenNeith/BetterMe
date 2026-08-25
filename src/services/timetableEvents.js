@@ -91,8 +91,8 @@ export function validateTimetableReminderAndTimer(input) {
 
   if (input?.reminderEnabled) {
     const reminderMinutes = getDurationMinutes(input.reminderHours, input.reminderMinutes)
-    if (reminderMinutes <= 0) {
-      return 'Indique un délai de rappel (au moins 1 minute) ou désactive le rappel.'
+    if (reminderMinutes < 0) {
+      return 'Indique un délai de rappel valide ou désactive le rappel.'
     }
   }
 
@@ -167,7 +167,7 @@ export async function scheduleTimetableEventNotifications(userId, savedEvent, in
 
   if (input.reminderEnabled) {
     const reminderMinutes = getDurationMinutes(input.reminderHours, input.reminderMinutes)
-    if (reminderMinutes > 0) {
+    if (reminderMinutes >= 0) {
       const delaiLabel = formatDelaiAvantEvenement(input.reminderHours, input.reminderMinutes)
       await planifierNotificationActivite(userId, {
         nom: title,

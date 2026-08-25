@@ -6,7 +6,7 @@ const TABLE = 'todo_items'
 const COMPLETIONS_TABLE = 'todo_item_completions'
 
 const TODO_ITEM_SELECT =
-  'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, timetable_event_id, created_at, updated_at'
+  'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, timetable_event_id, reminder, reminder_time, created_at, updated_at'
 
 async function refreshTodoPromesseReminder(userId) {
   if (!userId) return
@@ -15,6 +15,26 @@ async function refreshTodoPromesseReminder(userId) {
     await rescheduleTodoPromesseReminder(userId)
   } catch (err) {
     console.error('refreshTodoPromesseReminder:', err)
+  }
+}
+
+async function refreshTodoItemReminder(userId, item) {
+  if (!userId || !item?.id) return
+  try {
+    const { rescheduleTodoItemReminder } = await import('./todoItemReminders.js')
+    await rescheduleTodoItemReminder(userId, item)
+  } catch (err) {
+    console.error('refreshTodoItemReminder:', err)
+  }
+}
+
+async function clearTodoItemReminder(todoItemId) {
+  if (!todoItemId) return
+  try {
+    const { deletePendingTodoItemReminders } = await import('./todoItemReminders.js')
+    await deletePendingTodoItemReminders(null, todoItemId)
+  } catch (err) {
+    console.error('clearTodoItemReminder:', err)
   }
 }
 
@@ -71,6 +91,21 @@ function normalizeTodoPayload(payload) {
     quantite_cible = qty
   }
 
+  const reminderRequested = Boolean(payload.reminder)
+  let reminder = false
+  let reminder_time = null
+  if (reminderRequested) {
+    if (!heure) {
+      throw new Error('Indique un horaire pour activer le rappel, ou désactive le rappel.')
+    }
+    const minutes = Math.round(Number(payload.reminder_time) || 0)
+    if (!Number.isInteger(minutes) || minutes < 0) {
+      throw new Error('Indique un délai de rappel valide ou désactive le rappel.')
+    }
+    reminder = true
+    reminder_time = minutes
+  }
+
   return {
     nom,
     description,
@@ -80,6 +115,8 @@ function normalizeTodoPayload(payload) {
     is_promesse,
     date_echeance,
     quantite_cible,
+    reminder,
+    reminder_time,
   }
 }
 
@@ -94,7 +131,25 @@ export async function listTodoItems(supabase, userId) {
     .eq('user_id', userId)
     .order('sort_order', { ascending: true })
 
-  if (error) throw error
+  if (error) {
+    const msg = String(error.message ?? '')
+    if (msg.includes('reminder') || error.code === 'PGRST204') {
+      const fallback = await supabase
+        .from(TABLE)
+        .select(
+          'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, timetable_event_id, created_at, updated_at',
+        )
+        .eq('user_id', userId)
+        .order('sort_order', { ascending: true })
+      if (fallback.error) throw fallback.error
+      return (fallback.data ?? []).map((row) => ({
+        ...row,
+        reminder: false,
+        reminder_time: null,
+      }))
+    }
+    throw error
+  }
   return data ?? []
 }
 
@@ -148,6 +203,7 @@ export async function createTodoItem(supabase, userId, payload) {
 
   if (error) throw error
   await refreshTodoPromesseReminder(userId)
+  await refreshTodoItemReminder(userId, data)
   return data
 }
 
@@ -178,6 +234,7 @@ export async function replaceTodoItem(supabase, userId, itemId, payload) {
 
   if (error) throw error
   await refreshTodoPromesseReminder(userId)
+  await refreshTodoItemReminder(userId, data)
   return data
 }
 
@@ -188,6 +245,8 @@ export async function replaceTodoItem(supabase, userId, itemId, payload) {
  */
 export async function deleteTodoItem(supabase, userId, itemId) {
   if (!userId || !itemId) return
+
+  await clearTodoItemReminder(itemId)
 
   const { error } = await supabase.from(TABLE).delete().eq('id', itemId).eq('user_id', userId)
 
@@ -258,6 +317,7 @@ export async function setTodoCompletionForDate(supabase, userId, item, dateISO, 
 
   if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
     await updateTodoItem(supabase, userId, item.id, { is_done: done })
+    await refreshTodoItemReminder(userId, { ...item, is_done: done })
     return
   }
 
@@ -272,6 +332,7 @@ export async function setTodoCompletionForDate(supabase, userId, item, dateISO, 
       { onConflict: 'todo_item_id,completion_date' },
     )
     if (error) throw error
+    await refreshTodoItemReminder(userId, item)
     return
   }
 
@@ -283,6 +344,7 @@ export async function setTodoCompletionForDate(supabase, userId, item, dateISO, 
     .eq('completion_date', date)
 
   if (error) throw error
+  await refreshTodoItemReminder(userId, item)
 }
 
 /**
@@ -310,6 +372,10 @@ export async function setTodoQuantiteForDate(supabase, userId, item, dateISO, qu
       .eq('todo_item_id', item.id)
       .eq('completion_date', date)
     if (error) throw error
+    await refreshTodoItemReminder(userId, {
+      ...item,
+      is_done: item.frequence === TODO_FREQUENCY.ONE_OFF ? false : item.is_done,
+    })
     return
   }
 
@@ -323,6 +389,10 @@ export async function setTodoQuantiteForDate(supabase, userId, item, dateISO, qu
     { onConflict: 'todo_item_id,completion_date' },
   )
   if (error) throw error
+  await refreshTodoItemReminder(userId, {
+    ...item,
+    is_done: item.frequence === TODO_FREQUENCY.ONE_OFF ? done : item.is_done,
+  })
 }
 
 /**

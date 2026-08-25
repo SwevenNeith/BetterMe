@@ -150,7 +150,7 @@ watch(
       </label>
 
       <div v-if="model.reminderEnabled" class="planning-subform__offset">
-        <span class="planning-subform__offset-label">Me rappeler avant l'événement</span>
+        <span class="planning-subform__offset-label">Délai avant l’événement (0 h 0 min = à l’heure)</span>
         <div class="planning-subform__duration" role="group" aria-label="Délai du rappel">
           <div class="planning-subform__duration-unit">
             <input
