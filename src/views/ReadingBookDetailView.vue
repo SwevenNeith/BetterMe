@@ -47,6 +47,7 @@ const FIELD_GETTERS = {
   pages: (item) => (item?.pages != null ? String(item.pages) : ''),
   publicationYear: (item) => (item?.publication_year != null ? String(item.publication_year) : ''),
   extraTags: (item) => formatExtraTagsInput(item),
+  sagaVolume: (item) => String(item?.saga_volume ?? 1),
   comments: (item) => item?.comments ?? '',
   quote: (item) => item?.quote ?? '',
 }
@@ -181,6 +182,14 @@ async function commitEdit() {
     return
   }
 
+  if (field === 'sagaVolume') {
+    const num = Number.parseInt(String(nextValue ?? ''), 10)
+    if (!Number.isFinite(num) || num < 1) {
+      errorMessage.value = 'Le numéro de tome doit être au moins 1.'
+      return
+    }
+  }
+
   if (valuesEqual(field, nextValue, book.value)) {
     resetInlineEdit()
     return
@@ -276,6 +285,7 @@ async function onIsSagaChange(value) {
   try {
     const payload = bookToEditForm(book.value)
     payload.isSaga = Boolean(value)
+    if (value) payload.sagaVolume = book.value.saga_volume ?? 1
     book.value = await updateReadingBook(supabase, userId.value, book.value.id, payload)
   } catch (err) {
     console.error(err)

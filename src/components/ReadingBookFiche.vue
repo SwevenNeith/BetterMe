@@ -3,7 +3,7 @@
  * `form` est un objet réactif partagé fourni par le parent (mode create).
  * `coverFileInputRef` est un ref du parent relié à l’input fichier.
  */
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, ref, watch, computed } from 'vue'
 import ReadingBookSheet from './ReadingBookSheet.vue'
 import ReadingHalfRating from './ReadingHalfRating.vue'
 import ReadingCollectionCombobox from './ReadingCollectionCombobox.vue'
@@ -98,6 +98,11 @@ const emit = defineEmits([
 ])
 
 const fieldInputRef = ref(null)
+
+const sagaVolumeVisible = computed(() => {
+  if (props.mode === 'create') return Boolean(props.form?.isSaga)
+  return Boolean(props.book?.is_saga)
+})
 
 const MULTILINE_FIELDS = new Set(['comments', 'quote'])
 
@@ -316,24 +321,67 @@ function fieldClass(field) {
           </button>
         </div>
 
-        <label class="reading-fiche-saga">
-          <input
-            v-if="mode === 'create'"
-            v-model="form.isSaga"
-            type="checkbox"
-            class="reading-fiche-saga__input"
-            :disabled="disabled"
-          />
-          <input
-            v-else
-            type="checkbox"
-            class="reading-fiche-saga__input"
-            :checked="Boolean(book?.is_saga)"
-            :disabled="disabled"
-            @change="onIsSagaChange"
-          />
-          <span class="reading-fiche-saga__label">Série</span>
-        </label>
+        <div class="reading-fiche-saga-group">
+          <label class="reading-fiche-saga">
+            <input
+              v-if="mode === 'create'"
+              v-model="form.isSaga"
+              type="checkbox"
+              class="reading-fiche-saga__input"
+              :disabled="disabled"
+            />
+            <input
+              v-else
+              type="checkbox"
+              class="reading-fiche-saga__input"
+              :checked="Boolean(book?.is_saga)"
+              :disabled="disabled"
+              @change="onIsSagaChange"
+            />
+            <span class="reading-fiche-saga__label">Série</span>
+          </label>
+
+          <div v-if="sagaVolumeVisible" class="reading-fiche-saga-volume">
+            <span class="reading-fiche-saga-volume__label">Tome n°</span>
+            <template v-if="mode === 'create'">
+              <input
+                v-model.number="form.sagaVolume"
+                type="number"
+                min="1"
+                step="1"
+                class="reading-fiche-saga-volume__input"
+                :disabled="disabled"
+                aria-label="Numéro de tome"
+              />
+            </template>
+            <template v-else-if="isEditing('sagaVolume')">
+              <input
+                ref="fieldInputRef"
+                :value="draft"
+                type="number"
+                min="1"
+                step="1"
+                class="reading-fiche-saga-volume__input"
+                :disabled="disabled"
+                aria-label="Numéro de tome"
+                @input="onDraftInput"
+                @keydown="onFieldKeydown"
+                @change="commitEdit"
+                @blur="commitEdit"
+              />
+            </template>
+            <button
+              v-else
+              type="button"
+              class="reading-fiche-saga-volume__value"
+              :class="fieldClass('sagaVolume')"
+              :disabled="disabled"
+              @click="startEdit('sagaVolume')"
+            >
+              {{ book?.saga_volume ?? 1 }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Dates + note : popup uniquement -->

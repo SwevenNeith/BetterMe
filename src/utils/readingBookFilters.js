@@ -8,6 +8,7 @@ export const READING_FILTER_FIELDS = {
   keyword: { id: 'keyword', label: 'Mot-clé' },
   notes: { id: 'notes', label: 'Notes' },
   series: { id: 'series', label: 'Série' },
+  sagaVolume: { id: 'sagaVolume', label: 'Tome' },
   pages: { id: 'pages', label: 'Pages' },
 }
 
@@ -39,6 +40,12 @@ export const READING_FILTER_OPERATORS = {
     { id: 'is_yes', label: 'est une série', needsValue: false },
     { id: 'is_no', label: "n'est pas une série", needsValue: false },
   ],
+  sagaVolume: [
+    { id: 'is', label: 'est', needsValue: 'number' },
+    { id: 'between', label: 'entre', needsValue: 'range' },
+    { id: 'is_empty', label: 'est vide', needsValue: false },
+    { id: 'is_not_empty', label: "n'est pas vide", needsValue: false },
+  ],
   pages: [
     { id: 'between', label: 'entre', needsValue: 'range' },
     { id: 'is_empty', label: 'est vide', needsValue: false },
@@ -57,6 +64,7 @@ function defaultValueFor(field, operator, collections = []) {
   const meta = getOperatorMeta(field, operator)
   if (!meta?.needsValue) return ''
   if (meta.needsValue === 'select') return String(collections[0]?.name ?? '')
+  if (meta.needsValue === 'number') return '1'
   return ''
 }
 
@@ -128,6 +136,12 @@ export function resetFilterForOperatorChange(filter, operator, collections = [])
     return
   }
 
+  if (operator.needsValue === 'number') {
+    filter.value = filter.value ?? '1'
+    filter.valueTo = ''
+    return
+  }
+
   filter.value = filter.value ?? ''
   filter.valueTo = ''
 }
@@ -174,6 +188,18 @@ export function formatReadingFilterLabel(filter) {
     return `${fieldLabel} entre…`
   }
 
+  if (filter.field === 'sagaVolume' && filter.operator === 'between') {
+    const min = String(filter.value ?? '').trim()
+    const max = String(filter.valueTo ?? '').trim()
+    if (min && max) return `${fieldLabel} entre ${min} et ${max}`
+    return `${fieldLabel} entre…`
+  }
+
+  if (filter.field === 'sagaVolume' && filter.operator === 'is') {
+    const value = String(filter.value ?? '').trim()
+    return value ? `${fieldLabel} ${operatorLabel} ${value}` : `${fieldLabel} ${operatorLabel}…`
+  }
+
   if (!operator?.needsValue) {
     return `${fieldLabel} ${operatorLabel}`
   }
@@ -184,6 +210,12 @@ export function formatReadingFilterLabel(filter) {
   }
 
   return value ? `${fieldLabel} ${operatorLabel} ${value}` : `${fieldLabel} ${operatorLabel}…`
+}
+
+function getBookSagaVolume(book) {
+  if (!book?.is_saga) return null
+  const volume = parseOptionalNumber(book.saga_volume)
+  return volume ?? 1
 }
 
 /**
@@ -242,6 +274,32 @@ export function bookMatchesReadingFilter(book, filter) {
     if (filter.operator === 'is_yes') return isSeries
     if (filter.operator === 'is_no') return !isSeries
     return true
+  }
+
+  if (filter.field === 'sagaVolume') {
+    const volume = getBookSagaVolume(book)
+
+    switch (filter.operator) {
+      case 'is_empty':
+        return volume === null
+      case 'is_not_empty':
+        return volume !== null
+      case 'is': {
+        const target = parseOptionalNumber(filter.value)
+        if (target === null) return true
+        if (volume === null) return false
+        return volume === target
+      }
+      case 'between': {
+        const min = parseOptionalNumber(filter.value)
+        const max = parseOptionalNumber(filter.valueTo)
+        if (min === null || max === null) return true
+        if (volume === null) return false
+        return volume >= min && volume <= max
+      }
+      default:
+        return true
+    }
   }
 
   if (filter.field === 'pages') {

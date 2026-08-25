@@ -335,6 +335,62 @@ defineProps({
   cursor: wait;
 }
 
+.reading-fiche-saga-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+  flex-shrink: 0;
+}
+
+.reading-fiche-saga-volume {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.reading-fiche-saga-volume__label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #5a4a68;
+  white-space: nowrap;
+}
+
+.reading-fiche-saga-volume__input {
+  width: 4.25rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(173, 129, 190, 0.45);
+  background: rgba(255, 255, 255, 0.85);
+  color: #2c2434;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.reading-fiche-saga-volume__input:focus {
+  outline: none;
+  border-color: #ad81be;
+  box-shadow: 0 0 0 2px rgba(213, 181, 234, 0.35);
+}
+
+.reading-fiche-saga-volume__value {
+  min-width: 2rem;
+  padding: 0.2rem 0.45rem;
+  border: none;
+  border-bottom: 1px dashed rgba(173, 129, 190, 0.55);
+  background: transparent;
+  color: #2c2434;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reading-fiche-saga-volume__value:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 .reading-fiche-label {
   font-size: 0.78rem;
   font-weight: 700;

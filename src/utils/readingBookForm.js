@@ -32,6 +32,7 @@ export function emptyBookForm() {
     author: '',
     collection: '',
     isSaga: false,
+    sagaVolume: 1,
     dateStart: '',
     dateEnd: '',
     rating: null,
@@ -53,6 +54,7 @@ export function bookToEditForm(book) {
     author: book?.author ?? '',
     collection: book?.collection ?? '',
     isSaga: Boolean(book?.is_saga),
+    sagaVolume: book?.is_saga ? (book?.saga_volume ?? 1) : 1,
     dateStart: book?.date_start ?? '',
     dateEnd: book?.date_end ?? '',
     rating: book?.rating ?? null,
@@ -87,12 +89,22 @@ function parseOptionalDate(value) {
   return trimmed || null
 }
 
+function parseSagaVolume(value, isSaga) {
+  if (!isSaga) return null
+  const trimmed = String(value ?? '').trim()
+  const num = trimmed ? Number.parseInt(trimmed, 10) : 1
+  if (!Number.isFinite(num) || num < 1) return 1
+  return num
+}
+
 export function formToBookPayload(form) {
+  const isSaga = Boolean(form?.isSaga)
   return {
     title: String(form?.title ?? '').trim(),
     author: String(form?.author ?? '').trim(),
     collection: String(form?.collection ?? '').trim(),
-    isSaga: Boolean(form?.isSaga),
+    isSaga,
+    sagaVolume: parseSagaVolume(form?.sagaVolume, isSaga),
     dateStart: parseOptionalDate(form?.dateStart),
     dateEnd: parseOptionalDate(form?.dateEnd),
     rating: parseOptionalRating(form?.rating),

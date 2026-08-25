@@ -14,7 +14,7 @@ const ALLOWED_MIME = new Set([
 ])
 
 const BOOK_SELECT =
-  'id, user_id, title, author, collection, is_saga, date_start, date_end, rating, pages, publication_year, comments, quote, spoil, cover_storage_path, cover_image_url, tags, created_at'
+  'id, user_id, title, author, collection, is_saga, saga_volume, date_start, date_end, rating, pages, publication_year, comments, quote, spoil, cover_storage_path, cover_image_url, tags, created_at'
 
 const DUPLICATE_BOOK_MESSAGE =
   'Un livre avec le même titre et le même auteur existe déjà dans ta bibliothèque.'
@@ -224,6 +224,7 @@ function buildBookRowFromInput(input, existing = null) {
     author: payload.author,
     collection: payload.collection || null,
     is_saga: Boolean(payload.isSaga),
+    saga_volume: payload.isSaga ? (payload.sagaVolume ?? 1) : null,
     date_start: payload.dateStart,
     date_end: payload.dateEnd,
     rating: payload.rating,

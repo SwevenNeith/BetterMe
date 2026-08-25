@@ -86,6 +86,14 @@ function operatorNeedsRange(filter) {
   return getOperatorMeta(filter.field, filter.operator)?.needsValue === 'range'
 }
 
+function operatorNeedsNumber(filter) {
+  return getOperatorMeta(filter.field, filter.operator)?.needsValue === 'number'
+}
+
+function rangeMinForField(field) {
+  return field === 'sagaVolume' ? 1 : 0
+}
+
 function toggleAddFieldMenu() {
   addFieldMenuOpen.value = !addFieldMenuOpen.value
 }
@@ -149,7 +157,7 @@ function toggleAddFieldMenu() {
               <input
                 v-model="filter.value"
                 type="number"
-                min="0"
+                :min="rangeMinForField(filter.field)"
                 class="reading-books-filter__input reading-books-filter__input--range"
                 placeholder="Min"
                 @input="onValueChange"
@@ -158,12 +166,22 @@ function toggleAddFieldMenu() {
               <input
                 v-model="filter.valueTo"
                 type="number"
-                min="0"
+                :min="rangeMinForField(filter.field)"
                 class="reading-books-filter__input reading-books-filter__input--range"
                 placeholder="Max"
                 @input="onValueChange"
               />
             </div>
+
+            <input
+              v-else-if="operatorNeedsNumber(filter)"
+              v-model="filter.value"
+              type="number"
+              min="1"
+              class="reading-books-filter__input reading-books-filter__select--value"
+              placeholder="Tome…"
+              @input="onValueChange"
+            />
 
             <input
               v-else-if="operatorNeedsText(filter)"
