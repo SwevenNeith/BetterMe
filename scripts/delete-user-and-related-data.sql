@@ -1,6 +1,11 @@
 -- ============================================================
--- Supprimer un utilisateur BetterMe et toutes ses données
+-- Supprimer un utilisateur BetterMe et toutes ses données (BDD + Auth)
 -- Exécute dans le SQL Editor Supabase (rôle service_role / postgres).
+--
+-- ⚠️  Supabase interdit DELETE direct sur storage.objects.
+--     Supprime d’abord les fichiers Storage (étape 1), puis ce script (étape 2) :
+--
+--     node scripts/delete-user-storage.mjs <USER_ID>
 --
 -- 1. Remplace l’UUID ci-dessous
 -- 2. Exécute le script en une seule fois
@@ -130,21 +135,9 @@ BEGIN
   RAISE NOTICE 'Lignes public.* supprimées : %', total_deleted;
 
   -- ------------------------------------------------------------------
-  -- 3) Fichiers Storage (couvertures lecture + images de réconfort)
-  -- ------------------------------------------------------------------
-  DELETE FROM storage.objects
-  WHERE bucket_id IN ('comfort-images', 'reading-covers')
-    AND (
-      owner = target_user
-      OR name LIKE target_user::text || '/%'
-      OR (metadata ->> 'owner') = target_user::text
-    );
-
-  GET DIAGNOSTICS deleted_count = ROW_COUNT;
-  RAISE NOTICE 'Objets storage supprimés : %', deleted_count;
-
-  -- ------------------------------------------------------------------
-  -- 4) Compte Auth (sessions, identities, etc. via CASCADE)
+  -- 3) Compte Auth (sessions, identities, etc. via CASCADE)
+  --     Les fichiers Storage doivent être supprimés AVANT via :
+  --     node scripts/delete-user-storage.mjs <USER_ID>
   -- ------------------------------------------------------------------
   DELETE FROM auth.users WHERE id = target_user;
 
