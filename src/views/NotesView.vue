@@ -23,6 +23,8 @@ import { parseNoteWikiHref, renderMarkdownToSafeHtml } from '../utils/renderMark
 import NotesTreeNode from '../components/NotesTreeNode.vue'
 import AppConfirmDialog from '../components/AppConfirmDialog.vue'
 import NotesExtensionsModal from '../components/NotesExtensionsModal.vue'
+import NotesGraphView from '../components/NotesGraphView.vue'
+import NotesTabsBar from '../components/NotesTabsBar.vue'
 import {
   isNotesExtensionEnabled,
   loadNotesExtensionPrefs,
@@ -30,6 +32,8 @@ import {
   saveNotesExtensionPrefs,
 } from '../services/notesExtensions.js'
 import { createDefaultNotesExtensionPrefs } from '../constants/notesExtensions.js'
+
+const GRAPH_TAB = { type: 'graph', id: 'graph' }
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.NOTES, undefined, { setDocumentTitle: true })
 
@@ -58,7 +62,42 @@ const editorEl = ref(null)
 const previewEl = ref(null)
 const extensionsOpen = ref(false)
 const extensionPrefs = ref(createDefaultNotesExtensionPrefs())
+/** @type {import('vue').Ref<Array<{ type: 'note' | 'graph', id: string }>>} */
+const openTabs = ref([])
+/** @type {import('vue').Ref<Record<string, { title: string, content: string, folderId: string | null, dirty: boolean, viewMode: string, saveStatus: string, saveError: string }>>} */
+const noteSessions = ref({})
 let scrollSyncLock = false
+let switchingTabs = false
+
+const isGraphView = computed(() => {
+  const name = route.name?.toString() ?? ''
+  return name === 'notes-graph' || name === 'embed-notes-graph'
+})
+
+const activeTabKey = computed(() => {
+  if (isGraphView.value) return 'graph'
+  if (selectedNoteId.value) return `note:${selectedNoteId.value}`
+  return ''
+})
+
+const tabItems = computed(() =>
+  openTabs.value.map((tab) => {
+    if (tab.type === 'graph') {
+      return { ...tab, key: 'graph', label: 'Vue globale' }
+    }
+    const fromDraft =
+      tab.id === selectedNoteId.value && !isGraphView.value
+        ? String(draftTitle.value ?? '').trim()
+        : ''
+    const fromList = notes.value.find((note) => note.id === tab.id)?.title
+    const fromSession = noteSessions.value[tab.id]?.title
+    return {
+      ...tab,
+      key: `note:${tab.id}`,
+      label: fromDraft || String(fromSession || fromList || 'Note').trim() || 'Note',
+    }
+  }),
+)
 
 const promptOpen = ref(false)
 const promptKind = ref('note') // note | folder | rename-folder | rename-note
@@ -122,6 +161,149 @@ function updateExtensionPrefs(nextPrefs) {
       errorMessage.value = err.message || 'Impossible d’enregistrer les extensions.'
     }
   })()
+}
+
+function tabsStorageKey(uid) {
+  return `betterme-notes-open-tabs:${uid || 'anon'}`
+}
+
+function persistOpenTabs() {
+  if (!userId.value) return
+  try {
+    localStorage.setItem(tabsStorageKey(userId.value), JSON.stringify(openTabs.value))
+  } catch {
+    // ignore
+  }
+}
+
+function loadPersistedOpenTabs(uid) {
+  try {
+    const raw = localStorage.getItem(tabsStorageKey(uid))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (tab) =>
+        tab &&
+        (tab.type === 'graph' || tab.type === 'note') &&
+        typeof tab.id === 'string' &&
+        tab.id,
+    )
+  } catch {
+    return []
+  }
+}
+
+function ensureNoteTab(noteId) {
+  if (!noteId) return
+  if (openTabs.value.some((tab) => tab.type === 'note' && tab.id === noteId)) return
+  openTabs.value = [...openTabs.value, { type: 'note', id: noteId }]
+  persistOpenTabs()
+}
+
+function ensureGraphTab() {
+  if (openTabs.value.some((tab) => tab.type === 'graph')) return
+  openTabs.value = [...openTabs.value, { ...GRAPH_TAB }]
+  persistOpenTabs()
+}
+
+function removeNoteTab(noteId) {
+  openTabs.value = openTabs.value.filter((tab) => !(tab.type === 'note' && tab.id === noteId))
+  persistOpenTabs()
+}
+
+function pruneOpenTabs(noteRows) {
+  const ids = new Set((noteRows ?? []).map((note) => note.id))
+  openTabs.value = openTabs.value.filter((tab) => tab.type === 'graph' || ids.has(tab.id))
+  persistOpenTabs()
+}
+
+function stashCurrentNoteSession() {
+  if (!selectedNoteId.value) return
+  noteSessions.value = {
+    ...noteSessions.value,
+    [selectedNoteId.value]: {
+      title: draftTitle.value,
+      content: draftContent.value,
+      folderId: draftFolderId.value,
+      dirty: dirty.value,
+      viewMode: viewMode.value,
+      saveStatus: saveStatus.value,
+      saveError: saveError.value,
+    },
+  }
+}
+
+function applyNoteToEditor(note) {
+  const session = noteSessions.value[note.id]
+  selectedNoteId.value = note.id
+  selectedNote.value = note
+  if (session) {
+    draftTitle.value = session.title
+    draftContent.value = session.content
+    draftFolderId.value = session.folderId
+    dirty.value = Boolean(session.dirty)
+    viewMode.value = session.viewMode || 'split'
+    saveStatus.value = session.saveStatus || ''
+    saveError.value = session.saveError || ''
+  } else {
+    draftTitle.value = note.title
+    draftContent.value = note.content_md
+    draftFolderId.value = note.folder_id
+    dirty.value = false
+    saveStatus.value = ''
+    saveError.value = ''
+  }
+}
+
+async function activateTab(tab) {
+  if (!tab) return
+  if (tab.type === 'graph') {
+    await openGraphView()
+    return
+  }
+  await selectNote(tab.id)
+}
+
+async function closeTab(tab) {
+  if (!tab) return
+  const key = tab.type === 'graph' ? 'graph' : `note:${tab.id}`
+  const wasActive = activeTabKey.value === key
+  const index = openTabs.value.findIndex((item) =>
+    tab.type === 'graph' ? item.type === 'graph' : item.type === 'note' && item.id === tab.id,
+  )
+
+  if (wasActive && tab.type === 'note' && dirty.value) {
+    await flushSave()
+  }
+  if (wasActive && tab.type === 'note') {
+    stashCurrentNoteSession()
+  }
+
+  openTabs.value = openTabs.value.filter((item) =>
+    tab.type === 'graph' ? item.type !== 'graph' : !(item.type === 'note' && item.id === tab.id),
+  )
+  persistOpenTabs()
+
+  if (tab.type === 'note') {
+    const nextSessions = { ...noteSessions.value }
+    delete nextSessions[tab.id]
+    noteSessions.value = nextSessions
+  }
+
+  if (!wasActive) return
+
+  const fallback =
+    openTabs.value[Math.min(Math.max(index, 0), openTabs.value.length - 1)] ?? openTabs.value[0] ?? null
+
+  if (fallback) {
+    await activateTab(fallback)
+    return
+  }
+
+  clearSelection()
+  const name = route.name?.toString().startsWith('embed-') ? 'embed-notes' : 'notes'
+  await router.replace({ name })
 }
 
 const tree = computed(() => buildNotesTree(folders.value, notes.value, null))
@@ -217,16 +399,39 @@ async function loadAll() {
     folders.value = folderRows
     notes.value = noteRows
 
-    const routeNoteId = typeof route.params.noteId === 'string' ? route.params.noteId : null
-    if (routeNoteId && noteRows.some((n) => n.id === routeNoteId)) {
-      await selectNote(routeNoteId, { syncRoute: false })
-    } else if (selectedNoteId.value && noteRows.some((n) => n.id === selectedNoteId.value)) {
-      await selectNote(selectedNoteId.value, { syncRoute: false })
-    } else {
-      const tutorial = noteRows.find((n) => n.system_key === 'markdown-tutorial')
-      const first = tutorial ?? noteRows.slice().sort((a, b) => a.title.localeCompare(b.title, 'fr'))[0]
-      if (first) await selectNote(first.id)
+    if (!openTabs.value.length) {
+      openTabs.value = loadPersistedOpenTabs(userId.value)
+    }
+    pruneOpenTabs(noteRows)
+    const ids = new Set(noteRows.map((n) => n.id))
+
+    if (isGraphView.value) {
+      ensureGraphTab()
+      const keepId =
+        (selectedNoteId.value && noteRows.some((n) => n.id === selectedNoteId.value)
+          ? selectedNoteId.value
+          : null) ||
+        noteRows.find((n) => n.system_key === 'markdown-tutorial')?.id ||
+        noteRows[0]?.id ||
+        null
+      if (keepId) await selectNote(keepId, { syncRoute: false, openTab: false })
       else clearSelection()
+    } else {
+      const routeNoteId = typeof route.params.noteId === 'string' ? route.params.noteId : null
+      if (routeNoteId && noteRows.some((n) => n.id === routeNoteId)) {
+        await selectNote(routeNoteId, { syncRoute: false })
+      } else if (selectedNoteId.value && noteRows.some((n) => n.id === selectedNoteId.value)) {
+        await selectNote(selectedNoteId.value, { syncRoute: false })
+      } else if (openTabs.value.some((tab) => tab.type === 'note' && ids.has(tab.id))) {
+        const firstTab = openTabs.value.find((tab) => tab.type === 'note' && ids.has(tab.id))
+        if (firstTab) await selectNote(firstTab.id)
+      } else {
+        const tutorial = noteRows.find((n) => n.system_key === 'markdown-tutorial')
+        const first =
+          tutorial ?? noteRows.slice().sort((a, b) => a.title.localeCompare(b.title, 'fr'))[0]
+        if (first) await selectNote(first.id)
+        else clearSelection()
+      }
     }
   } catch (err) {
     console.error(err)
@@ -249,34 +454,46 @@ function clearSelection() {
   saveError.value = ''
 }
 
-async function selectNote(noteId, { syncRoute = true } = {}) {
+async function selectNote(noteId, { syncRoute = true, openTab = true } = {}) {
   if (!noteId || !userId.value) return
-  if (dirty.value && selectedNoteId.value && selectedNoteId.value !== noteId) {
-    await flushSave()
+
+  if (selectedNoteId.value && selectedNoteId.value !== noteId) {
+    stashCurrentNoteSession()
+    if (dirty.value) await flushSave()
   }
 
   try {
     const note = await getNote(supabase, userId.value, noteId)
     if (!note) return
-    selectedNoteId.value = note.id
-    selectedNote.value = note
-    draftTitle.value = note.title
-    draftContent.value = note.content_md
-    draftFolderId.value = note.folder_id
-    dirty.value = false
-    saveError.value = ''
-    saveStatus.value = ''
+    switchingTabs = true
+    applyNoteToEditor(note)
+    await nextTick()
+    switchingTabs = false
     expandAncestorsOfNote(note.id)
+    if (openTab) ensureNoteTab(note.id)
     if (syncRoute) {
       const name = route.name?.toString().startsWith('embed-') ? 'embed-notes-detail' : 'notes-detail'
-      if (route.params.noteId !== note.id) {
-        await router.replace({ name, params: { noteId: note.id } })
+      const onGraph = isGraphView.value
+      if (onGraph || route.params.noteId !== note.id) {
+        await router.push({ name, params: { noteId: note.id } })
       }
     }
   } catch (err) {
+    switchingTabs = false
     console.error(err)
     saveError.value = err.message || 'Impossible d’ouvrir la note.'
   }
+}
+
+async function openGraphView() {
+  if (selectedNoteId.value) {
+    stashCurrentNoteSession()
+    if (dirty.value) await flushSave()
+  }
+  ensureGraphTab()
+  if (isGraphView.value) return
+  const name = route.name?.toString().startsWith('embed-') ? 'embed-notes-graph' : 'notes-graph'
+  await router.push({ name })
 }
 
 function markDirty() {
@@ -319,6 +536,18 @@ async function flushSave() {
     notes.value = notes.value.map((n) => (n.id === updated.id ? updated : n))
     dirty.value = false
     saveStatus.value = 'Enregistré'
+    noteSessions.value = {
+      ...noteSessions.value,
+      [updated.id]: {
+        title: draftTitle.value,
+        content: draftContent.value,
+        folderId: draftFolderId.value,
+        dirty: false,
+        viewMode: viewMode.value,
+        saveStatus: 'Enregistré',
+        saveError: '',
+      },
+    }
   } catch (err) {
     console.error(err)
     saveError.value = err.message || 'Échec de l’enregistrement.'
@@ -423,12 +652,26 @@ async function onDeleteNote(noteId) {
     await flushSave()
     await deleteNote(supabase, userId.value, noteId, note)
     notes.value = notes.value.filter((n) => n.id !== noteId)
-    if (selectedNoteId.value === noteId) {
-      clearSelection()
-      const name = route.name?.toString().startsWith('embed-') ? 'embed-notes' : 'notes'
-      await router.replace({ name })
-      const next = notes.value[0]
-      if (next) await selectNote(next.id)
+    const nextSessions = { ...noteSessions.value }
+    delete nextSessions[noteId]
+    noteSessions.value = nextSessions
+
+    const wasSelected = selectedNoteId.value === noteId || activeTabKey.value === `note:${noteId}`
+    const tabIndex = openTabs.value.findIndex((tab) => tab.type === 'note' && tab.id === noteId)
+    removeNoteTab(noteId)
+
+    if (wasSelected) {
+      const fallback =
+        openTabs.value[Math.min(Math.max(tabIndex, 0), openTabs.value.length - 1)] ??
+        openTabs.value[0] ??
+        null
+      if (fallback) {
+        await activateTab(fallback)
+      } else {
+        clearSelection()
+        const name = route.name?.toString().startsWith('embed-') ? 'embed-notes' : 'notes'
+        await router.replace({ name })
+      }
     }
   } catch (err) {
     console.error(err)
@@ -449,6 +692,7 @@ async function onDeleteFolder(folderId) {
 
   try {
     const selectedId = selectedNoteId.value
+    const wasOnGraph = isGraphView.value
     await deleteNoteFolder(supabase, userId.value, folderId)
     const [folderRows, noteRows] = await Promise.all([
       listNoteFolders(supabase, userId.value),
@@ -456,11 +700,28 @@ async function onDeleteFolder(folderId) {
     ])
     folders.value = folderRows
     notes.value = noteRows
+    pruneOpenTabs(noteRows)
+
+    const survivingSessions = { ...noteSessions.value }
+    for (const id of Object.keys(survivingSessions)) {
+      if (!noteRows.some((n) => n.id === id)) delete survivingSessions[id]
+    }
+    noteSessions.value = survivingSessions
+
+    if (wasOnGraph) {
+      ensureGraphTab()
+      return
+    }
+
     if (selectedId && !noteRows.some((n) => n.id === selectedId)) {
-      clearSelection()
-      const name = route.name?.toString().startsWith('embed-') ? 'embed-notes' : 'notes'
-      await router.replace({ name })
-      if (noteRows[0]) await selectNote(noteRows[0].id)
+      const fallback = openTabs.value[0] ?? null
+      if (fallback) {
+        await activateTab(fallback)
+      } else {
+        clearSelection()
+        const name = route.name?.toString().startsWith('embed-') ? 'embed-notes' : 'notes'
+        await router.replace({ name })
+      }
     }
   } catch (err) {
     console.error(err)
@@ -564,6 +825,7 @@ onUnmounted(() => {
 watch(userId, (id) => {
   if (!id) return
   void (async () => {
+    openTabs.value = loadPersistedOpenTabs(id)
     try {
       extensionPrefs.value = await loadNotesExtensionPrefs(supabase, id)
     } catch (err) {
@@ -583,6 +845,10 @@ watch(
   },
 )
 
+watch(isGraphView, (active) => {
+  if (active) ensureGraphTab()
+})
+
 watch(viewMode, async (mode) => {
   if (mode !== 'split') return
   await nextTick()
@@ -590,14 +856,17 @@ watch(viewMode, async (mode) => {
 })
 
 watch(draftTitle, () => {
+  if (switchingTabs) return
   if (selectedNote.value && draftTitle.value !== selectedNote.value.title) markDirty()
 })
 
 watch(draftContent, () => {
+  if (switchingTabs) return
   if (selectedNote.value && draftContent.value !== selectedNote.value.content_md) markDirty()
 })
 
 watch(draftFolderId, (value) => {
+  if (switchingTabs) return
   if (selectedNote.value && value !== selectedNote.value.folder_id) {
     void onMoveNoteFolder()
   }
@@ -647,6 +916,23 @@ watch(draftFolderId, (value) => {
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
               <line x1="12" y1="11" x2="12" y2="17" />
               <line x1="9" y1="14" x2="15" y2="14" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="notes-page__icon-btn"
+            :class="{ 'notes-page__icon-btn--active': isGraphView }"
+            title="Vue globale"
+            aria-label="Ouvrir la vue globale des notes"
+            @click="openGraphView"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="6" cy="6" r="2.5" />
+              <circle cx="18" cy="6" r="2.5" />
+              <circle cx="12" cy="18" r="2.5" />
+              <line x1="8.2" y1="7.2" x2="10.2" y2="16" />
+              <line x1="15.8" y1="7.2" x2="13.8" y2="16" />
+              <line x1="8.5" y1="6" x2="15.5" y2="6" />
             </svg>
           </button>
         </div>
@@ -714,7 +1000,22 @@ watch(draftFolderId, (value) => {
     </button>
 
     <section class="notes-page__main">
-      <template v-if="selectedNote">
+      <NotesTabsBar
+        :tabs="tabItems"
+        :active-key="activeTabKey"
+        @select="activateTab"
+        @close="closeTab"
+      />
+
+      <NotesGraphView
+        v-if="isGraphView"
+        :active="isGraphView"
+        :notes="notes"
+        :selected-note-id="selectedNoteId"
+        @select-note="selectNote"
+      />
+
+      <template v-else-if="selectedNote">
         <header class="notes-page__editor-header">
           <input
             v-model="draftTitle"
@@ -969,6 +1270,10 @@ watch(draftFolderId, (value) => {
 .notes-page__icon-btn:hover {
   color: var(--color-success, #95d1aa);
   background: transparent;
+}
+
+.notes-page__icon-btn--active {
+  color: var(--color-success, #95d1aa);
 }
 
 .notes-page__icon-btn svg {

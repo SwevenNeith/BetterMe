@@ -115,6 +115,11 @@ function createAppChildRoutes(namePrefix = '') {
       component: NotesView,
     },
     {
+      path: 'notes/graphe',
+      name: n('notes-graph'),
+      component: NotesView,
+    },
+    {
       path: 'notes/:noteId',
       name: n('notes-detail'),
       component: NotesView,
