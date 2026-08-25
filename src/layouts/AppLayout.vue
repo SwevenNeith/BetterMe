@@ -1,74 +1,102 @@
 <script setup>
-import { onMounted, onUnmounted } from 'vue';
-import { RouterView } from 'vue-router';
-import AppSidebar from '../components/Sidebar.vue';
-import NotificationPrompt from '../components/NotificationPrompt.vue';
-import { supabase } from '../lib/supabase.js';
+import { ref, onMounted, onUnmounted } from 'vue'
+import { RouterView } from 'vue-router'
+import AppSidebar from '../components/Sidebar.vue'
+import NotificationPrompt from '../components/NotificationPrompt.vue'
+import VisibilityOnboardingModal from '../components/VisibilityOnboardingModal.vue'
+import { supabase } from '../lib/supabase.js'
 import {
   declencherCronNotifications,
   notificationsActives,
-} from '../services/notifications.js';
+} from '../services/notifications.js'
+import { hasCompletedVisibilityOnboarding } from '../services/visibilityOnboarding.js'
 
 /** Secours si pg_cron Supabase indisponible — le verrou serveur évite le double envoi avec pg_cron */
-const CRON_INTERVAL_MS = 60_000;
-let cronIntervalId = null;
+const CRON_INTERVAL_MS = 60_000
+let cronIntervalId = null
+
+const userId = ref(null)
+const showVisibilityOnboarding = ref(false)
 
 const startNotificationCron = () => {
-  if (!notificationsActives() || cronIntervalId) return;
+  if (!notificationsActives() || cronIntervalId) return
   // Pas d'appel immédiat : évite 2 déclenchements la même seconde que pg_cron au chargement
-  cronIntervalId = window.setInterval(declencherCronNotifications, CRON_INTERVAL_MS);
-};
+  cronIntervalId = window.setInterval(declencherCronNotifications, CRON_INTERVAL_MS)
+}
 
 const stopNotificationCron = () => {
   if (cronIntervalId) {
-    clearInterval(cronIntervalId);
-    cronIntervalId = null;
+    clearInterval(cronIntervalId)
+    cronIntervalId = null
   }
-};
+}
+
+function onVisibilityOnboardingCompleted() {
+  showVisibilityOnboarding.value = false
+}
 
 onMounted(() => {
-  startNotificationCron();
-  window.addEventListener('betterme-notifications-granted', startNotificationCron);
+  startNotificationCron()
+  window.addEventListener('betterme-notifications-granted', startNotificationCron)
   void (async () => {
     try {
       const {
         data: { user },
-      } = await supabase.auth.getUser();
-      if (user?.id) {
-        const [
-          { rescheduleTodoPromesseReminder },
-          { purgeStaleMenstruationNotificationsOnStartup },
-          { rescheduleAllTodoItemReminders },
-        ] = await Promise.all([
-          import('../services/todoPromesseNotifications.js'),
-          import('../services/menstruationNotificationSync.js'),
-          import('../services/todoItemReminders.js'),
-        ])
-        await Promise.all([
-          rescheduleTodoPromesseReminder(user.id),
-          purgeStaleMenstruationNotificationsOnStartup(user.id),
-          rescheduleAllTodoItemReminders(user.id),
-        ])
+      } = await supabase.auth.getUser()
+      if (!user?.id) return
+
+      userId.value = user.id
+
+      try {
+        const completed = await hasCompletedVisibilityOnboarding(supabase, user.id)
+        showVisibilityOnboarding.value = !completed
+      } catch (onboardingErr) {
+        console.error('visibility onboarding:', onboardingErr)
       }
+
+      const [
+        { rescheduleTodoPromesseReminder },
+        { purgeStaleMenstruationNotificationsOnStartup },
+        { rescheduleAllTodoItemReminders },
+      ] = await Promise.all([
+        import('../services/todoPromesseNotifications.js'),
+        import('../services/menstruationNotificationSync.js'),
+        import('../services/todoItemReminders.js'),
+      ])
+      await Promise.all([
+        rescheduleTodoPromesseReminder(user.id),
+        purgeStaleMenstruationNotificationsOnStartup(user.id),
+        rescheduleAllTodoItemReminders(user.id),
+      ])
     } catch (err) {
-      console.error('rescheduleTodoPromesseReminder / syncMenstruationNotifications / todoReminders:', err);
+      console.error(
+        'rescheduleTodoPromesseReminder / syncMenstruationNotifications / todoReminders:',
+        err,
+      )
     }
-  })();
-});
+  })()
+})
 
 onUnmounted(() => {
-  stopNotificationCron();
-  window.removeEventListener('betterme-notifications-granted', startNotificationCron);
-});
+  stopNotificationCron()
+  window.removeEventListener('betterme-notifications-granted', startNotificationCron)
+})
 </script>
 
 <template>
-  <div class="app-layout">
-    <AppSidebar />
-    <main class="app-content">
-      <NotificationPrompt />
-      <RouterView />
-    </main>
+  <div class="app-layout" :class="{ 'app-layout--onboarding': showVisibilityOnboarding }">
+    <div class="app-layout__shell" :aria-hidden="showVisibilityOnboarding ? 'true' : undefined">
+      <AppSidebar />
+      <main class="app-content">
+        <NotificationPrompt />
+        <RouterView />
+      </main>
+    </div>
+    <VisibilityOnboardingModal
+      v-if="showVisibilityOnboarding && userId"
+      :user-id="userId"
+      @completed="onVisibilityOnboardingCompleted"
+    />
   </div>
 </template>
 
@@ -79,6 +107,29 @@ onUnmounted(() => {
   width: 100%;
   background-color: #f9f6fd;
   overflow-x: hidden;
+  position: relative;
+}
+
+.app-layout__shell {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 100vh;
+  width: 100%;
+  transition: filter 0.25s ease;
+}
+
+.app-layout--onboarding {
+  overflow: hidden;
+  height: 100vh;
+  max-height: 100vh;
+}
+
+.app-layout--onboarding .app-layout__shell {
+  filter: blur(10px) saturate(0.85);
+  pointer-events: none;
+  user-select: none;
+  touch-action: none;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -108,6 +159,13 @@ onUnmounted(() => {
 </style>
 
 <style>
+html.visibility-onboarding-open,
+body.visibility-onboarding-open {
+  overflow: hidden !important;
+  height: 100%;
+  overscroll-behavior: none;
+}
+
 @media (max-width: 768px) {
   .reading-book-page__back,
   .journal-entry-page__back,
