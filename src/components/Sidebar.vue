@@ -1412,6 +1412,15 @@ onUnmounted(() => {
     <!-- Réglages + déconnexion (footer) -->
     <div class="sidebar-footer">
       <div class="sidebar-divider"></div>
+      <button
+        class="nav-link footer-nav-link"
+        :class="{ 'nav-link--active': isActive(settingsLink.path) }"
+        @click="navigate(settingsLink.path)"
+      >
+        <span class="nav-icon" v-html="settingsLink.icon"></span>
+        <span class="nav-label">{{ settingsLink.name }}</span>
+        <span class="nav-indicator" v-if="isActive(settingsLink.path)"></span>
+      </button>
       <button class="logout-btn" @click="handleLogout">
         <span class="nav-icon">
           <svg
@@ -1431,15 +1440,6 @@ onUnmounted(() => {
           </svg>
         </span>
         <span>Déconnexion</span>
-      </button>
-      <button
-        class="nav-link footer-nav-link"
-        :class="{ 'nav-link--active': isActive(settingsLink.path) }"
-        @click="navigate(settingsLink.path)"
-      >
-        <span class="nav-icon" v-html="settingsLink.icon"></span>
-        <span class="nav-label">{{ settingsLink.name }}</span>
-        <span class="nav-indicator" v-if="isActive(settingsLink.path)"></span>
       </button>
     </div>
   </aside>
