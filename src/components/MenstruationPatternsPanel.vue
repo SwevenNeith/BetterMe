@@ -145,17 +145,16 @@ function patternDescription(patterns) {
   }
 
   if (p.type_pattern === PATTERN_TYPE.INTENSITY) {
-    const relation = formatThresholdRelation(p.symptôme)
     const dir = p.direction === 'hausse' ? 'plus intense' : 'moins intense'
     const current = formatScaleValue(p.intensité_moyenne, p.symptôme)
     const baseline = formatScaleValue(p.durée_moyenne, p.symptôme)
     if (current && baseline) {
-      return `${title} est souvent ${relation}, ${dir} que d’habitude sur ce cycle (${current} contre ~${baseline} d’habitude).`
+      return `${title} est ${dir} que d’habitude sur ce cycle (${current} contre ~${baseline} d’habitude).`
     }
     if (current) {
-      return `${title} est souvent ${relation}, ${dir} que d’habitude sur ce cycle (${current}).`
+      return `${title} est ${dir} que d’habitude sur ce cycle (${current}).`
     }
-    return `${title} est souvent ${relation}, ${dir} que d’habitude sur ce cycle.`
+    return `${title} est ${dir} que d’habitude sur ce cycle.`
   }
 
   if (p.type_pattern === PATTERN_TYPE.DURATION) {
@@ -168,12 +167,12 @@ function patternDescription(patterns) {
       const delta = Math.abs(
         Math.round(Number(p.durée_moyenne)) - Math.round(Number(p.intensité_moyenne)),
       )
-      return `${title} est souvent ${relation} ${dir} que d’habitude (${currentDays}, soit ${delta} j de ${longer ? 'plus' : 'moins'} que ~${baselineDays}).`
+      return `${title} est ${relation} ${dir} que d’habitude (${currentDays}, soit ${delta} j de ${longer ? 'plus' : 'moins'} que ~${baselineDays}).`
     }
     if (currentDays) {
-      return `${title} est souvent ${relation} ${dir} que d’habitude (${currentDays}).`
+      return `${title} est ${relation} ${dir} que d’habitude (${currentDays}).`
     }
-    return `${title} est souvent ${relation} ${dir} que d’habitude.`
+    return `${title} est ${relation} ${dir} que d’habitude.`
   }
 
   if (p.type_pattern === PATTERN_TYPE.COMBINED) {
