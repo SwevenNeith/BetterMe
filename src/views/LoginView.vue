@@ -29,14 +29,59 @@ const name = ref('')
 const email = ref('')
 const password = ref('')
 const errorMessage = ref('')
+const errorKind = ref('')
 const isLoading = ref(false)
 
 const toggleMode = () => {
   isLogin.value = !isLogin.value
   errorMessage.value = ''
+  errorKind.value = ''
   name.value = ''
   email.value = ''
   password.value = ''
+}
+
+const openSignup = () => {
+  errorKind.value = ''
+  errorMessage.value = ''
+  if (isLogin.value) {
+    isLogin.value = false
+  }
+}
+
+const isInvalidCredentialsError = (error) => {
+  const msg = error?.message?.toLowerCase() ?? ''
+  return msg.includes('invalid login credentials') || msg.includes('invalid credentials')
+}
+
+const resolveLoginCredentialsError = async () => {
+  const trimmedEmail = email.value.trim()
+  if (!trimmedEmail) {
+    errorMessage.value = 'Email ou mot de passe incorrect.'
+    return
+  }
+
+  try {
+    const { data: registered, error: rpcError } = await supabase.rpc('is_email_registered', {
+      check_email: trimmedEmail,
+    })
+
+    if (rpcError) {
+      console.error('is_email_registered:', rpcError)
+      errorMessage.value = 'Email ou mot de passe incorrect.'
+      return
+    }
+
+    if (registered === false) {
+      errorKind.value = 'no_account'
+      return
+    }
+
+    errorMessage.value = 'Mot de passe incorrect.'
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = 'Email ou mot de passe incorrect.'
+  }
 }
 
 const getErrorMessage = (error) => {
@@ -46,7 +91,7 @@ const getErrorMessage = (error) => {
   if (msg.includes('user already registered') || msg.includes('already been registered'))
     return 'Cet email est déjà utilisé. Essayez de vous connecter.'
   if (msg.includes('invalid login credentials') || msg.includes('invalid credentials'))
-    return 'Email ou mot de passe incorrect.'
+    return null
   if (msg.includes('password should be at least'))
     return 'Le mot de passe doit contenir au moins 6 caractères.'
   if (msg.includes('unable to validate email address')) return 'Adresse email invalide.'
@@ -55,6 +100,7 @@ const getErrorMessage = (error) => {
 
 const handleSubmit = async () => {
   errorMessage.value = ''
+  errorKind.value = ''
 
   if (!email.value || !password.value || (!isLogin.value && !name.value)) {
     errorMessage.value = 'Veuillez remplir tous les champs.'
@@ -83,7 +129,12 @@ const handleSubmit = async () => {
 
     router.push('/dashboard')
   } catch (error) {
-    errorMessage.value = getErrorMessage(error)
+    if (isLogin.value && isInvalidCredentialsError(error)) {
+      await resolveLoginCredentialsError()
+    } else {
+      const message = getErrorMessage(error)
+      errorMessage.value = message ?? 'Une erreur est survenue. Veuillez réessayer.'
+    }
   } finally {
     isLoading.value = false
   }
@@ -138,7 +189,11 @@ const handleSubmit = async () => {
             />
           </div>
 
-          <p v-if="errorMessage" class="error-message">{{ errorMessage }}</p>
+          <p v-if="errorKind === 'no_account'" class="error-message" role="alert">
+            Aucun compte n’est associé à cet email.
+            <a href="#" class="error-message__link" @click.prevent="openSignup">Créer un compte</a>
+          </p>
+          <p v-else-if="errorMessage" class="error-message" role="alert">{{ errorMessage }}</p>
 
           <button type="submit" class="submit-btn" :disabled="isLoading">
             <span v-if="isLoading" class="spinner"></span>
@@ -360,6 +415,20 @@ const handleSubmit = async () => {
   border-radius: 10px;
   text-align: center;
   animation: fadeIn 0.2s ease;
+  line-height: 1.45;
+}
+
+.error-message__link {
+  display: inline-block;
+  margin-left: 0.35rem;
+  color: #ad81be;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.error-message__link:hover {
+  color: #8e5fa8;
 }
 
 @media (prefers-color-scheme: dark) {
