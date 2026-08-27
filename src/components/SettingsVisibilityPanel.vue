@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { APP_MAIN_PAGES, APP_PAGE_IDS } from '../constants/appPages.js'
 import {
@@ -64,12 +64,24 @@ const editingPageId = ref(null)
 const editingLabel = ref('')
 
 const dragState = ref({
+  active: false,
   widgetId: null,
+  mode: null, // 'desktop' | 'mobile'
   fromZone: null,
+  fromGroupIndex: null,
   overZone: null,
   overWidgetId: null,
   overGroupIndex: null,
+  pointerId: null,
 })
+
+/** Drag en attente (seuil de mouvement avant activation). */
+let pendingDrag = null
+let layoutBeforeDrag = null
+let saveDashboardQueue = Promise.resolve()
+let pointerListenersBound = false
+
+const DRAG_THRESHOLD_PX = 6
 
 const pagesForList = computed(() =>
   APP_MAIN_PAGES.map((page) => ({
@@ -166,24 +178,32 @@ async function persist() {
   }
 }
 
-async function persistDashboard() {
-  if (!props.userId || isSaving.value) return
+function persistDashboard() {
+  if (!props.userId) return
 
-  isSaving.value = true
-  saveError.value = ''
-  saveMessage.value = ''
-  try {
-    await saveDashboardVisibility(supabase, props.userId, dashboardVisibility.value)
-    saveMessage.value = 'Enregistré.'
-    setTimeout(() => {
-      saveMessage.value = ''
-    }, 2500)
-  } catch (err) {
-    console.error(err)
-    saveError.value = err.message || 'Erreur lors de la sauvegarde.'
-  } finally {
-    isSaving.value = false
+  const snapshot = {
+    ...dashboardVisibility.value,
+    layout: getDashboardLayout(dashboardVisibility.value),
   }
+
+  saveDashboardQueue = saveDashboardQueue
+    .catch(() => {})
+    .then(async () => {
+      isSaving.value = true
+      saveError.value = ''
+      try {
+        await saveDashboardVisibility(supabase, props.userId, snapshot)
+        saveMessage.value = 'Enregistré.'
+        setTimeout(() => {
+          saveMessage.value = ''
+        }, 2500)
+      } catch (err) {
+        console.error(err)
+        saveError.value = err.message || 'Erreur lors de la sauvegarde.'
+      } finally {
+        isSaving.value = false
+      }
+    })
 }
 
 async function onToggleDashboardVisible(widgetId, visible) {
@@ -194,163 +214,225 @@ async function onToggleDashboardVisible(widgetId, visible) {
       visible,
     },
   }
-  await persistDashboard()
+  persistDashboard()
 }
 
-async function applyLayout(nextLayout) {
+function applyLayout(nextLayout, { persist = true } = {}) {
   dashboardVisibility.value = {
     ...dashboardVisibility.value,
     layout: nextLayout,
   }
-  await persistDashboard()
+  if (persist) persistDashboard()
 }
 
-function onWidgetDragStart(widgetId, fromZone, event) {
-  if (fromZone === 'mobile' && widgetId === DASHBOARD_WIDGET_IDS.COMFORT) {
-    event.preventDefault()
-    return
-  }
-  if (fromZone === 'mobile-group' && widgetId === DASHBOARD_WIDGET_IDS.COMFORT) {
-    event.preventDefault()
-    return
-  }
+function layoutsEqual(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+function resetDragState() {
   dragState.value = {
+    active: false,
+    widgetId: null,
+    mode: null,
+    fromZone: null,
+    fromGroupIndex: null,
+    overZone: null,
+    overWidgetId: null,
+    overGroupIndex: null,
+    pointerId: null,
+  }
+  pendingDrag = null
+  layoutBeforeDrag = null
+  document.body.classList.remove('dashboard-visibility-dragging')
+}
+
+function unbindPointerListeners() {
+  if (!pointerListenersBound) return
+  window.removeEventListener('pointermove', onWindowPointerMove)
+  window.removeEventListener('pointerup', onWindowPointerUp)
+  window.removeEventListener('pointercancel', onWindowPointerUp)
+  pointerListenersBound = false
+}
+
+function bindPointerListeners() {
+  if (pointerListenersBound) return
+  window.addEventListener('pointermove', onWindowPointerMove, { passive: false })
+  window.addEventListener('pointerup', onWindowPointerUp)
+  window.addEventListener('pointercancel', onWindowPointerUp)
+  pointerListenersBound = true
+}
+
+/**
+ * @param {string} widgetId
+ * @param {{ mode: 'desktop', zone: string } | { mode: 'mobile', groupIndex: number }} context
+ * @param {PointerEvent} event
+ */
+function onMoveStart(widgetId, context, event) {
+  if (isLoading.value) return
+  if (widgetId === DASHBOARD_WIDGET_IDS.COMFORT && context.mode === 'mobile') return
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+
+  event.preventDefault()
+  event.stopPropagation()
+
+  pendingDrag = {
     widgetId,
-    fromZone,
-    overZone: fromZone,
-    overWidgetId: widgetId,
-    overGroupIndex: null,
+    mode: context.mode,
+    zone: context.mode === 'desktop' ? context.zone : null,
+    groupIndex: context.mode === 'mobile' ? context.groupIndex : null,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
   }
-  try {
-    event.dataTransfer?.setData(
-      'text/plain',
-      JSON.stringify({ widgetId, fromZone }),
-    )
-    event.dataTransfer.effectAllowed = 'move'
-  } catch {
-    /* ignore */
-  }
+  layoutBeforeDrag = JSON.parse(JSON.stringify(dashboardLayout.value))
+  bindPointerListeners()
 }
 
-function onWidgetDragOver(zone, widgetId, event) {
-  if (!dragState.value.widgetId) return
-  event.preventDefault()
-  try {
-    event.dataTransfer.dropEffect = 'move'
-  } catch {
-    /* ignore */
-  }
+function activatePendingDrag() {
+  if (!pendingDrag || dragState.value.active) return
+
   dragState.value = {
-    ...dragState.value,
-    overZone: zone,
-    overWidgetId: widgetId ?? null,
-    overGroupIndex: null,
+    active: true,
+    widgetId: pendingDrag.widgetId,
+    mode: pendingDrag.mode,
+    fromZone: pendingDrag.mode === 'desktop' ? pendingDrag.zone : 'mobile-group',
+    fromGroupIndex: pendingDrag.mode === 'mobile' ? pendingDrag.groupIndex : null,
+    overZone: pendingDrag.mode === 'desktop' ? pendingDrag.zone : 'mobile-group',
+    overWidgetId: null,
+    overGroupIndex: pendingDrag.mode === 'mobile' ? pendingDrag.groupIndex : null,
+    pointerId: pendingDrag.pointerId,
   }
+  document.body.classList.add('dashboard-visibility-dragging')
 }
 
-function onGroupDragOver(groupIndex, widgetId, event) {
-  if (!dragState.value.widgetId) return
+/**
+ * Lit la cible de drop sous le pointeur via les wrappers `data-dash-drop`
+ * (jamais via fallthrough Vue sur le composant enfant).
+ * @param {number} clientX
+ * @param {number} clientY
+ * @param {string|null} [sourceId]
+ */
+function readDropTargetFromPoint(clientX, clientY, sourceId = null) {
+  const stack = document.elementsFromPoint(clientX, clientY)
+  for (const el of stack) {
+    if (!(el instanceof Element)) continue
+    const dropEl = el.closest('[data-dash-drop]')
+    if (!dropEl) continue
+
+    const mode = dropEl.getAttribute('data-dash-drop')
+    const beforeRaw = dropEl.getAttribute('data-before')
+    const beforeWidgetId =
+      beforeRaw && beforeRaw !== '' && beforeRaw !== '__end__' ? beforeRaw : null
+
+    // Ignorer la ligne source (sinon on “vise” soi-même).
+    if (sourceId && beforeWidgetId === sourceId) continue
+
+    if (mode === 'desktop') {
+      const zone = dropEl.getAttribute('data-zone')
+      if (!zone) continue
+      return { mode: 'desktop', zone, beforeWidgetId }
+    }
+
+    if (mode === 'mobile') {
+      const groupRaw = dropEl.getAttribute('data-group')
+      const groupIndex = groupRaw == null || groupRaw === '' ? NaN : Number(groupRaw)
+      if (!Number.isInteger(groupIndex) || groupIndex < 0) continue
+      return { mode: 'mobile', groupIndex, beforeWidgetId }
+    }
+  }
+  return null
+}
+
+function onWindowPointerMove(event) {
+  if (pendingDrag && event.pointerId === pendingDrag.pointerId && !dragState.value.active) {
+    const dx = event.clientX - pendingDrag.startX
+    const dy = event.clientY - pendingDrag.startY
+    if (dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) return
+    activatePendingDrag()
+  }
+
+  if (!dragState.value.active || event.pointerId !== dragState.value.pointerId) return
   event.preventDefault()
-  try {
-    event.dataTransfer.dropEffect = 'move'
-  } catch {
-    /* ignore */
+
+  const sourceId = dragState.value.widgetId
+  const mode = dragState.value.mode
+  const target = readDropTargetFromPoint(event.clientX, event.clientY, sourceId)
+
+  if (!target || target.mode !== mode) return
+
+  if (mode === 'desktop') {
+    if (
+      dragState.value.overZone === target.zone &&
+      dragState.value.overWidgetId === target.beforeWidgetId
+    ) {
+      return
+    }
+    dragState.value = {
+      ...dragState.value,
+      overZone: target.zone,
+      overWidgetId: target.beforeWidgetId,
+      overGroupIndex: null,
+    }
+    return
+  }
+
+  if (
+    dragState.value.overGroupIndex === target.groupIndex &&
+    dragState.value.overWidgetId === target.beforeWidgetId
+  ) {
+    return
   }
   dragState.value = {
     ...dragState.value,
     overZone: 'mobile-group',
-    overWidgetId: widgetId ?? null,
-    overGroupIndex: groupIndex,
+    overGroupIndex: target.groupIndex,
+    overWidgetId: target.beforeWidgetId,
   }
 }
 
-function onZoneDragOver(zone, event) {
-  if (!dragState.value.widgetId) return
-  event.preventDefault()
-  try {
-    event.dataTransfer.dropEffect = 'move'
-  } catch {
-    /* ignore */
-  }
-  if (dragState.value.overZone !== zone || dragState.value.overWidgetId) {
-    dragState.value = {
-      ...dragState.value,
-      overZone: zone,
-      overWidgetId: null,
-      overGroupIndex: null,
-    }
-  }
+function onWindowPointerUp(event) {
+  const pointerId = pendingDrag?.pointerId ?? dragState.value.pointerId
+  if (pointerId != null && event.pointerId !== pointerId) return
+
+  const wasActive = dragState.value.active
+  const sourceId = dragState.value.widgetId
+  const mode = dragState.value.mode
+  const fromZone = dragState.value.fromZone
+  const fromGroupIndex = dragState.value.fromGroupIndex
+  const overZone = dragState.value.overZone
+  const overWidgetId = dragState.value.overWidgetId
+  const overGroupIndex = dragState.value.overGroupIndex
+  const before = layoutBeforeDrag
+
+  unbindPointerListeners()
+  resetDragState()
+
+  // Clic sans déplacement : ne rien faire.
+  if (!wasActive || !sourceId || !before) return
+
+  // Pas de cible d'insertion précise et même zone/groupe → no-op
+  if (mode === 'desktop' && overZone === fromZone && overWidgetId == null) return
+  if (mode === 'mobile' && overGroupIndex === fromGroupIndex && overWidgetId == null) return
+
+  const target =
+    mode === 'desktop'
+      ? { mode: 'desktop', zone: overZone, beforeWidgetId: overWidgetId }
+      : { mode: 'mobile', groupIndex: overGroupIndex, beforeWidgetId: overWidgetId }
+
+  const nextLayout =
+    mode === 'desktop'
+      ? moveDesktopWidget(before, sourceId, target.zone, target.beforeWidgetId)
+      : moveMobileWidgetInGroups(before, sourceId, target.groupIndex, target.beforeWidgetId)
+
+  if (!nextLayout || layoutsEqual(before, nextLayout)) return
+
+  applyLayout(nextLayout, { persist: true })
 }
 
-function onWidgetDragEnd() {
-  dragState.value = {
-    widgetId: null,
-    fromZone: null,
-    overZone: null,
-    overWidgetId: null,
-    overGroupIndex: null,
-  }
-}
-
-async function onDesktopDrop(targetZone, beforeWidgetId, event) {
-  event.preventDefault()
-  event.stopPropagation()
-
-  let sourceId = dragState.value.widgetId
-  if (!sourceId) {
-    try {
-      const raw = event.dataTransfer?.getData('text/plain')
-      const parsed = raw ? JSON.parse(raw) : null
-      sourceId = parsed?.widgetId ?? null
-    } catch {
-      sourceId = null
-    }
-  }
-
-  onWidgetDragEnd()
-  if (!sourceId || !Object.values(DASHBOARD_DESKTOP_ZONES).includes(targetZone)) return
-
-  const nextLayout = moveDesktopWidget(
-    dashboardLayout.value,
-    sourceId,
-    targetZone,
-    beforeWidgetId,
-  )
-  await applyLayout(nextLayout)
-}
-
-async function onGroupDrop(targetGroupIndex, beforeWidgetId, event) {
-  event.preventDefault()
-  event.stopPropagation()
-
-  let sourceId = dragState.value.widgetId
-  if (!sourceId) {
-    try {
-      const raw = event.dataTransfer?.getData('text/plain')
-      const parsed = raw ? JSON.parse(raw) : null
-      sourceId = parsed?.widgetId ?? null
-    } catch {
-      sourceId = null
-    }
-  }
-
-  onWidgetDragEnd()
-  if (!sourceId || sourceId === DASHBOARD_WIDGET_IDS.COMFORT) return
-  if (!Number.isInteger(targetGroupIndex) || targetGroupIndex < 0) return
-
-  const nextLayout = moveMobileWidgetInGroups(
-    dashboardLayout.value,
-    sourceId,
-    targetGroupIndex,
-    beforeWidgetId,
-  )
-  await applyLayout(nextLayout)
-}
-
-async function onExtractToOwnPage(widgetId) {
-  if (!widgetId || widgetId === DASHBOARD_WIDGET_IDS.COMFORT || isSaving.value) return
+function onExtractToOwnPage(widgetId) {
+  if (!widgetId || widgetId === DASHBOARD_WIDGET_IDS.COMFORT) return
   const nextLayout = extractMobileWidgetToOwnGroup(dashboardLayout.value, widgetId)
-  await applyLayout(nextLayout)
+  applyLayout(nextLayout)
 }
 
 function groupWidgets(ids) {
@@ -362,12 +444,13 @@ function canExtractWidget(group, widgetId) {
 }
 
 function isDragging(widgetId) {
-  return dragState.value.widgetId === widgetId
+  return dragState.value.active && dragState.value.widgetId === widgetId
 }
 
 function isDropTarget(zone, widgetId) {
   return (
-    Boolean(dragState.value.widgetId) &&
+    dragState.value.active &&
+    dragState.value.mode === 'desktop' &&
     dragState.value.widgetId !== widgetId &&
     dragState.value.overZone === zone &&
     dragState.value.overWidgetId === widgetId
@@ -376,8 +459,8 @@ function isDropTarget(zone, widgetId) {
 
 function isGroupDropTarget(groupIndex, widgetId = null) {
   return (
-    Boolean(dragState.value.widgetId) &&
-    dragState.value.overZone === 'mobile-group' &&
+    dragState.value.active &&
+    dragState.value.mode === 'mobile' &&
     dragState.value.overGroupIndex === groupIndex &&
     dragState.value.overWidgetId === widgetId
   )
@@ -385,7 +468,8 @@ function isGroupDropTarget(groupIndex, widgetId = null) {
 
 function isZoneDropTarget(zone) {
   return (
-    Boolean(dragState.value.widgetId) &&
+    dragState.value.active &&
+    dragState.value.mode === 'desktop' &&
     dragState.value.overZone === zone &&
     !dragState.value.overWidgetId
   )
@@ -446,6 +530,11 @@ watch(
   },
   { immediate: true },
 )
+
+onUnmounted(() => {
+  unbindPointerListeners()
+  resetDragState()
+})
 </script>
 
 <template>
@@ -610,9 +699,9 @@ watch(
         class="card-body"
       >
         <p class="card-body__desc">
-          Affiche ou masque chaque bloc, et glisse-les pour choisir leur place sur le tableau de
-          bord (colonnes à gauche / droite, bandeaux centraux en haut ou en bas sur ordinateur ;
-          ordre du carrousel sur téléphone).
+          Affiche ou masque chaque bloc, et utilise la poignée ⋮⋮ pour les déplacer sur le
+          tableau de bord (colonnes à gauche / droite, bandeaux centraux en haut ou en bas sur
+          ordinateur ; pages du carrousel sur téléphone).
         </p>
 
         <p v-if="isLoading" class="visibility-state">Chargement…</p>
@@ -626,8 +715,9 @@ watch(
             <div
               class="dashboard-visibility-col dashboard-visibility-col--full"
               :class="{ 'dashboard-visibility-col--drop': isZoneDropTarget(DASHBOARD_DESKTOP_ZONES.TOP) }"
-              @dragover="onZoneDragOver(DASHBOARD_DESKTOP_ZONES.TOP, $event)"
-              @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.TOP, null, $event)"
+              data-dash-drop="desktop"
+              :data-zone="DASHBOARD_DESKTOP_ZONES.TOP"
+              data-before="__end__"
             >
               <p class="dashboard-visibility-zone-label">Centre · haut</p>
               <ul class="visibility-pages-list">
@@ -636,14 +726,14 @@ watch(
                   :key="`top-${widget.id}`"
                   :widget="widget"
                   :disabled="isSaving"
-                  draggable
+                  movable
                   :dragging="isDragging(widget.id)"
                   :drop-target="isDropTarget(DASHBOARD_DESKTOP_ZONES.TOP, widget.id)"
+                  drop-mode="desktop"
+                  :drop-zone="DASHBOARD_DESKTOP_ZONES.TOP"
+                  :drop-before="widget.id"
                   @toggle="onToggleDashboardVisible"
-                  @dragstart="onWidgetDragStart(widget.id, DASHBOARD_DESKTOP_ZONES.TOP, $event)"
-                  @dragover="onWidgetDragOver(DASHBOARD_DESKTOP_ZONES.TOP, widget.id, $event)"
-                  @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.TOP, widget.id, $event)"
-                  @dragend="onWidgetDragEnd"
+                  @move-start="onMoveStart(widget.id, { mode: 'desktop', zone: DASHBOARD_DESKTOP_ZONES.TOP }, $event)"
                 />
                 <li
                   v-if="!dashboardTopWidgets.length"
@@ -657,8 +747,9 @@ watch(
             <div
               class="dashboard-visibility-col dashboard-visibility-col--left"
               :class="{ 'dashboard-visibility-col--drop': isZoneDropTarget(DASHBOARD_DESKTOP_ZONES.LEFT) }"
-              @dragover="onZoneDragOver(DASHBOARD_DESKTOP_ZONES.LEFT, $event)"
-              @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.LEFT, null, $event)"
+              data-dash-drop="desktop"
+              :data-zone="DASHBOARD_DESKTOP_ZONES.LEFT"
+              data-before="__end__"
             >
               <p class="dashboard-visibility-zone-label">Colonne gauche</p>
               <ul class="visibility-pages-list">
@@ -667,14 +758,14 @@ watch(
                   :key="`left-${widget.id}`"
                   :widget="widget"
                   :disabled="isSaving"
-                  draggable
+                  movable
                   :dragging="isDragging(widget.id)"
                   :drop-target="isDropTarget(DASHBOARD_DESKTOP_ZONES.LEFT, widget.id)"
+                  drop-mode="desktop"
+                  :drop-zone="DASHBOARD_DESKTOP_ZONES.LEFT"
+                  :drop-before="widget.id"
                   @toggle="onToggleDashboardVisible"
-                  @dragstart="onWidgetDragStart(widget.id, DASHBOARD_DESKTOP_ZONES.LEFT, $event)"
-                  @dragover="onWidgetDragOver(DASHBOARD_DESKTOP_ZONES.LEFT, widget.id, $event)"
-                  @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.LEFT, widget.id, $event)"
-                  @dragend="onWidgetDragEnd"
+                  @move-start="onMoveStart(widget.id, { mode: 'desktop', zone: DASHBOARD_DESKTOP_ZONES.LEFT }, $event)"
                 />
                 <li
                   v-if="!dashboardLeftWidgets.length"
@@ -688,8 +779,9 @@ watch(
             <div
               class="dashboard-visibility-col dashboard-visibility-col--right"
               :class="{ 'dashboard-visibility-col--drop': isZoneDropTarget(DASHBOARD_DESKTOP_ZONES.RIGHT) }"
-              @dragover="onZoneDragOver(DASHBOARD_DESKTOP_ZONES.RIGHT, $event)"
-              @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.RIGHT, null, $event)"
+              data-dash-drop="desktop"
+              :data-zone="DASHBOARD_DESKTOP_ZONES.RIGHT"
+              data-before="__end__"
             >
               <p class="dashboard-visibility-zone-label">Colonne droite</p>
               <ul class="visibility-pages-list">
@@ -698,14 +790,14 @@ watch(
                   :key="`right-${widget.id}`"
                   :widget="widget"
                   :disabled="isSaving"
-                  draggable
+                  movable
                   :dragging="isDragging(widget.id)"
                   :drop-target="isDropTarget(DASHBOARD_DESKTOP_ZONES.RIGHT, widget.id)"
+                  drop-mode="desktop"
+                  :drop-zone="DASHBOARD_DESKTOP_ZONES.RIGHT"
+                  :drop-before="widget.id"
                   @toggle="onToggleDashboardVisible"
-                  @dragstart="onWidgetDragStart(widget.id, DASHBOARD_DESKTOP_ZONES.RIGHT, $event)"
-                  @dragover="onWidgetDragOver(DASHBOARD_DESKTOP_ZONES.RIGHT, widget.id, $event)"
-                  @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.RIGHT, widget.id, $event)"
-                  @dragend="onWidgetDragEnd"
+                  @move-start="onMoveStart(widget.id, { mode: 'desktop', zone: DASHBOARD_DESKTOP_ZONES.RIGHT }, $event)"
                 />
                 <li
                   v-if="!dashboardRightWidgets.length"
@@ -719,8 +811,9 @@ watch(
             <div
               class="dashboard-visibility-col dashboard-visibility-col--full"
               :class="{ 'dashboard-visibility-col--drop': isZoneDropTarget(DASHBOARD_DESKTOP_ZONES.BOTTOM) }"
-              @dragover="onZoneDragOver(DASHBOARD_DESKTOP_ZONES.BOTTOM, $event)"
-              @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.BOTTOM, null, $event)"
+              data-dash-drop="desktop"
+              :data-zone="DASHBOARD_DESKTOP_ZONES.BOTTOM"
+              data-before="__end__"
             >
               <p class="dashboard-visibility-zone-label">Centre · bas</p>
               <ul class="visibility-pages-list">
@@ -729,14 +822,14 @@ watch(
                   :key="`bottom-${widget.id}`"
                   :widget="widget"
                   :disabled="isSaving"
-                  draggable
+                  movable
                   :dragging="isDragging(widget.id)"
                   :drop-target="isDropTarget(DASHBOARD_DESKTOP_ZONES.BOTTOM, widget.id)"
+                  drop-mode="desktop"
+                  :drop-zone="DASHBOARD_DESKTOP_ZONES.BOTTOM"
+                  :drop-before="widget.id"
                   @toggle="onToggleDashboardVisible"
-                  @dragstart="onWidgetDragStart(widget.id, DASHBOARD_DESKTOP_ZONES.BOTTOM, $event)"
-                  @dragover="onWidgetDragOver(DASHBOARD_DESKTOP_ZONES.BOTTOM, widget.id, $event)"
-                  @drop="onDesktopDrop(DASHBOARD_DESKTOP_ZONES.BOTTOM, widget.id, $event)"
-                  @dragend="onWidgetDragEnd"
+                  @move-start="onMoveStart(widget.id, { mode: 'desktop', zone: DASHBOARD_DESKTOP_ZONES.BOTTOM }, $event)"
                 />
                 <li
                   v-if="!dashboardBottomWidgets.length"
@@ -752,8 +845,8 @@ watch(
           <div class="dashboard-visibility-mobile">
             <p class="dashboard-visibility-zone-label">Pages sur téléphone</p>
             <p class="dashboard-visibility-mobile-hint">
-              Regroupe plusieurs blocs sur une même page en les glissant dans le même groupe.
-              L’image de réconfort reste en tête de la première page.
+              Regroupe plusieurs blocs sur une même page en les glissant via la poignée ⋮⋮
+              ou le libellé. L’image de réconfort reste en tête de la première page.
             </p>
 
             <div
@@ -763,27 +856,30 @@ watch(
               :class="{
                 'dashboard-visibility-group--drop': isGroupDropTarget(groupIndex, null),
               }"
-              @dragover="onGroupDragOver(groupIndex, null, $event)"
-              @drop="onGroupDrop(groupIndex, null, $event)"
+              data-dash-drop="mobile"
+              :data-group="groupIndex"
+              data-before="__end__"
             >
               <p class="dashboard-visibility-group-label">Page {{ groupIndex + 1 }}</p>
               <div
                 v-for="widget in groupWidgets(group)"
                 :key="`mobile-group-${groupIndex}-${widget.id}`"
                 class="dashboard-visibility-group-item"
+                data-dash-drop="mobile"
+                :data-group="groupIndex"
+                :data-before="widget.id"
               >
                 <ul class="dashboard-visibility-group-item-list">
                   <DashboardVisibilityWidgetRow
                     :widget="widget"
                     :disabled="isSaving"
-                    :draggable="widget.id !== DASHBOARD_WIDGET_IDS.COMFORT"
+                    :movable="widget.id !== DASHBOARD_WIDGET_IDS.COMFORT"
                     :dragging="isDragging(widget.id)"
                     :drop-target="isGroupDropTarget(groupIndex, widget.id)"
                     @toggle="onToggleDashboardVisible"
-                    @dragstart="onWidgetDragStart(widget.id, 'mobile-group', $event)"
-                    @dragover="onGroupDragOver(groupIndex, widget.id, $event)"
-                    @drop="onGroupDrop(groupIndex, widget.id, $event)"
-                    @dragend="onWidgetDragEnd"
+                    @move-start="
+                      onMoveStart(widget.id, { mode: 'mobile', groupIndex }, $event)
+                    "
                   />
                 </ul>
                 <button
@@ -807,8 +903,9 @@ watch(
                   null,
                 ),
               }"
-              @dragover="onGroupDragOver(dashboardMobileGroups.length, null, $event)"
-              @drop="onGroupDrop(dashboardMobileGroups.length, null, $event)"
+              data-dash-drop="mobile"
+              :data-group="dashboardMobileGroups.length"
+              data-before="__end__"
             >
               Déposer ici pour une nouvelle page
             </div>
@@ -1272,5 +1369,14 @@ watch(
   .dashboard-visibility-col--drop {
     background: rgba(213, 181, 234, 0.1);
   }
+}
+</style>
+
+<style>
+/* Hors scoped : curseur global pendant le drag dashboard */
+body.dashboard-visibility-dragging,
+body.dashboard-visibility-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
 }
 </style>

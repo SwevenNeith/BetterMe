@@ -8,7 +8,8 @@ defineProps({
     type: Boolean,
     default: false,
   },
-  draggable: {
+  /** Peut être déplacé (handle + gesture). */
+  movable: {
     type: Boolean,
     default: false,
   },
@@ -20,16 +21,30 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  /** Attributs de drop (sur le <li> réel, pas en fallthrough parent). */
+  dropMode: {
+    type: String,
+    default: null,
+  },
+  dropZone: {
+    type: String,
+    default: null,
+  },
+  dropGroup: {
+    type: [Number, String],
+    default: null,
+  },
+  dropBefore: {
+    type: String,
+    default: null,
+  },
 })
 
-const emit = defineEmits(['toggle', 'dragstart', 'dragover', 'drop', 'dragend'])
+const emit = defineEmits(['toggle', 'move-start'])
 
-function onRowDragStart(event) {
-  if (event.target?.closest('input, label, button')) {
-    event.preventDefault()
-    return
-  }
-  emit('dragstart', event)
+function onHandlePointerDown(event) {
+  if (event.button != null && event.button !== 0) return
+  emit('move-start', event)
 }
 </script>
 
@@ -39,26 +54,29 @@ function onRowDragStart(event) {
     :class="{
       'dashboard-visibility-row--dragging': dragging,
       'dashboard-visibility-row--drop-target': dropTarget,
-      'dashboard-visibility-row--draggable': draggable,
+      'dashboard-visibility-row--movable': movable,
     }"
-    :draggable="draggable && !disabled"
-    @dragstart="onRowDragStart"
-    @dragover="emit('dragover', $event)"
-    @drop="emit('drop', $event)"
-    @dragend="draggable ? emit('dragend', $event) : undefined"
+    :data-dash-widget="widget.id"
+    :data-dash-drop="dropMode || undefined"
+    :data-zone="dropZone || undefined"
+    :data-group="dropGroup != null && dropGroup !== '' ? String(dropGroup) : undefined"
+    :data-before="dropBefore || undefined"
   >
-    <span
-      v-if="draggable"
+    <button
+      v-if="movable"
+      type="button"
       class="dashboard-visibility-row__handle"
-      aria-hidden="true"
       title="Glisser pour réorganiser"
+      aria-label="Glisser pour réorganiser"
+      @pointerdown.stop.prevent="onHandlePointerDown"
     >
-      ⋮⋮
-    </span>
+      <span class="dashboard-visibility-row__handle-glyph" aria-hidden="true">⋮⋮</span>
+    </button>
 
     <label
       class="visibility-page-check"
       :title="widget.visible ? 'Masquer sur le dashboard' : 'Afficher sur le dashboard'"
+      @pointerdown.stop
     >
       <input
         type="checkbox"
@@ -70,20 +88,23 @@ function onRowDragStart(event) {
       />
     </label>
 
-    <div class="visibility-page-main">
+    <div
+      class="visibility-page-main"
+      :class="{ 'visibility-page-main--draggable': movable }"
+      @pointerdown="movable ? onHandlePointerDown($event) : undefined"
+    >
       <span class="visibility-page-label">{{ widget.displayLabel }}</span>
     </div>
   </li>
 </template>
 
 <style scoped>
-.dashboard-visibility-row--draggable {
-  cursor: grab;
+.dashboard-visibility-row--movable {
+  touch-action: none;
 }
 
 .dashboard-visibility-row--dragging {
-  opacity: 0.55;
-  cursor: grabbing;
+  opacity: 0.4;
 }
 
 .dashboard-visibility-row--drop-target {
@@ -95,11 +116,38 @@ function onRowDragStart(event) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.1rem;
+  width: 1.55rem;
+  height: 1.55rem;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: rgba(213, 181, 234, 0.18);
   color: #ad81be;
-  font-size: 0.7rem;
-  letter-spacing: -0.12em;
-  opacity: 0.75;
+  cursor: grab;
   user-select: none;
+  touch-action: none;
+  -webkit-user-select: none;
+}
+
+.dashboard-visibility-row__handle-glyph {
+  font-size: 0.72rem;
+  letter-spacing: -0.12em;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.dashboard-visibility-row__handle:active {
+  cursor: grabbing;
+}
+
+.visibility-page-main--draggable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.visibility-page-main--draggable:active {
+  cursor: grabbing;
 }
 </style>
