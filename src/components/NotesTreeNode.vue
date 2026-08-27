@@ -45,10 +45,55 @@ defineEmits([
           <span class="notes-tree-node__label">{{ node.name }}</span>
         </button>
         <div class="notes-tree-node__actions">
-          <button type="button" title="Nouvelle note" @click.stop="$emit('create-note', node.id)">N</button>
-          <button type="button" title="Sous-dossier" @click.stop="$emit('create-folder', node.id)">D</button>
-          <button type="button" title="Renommer" @click.stop="$emit('rename-folder', node)">R</button>
-          <button type="button" title="Supprimer" @click.stop="$emit('delete-folder', node.id)">×</button>
+          <button
+            type="button"
+            title="Nouvelle note"
+            aria-label="Nouvelle note"
+            @click.stop="$emit('create-note', node.id)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="12" y1="11" x2="12" y2="17" />
+              <line x1="9" y1="14" x2="15" y2="14" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title="Sous-dossier"
+            aria-label="Créer un sous-dossier"
+            @click.stop="$emit('create-folder', node.id)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              <line x1="12" y1="11" x2="12" y2="17" />
+              <line x1="9" y1="14" x2="15" y2="14" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title="Renommer"
+            aria-label="Renommer le dossier"
+            @click.stop="$emit('rename-folder', node)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3 2.12 2.12 0 0 1 0 3L7 19l-4 1 1-4Z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title="Supprimer"
+            aria-label="Supprimer le dossier"
+            @click.stop="$emit('delete-folder', node.id)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <line x1="10" y1="11" x2="10" y2="17" />
+              <line x1="14" y1="11" x2="14" y2="17" />
+            </svg>
+          </button>
         </div>
       </div>
       <div v-if="isFolderExpanded(node.id)" class="notes-tree-node__children">
@@ -93,8 +138,30 @@ defineEmits([
           <span class="notes-tree-node__label">{{ node.title }}</span>
         </button>
         <div class="notes-tree-node__actions">
-          <button type="button" title="Renommer" @click.stop="$emit('rename-note', node)">R</button>
-          <button type="button" title="Supprimer" @click.stop="$emit('delete-note', node.id)">×</button>
+          <button
+            type="button"
+            title="Renommer"
+            aria-label="Renommer la note"
+            @click.stop="$emit('rename-note', node)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3 2.12 2.12 0 0 1 0 3L7 19l-4 1 1-4Z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title="Supprimer"
+            aria-label="Supprimer la note"
+            @click.stop="$emit('delete-note', node.id)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <line x1="10" y1="11" x2="10" y2="17" />
+              <line x1="14" y1="11" x2="14" y2="17" />
+            </svg>
+          </button>
         </div>
       </div>
     </template>
@@ -180,14 +247,23 @@ defineEmits([
   background: transparent;
   cursor: pointer;
   border-radius: 4px;
-  padding: 0.1rem 0.25rem;
-  font-size: 0.75rem;
+  padding: 0.2rem;
   color: #6d5a7e;
-  line-height: 1;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notes-tree-node__actions button svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  display: block;
 }
 
 .notes-tree-node__actions button:hover {
   background: rgba(255, 255, 255, 0.7);
+  color: #4a3560;
 }
 
 .notes-tree-node__children {
