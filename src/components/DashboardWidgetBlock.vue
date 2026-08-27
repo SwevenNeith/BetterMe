@@ -6,6 +6,7 @@ import DashboardComfortImages from './DashboardComfortImages.vue'
 import DashboardWordOfTheDay from './DashboardWordOfTheDay.vue'
 import DashboardTodayTodos from './DashboardTodayTodos.vue'
 import DashboardHabitsAnnual from './DashboardHabitsAnnual.vue'
+import DashboardNotesGraph from './DashboardNotesGraph.vue'
 import DashboardReadingInProgress from './DashboardReadingInProgress.vue'
 import DashboardActiveProjects from './DashboardActiveProjects.vue'
 import { DASHBOARD_WIDGET_IDS } from '../constants/dashboardWidgets.js'
@@ -103,8 +104,9 @@ const COLUMN_CLASS_BY_ID = {
   [IDS.TODO]: 'todo-column',
   [IDS.TIMETABLE]: 'edt-column',
   [IDS.CHECKIN]: 'checkin-column',
-  [IDS.HABITS]: 'habits-column',
   [IDS.MENSTRUATION]: 'menstruation-column right-column',
+  [IDS.HABITS]: 'habits-column',
+  [IDS.NOTES_GRAPH]: 'notes-graph-column',
   [IDS.READING_IN_PROGRESS]: 'reading-column',
   [IDS.PROJECTS]: 'projects-column',
 }
@@ -186,6 +188,8 @@ function rootClass(widgetId, asColumn) {
 
     <DashboardHabitsAnnual v-else-if="widgetId === IDS.HABITS" :user-id="userId" />
 
+    <DashboardNotesGraph v-else-if="widgetId === IDS.NOTES_GRAPH" :user-id="userId" />
+
     <div
       v-else-if="widgetId === IDS.MENSTRUATION"
       class="mini-calendar-wrapper dashboard-menstruation-wrap"
@@ -246,6 +250,7 @@ function rootClass(widgetId, asColumn) {
 .intro-column,
 .edt-column,
 .habits-column,
+.notes-graph-column,
 .projects-column,
 .reading-column,
 .dictionary-word-column,

@@ -125,10 +125,31 @@ export function normalizeMobileGroups(rawGroups, mobileOrder) {
   }
 
   for (const id of order) {
-    if (!seen.has(id)) {
-      groups.push([id])
-      seen.add(id)
+    if (seen.has(id)) continue
+
+    const defIdx = order.indexOf(id)
+    let insertGi = groups.length
+    for (let i = defIdx - 1; i >= 0; i -= 1) {
+      const prev = order[i]
+      const gi = groups.findIndex((group) => group.includes(prev))
+      if (gi >= 0) {
+        insertGi = gi + 1
+        break
+      }
     }
+    if (insertGi === groups.length) {
+      for (let i = defIdx + 1; i < order.length; i += 1) {
+        const nextId = order[i]
+        const gi = groups.findIndex((group) => group.includes(nextId))
+        if (gi >= 0) {
+          insertGi = gi
+          break
+        }
+      }
+    }
+
+    groups.splice(insertGi, 0, [id])
+    seen.add(id)
   }
 
   if (!groups.length) return createDefaultMobileGroups(order)
@@ -145,6 +166,119 @@ export function normalizeMobileGroups(rawGroups, mobileOrder) {
   }
 
   return upgradeLegacyDefaultFirstPage(groups)
+}
+
+/**
+ * Place le tracker d’habitudes juste après la menstruation (ordre désiré).
+ * @param {string[]} ids
+ * @returns {string[]}
+ */
+function ensureMenstruationBeforeHabits(ids) {
+  const habitsId = DASHBOARD_WIDGET_IDS.HABITS
+  const mensId = DASHBOARD_WIDGET_IDS.MENSTRUATION
+  const habitsIndex = ids.indexOf(habitsId)
+  const mensIndex = ids.indexOf(mensId)
+  if (habitsIndex < 0 || mensIndex < 0 || habitsIndex > mensIndex) return ids
+
+  const next = ids.filter((id) => id !== habitsId)
+  const newMensIndex = next.indexOf(mensId)
+  next.splice(newMensIndex + 1, 0, habitsId)
+  return next
+}
+
+/**
+ * Place la vue Notes juste après les projets.
+ * @param {string[]} ids
+ * @returns {string[]}
+ */
+function ensureNotesAfterProjects(ids) {
+  const notesId = DASHBOARD_WIDGET_IDS.NOTES_GRAPH
+  const projectsId = DASHBOARD_WIDGET_IDS.PROJECTS
+  if (!ids.includes(notesId)) return ids
+
+  const next = ids.filter((id) => id !== notesId)
+  const projectsIndex = next.indexOf(projectsId)
+  if (projectsIndex < 0) {
+    next.push(notesId)
+    return next
+  }
+  next.splice(projectsIndex + 1, 0, notesId)
+  return next
+}
+
+/**
+ * Même logique pour les groupes mobile.
+ * @param {string[][]} groups
+ * @returns {string[][]}
+ */
+function ensureMenstruationBeforeHabitsInGroups(groups) {
+  let habitsGi = -1
+  let mensGi = -1
+  for (let i = 0; i < groups.length; i += 1) {
+    if (groups[i].includes(DASHBOARD_WIDGET_IDS.HABITS)) habitsGi = i
+    if (groups[i].includes(DASHBOARD_WIDGET_IDS.MENSTRUATION)) mensGi = i
+  }
+  if (habitsGi < 0 || mensGi < 0 || habitsGi > mensGi) return groups
+
+  const next = groups.map((group) => [...group])
+  const [habitsGroup] = next.splice(habitsGi, 1)
+  const newMensGi = next.findIndex((group) => group.includes(DASHBOARD_WIDGET_IDS.MENSTRUATION))
+  if (newMensGi < 0) {
+    next.push(habitsGroup)
+    return next
+  }
+  next.splice(newMensGi + 1, 0, habitsGroup)
+  return next
+}
+
+/**
+ * Place le groupe Notes juste après le groupe Projets.
+ * @param {string[][]} groups
+ * @returns {string[][]}
+ */
+function ensureNotesAfterProjectsInGroups(groups) {
+  let projectsGi = -1
+  let notesGi = -1
+  for (let i = 0; i < groups.length; i += 1) {
+    if (groups[i].includes(DASHBOARD_WIDGET_IDS.PROJECTS)) projectsGi = i
+    if (groups[i].includes(DASHBOARD_WIDGET_IDS.NOTES_GRAPH)) notesGi = i
+  }
+  if (notesGi < 0) return groups
+
+  const next = groups.map((group) => [...group])
+  const [notesGroup] = next.splice(notesGi, 1)
+  const newProjectsGi = next.findIndex((group) =>
+    group.includes(DASHBOARD_WIDGET_IDS.PROJECTS),
+  )
+  if (newProjectsGi < 0) {
+    next.push(notesGroup)
+    return next
+  }
+  next.splice(newProjectsGi + 1, 0, notesGroup)
+  return next
+}
+
+/**
+ * Sur desktop, force Notes dans la colonne gauche, juste sous les projets.
+ * @param {DashboardLayout['desktop']} desktop
+ */
+function ensureNotesAfterProjectsDesktop(desktop) {
+  const notesId = DASHBOARD_WIDGET_IDS.NOTES_GRAPH
+  const projectsId = DASHBOARD_WIDGET_IDS.PROJECTS
+
+  for (const zone of Object.values(DASHBOARD_DESKTOP_ZONES)) {
+    desktop[zone] = desktop[zone].filter((id) => id !== notesId)
+  }
+
+  let targetZone = DASHBOARD_DESKTOP_ZONES.LEFT
+  for (const zone of Object.values(DASHBOARD_DESKTOP_ZONES)) {
+    if (desktop[zone].includes(projectsId)) {
+      targetZone = zone
+      break
+    }
+  }
+
+  desktop[targetZone] = ensureNotesAfterProjects([...desktop[targetZone], notesId])
 }
 
 /**
@@ -287,6 +421,9 @@ export function normalizeDashboardLayout(rawLayout) {
     claimed.add(widget.id)
   }
 
+  desktop.right = ensureMenstruationBeforeHabits(desktop.right)
+  ensureNotesAfterProjectsDesktop(desktop)
+
   let mobile = sanitizeWidgetIds(raw.mobile ?? defaults.mobile)
   const mobileSeen = new Set(mobile)
   for (const widget of DASHBOARD_WIDGETS) {
@@ -295,8 +432,13 @@ export function normalizeDashboardLayout(rawLayout) {
     mobileSeen.add(widget.id)
   }
 
-  mobile = pinComfortFirstInMobileOrder(mobile)
-  const mobileGroups = normalizeMobileGroups(raw.mobileGroups, mobile)
+  mobile = pinComfortFirstInMobileOrder(
+    ensureNotesAfterProjects(ensureMenstruationBeforeHabits(mobile)),
+  )
+  let mobileGroups = normalizeMobileGroups(raw.mobileGroups, mobile)
+  mobileGroups = ensureNotesAfterProjectsInGroups(
+    ensureMenstruationBeforeHabitsInGroups(mobileGroups),
+  )
 
   return {
     desktop,

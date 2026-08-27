@@ -5,8 +5,9 @@ export const DASHBOARD_WIDGET_IDS = {
   TODO: 'todo',
   TIMETABLE: 'timetable',
   CHECKIN: 'checkin',
-  HABITS: 'habits',
   MENSTRUATION: 'menstruation',
+  HABITS: 'habits',
+  NOTES_GRAPH: 'notes-graph',
   READING_IN_PROGRESS: 'reading-in-progress',
   PROJECTS: 'projects',
 }
@@ -28,10 +29,11 @@ export const DASHBOARD_WIDGETS = [
   { id: DASHBOARD_WIDGET_IDS.TODO, defaultLabel: 'TODO du jour' },
   { id: DASHBOARD_WIDGET_IDS.TIMETABLE, defaultLabel: 'Emploi du temps du jour' },
   { id: DASHBOARD_WIDGET_IDS.CHECKIN, defaultLabel: 'Check-in émotionnel' },
-  { id: DASHBOARD_WIDGET_IDS.HABITS, defaultLabel: 'Habitudes (vue mensuelle)' },
   { id: DASHBOARD_WIDGET_IDS.MENSTRUATION, defaultLabel: 'Menstruation' },
+  { id: DASHBOARD_WIDGET_IDS.HABITS, defaultLabel: 'Habitudes (vue mensuelle)' },
   { id: DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS, defaultLabel: 'Lectures en cours' },
   { id: DASHBOARD_WIDGET_IDS.PROJECTS, defaultLabel: 'Projets actifs' },
+  { id: DASHBOARD_WIDGET_IDS.NOTES_GRAPH, defaultLabel: 'Notes · vue globale' },
 ]
 
 export const DASHBOARD_WIDGET_ID_SET = new Set(DASHBOARD_WIDGETS.map((widget) => widget.id))
@@ -43,10 +45,11 @@ export const DASHBOARD_WIDGET_MOBILE_ORDER = [
   DASHBOARD_WIDGET_IDS.TODO,
   DASHBOARD_WIDGET_IDS.TIMETABLE,
   DASHBOARD_WIDGET_IDS.CHECKIN,
-  DASHBOARD_WIDGET_IDS.HABITS,
   DASHBOARD_WIDGET_IDS.MENSTRUATION,
+  DASHBOARD_WIDGET_IDS.HABITS,
   DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS,
   DASHBOARD_WIDGET_IDS.PROJECTS,
+  DASHBOARD_WIDGET_IDS.NOTES_GRAPH,
 ]
 
 /** Colonne gauche du dashboard (desktop). */
@@ -57,12 +60,13 @@ export const DASHBOARD_WIDGET_DESKTOP_LEFT = [
   DASHBOARD_WIDGET_IDS.TIMETABLE,
   DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS,
   DASHBOARD_WIDGET_IDS.PROJECTS,
+  DASHBOARD_WIDGET_IDS.NOTES_GRAPH,
 ]
 
 /** Colonne droite du dashboard (desktop). */
 export const DASHBOARD_WIDGET_DESKTOP_RIGHT = [
-  DASHBOARD_WIDGET_IDS.HABITS,
   DASHBOARD_WIDGET_IDS.MENSTRUATION,
+  DASHBOARD_WIDGET_IDS.HABITS,
 ]
 
 /** Bandeau pleine largeur au-dessus des colonnes (desktop). */

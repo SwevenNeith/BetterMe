@@ -6,6 +6,8 @@ const props = defineProps({
   active: { type: Boolean, default: false },
   notes: { type: Array, default: () => [] },
   selectedNoteId: { type: String, default: null },
+  /** Mode embarqué (dashboard) : pas d’en-tête local, hauteur plus compacte. */
+  compact: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['select-note'])
@@ -50,8 +52,9 @@ function measure() {
   const el = viewportEl.value
   if (!el) return
   const rect = el.getBoundingClientRect()
-  width.value = Math.max(320, Math.floor(rect.width))
-  height.value = Math.max(280, Math.floor(rect.height))
+  const minH = props.compact ? 200 : 280
+  width.value = Math.max(props.compact ? 240 : 320, Math.floor(rect.width))
+  height.value = Math.max(minH, Math.floor(rect.height) || minH)
 }
 
 function initSimulation() {
@@ -230,8 +233,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="notes-graph" aria-label="Vue globale des notes">
-    <header class="notes-graph__header">
+  <div
+    class="notes-graph"
+    :class="{ 'notes-graph--compact': compact }"
+    aria-label="Vue globale des notes"
+  >
+    <header v-if="!compact" class="notes-graph__header">
       <div>
         <h2 class="notes-graph__title">Vue globale</h2>
         <p class="notes-graph__meta">
@@ -250,14 +257,6 @@ onUnmounted(() => {
         role="img"
         aria-label="Graphe des notes et hyperliens"
       >
-        <defs>
-          <radialGradient id="notes-graph-bg" cx="50%" cy="45%" r="70%">
-            <stop offset="0%" stop-color="#2a2438" />
-            <stop offset="100%" stop-color="#16121f" />
-          </radialGradient>
-        </defs>
-        <rect x="0" y="0" :width="width" :height="height" fill="url(#notes-graph-bg)" />
-
         <line
           v-for="edge in renderedEdges"
           :key="edge.key"
@@ -308,6 +307,10 @@ onUnmounted(() => {
   background: #faf7fd;
 }
 
+.notes-graph--compact {
+  background: transparent;
+}
+
 .notes-graph__header {
   flex-shrink: 0;
   padding: 0.7rem 1rem 0.55rem;
@@ -333,7 +336,10 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: #16121f;
+  background:
+    radial-gradient(ellipse 80% 70% at 50% 40%, rgba(213, 181, 234, 0.45) 0%, transparent 60%),
+    radial-gradient(ellipse 70% 65% at 70% 75%, rgba(149, 209, 170, 0.35) 0%, transparent 55%),
+    linear-gradient(160deg, #f7f2fb 0%, #eef6f1 55%, #f3ebf9 100%);
 }
 
 .notes-graph__svg {
@@ -343,9 +349,9 @@ onUnmounted(() => {
 }
 
 .notes-graph__link {
-  stroke: #6d5a88;
+  stroke: #ad81be;
   stroke-width: 1.25;
-  stroke-opacity: 0.85;
+  stroke-opacity: 0.55;
 }
 
 .notes-graph__node {
@@ -357,24 +363,24 @@ onUnmounted(() => {
 }
 
 .notes-graph__dot {
-  fill: #95d1aa;
-  stroke: #72a098;
+  fill: #9b6fb3;
+  stroke: #7a528f;
   stroke-width: 1.5;
 }
 
 .notes-graph__node--hover .notes-graph__dot,
 .notes-graph__node--active .notes-graph__dot {
-  fill: #d5b5ea;
-  stroke: #c5a0dc;
+  fill: #ad81be;
+  stroke: #6d4a82;
 }
 
 .notes-graph__label {
-  fill: #efe8f7;
+  fill: #3b2a4a;
   font-size: 11px;
   text-anchor: middle;
   pointer-events: none;
   paint-order: stroke;
-  stroke: rgba(22, 18, 31, 0.85);
+  stroke: rgba(255, 255, 255, 0.75);
   stroke-width: 3px;
 }
 
@@ -384,7 +390,59 @@ onUnmounted(() => {
   display: grid;
   place-content: center;
   margin: 0;
-  color: #a895bc;
+  color: #6d5a7e;
   font-size: 0.95rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .notes-graph {
+    background: #1a1524;
+  }
+
+  .notes-graph--compact {
+    background: transparent;
+  }
+
+  .notes-graph__header {
+    border-bottom-color: rgba(213, 181, 234, 0.15);
+    background: #241c30;
+  }
+
+  .notes-graph__title {
+    color: #f0e8f8;
+  }
+
+  .notes-graph__meta {
+    color: #a895bc;
+  }
+
+  .notes-graph__viewport {
+    background: radial-gradient(ellipse 70% 70% at 50% 45%, #2a2438 0%, #16121f 100%);
+  }
+
+  .notes-graph__link {
+    stroke: #6d5a88;
+    stroke-opacity: 0.85;
+  }
+
+  .notes-graph__dot {
+    fill: #d5b5ea;
+    stroke: #c5a0dc;
+  }
+
+  .notes-graph__node--hover .notes-graph__dot,
+  .notes-graph__node--active .notes-graph__dot {
+    fill: #e8d4f8;
+    stroke: #d5b5ea;
+  }
+
+  .notes-graph__label {
+    fill: #efe8f7;
+    stroke: rgba(22, 18, 31, 0.85);
+  }
+
+  .notes-graph__empty {
+    color: #a895bc;
+  }
 }
 </style>
