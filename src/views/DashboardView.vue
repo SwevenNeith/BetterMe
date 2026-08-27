@@ -38,7 +38,9 @@ const desktopBottomWidgets = computed(() =>
   visibleWidgetIds(dashboardLayout.value.desktop.bottom),
 )
 const mobileWidgets = computed(() => visibleWidgetIds(dashboardLayout.value.mobile))
-const mobileSlides = computed(() => buildMobileCarouselSlides(mobileWidgets.value))
+const mobileSlides = computed(() =>
+  buildMobileCarouselSlides(mobileWidgets.value, dashboardLayout.value.mobileGroups),
+)
 
 const showLeftGroup = computed(() => desktopLeftWidgets.value.length > 0)
 const showRightGroup = computed(() => desktopRightWidgets.value.length > 0)

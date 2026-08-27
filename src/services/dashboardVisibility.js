@@ -2,8 +2,13 @@ import {
   DASHBOARD_WIDGETS,
   DASHBOARD_WIDGET_IDS,
   DASHBOARD_WIDGET_ID_SET,
+  DASHBOARD_WIDGET_MOBILE_ORDER,
   DASHBOARD_DESKTOP_ZONES,
+  DASHBOARD_MOBILE_FIRST_PAGE_COMPANIONS,
   createDefaultDashboardLayout,
+  createDefaultMobileGroups,
+  defaultDesktopZoneForWidget,
+  preferredOrderForDesktopZone,
 } from '../constants/dashboardWidgets.js'
 import { ensureUserSettings } from './menstruationNotifications.js'
 
@@ -16,6 +21,7 @@ export const DASHBOARD_VISIBILITY_UPDATED_EVENT = 'betterme-dashboard-visibility
  * @typedef {{
  *   desktop: { top: string[], left: string[], right: string[], bottom: string[] },
  *   mobile: string[],
+ *   mobileGroups: string[][],
  * }} DashboardLayout
  * @typedef {Record<string, DashboardVisibilityEntry> & { layout?: DashboardLayout }} DashboardVisibilityMap
  */
@@ -38,6 +44,196 @@ function sanitizeWidgetIds(ids) {
     result.push(id)
   }
   return result
+}
+
+/**
+ * Insère un id manquant près de ses voisins dans un ordre préféré.
+ * @param {string[]} list
+ * @param {string} id
+ * @param {string[]} preferredOrder
+ * @returns {string[]}
+ */
+export function insertIdNearNeighbors(list, id, preferredOrder) {
+  if (!DASHBOARD_WIDGET_ID_SET.has(id)) return list
+  if (list.includes(id)) return list
+
+  const result = [...list]
+  const defIdx = preferredOrder.indexOf(id)
+  let insertAt = result.length
+
+  if (defIdx >= 0) {
+    for (let i = defIdx - 1; i >= 0; i -= 1) {
+      const idx = result.indexOf(preferredOrder[i])
+      if (idx >= 0) {
+        insertAt = idx + 1
+        break
+      }
+    }
+    if (insertAt === result.length) {
+      for (let i = defIdx + 1; i < preferredOrder.length; i += 1) {
+        const idx = result.indexOf(preferredOrder[i])
+        if (idx >= 0) {
+          insertAt = idx
+          break
+        }
+      }
+    }
+  }
+
+  result.splice(insertAt, 0, id)
+  return result
+}
+
+/**
+ * Force l'image de réconfort en tête de la liste mobile.
+ * @param {string[]} ids
+ * @returns {string[]}
+ */
+export function pinComfortFirstInMobileOrder(ids) {
+  const list = sanitizeWidgetIds(ids)
+  const withoutComfort = list.filter((id) => id !== DASHBOARD_WIDGET_IDS.COMFORT)
+  return [DASHBOARD_WIDGET_IDS.COMFORT, ...withoutComfort]
+}
+
+/**
+ * Normalise les groupes mobile : chaque widget une fois, réconfort en tête du 1er groupe.
+ * @param {unknown} rawGroups
+ * @param {string[]} mobileOrder
+ * @returns {string[][]}
+ */
+export function normalizeMobileGroups(rawGroups, mobileOrder) {
+  const order = pinComfortFirstInMobileOrder(mobileOrder)
+  const expected = new Set(order)
+
+  if (!Array.isArray(rawGroups) || !rawGroups.length) {
+    return createDefaultMobileGroups(order)
+  }
+
+  /** @type {string[][]} */
+  const groups = []
+  const seen = new Set()
+
+  for (const rawGroup of rawGroups) {
+    if (!Array.isArray(rawGroup)) continue
+    const group = []
+    for (const id of rawGroup) {
+      if (typeof id !== 'string' || !expected.has(id) || seen.has(id)) continue
+      seen.add(id)
+      group.push(id)
+    }
+    if (group.length) groups.push(group)
+  }
+
+  for (const id of order) {
+    if (!seen.has(id)) {
+      groups.push([id])
+      seen.add(id)
+    }
+  }
+
+  if (!groups.length) return createDefaultMobileGroups(order)
+
+  // Réconfort toujours en première position du premier groupe qui le contient, et ce groupe en tête.
+  const comfortId = DASHBOARD_WIDGET_IDS.COMFORT
+  const comfortGroupIndex = groups.findIndex((group) => group.includes(comfortId))
+  if (comfortGroupIndex >= 0) {
+    const [comfortGroup] = groups.splice(comfortGroupIndex, 1)
+    const withoutComfort = comfortGroup.filter((id) => id !== comfortId)
+    groups.unshift([comfortId, ...withoutComfort])
+  } else if (expected.has(comfortId)) {
+    groups.unshift([comfortId])
+  }
+
+  return upgradeLegacyDefaultFirstPage(groups)
+}
+
+/**
+ * Ancien défaut = image + mot du jour, TODO seul juste après → fusionne sur la 1ʳᵉ page.
+ * @param {string[][]} groups
+ * @returns {string[][]}
+ */
+function upgradeLegacyDefaultFirstPage(groups) {
+  if (groups.length < 2) return groups
+
+  const first = groups[0]
+  const second = groups[1]
+  const comfortId = DASHBOARD_WIDGET_IDS.COMFORT
+  const wordId = DASHBOARD_WIDGET_IDS.DICTIONARY_WORD
+  const todoId = DASHBOARD_WIDGET_IDS.TODO
+
+  const isLegacyFirst =
+    first.length === 2 &&
+    first[0] === comfortId &&
+    first[1] === wordId &&
+    second.length === 1 &&
+    second[0] === todoId
+
+  if (!isLegacyFirst) return groups
+
+  return [[comfortId, wordId, todoId], ...groups.slice(2)]
+}
+
+function syncMobileFromGroups(groups) {
+  return pinComfortFirstInMobileOrder(groups.flat())
+}
+
+/**
+ * Construit les slides du carrousel mobile.
+ * Si `mobileGroups` est fourni, il prime ; sinon slide 1 = image (+ compagnon).
+ * @param {string[]} visibleMobileIds — ids visibles déjà dans l'ordre mobile
+ * @param {string[][]|null} [mobileGroups]
+ * @returns {string[][]}
+ */
+export function buildMobileCarouselSlides(visibleMobileIds, mobileGroups = null) {
+  const ids = sanitizeWidgetIds(visibleMobileIds)
+  if (!ids.length) return []
+
+  const visible = new Set(ids)
+
+  if (Array.isArray(mobileGroups) && mobileGroups.length) {
+    /** @type {string[][]} */
+    const slides = []
+    const seen = new Set()
+
+    for (const group of mobileGroups) {
+      if (!Array.isArray(group)) continue
+      const slide = sanitizeWidgetIds(group).filter((id) => visible.has(id) && !seen.has(id))
+      for (const id of slide) seen.add(id)
+      if (slide.length) slides.push(slide)
+    }
+
+    for (const id of ids) {
+      if (!seen.has(id)) {
+        slides.push([id])
+        seen.add(id)
+      }
+    }
+
+    return slides
+  }
+
+  const comfortId = DASHBOARD_WIDGET_IDS.COMFORT
+  const comfortVisible = ids.includes(comfortId)
+  const rest = ids.filter((id) => id !== comfortId)
+
+  /** @type {string[][]} */
+  const slides = []
+
+  if (comfortVisible) {
+    const companions = DASHBOARD_MOBILE_FIRST_PAGE_COMPANIONS.filter((id) => rest.includes(id))
+    const companionSet = new Set(companions)
+    const leftover = rest.filter((id) => !companionSet.has(id))
+    slides.push([comfortId, ...companions])
+    for (const id of leftover) {
+      slides.push([id])
+    }
+    return slides
+  }
+
+  for (const id of rest) {
+    slides.push([id])
+  }
+  return slides
 }
 
 /**
@@ -81,70 +277,32 @@ export function normalizeDashboardLayout(rawLayout) {
   }
 
   for (const widget of DASHBOARD_WIDGETS) {
-    if (!claimed.has(widget.id)) {
-      desktop.left.push(widget.id)
-      claimed.add(widget.id)
-    }
+    if (claimed.has(widget.id)) continue
+    const zone = defaultDesktopZoneForWidget(widget.id)
+    desktop[zone] = insertIdNearNeighbors(
+      desktop[zone],
+      widget.id,
+      preferredOrderForDesktopZone(zone),
+    )
+    claimed.add(widget.id)
   }
 
   let mobile = sanitizeWidgetIds(raw.mobile ?? defaults.mobile)
   const mobileSeen = new Set(mobile)
   for (const widget of DASHBOARD_WIDGETS) {
-    if (!mobileSeen.has(widget.id)) {
-      mobile.push(widget.id)
-      mobileSeen.add(widget.id)
-    }
+    if (mobileSeen.has(widget.id)) continue
+    mobile = insertIdNearNeighbors(mobile, widget.id, DASHBOARD_WIDGET_MOBILE_ORDER)
+    mobileSeen.add(widget.id)
   }
 
-  // L'image de réconfort est toujours en première position sur mobile.
   mobile = pinComfortFirstInMobileOrder(mobile)
+  const mobileGroups = normalizeMobileGroups(raw.mobileGroups, mobile)
 
-  return { desktop, mobile }
-}
-
-/**
- * Force l'image de réconfort en tête de la liste mobile.
- * @param {string[]} ids
- * @returns {string[]}
- */
-export function pinComfortFirstInMobileOrder(ids) {
-  const list = sanitizeWidgetIds(ids)
-  const withoutComfort = list.filter((id) => id !== DASHBOARD_WIDGET_IDS.COMFORT)
-  return [DASHBOARD_WIDGET_IDS.COMFORT, ...withoutComfort]
-}
-
-/**
- * Construit les slides du carrousel mobile.
- * Slide 1 = image (+ éventuellement le bloc placé juste en dessous).
- * Les autres blocs = une slide chacun.
- * @param {string[]} visibleMobileIds — ids visibles déjà dans l'ordre mobile
- * @returns {string[][]}
- */
-export function buildMobileCarouselSlides(visibleMobileIds) {
-  const ids = sanitizeWidgetIds(visibleMobileIds)
-  if (!ids.length) return []
-
-  const comfortId = DASHBOARD_WIDGET_IDS.COMFORT
-  const comfortVisible = ids.includes(comfortId)
-  const rest = ids.filter((id) => id !== comfortId)
-
-  /** @type {string[][]} */
-  const slides = []
-
-  if (comfortVisible) {
-    const companion = rest[0] ?? null
-    const firstSlide = companion ? [comfortId, companion] : [comfortId]
-    slides.push(firstSlide)
-    for (const id of rest.slice(companion ? 1 : 0)) {
-      slides.push([id])
-    }
-    return slides
+  return {
+    desktop,
+    mobile: syncMobileFromGroups(mobileGroups),
+    mobileGroups,
   }
-
-  for (const id of rest) {
-    slides.push([id])
-  }
-  return slides
 }
 
 /** @returns {DashboardVisibilityMap} */
@@ -269,6 +427,7 @@ export function moveDesktopWidget(layout, widgetId, targetZone, beforeWidgetId =
 
 /**
  * Réordonne la liste mobile (l'image de réconfort reste figée en première position).
+ * Recalcule les groupes selon la règle compagnon (édition desktop).
  * @param {DashboardLayout} layout
  * @param {string} sourceId
  * @param {string} targetId
@@ -292,12 +451,89 @@ export function reorderMobileWidget(layout, sourceId, targetId) {
       DASHBOARD_WIDGET_IDS.COMFORT,
       ...list,
     ])
+    next.mobileGroups = createDefaultMobileGroups(next.mobile)
     return next
   }
 
   const [moved] = list.splice(from, 1)
   list.splice(to, 0, moved)
   next.mobile = pinComfortFirstInMobileOrder([DASHBOARD_WIDGET_IDS.COMFORT, ...list])
+  next.mobileGroups = createDefaultMobileGroups(next.mobile)
+  return next
+}
+
+/**
+ * Déplace un widget dans les groupes mobile (drag & drop réglages téléphone).
+ * @param {DashboardLayout} layout
+ * @param {string} sourceId
+ * @param {number} targetGroupIndex
+ * @param {string|null} beforeWidgetId
+ */
+export function moveMobileWidgetInGroups(
+  layout,
+  sourceId,
+  targetGroupIndex,
+  beforeWidgetId = null,
+) {
+  const next = normalizeDashboardLayout(layout)
+  if (!DASHBOARD_WIDGET_ID_SET.has(sourceId)) return next
+  if (sourceId === DASHBOARD_WIDGET_IDS.COMFORT) return next
+  if (!Number.isInteger(targetGroupIndex) || targetGroupIndex < 0) return next
+
+  /** @type {string[][]} */
+  const groups = next.mobileGroups.map((group) => group.filter((id) => id !== sourceId))
+
+  while (groups.length <= targetGroupIndex) {
+    groups.push([])
+  }
+
+  const target = groups[targetGroupIndex]
+  const insertAt =
+    beforeWidgetId && beforeWidgetId !== sourceId ? target.indexOf(beforeWidgetId) : -1
+
+  if (insertAt >= 0) target.splice(insertAt, 0, sourceId)
+  else target.push(sourceId)
+
+  const cleaned = groups.filter((group) => group.length > 0)
+  next.mobileGroups = normalizeMobileGroups(cleaned, syncMobileFromGroups(cleaned))
+  next.mobile = syncMobileFromGroups(next.mobileGroups)
+  return next
+}
+
+/**
+ * Extrait un widget dans sa propre page (nouveau groupe juste après).
+ * @param {DashboardLayout} layout
+ * @param {string} widgetId
+ */
+export function extractMobileWidgetToOwnGroup(layout, widgetId) {
+  const next = normalizeDashboardLayout(layout)
+  if (!DASHBOARD_WIDGET_ID_SET.has(widgetId)) return next
+  if (widgetId === DASHBOARD_WIDGET_IDS.COMFORT) return next
+
+  const groups = next.mobileGroups.map((group) => [...group])
+  const groupIndex = groups.findIndex((group) => group.includes(widgetId))
+  if (groupIndex < 0) return next
+
+  const group = groups[groupIndex]
+  if (group.length <= 1) return next
+
+  groups[groupIndex] = group.filter((id) => id !== widgetId)
+  groups.splice(groupIndex + 1, 0, [widgetId])
+
+  const cleaned = groups.filter((g) => g.length > 0)
+  next.mobileGroups = normalizeMobileGroups(cleaned, syncMobileFromGroups(cleaned))
+  next.mobile = syncMobileFromGroups(next.mobileGroups)
+  return next
+}
+
+/**
+ * Ajoute un groupe vide en fin de liste (usage local éventuel ; les groupes vides
+ * sont retirés à la normalisation / sauvegarde).
+ * @param {DashboardLayout} layout
+ */
+export function addEmptyMobileGroup(layout) {
+  const next = normalizeDashboardLayout(layout)
+  next.mobileGroups = [...next.mobileGroups, []]
   return next
 }
 

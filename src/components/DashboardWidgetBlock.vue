@@ -3,8 +3,10 @@ import MenstruationCycleCalendar from './MenstruationCycleCalendar.vue'
 import MenstruationNaturalCycleCalendar from './MenstruationNaturalCycleCalendar.vue'
 import DashboardEmotionalCheckin from './DashboardEmotionalCheckin.vue'
 import DashboardComfortImages from './DashboardComfortImages.vue'
+import DashboardWordOfTheDay from './DashboardWordOfTheDay.vue'
 import DashboardTodayTodos from './DashboardTodayTodos.vue'
 import DashboardHabitsAnnual from './DashboardHabitsAnnual.vue'
+import DashboardReadingInProgress from './DashboardReadingInProgress.vue'
 import DashboardActiveProjects from './DashboardActiveProjects.vue'
 import { DASHBOARD_WIDGET_IDS } from '../constants/dashboardWidgets.js'
 
@@ -97,11 +99,13 @@ const IDS = DASHBOARD_WIDGET_IDS
 
 const COLUMN_CLASS_BY_ID = {
   [IDS.COMFORT]: 'intro-column comfort-column',
+  [IDS.DICTIONARY_WORD]: 'dictionary-word-column',
   [IDS.TODO]: 'todo-column',
   [IDS.TIMETABLE]: 'edt-column',
   [IDS.CHECKIN]: 'checkin-column',
   [IDS.HABITS]: 'habits-column',
   [IDS.MENSTRUATION]: 'menstruation-column right-column',
+  [IDS.READING_IN_PROGRESS]: 'reading-column',
   [IDS.PROJECTS]: 'projects-column',
 }
 
@@ -114,6 +118,11 @@ function rootClass(widgetId, asColumn) {
 <template>
   <div :class="rootClass(widgetId, asColumn)">
     <DashboardComfortImages v-if="widgetId === IDS.COMFORT" :user-id="userId" />
+
+    <DashboardWordOfTheDay
+      v-else-if="widgetId === IDS.DICTIONARY_WORD"
+      :user-id="userId"
+    />
 
     <DashboardTodayTodos
       v-else-if="widgetId === IDS.TODO"
@@ -211,6 +220,11 @@ function rootClass(widgetId, asColumn) {
       />
     </div>
 
+    <DashboardReadingInProgress
+      v-else-if="widgetId === IDS.READING_IN_PROGRESS"
+      :user-id="userId"
+    />
+
     <DashboardActiveProjects v-else-if="widgetId === IDS.PROJECTS" :user-id="userId" />
   </div>
 </template>
@@ -233,6 +247,8 @@ function rootClass(widgetId, asColumn) {
 .edt-column,
 .habits-column,
 .projects-column,
+.reading-column,
+.dictionary-word-column,
 .todo-column,
 .comfort-column,
 .checkin-column {

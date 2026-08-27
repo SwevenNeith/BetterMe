@@ -20,7 +20,8 @@ import {
   mergeDashboardVisibility,
   getDashboardLayout,
   moveDesktopWidget,
-  reorderMobileWidget,
+  moveMobileWidgetInGroups,
+  extractMobileWidgetToOwnGroup,
 } from '../services/dashboardVisibility.js'
 
 const DASHBOARD_WIDGET_PAGE_IDS = {
@@ -29,6 +30,8 @@ const DASHBOARD_WIDGET_PAGE_IDS = {
   [DASHBOARD_WIDGET_IDS.HABITS]: APP_PAGE_IDS.HABIT,
   [DASHBOARD_WIDGET_IDS.MENSTRUATION]: APP_PAGE_IDS.MENSTRUATION,
   [DASHBOARD_WIDGET_IDS.PROJECTS]: APP_PAGE_IDS.PROJETS,
+  [DASHBOARD_WIDGET_IDS.DICTIONARY_WORD]: APP_PAGE_IDS.DICTIONNAIRE,
+  [DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS]: APP_PAGE_IDS.LECTURE,
 }
 
 const props = defineProps({
@@ -63,6 +66,7 @@ const dragState = ref({
   fromZone: null,
   overZone: null,
   overWidgetId: null,
+  overGroupIndex: null,
 })
 
 const pagesForList = computed(() =>
@@ -96,23 +100,7 @@ function orderedDashboardWidgets(ids) {
   return ids.map((id) => dashboardWidgetMap.value[id]).filter(Boolean)
 }
 
-const dashboardMobileWidgets = computed(() =>
-  orderedDashboardWidgets(dashboardLayout.value.mobile),
-)
-
-/** Image figée en tête sur mobile. */
-const dashboardMobilePinnedWidget = computed(
-  () => dashboardWidgetMap.value[DASHBOARD_WIDGET_IDS.COMFORT] ?? null,
-)
-
-/** Blocs réordonnables sous l'image (le premier = compagnon de la slide 1). */
-const dashboardMobileReorderableWidgets = computed(() =>
-  dashboardMobileWidgets.value.filter((widget) => widget.id !== DASHBOARD_WIDGET_IDS.COMFORT),
-)
-
-const dashboardMobileCompanionId = computed(
-  () => dashboardMobileReorderableWidgets.value[0]?.id ?? null,
-)
+const dashboardMobileGroups = computed(() => dashboardLayout.value.mobileGroups ?? [])
 
 const dashboardTopWidgets = computed(() =>
   orderedDashboardWidgets(dashboardLayout.value.desktop.top),
@@ -220,11 +208,16 @@ function onWidgetDragStart(widgetId, fromZone, event) {
     event.preventDefault()
     return
   }
+  if (fromZone === 'mobile-group' && widgetId === DASHBOARD_WIDGET_IDS.COMFORT) {
+    event.preventDefault()
+    return
+  }
   dragState.value = {
     widgetId,
     fromZone,
     overZone: fromZone,
     overWidgetId: widgetId,
+    overGroupIndex: null,
   }
   try {
     event.dataTransfer?.setData(
@@ -249,6 +242,23 @@ function onWidgetDragOver(zone, widgetId, event) {
     ...dragState.value,
     overZone: zone,
     overWidgetId: widgetId ?? null,
+    overGroupIndex: null,
+  }
+}
+
+function onGroupDragOver(groupIndex, widgetId, event) {
+  if (!dragState.value.widgetId) return
+  event.preventDefault()
+  try {
+    event.dataTransfer.dropEffect = 'move'
+  } catch {
+    /* ignore */
+  }
+  dragState.value = {
+    ...dragState.value,
+    overZone: 'mobile-group',
+    overWidgetId: widgetId ?? null,
+    overGroupIndex: groupIndex,
   }
 }
 
@@ -265,6 +275,7 @@ function onZoneDragOver(zone, event) {
       ...dragState.value,
       overZone: zone,
       overWidgetId: null,
+      overGroupIndex: null,
     }
   }
 }
@@ -275,6 +286,7 @@ function onWidgetDragEnd() {
     fromZone: null,
     overZone: null,
     overWidgetId: null,
+    overGroupIndex: null,
   }
 }
 
@@ -305,7 +317,7 @@ async function onDesktopDrop(targetZone, beforeWidgetId, event) {
   await applyLayout(nextLayout)
 }
 
-async function onMobileDrop(targetWidgetId, event) {
+async function onGroupDrop(targetGroupIndex, beforeWidgetId, event) {
   event.preventDefault()
   event.stopPropagation()
 
@@ -322,10 +334,29 @@ async function onMobileDrop(targetWidgetId, event) {
 
   onWidgetDragEnd()
   if (!sourceId || sourceId === DASHBOARD_WIDGET_IDS.COMFORT) return
-  if (!targetWidgetId || sourceId === targetWidgetId) return
+  if (!Number.isInteger(targetGroupIndex) || targetGroupIndex < 0) return
 
-  const nextLayout = reorderMobileWidget(dashboardLayout.value, sourceId, targetWidgetId)
+  const nextLayout = moveMobileWidgetInGroups(
+    dashboardLayout.value,
+    sourceId,
+    targetGroupIndex,
+    beforeWidgetId,
+  )
   await applyLayout(nextLayout)
+}
+
+async function onExtractToOwnPage(widgetId) {
+  if (!widgetId || widgetId === DASHBOARD_WIDGET_IDS.COMFORT || isSaving.value) return
+  const nextLayout = extractMobileWidgetToOwnGroup(dashboardLayout.value, widgetId)
+  await applyLayout(nextLayout)
+}
+
+function groupWidgets(ids) {
+  return orderedDashboardWidgets(ids)
+}
+
+function canExtractWidget(group, widgetId) {
+  return group.length > 1 && widgetId !== DASHBOARD_WIDGET_IDS.COMFORT
 }
 
 function isDragging(widgetId) {
@@ -337,6 +368,15 @@ function isDropTarget(zone, widgetId) {
     Boolean(dragState.value.widgetId) &&
     dragState.value.widgetId !== widgetId &&
     dragState.value.overZone === zone &&
+    dragState.value.overWidgetId === widgetId
+  )
+}
+
+function isGroupDropTarget(groupIndex, widgetId = null) {
+  return (
+    Boolean(dragState.value.widgetId) &&
+    dragState.value.overZone === 'mobile-group' &&
+    dragState.value.overGroupIndex === groupIndex &&
     dragState.value.overWidgetId === widgetId
   )
 }
@@ -706,57 +746,70 @@ watch(
             </div>
           </div>
 
-          <!-- Mobile : image figée + ordre des autres blocs -->
+          <!-- Mobile (visible ≤768px via CSS) : groupes de pages du carrousel -->
           <div class="dashboard-visibility-mobile">
-            <p class="dashboard-visibility-zone-label">Ordre sur téléphone</p>
+            <p class="dashboard-visibility-zone-label">Pages sur téléphone</p>
             <p class="dashboard-visibility-mobile-hint">
-              L’image de réconfort reste en première page. Le bloc placé juste en dessous
-              s’affiche sur la même page, sous l’image.
+              Regroupe plusieurs blocs sur une même page en les glissant dans le même groupe.
+              L’image de réconfort reste en tête de la première page.
             </p>
-            <ul
-              class="visibility-pages-list dashboard-visibility-mobile-list"
-              aria-label="Blocs du dashboard (téléphone)"
-            >
-              <DashboardVisibilityWidgetRow
-                v-if="dashboardMobilePinnedWidget"
-                :key="`mobile-pinned-${dashboardMobilePinnedWidget.id}`"
-                :widget="dashboardMobilePinnedWidget"
-                :disabled="isSaving"
-                :drop-target="isDropTarget('mobile', dashboardMobilePinnedWidget.id)"
-                @toggle="onToggleDashboardVisible"
-                @dragover="onWidgetDragOver('mobile', dashboardMobilePinnedWidget.id, $event)"
-                @drop="onMobileDrop(dashboardMobilePinnedWidget.id, $event)"
-              />
-              <li
-                v-if="dashboardMobilePinnedWidget"
-                class="dashboard-visibility-mobile-pin-note"
-                aria-hidden="true"
-              >
-                Position figée · page 1
-              </li>
 
-              <DashboardVisibilityWidgetRow
-                v-for="widget in dashboardMobileReorderableWidgets"
-                :key="`mobile-${widget.id}`"
-                :widget="widget"
-                :disabled="isSaving"
-                draggable
-                :dragging="isDragging(widget.id)"
-                :drop-target="isDropTarget('mobile', widget.id)"
-                @toggle="onToggleDashboardVisible"
-                @dragstart="onWidgetDragStart(widget.id, 'mobile', $event)"
-                @dragover="onWidgetDragOver('mobile', widget.id, $event)"
-                @drop="onMobileDrop(widget.id, $event)"
-                @dragend="onWidgetDragEnd"
-              />
-            </ul>
-            <p
-              v-if="dashboardMobileCompanionId"
-              class="dashboard-visibility-mobile-companion-hint"
+            <div
+              v-for="(group, groupIndex) in dashboardMobileGroups"
+              :key="`mobile-group-${groupIndex}`"
+              class="dashboard-visibility-group"
+              :class="{
+                'dashboard-visibility-group--drop': isGroupDropTarget(groupIndex, null),
+              }"
+              @dragover="onGroupDragOver(groupIndex, null, $event)"
+              @drop="onGroupDrop(groupIndex, null, $event)"
             >
-              « {{ dashboardWidgetMap[dashboardMobileCompanionId]?.displayLabel }} » sera sous
-              l’image sur la première page.
-            </p>
+              <p class="dashboard-visibility-group-label">Page {{ groupIndex + 1 }}</p>
+              <div
+                v-for="widget in groupWidgets(group)"
+                :key="`mobile-group-${groupIndex}-${widget.id}`"
+                class="dashboard-visibility-group-item"
+              >
+                <ul class="dashboard-visibility-group-item-list">
+                  <DashboardVisibilityWidgetRow
+                    :widget="widget"
+                    :disabled="isSaving"
+                    :draggable="widget.id !== DASHBOARD_WIDGET_IDS.COMFORT"
+                    :dragging="isDragging(widget.id)"
+                    :drop-target="isGroupDropTarget(groupIndex, widget.id)"
+                    @toggle="onToggleDashboardVisible"
+                    @dragstart="onWidgetDragStart(widget.id, 'mobile-group', $event)"
+                    @dragover="onGroupDragOver(groupIndex, widget.id, $event)"
+                    @drop="onGroupDrop(groupIndex, widget.id, $event)"
+                    @dragend="onWidgetDragEnd"
+                  />
+                </ul>
+                <button
+                  v-if="canExtractWidget(group, widget.id)"
+                  type="button"
+                  class="dashboard-visibility-extract-btn"
+                  :disabled="isSaving"
+                  title="Mettre seul sur une nouvelle page"
+                  @click="onExtractToOwnPage(widget.id)"
+                >
+                  Seul
+                </button>
+              </div>
+            </div>
+
+            <div
+              class="dashboard-visibility-new-page"
+              :class="{
+                'dashboard-visibility-new-page--drop': isGroupDropTarget(
+                  dashboardMobileGroups.length,
+                  null,
+                ),
+              }"
+              @dragover="onGroupDragOver(dashboardMobileGroups.length, null, $event)"
+              @drop="onGroupDrop(dashboardMobileGroups.length, null, $event)"
+            >
+              Déposer ici pour une nouvelle page
+            </div>
           </div>
         </template>
 
@@ -1016,29 +1069,84 @@ watch(
   color: #6c757d;
 }
 
-.dashboard-visibility-mobile-pin-note {
-  list-style: none;
-  margin: -0.15rem 0 0.35rem;
-  padding: 0 0.65rem;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
+.dashboard-visibility-group {
+  margin-bottom: 0.75rem;
+  padding: 0.55rem;
+  border-radius: 14px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.4);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.dashboard-visibility-group--drop {
+  border-color: rgba(173, 129, 190, 0.55);
+  background: rgba(213, 181, 234, 0.14);
+}
+
+.dashboard-visibility-group-label {
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #ad81be;
-  opacity: 0.85;
 }
 
-.dashboard-visibility-mobile-companion-hint {
-  margin: 0.65rem 0 0;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #8c98a4;
-  line-height: 1.4;
-}
-
-.dashboard-visibility-mobile-list {
+.dashboard-visibility-group-item {
   display: flex;
-  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.dashboard-visibility-group-item-list {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-visibility-extract-btn {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  border-radius: 8px;
+  background: rgba(213, 181, 234, 0.22);
+  color: #8c6a9e;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dashboard-visibility-extract-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dashboard-visibility-new-page {
+  margin-top: 0.25rem;
+  padding: 0.85rem 0.75rem;
+  border-radius: 14px;
+  border: 1px dashed rgba(173, 129, 190, 0.45);
+  background: rgba(213, 181, 234, 0.08);
+  color: #8c98a4;
+  font-size: 0.82rem;
+  font-weight: 650;
+  text-align: center;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.dashboard-visibility-new-page--drop {
+  border-color: rgba(173, 129, 190, 0.7);
+  background: rgba(213, 181, 234, 0.2);
+  color: #ad81be;
 }
 
 .dashboard-visibility-zone-label {
@@ -1115,8 +1223,7 @@ watch(
 
   .card-body__desc,
   .visibility-state,
-  .dashboard-visibility-mobile-hint,
-  .dashboard-visibility-mobile-companion-hint {
+  .dashboard-visibility-mobile-hint {
     color: #adb5bd;
   }
 
@@ -1145,6 +1252,17 @@ watch(
 
   .dashboard-visibility-empty {
     border-color: rgba(213, 181, 234, 0.28);
+    background: rgba(213, 181, 234, 0.06);
+    color: #adb5bd;
+  }
+
+  .dashboard-visibility-group {
+    background: rgba(25, 20, 35, 0.45);
+    border-color: rgba(213, 181, 234, 0.2);
+  }
+
+  .dashboard-visibility-new-page {
+    border-color: rgba(213, 181, 234, 0.35);
     background: rgba(213, 181, 234, 0.06);
     color: #adb5bd;
   }
