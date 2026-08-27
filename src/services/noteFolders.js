@@ -1,5 +1,18 @@
+import {
+  DAILY_NOTES_FOLDER_DEFAULT_NAME,
+  DAILY_NOTES_FOLDER_SYSTEM_KEY,
+} from '../constants/dailyNotes.js'
+
 const TABLE = 'note_folders'
-const SELECT = 'id, user_id, parent_id, name, created_at, updated_at'
+const SELECT = 'id, user_id, parent_id, name, system_key, created_at, updated_at'
+
+function isMissingSystemKeyColumnError(error) {
+  return (
+    error?.code === 'PGRST204' &&
+    typeof error.message === 'string' &&
+    error.message.includes("'system_key'")
+  )
+}
 
 function normalizeFolder(row) {
   return {
@@ -7,6 +20,7 @@ function normalizeFolder(row) {
     user_id: row.user_id,
     parent_id: row.parent_id ?? null,
     name: String(row.name ?? '').trim(),
+    system_key: row.system_key ?? null,
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? row.created_at ?? null,
   }
@@ -23,14 +37,25 @@ export async function listNoteFolders(supabase, userId) {
     .eq('user_id', userId)
     .order('name', { ascending: true })
 
-  if (error) throw error
+  if (error) {
+    if (isMissingSystemKeyColumnError(error)) {
+      const legacy = await supabase
+        .from(TABLE)
+        .select('id, user_id, parent_id, name, created_at, updated_at')
+        .eq('user_id', userId)
+        .order('name', { ascending: true })
+      if (legacy.error) throw legacy.error
+      return (legacy.data ?? []).map((row) => normalizeFolder({ ...row, system_key: null }))
+    }
+    throw error
+  }
   return (data ?? []).map(normalizeFolder)
 }
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
- * @param {{ name: string, parentId?: string | null }} input
+ * @param {{ name: string, parentId?: string | null, systemKey?: string | null }} input
  */
 export async function createNoteFolder(supabase, userId, input) {
   if (!userId) throw new Error('Utilisateur non connecté.')
@@ -38,19 +63,27 @@ export async function createNoteFolder(supabase, userId, input) {
   if (!name) throw new Error('Le nom du dossier est requis.')
 
   const now = new Date().toISOString()
-  const { data, error } = await supabase
-    .from(TABLE)
-    .insert({
-      user_id: userId,
-      parent_id: input?.parentId || input?.parent_id || null,
-      name,
-      created_at: now,
-      updated_at: now,
-    })
-    .select(SELECT)
-    .single()
+  const row = {
+    user_id: userId,
+    parent_id: input?.parentId || input?.parent_id || null,
+    name,
+    created_at: now,
+    updated_at: now,
+  }
 
-  if (error) throw error
+  const systemKey = input?.systemKey ?? input?.system_key ?? null
+  if (systemKey) row.system_key = systemKey
+
+  const { data, error } = await supabase.from(TABLE).insert(row).select(SELECT).single()
+
+  if (error) {
+    if (isMissingSystemKeyColumnError(error)) {
+      throw new Error(
+        'Colonne note_folders.system_key absente. Exécute scripts/migrate-note-folders-system-key.sql dans Supabase.',
+      )
+    }
+    throw error
+  }
   return normalizeFolder(data)
 }
 
@@ -81,7 +114,20 @@ export async function updateNoteFolder(supabase, userId, folderId, input) {
     .select(SELECT)
     .single()
 
-  if (error) throw error
+  if (error) {
+    if (isMissingSystemKeyColumnError(error)) {
+      const legacy = await supabase
+        .from(TABLE)
+        .update(patch)
+        .eq('id', folderId)
+        .eq('user_id', userId)
+        .select('id, user_id, parent_id, name, created_at, updated_at')
+        .single()
+      if (legacy.error) throw legacy.error
+      return normalizeFolder({ ...legacy.data, system_key: null })
+    }
+    throw error
+  }
   return normalizeFolder(data)
 }
 
@@ -96,4 +142,51 @@ export async function deleteNoteFolder(supabase, userId, folderId) {
 
   const { error } = await supabase.from(TABLE).delete().eq('id', folderId).eq('user_id', userId)
   if (error) throw error
+}
+
+/**
+ * Retrouve le dossier Daily Notes par system_key, ou le crée (nom par défaut).
+ * Un renommage ne provoque pas de recreation.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ */
+export async function ensureDailyNotesFolder(supabase, userId) {
+  if (!userId) throw new Error('Utilisateur non connecté.')
+
+  const { data: existing, error } = await supabase
+    .from(TABLE)
+    .select(SELECT)
+    .eq('user_id', userId)
+    .eq('system_key', DAILY_NOTES_FOLDER_SYSTEM_KEY)
+    .maybeSingle()
+
+  if (error) {
+    if (isMissingSystemKeyColumnError(error)) {
+      throw new Error(
+        'Colonne note_folders.system_key absente. Exécute scripts/migrate-note-folders-system-key.sql dans Supabase.',
+      )
+    }
+    throw error
+  }
+
+  if (existing) return normalizeFolder(existing)
+
+  try {
+    return await createNoteFolder(supabase, userId, {
+      name: DAILY_NOTES_FOLDER_DEFAULT_NAME,
+      parentId: null,
+      systemKey: DAILY_NOTES_FOLDER_SYSTEM_KEY,
+    })
+  } catch (err) {
+    if (String(err?.code) === '23505' || String(err?.message ?? '').includes('duplicate')) {
+      const { data } = await supabase
+        .from(TABLE)
+        .select(SELECT)
+        .eq('user_id', userId)
+        .eq('system_key', DAILY_NOTES_FOLDER_SYSTEM_KEY)
+        .maybeSingle()
+      if (data) return normalizeFolder(data)
+    }
+    throw err
+  }
 }

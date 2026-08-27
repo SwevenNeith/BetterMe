@@ -9,17 +9,24 @@ CREATE TABLE IF NOT EXISTS public.note_folders (
   user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
   parent_id uuid NULL REFERENCES public.note_folders (id) ON DELETE CASCADE,
   name text NOT NULL CHECK (char_length(trim(name)) > 0),
+  system_key text NULL,
   created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
   updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
 
 COMMENT ON TABLE public.note_folders IS 'Dossiers de notes (arborescence par parent_id).';
+COMMENT ON COLUMN public.note_folders.system_key IS
+  'Clé système (ex. daily_notes). Unique par utilisateur ; NULL pour les dossiers normaux.';
 
 CREATE INDEX IF NOT EXISTS note_folders_user_parent_idx
   ON public.note_folders (user_id, parent_id);
 
 CREATE INDEX IF NOT EXISTS note_folders_user_name_idx
   ON public.note_folders (user_id, lower(name));
+
+CREATE UNIQUE INDEX IF NOT EXISTS note_folders_user_system_key_uidx
+  ON public.note_folders (user_id, system_key)
+  WHERE system_key IS NOT NULL;
 
 -- Notes Markdown
 CREATE TABLE IF NOT EXISTS public.notes (

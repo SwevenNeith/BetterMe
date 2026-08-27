@@ -7,6 +7,7 @@ import DashboardWordOfTheDay from './DashboardWordOfTheDay.vue'
 import DashboardTodayTodos from './DashboardTodayTodos.vue'
 import DashboardHabitsAnnual from './DashboardHabitsAnnual.vue'
 import DashboardNotesGraph from './DashboardNotesGraph.vue'
+import DashboardDailyNote from './DashboardDailyNote.vue'
 import DashboardReadingInProgress from './DashboardReadingInProgress.vue'
 import DashboardActiveProjects from './DashboardActiveProjects.vue'
 import { DASHBOARD_WIDGET_IDS } from '../constants/dashboardWidgets.js'
@@ -104,6 +105,7 @@ const COLUMN_CLASS_BY_ID = {
   [IDS.TODO]: 'todo-column',
   [IDS.TIMETABLE]: 'edt-column',
   [IDS.CHECKIN]: 'checkin-column',
+  [IDS.DAILY_NOTE]: 'daily-note-column',
   [IDS.MENSTRUATION]: 'menstruation-column right-column',
   [IDS.HABITS]: 'habits-column',
   [IDS.NOTES_GRAPH]: 'notes-graph-column',
@@ -186,6 +188,8 @@ function rootClass(widgetId, asColumn) {
       @cancel="$emit('cancel-checkin')"
     />
 
+    <DashboardDailyNote v-else-if="widgetId === IDS.DAILY_NOTE" :user-id="userId" />
+
     <DashboardHabitsAnnual v-else-if="widgetId === IDS.HABITS" :user-id="userId" />
 
     <DashboardNotesGraph v-else-if="widgetId === IDS.NOTES_GRAPH" :user-id="userId" />
@@ -256,6 +260,7 @@ function rootClass(widgetId, asColumn) {
 .dictionary-word-column,
 .todo-column,
 .comfort-column,
+.daily-note-column,
 .checkin-column {
   gap: 1rem;
 }

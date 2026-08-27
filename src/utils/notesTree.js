@@ -1,10 +1,16 @@
+import { DAILY_NOTES_FOLDER_SYSTEM_KEY, parseDailyNoteDateKey } from '../constants/dailyNotes.js'
+
 /**
  * Construit une arborescence triée : dossiers (alpha) puis notes (alpha), récursif.
- * @param {{ id: string, parent_id: string | null, name: string }[]} folders
- * @param {{ id: string, folder_id: string | null, title: string }[]} notes
+ * Dans le dossier Daily Notes, les notes sont triées par date (ancienne → récente).
+ * @param {{ id: string, parent_id: string | null, name: string, system_key?: string | null }[]} folders
+ * @param {{ id: string, folder_id: string | null, title: string, system_key?: string | null }[]} notes
  * @param {string | null} [parentId]
  */
 export function buildNotesTree(folders, notes, parentId = null) {
+  const parentFolder =
+    parentId == null ? null : (folders ?? []).find((folder) => folder.id === parentId) ?? null
+
   const folderChildren = (folders ?? [])
     .filter((folder) => (folder.parent_id ?? null) === parentId)
     .slice()
@@ -13,13 +19,14 @@ export function buildNotesTree(folders, notes, parentId = null) {
       type: 'folder',
       id: folder.id,
       name: folder.name,
+      system_key: folder.system_key ?? null,
       children: buildNotesTree(folders, notes, folder.id),
     }))
 
   const noteChildren = (notes ?? [])
     .filter((note) => (note.folder_id ?? null) === parentId)
     .slice()
-    .sort((a, b) => compareAlpha(a.title, b.title))
+    .sort((a, b) => compareNotesInFolder(a, b, parentFolder))
     .map((note) => ({
       type: 'note',
       id: note.id,
@@ -35,6 +42,22 @@ function compareAlpha(a, b) {
     sensitivity: 'base',
     numeric: true,
   })
+}
+
+/**
+ * @param {{ title?: string, system_key?: string | null }} a
+ * @param {{ title?: string, system_key?: string | null }} b
+ * @param {{ system_key?: string | null } | null} parentFolder
+ */
+function compareNotesInFolder(a, b, parentFolder) {
+  if (parentFolder?.system_key === DAILY_NOTES_FOLDER_SYSTEM_KEY) {
+    const dateA = parseDailyNoteDateKey(a.system_key)
+    const dateB = parseDailyNoteDateKey(b.system_key)
+    if (dateA && dateB) return dateA.localeCompare(dateB)
+    if (dateA) return -1
+    if (dateB) return 1
+  }
+  return compareAlpha(a.title, b.title)
 }
 
 /**

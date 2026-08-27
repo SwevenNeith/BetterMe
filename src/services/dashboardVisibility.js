@@ -282,6 +282,100 @@ function ensureNotesAfterProjectsDesktop(desktop) {
 }
 
 /**
+ * Place la note du jour juste au-dessus de la menstruation (listes / desktop).
+ * @param {string[]} ids
+ * @returns {string[]}
+ */
+function ensureDailyNoteAboveMenstruation(ids) {
+  const dailyId = DASHBOARD_WIDGET_IDS.DAILY_NOTE
+  const mensId = DASHBOARD_WIDGET_IDS.MENSTRUATION
+  if (!ids.includes(dailyId)) return ids
+
+  const next = ids.filter((id) => id !== dailyId)
+  const mensIndex = next.indexOf(mensId)
+  if (mensIndex < 0) {
+    next.unshift(dailyId)
+    return next
+  }
+  next.splice(mensIndex, 0, dailyId)
+  return next
+}
+
+/**
+ * Sur mobile : la note du jour est la 2ᵉ page (juste après la slide réconfort).
+ * @param {string[]} ids
+ * @returns {string[]}
+ */
+function ensureDailyNoteSecondOnMobile(ids) {
+  const dailyId = DASHBOARD_WIDGET_IDS.DAILY_NOTE
+  if (!ids.includes(dailyId)) return ids
+
+  const next = ids.filter((id) => id !== dailyId)
+  // Après réconfort (+ compagnons page 1 dans l’ordre flat) : index 1 = 2ᵉ slot
+  // mais les compagnons page 1 sont dictionary + todo juste après comfort.
+  // On place daily juste après le dernier compagnon de 1ʳᵉ page présent.
+  const comfortId = DASHBOARD_WIDGET_IDS.COMFORT
+  const companions = [
+    DASHBOARD_WIDGET_IDS.DICTIONARY_WORD,
+    DASHBOARD_WIDGET_IDS.TODO,
+  ]
+  let insertAt = next.indexOf(comfortId)
+  if (insertAt < 0) insertAt = 0
+  else insertAt += 1
+
+  for (const companionId of companions) {
+    const idx = next.indexOf(companionId)
+    if (idx >= 0 && idx + 1 > insertAt) insertAt = idx + 1
+  }
+
+  next.splice(insertAt, 0, dailyId)
+  return next
+}
+
+/**
+ * Sur mobile : force le groupe note du jour en 2ᵉ slide.
+ * @param {string[][]} groups
+ * @returns {string[][]}
+ */
+function ensureDailyNoteSecondMobileGroup(groups) {
+  let dailyGi = -1
+  for (let i = 0; i < groups.length; i += 1) {
+    if (groups[i].includes(DASHBOARD_WIDGET_IDS.DAILY_NOTE)) dailyGi = i
+  }
+  if (dailyGi < 0) return groups
+  if (dailyGi === 1) return groups
+
+  const next = groups.map((group) => [...group])
+  const [dailyGroup] = next.splice(dailyGi, 1)
+  const insertAt = next.length > 0 ? 1 : 0
+  next.splice(insertAt, 0, dailyGroup)
+  return next
+}
+
+/**
+ * Sur desktop, force la note du jour dans la colonne de la menstruation, juste au-dessus.
+ * @param {DashboardLayout['desktop']} desktop
+ */
+function ensureDailyNoteAboveMenstruationDesktop(desktop) {
+  const dailyId = DASHBOARD_WIDGET_IDS.DAILY_NOTE
+  const mensId = DASHBOARD_WIDGET_IDS.MENSTRUATION
+
+  for (const zone of Object.values(DASHBOARD_DESKTOP_ZONES)) {
+    desktop[zone] = desktop[zone].filter((id) => id !== dailyId)
+  }
+
+  let targetZone = DASHBOARD_DESKTOP_ZONES.RIGHT
+  for (const zone of Object.values(DASHBOARD_DESKTOP_ZONES)) {
+    if (desktop[zone].includes(mensId)) {
+      targetZone = zone
+      break
+    }
+  }
+
+  desktop[targetZone] = ensureDailyNoteAboveMenstruation([...desktop[targetZone], dailyId])
+}
+
+/**
  * Ancien défaut = image + mot du jour, TODO seul juste après → fusionne sur la 1ʳᵉ page.
  * @param {string[][]} groups
  * @returns {string[][]}
@@ -423,6 +517,7 @@ export function normalizeDashboardLayout(rawLayout) {
 
   desktop.right = ensureMenstruationBeforeHabits(desktop.right)
   ensureNotesAfterProjectsDesktop(desktop)
+  ensureDailyNoteAboveMenstruationDesktop(desktop)
 
   let mobile = sanitizeWidgetIds(raw.mobile ?? defaults.mobile)
   const mobileSeen = new Set(mobile)
@@ -433,11 +528,15 @@ export function normalizeDashboardLayout(rawLayout) {
   }
 
   mobile = pinComfortFirstInMobileOrder(
-    ensureNotesAfterProjects(ensureMenstruationBeforeHabits(mobile)),
+    ensureDailyNoteSecondOnMobile(
+      ensureNotesAfterProjects(ensureMenstruationBeforeHabits(mobile)),
+    ),
   )
   let mobileGroups = normalizeMobileGroups(raw.mobileGroups, mobile)
-  mobileGroups = ensureNotesAfterProjectsInGroups(
-    ensureMenstruationBeforeHabitsInGroups(mobileGroups),
+  mobileGroups = ensureDailyNoteSecondMobileGroup(
+    ensureNotesAfterProjectsInGroups(
+      ensureMenstruationBeforeHabitsInGroups(mobileGroups),
+    ),
   )
 
   return {

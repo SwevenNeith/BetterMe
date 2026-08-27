@@ -5,6 +5,7 @@ export const DASHBOARD_WIDGET_IDS = {
   TODO: 'todo',
   TIMETABLE: 'timetable',
   CHECKIN: 'checkin',
+  DAILY_NOTE: 'daily-note',
   MENSTRUATION: 'menstruation',
   HABITS: 'habits',
   NOTES_GRAPH: 'notes-graph',
@@ -29,6 +30,7 @@ export const DASHBOARD_WIDGETS = [
   { id: DASHBOARD_WIDGET_IDS.TODO, defaultLabel: 'TODO du jour' },
   { id: DASHBOARD_WIDGET_IDS.TIMETABLE, defaultLabel: 'Emploi du temps du jour' },
   { id: DASHBOARD_WIDGET_IDS.CHECKIN, defaultLabel: 'Check-in émotionnel' },
+  { id: DASHBOARD_WIDGET_IDS.DAILY_NOTE, defaultLabel: 'Note du jour' },
   { id: DASHBOARD_WIDGET_IDS.MENSTRUATION, defaultLabel: 'Menstruation' },
   { id: DASHBOARD_WIDGET_IDS.HABITS, defaultLabel: 'Habitudes (vue mensuelle)' },
   { id: DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS, defaultLabel: 'Lectures en cours' },
@@ -43,6 +45,7 @@ export const DASHBOARD_WIDGET_MOBILE_ORDER = [
   DASHBOARD_WIDGET_IDS.COMFORT,
   DASHBOARD_WIDGET_IDS.DICTIONARY_WORD,
   DASHBOARD_WIDGET_IDS.TODO,
+  DASHBOARD_WIDGET_IDS.DAILY_NOTE,
   DASHBOARD_WIDGET_IDS.TIMETABLE,
   DASHBOARD_WIDGET_IDS.CHECKIN,
   DASHBOARD_WIDGET_IDS.MENSTRUATION,
@@ -65,6 +68,7 @@ export const DASHBOARD_WIDGET_DESKTOP_LEFT = [
 
 /** Colonne droite du dashboard (desktop). */
 export const DASHBOARD_WIDGET_DESKTOP_RIGHT = [
+  DASHBOARD_WIDGET_IDS.DAILY_NOTE,
   DASHBOARD_WIDGET_IDS.MENSTRUATION,
   DASHBOARD_WIDGET_IDS.HABITS,
 ]
