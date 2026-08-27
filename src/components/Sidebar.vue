@@ -2137,42 +2137,60 @@ onUnmounted(() => {
   top: 0.55rem;
   left: 0.55rem;
   z-index: 200;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(213, 181, 234, 0.35);
-  box-shadow: 0 2px 8px rgba(173, 129, 190, 0.15);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.42);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(213, 181, 234, 0.2);
+  box-shadow: none;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 3px;
   cursor: pointer;
-  transition: opacity 0.25s ease, transform 0.2s ease;
+  opacity: 0.48;
+  transform: scale(0.92);
+  transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.hamburger:hover,
+.hamburger:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+  background: rgba(255, 255, 255, 0.88);
 }
 
 .hamburger.is-scrolled {
-  opacity: 0.45;
-  transform: scale(0.85);
+  opacity: 0.32;
+  transform: scale(0.86);
+  background: rgba(255, 255, 255, 0.28);
 }
 
 .hamburger.is-scrolled:hover,
 .hamburger.is-scrolled:focus-visible {
   opacity: 1;
   transform: scale(1);
+  background: rgba(255, 255, 255, 0.88);
 }
 
 @media (prefers-color-scheme: dark) {
   .hamburger {
-    background: rgba(25, 20, 35, 0.92);
+    background: rgba(25, 20, 35, 0.42);
+  }
+
+  .hamburger:hover,
+  .hamburger:focus-visible,
+  .hamburger.is-scrolled:hover,
+  .hamburger.is-scrolled:focus-visible {
+    background: rgba(25, 20, 35, 0.88);
   }
 }
 
 .hamburger span {
   display: block;
-  width: 17px;
-  height: 2px;
+  width: 14px;
+  height: 1.5px;
   background: #ad81be;
   border-radius: 2px;
   transition: all 0.3s ease;
@@ -2180,14 +2198,14 @@ onUnmounted(() => {
 }
 
 .hamburger.is-open span:nth-child(1) {
-  transform: translateY(6px) rotate(45deg);
+  transform: translateY(4.5px) rotate(45deg);
 }
 .hamburger.is-open span:nth-child(2) {
   opacity: 0;
   transform: scaleX(0);
 }
 .hamburger.is-open span:nth-child(3) {
-  transform: translateY(-6px) rotate(-45deg);
+  transform: translateY(-4.5px) rotate(-45deg);
 }
 
 /* ─── Overlay (mobile) ─── */

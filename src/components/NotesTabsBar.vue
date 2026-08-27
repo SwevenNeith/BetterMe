@@ -55,6 +55,12 @@ function onClose(event, tab) {
   flex-shrink: 0;
 }
 
+@media (max-width: 768px) {
+  .notes-tabs {
+    padding-left: 2.6rem;
+  }
+}
+
 .notes-tabs__tab {
   display: inline-flex;
   align-items: center;

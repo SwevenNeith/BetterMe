@@ -58,6 +58,7 @@ const saveStatus = ref('')
 const dirty = ref(false)
 const treeQuery = ref('')
 const sidebarCollapsed = ref(false)
+const isMobileNotes = ref(false)
 const editorEl = ref(null)
 const previewEl = ref(null)
 const extensionsOpen = ref(false)
@@ -73,6 +74,33 @@ const isGraphView = computed(() => {
   const name = route.name?.toString() ?? ''
   return name === 'notes-graph' || name === 'embed-notes-graph'
 })
+
+const effectiveViewMode = computed(() => {
+  if (isMobileNotes.value && viewMode.value === 'split') return 'edit'
+  return viewMode.value
+})
+
+const defaultViewMode = computed(() => (isMobileNotes.value ? 'edit' : 'split'))
+
+const MOBILE_NOTES_MQ = '(max-width: 900px)'
+let mobileNotesMql = null
+
+function syncMobileNotesLayout() {
+  if (typeof window === 'undefined') return
+  const mobile = window.matchMedia(MOBILE_NOTES_MQ).matches
+  const becameMobile = mobile && !isMobileNotes.value
+  isMobileNotes.value = mobile
+  if (becameMobile) {
+    sidebarCollapsed.value = true
+  }
+  if (mobile && viewMode.value === 'split') {
+    viewMode.value = 'edit'
+  }
+}
+
+function closeMobileDrawer() {
+  if (isMobileNotes.value) sidebarCollapsed.value = true
+}
 
 const activeTabKey = computed(() => {
   if (isGraphView.value) return 'graph'
@@ -243,7 +271,10 @@ function applyNoteToEditor(note) {
     draftContent.value = session.content
     draftFolderId.value = session.folderId
     dirty.value = Boolean(session.dirty)
-    viewMode.value = session.viewMode || 'split'
+    viewMode.value =
+      session.viewMode === 'split' && isMobileNotes.value
+        ? 'edit'
+        : session.viewMode || defaultViewMode.value
     saveStatus.value = session.saveStatus || ''
     saveError.value = session.saveError || ''
   } else {
@@ -251,6 +282,7 @@ function applyNoteToEditor(note) {
     draftContent.value = note.content_md
     draftFolderId.value = note.folder_id
     dirty.value = false
+    viewMode.value = defaultViewMode.value
     saveStatus.value = ''
     saveError.value = ''
   }
@@ -478,6 +510,7 @@ async function selectNote(noteId, { syncRoute = true, openTab = true } = {}) {
         await router.push({ name, params: { noteId: note.id } })
       }
     }
+    closeMobileDrawer()
   } catch (err) {
     switchingTabs = false
     console.error(err)
@@ -491,6 +524,7 @@ async function openGraphView() {
     if (dirty.value) await flushSave()
   }
   ensureGraphTab()
+  closeMobileDrawer()
   if (isGraphView.value) return
   const name = route.name?.toString().startsWith('embed-') ? 'embed-notes-graph' : 'notes-graph'
   await router.push({ name })
@@ -811,6 +845,11 @@ function onTreeRenameNote(note) {
 }
 
 onMounted(async () => {
+  syncMobileNotesLayout()
+  if (typeof window !== 'undefined') {
+    mobileNotesMql = window.matchMedia(MOBILE_NOTES_MQ)
+    mobileNotesMql.addEventListener('change', syncMobileNotesLayout)
+  }
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -818,6 +857,10 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (mobileNotesMql) {
+    mobileNotesMql.removeEventListener('change', syncMobileNotesLayout)
+    mobileNotesMql = null
+  }
   if (saveTimer) clearTimeout(saveTimer)
   if (dirty.value) void flushSave()
 })
@@ -874,8 +917,25 @@ watch(draftFolderId, (value) => {
 </script>
 
 <template>
-  <div class="notes-page" :class="{ 'notes-page--sidebar-collapsed': sidebarCollapsed }">
-    <aside v-show="!sidebarCollapsed" class="notes-page__sidebar">
+  <div
+    class="notes-page"
+    :class="{
+      'notes-page--sidebar-collapsed': sidebarCollapsed || isMobileNotes,
+      'notes-page--mobile': isMobileNotes,
+      'notes-page--drawer-open': isMobileNotes && !sidebarCollapsed,
+    }"
+  >
+    <div
+      v-if="isMobileNotes && !sidebarCollapsed"
+      class="notes-page__drawer-overlay"
+      @click="sidebarCollapsed = true"
+    />
+
+    <aside
+      v-show="isMobileNotes || !sidebarCollapsed"
+      class="notes-page__sidebar"
+      :aria-hidden="isMobileNotes && sidebarCollapsed ? 'true' : undefined"
+    >
       <header class="notes-page__sidebar-header">
         <div class="notes-page__sidebar-title-row">
           <h1 class="notes-page__title">{{ pageTitle }}</h1>
@@ -1038,15 +1098,16 @@ watch(draftFolderId, (value) => {
               <button
                 type="button"
                 class="notes-page__mode"
-                :class="{ 'notes-page__mode--active': viewMode === 'edit' }"
+                :class="{ 'notes-page__mode--active': effectiveViewMode === 'edit' }"
                 @click="viewMode = 'edit'"
               >
                 Édition
               </button>
               <button
+                v-if="!isMobileNotes"
                 type="button"
                 class="notes-page__mode"
-                :class="{ 'notes-page__mode--active': viewMode === 'split' }"
+                :class="{ 'notes-page__mode--active': effectiveViewMode === 'split' }"
                 @click="viewMode = 'split'"
               >
                 Split
@@ -1054,7 +1115,7 @@ watch(draftFolderId, (value) => {
               <button
                 type="button"
                 class="notes-page__mode"
-                :class="{ 'notes-page__mode--active': viewMode === 'preview' }"
+                :class="{ 'notes-page__mode--active': effectiveViewMode === 'preview' }"
                 @click="viewMode = 'preview'"
               >
                 Aperçu
@@ -1074,13 +1135,13 @@ watch(draftFolderId, (value) => {
         <div
           class="notes-page__panes"
           :class="{
-            'notes-page__panes--edit': viewMode === 'edit',
-            'notes-page__panes--preview': viewMode === 'preview',
-            'notes-page__panes--split': viewMode === 'split',
+            'notes-page__panes--edit': effectiveViewMode === 'edit',
+            'notes-page__panes--preview': effectiveViewMode === 'preview',
+            'notes-page__panes--split': effectiveViewMode === 'split',
           }"
         >
           <textarea
-            v-if="viewMode !== 'preview'"
+            v-if="effectiveViewMode !== 'preview'"
             ref="editorEl"
             v-model="draftContent"
             class="notes-page__editor"
@@ -1090,7 +1151,7 @@ watch(draftFolderId, (value) => {
             @blur="flushSave"
           />
           <div
-            v-if="viewMode !== 'edit'"
+            v-if="effectiveViewMode !== 'edit'"
             ref="previewEl"
             class="notes-page__preview markdown-body"
             @scroll="onPreviewScroll"
@@ -1152,6 +1213,7 @@ watch(draftFolderId, (value) => {
 
 <style scoped>
 .notes-page {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(180px, 220px) 1fr;
   gap: 0;
@@ -1654,44 +1716,84 @@ watch(draftFolderId, (value) => {
 }
 
 @media (max-width: 900px) {
-  .notes-page {
+  .notes-page,
+  .notes-page--sidebar-collapsed,
+  .notes-page--mobile {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: 1fr;
     height: calc(100vh - 2rem);
     min-height: 520px;
   }
 
-  .notes-page--sidebar-collapsed {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+  .notes-page__drawer-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 25;
+    background: rgba(40, 25, 55, 0.35);
   }
 
   .notes-page__sidebar {
-    max-height: 28vh;
+    position: absolute;
+    top: 0;
+    left: auto;
+    right: 0;
+    bottom: 0;
+    width: min(300px, 86vw);
+    max-height: none;
+    z-index: 26;
     border-right: none;
-    border-bottom: 1px solid #e0d4ee;
+    border-left: 1px solid #e0d4ee;
+    border-bottom: none;
+    transform: translateX(105%);
+    transition: transform 0.2s ease;
+    box-shadow: -8px 0 28px rgba(60, 30, 80, 0.16);
+    pointer-events: none;
+  }
+
+  .notes-page--drawer-open .notes-page__sidebar {
+    transform: translateX(0);
+    pointer-events: auto;
   }
 
   .notes-page__sidebar-rail {
-    width: 100%;
-    min-height: 2.2rem;
+    position: absolute;
+    top: 50%;
+    left: auto;
+    right: 0;
+    z-index: 20;
+    width: 1.55rem;
+    min-height: 3.8rem;
+    transform: translateY(-50%);
+    border: 1px solid rgba(224, 212, 238, 0.55);
     border-right: none;
-    border-bottom: 1px solid #e0d4ee;
+    border-radius: 10px 0 0 10px;
+    background: rgba(239, 230, 248, 0.42);
+    color: rgba(90, 74, 104, 0.72);
+    box-shadow: none;
+    backdrop-filter: blur(4px);
+  }
+
+  .notes-page__sidebar-rail:hover,
+  .notes-page__sidebar-rail:focus-visible {
+    background: rgba(239, 230, 248, 0.92);
+    color: #5a4a68;
   }
 
   .notes-page__sidebar-rail-label {
-    writing-mode: horizontal-tb;
+    writing-mode: vertical-rl;
     transform: none;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    opacity: 0.85;
   }
 
-  .notes-page__panes--split {
-    grid-template-columns: 1fr;
-    grid-template-rows: 1fr 1fr;
+  .notes-page__main {
+    padding-right: 1.15rem;
   }
 
   .notes-page__editor {
     border-right: none;
-    border-bottom: 1px solid #e6ddf2;
   }
 }
 </style>
