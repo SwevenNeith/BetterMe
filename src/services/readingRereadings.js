@@ -24,6 +24,16 @@ function inferCollectionFromReadingDates(dateStart, dateEnd, fallback = '') {
 }
 
 /**
+ * Une relecture n’est possible que si la lecture en cours a une date de début ET de fin.
+ * @param {{ date_start?: string|null, date_end?: string|null, dateStart?: string|null, dateEnd?: string|null }|null|undefined} book
+ */
+export function canStartReadingRereading(book) {
+  const dateStart = normalizeDateInput(book?.date_start ?? book?.dateStart)
+  const dateEnd = normalizeDateInput(book?.date_end ?? book?.dateEnd)
+  return Boolean(dateStart && dateEnd)
+}
+
+/**
  * Reconstruit les infos d'annulation à partir du snapshot et/ou de la dernière entrée archivée.
  * @param {{
  *   rereadingId?: string|null,
@@ -105,33 +115,33 @@ export async function listReadingRereadings(supabase, userId, bookId) {
 export async function startReadingRereading(supabase, userId, book) {
   if (!userId) throw new Error('Utilisateur non connecté.')
   if (!book?.id) throw new Error('Livre introuvable.')
-
-  const hasCurrentDates = Boolean(book.date_start || book.date_end)
-
-  let rereadingId = null
-  if (hasCurrentDates) {
-    const { data, error: insertError } = await supabase
-      .from(TABLE)
-      .insert({
-        user_id: userId,
-        book_id: book.id,
-        date_start: book.date_start ?? null,
-        date_end: book.date_end ?? null,
-      })
-      .select('id')
-      .single()
-
-    if (insertError) {
-      if (isMissingTableError(insertError)) {
-        throw new Error(
-          'Table reading_rereadings absente. Exécute scripts/create-reading-rereadings.sql dans Supabase.',
-        )
-      }
-      throw insertError
-    }
-
-    rereadingId = data?.id ?? null
+  if (!canStartReadingRereading(book)) {
+    throw new Error(
+      'Renseigne une date de début et une date de fin avant de relire ce livre.',
+    )
   }
+
+  const { data, error: insertError } = await supabase
+    .from(TABLE)
+    .insert({
+      user_id: userId,
+      book_id: book.id,
+      date_start: book.date_start ?? null,
+      date_end: book.date_end ?? null,
+    })
+    .select('id')
+    .single()
+
+  if (insertError) {
+    if (isMissingTableError(insertError)) {
+      throw new Error(
+        'Table reading_rereadings absente. Exécute scripts/create-reading-rereadings.sql dans Supabase.',
+      )
+    }
+    throw insertError
+  }
+
+  const rereadingId = data?.id ?? null
 
   const updatedBook = await updateReadingBook(supabase, userId, book.id, {
     ...bookToEditForm(book),

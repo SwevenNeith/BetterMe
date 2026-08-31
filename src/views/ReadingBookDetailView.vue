@@ -11,6 +11,7 @@ import {
   updateReadingRereading,
   cancelReadingRereading,
   resolveRereadUndo,
+  canStartReadingRereading,
 } from '../services/readingRereadings.js'
 import { listReadingCollections } from '../services/readingCollections.js'
 import { deleteSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/readingSpoilChapters.js'
@@ -86,6 +87,8 @@ const isRereadingInProgress = computed(() => {
   const last = rereadings.value[rereadings.value.length - 1]
   return Boolean(last?.date_start || last?.date_end)
 })
+
+const canStartRereading = computed(() => canStartReadingRereading(book.value))
 
 function syncPendingRereadUndoFromStorage() {
   if (!bookId.value) return
@@ -495,6 +498,7 @@ async function onDeleteSpoilChapter(chapterId) {
 
 async function onStartRereading() {
   if (!userId.value || !book.value || rereadingStarting.value || isSaving.value) return
+  if (!canStartRereading.value) return
 
   rereadingStarting.value = true
   errorMessage.value = ''
@@ -633,6 +637,7 @@ watch(bookId, () => {
       :rereading-starting="rereadingStarting"
       :rereading-in-progress="isRereadingInProgress"
       :rereading-cancelling="rereadingCancelling"
+      :can-start-rereading="canStartRereading"
       @start-edit="startEdit"
       @commit-edit="commitEdit"
       @cancel-edit="cancelEdit"

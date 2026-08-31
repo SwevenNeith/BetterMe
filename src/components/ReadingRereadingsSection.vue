@@ -23,6 +23,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  canStartRereading: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['start-rereading', 'update-rereading', 'cancel-rereading'])
@@ -108,7 +112,7 @@ watch(editingKey, async (key) => {
     <div class="reading-rereadings__header">
       <h3 class="reading-rereadings__title">Historique des lectures</h3>
       <button
-        v-if="!rereadingInProgress"
+        v-if="!rereadingInProgress && canStartRereading"
         type="button"
         class="reading-rereadings__start-btn"
         :disabled="disabled || isStarting"
@@ -117,6 +121,11 @@ watch(editingKey, async (key) => {
         {{ isStarting ? 'Préparation…' : 'Relire ce livre' }}
       </button>
     </div>
+
+    <p v-if="!rereadingInProgress && !canStartRereading" class="reading-rereadings__hint">
+      Pour relire ce livre, renseigne d’abord une <strong>date de début</strong> et une
+      <strong>date de fin</strong> pour la lecture en cours.
+    </p>
 
     <p v-if="!rereadings.length" class="reading-rereadings__empty">
       Aucune relecture enregistrée pour l’instant. Quand tu reliras ce livre, les dates de ta
@@ -288,6 +297,18 @@ watch(editingKey, async (key) => {
   color: #6c757d;
 }
 
+.reading-rereadings__hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #8c98a4;
+}
+
+.reading-rereadings__hint strong {
+  color: #6b4f7c;
+  font-weight: 700;
+}
+
 .reading-rereadings__list {
   list-style: none;
   margin: 0;
@@ -380,6 +401,14 @@ watch(editingKey, async (key) => {
 
   .reading-rereadings__empty {
     color: #adb5bd;
+  }
+
+  .reading-rereadings__hint {
+    color: #adb5bd;
+  }
+
+  .reading-rereadings__hint strong {
+    color: #d5b5ea;
   }
 
   .reading-rereadings__item {

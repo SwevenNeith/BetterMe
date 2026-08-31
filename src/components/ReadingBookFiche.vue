@@ -97,6 +97,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  canStartRereading: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits([
@@ -481,6 +485,7 @@ function fieldClass(field) {
           :is-starting="rereadingStarting"
           :rereading-in-progress="rereadingInProgress"
           :is-cancelling="rereadingCancelling"
+          :can-start-rereading="canStartRereading"
           @start-rereading="emit('start-rereading')"
           @update-rereading="emit('update-rereading', $event)"
           @cancel-rereading="emit('cancel-rereading')"
