@@ -1006,7 +1006,7 @@ onUnmounted(() => {
             @dragend="onSidebarDragEnd"
             @contextmenu="openFolderContextMenu($event, node.id, node.name)"
           >
-            <button
+      <button
               type="button"
               class="nav-sidebar-folder__toggle"
               :aria-expanded="isFolderExpanded(node.id)"
@@ -1044,7 +1044,7 @@ onUnmounted(() => {
                   <polyline points="6 9 12 15 18 9"></polyline>
                 </svg>
               </span>
-            </button>
+      </button>
             <button
               type="button"
               class="nav-sidebar-folder__actions"

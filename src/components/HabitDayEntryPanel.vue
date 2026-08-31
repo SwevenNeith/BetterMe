@@ -4,7 +4,10 @@ import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/scheduledReminders.js'
 import { listHabitLogsForRange, updateHabitLogDetails, upsertHabitLog } from '../services/habitLogs.js'
 import RichTextNoteEditor from './RichTextNoteEditor.vue'
+import HabitReadingDetailsPanel from './HabitReadingDetailsPanel.vue'
+import { listReadingBooksWithCovers } from '../services/readingBooks.js'
 import { isRichNoteEmpty, sanitizeRichNoteHtml } from '../utils/sanitizeHtml.js'
+import { isReadingHabit } from '../utils/habitReadingLink.js'
 import { HABIT_VALUE_TYPE } from '../constants/habitOptions.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import {
@@ -74,6 +77,11 @@ const detailsOpen = ref(false)
 const detailsDraft = ref('')
 const detailsSaving = ref(false)
 const detailsError = ref('')
+const readingPanelRef = ref(null)
+const readingBooks = ref([])
+const readingHistoryLogs = ref({})
+const readingContextLoading = ref(false)
+const readingContextError = ref('')
 const historyDetailsOpen = ref(false)
 const historyDetailsHtml = ref('')
 const historyDetailsDateLabel = ref('')
@@ -90,7 +98,7 @@ const habitDetailsDraftKey = computed(() => {
 const { clearDraft: clearHabitDetailsDraft, restoreDraft: restoreHabitDetailsDraft } = useFormDraft(
   habitDetailsDraftKey,
   {
-    enabled: computed(() => detailsOpen.value && !detailsSaving.value),
+    enabled: computed(() => detailsOpen.value && !detailsSaving.value && !isReadingHabitMode.value),
     getState: () => detailsDraft.value,
     setState: (state) => {
       detailsDraft.value = typeof state === 'string' ? state : ''
@@ -99,6 +107,9 @@ const { clearDraft: clearHabitDetailsDraft, restoreDraft: restoreHabitDetailsDra
 )
 
 const isBoolean = computed(() => props.habit.type_valeur === HABIT_VALUE_TYPE.BOOLEAN)
+const isReadingHabitMode = computed(() => isReadingHabit(props.habit))
+
+const readingHistoryStart = '2010-01-01'
 
 const todayIso = computed(() => getLocalTodayISO())
 
@@ -116,6 +127,7 @@ const stats = computed(() =>
 const selectedDayLog = computed(() => logsByDate.value[selectedDate.value] ?? null)
 
 const canShowDetails = computed(() => {
+  if (isReadingHabitMode.value) return true
   if (inputValue.value > 0) return true
   return isHabitDayDone(selectedDayLog.value)
 })
@@ -126,11 +138,51 @@ function getSavedDetailsHtml() {
   return selectedDayLog.value?.details ?? ''
 }
 
+async function loadReadingContext() {
+  if (!props.userId || !props.habit?.id) return
+
+  readingContextLoading.value = true
+  readingContextError.value = ''
+
+  try {
+    const [books, rows] = await Promise.all([
+      listReadingBooksWithCovers(supabase, props.userId),
+      listHabitLogsForRange(
+        supabase,
+        props.userId,
+        props.habit.id,
+        readingHistoryStart,
+        todayIso.value,
+      ),
+    ])
+
+    readingBooks.value = books
+    readingHistoryLogs.value = mergeLogsRows(rows, { ...logsByDate.value })
+  } catch (err) {
+    console.error(err)
+    readingContextError.value = err.message || 'Impossible de charger les livres.'
+    readingBooks.value = []
+    readingHistoryLogs.value = { ...logsByDate.value }
+  } finally {
+    readingContextLoading.value = false
+  }
+}
+
+async function onReadingBooksUpdated() {
+  await loadReadingContext()
+}
+
 async function openDetailsEditor() {
   if (detailsOpen.value) return
   detailsError.value = ''
   detailsDraft.value = getSavedDetailsHtml()
   detailsOpen.value = true
+
+  if (isReadingHabitMode.value) {
+    await loadReadingContext()
+    return
+  }
+
   await nextTick()
   restoreHabitDetailsDraft()
 }
@@ -166,6 +218,35 @@ function closeHistoryDetails() {
   historyDetailsDateLabel.value = ''
 }
 
+async function persistDetailsRow(details, valeurOverride = null) {
+  const payload =
+    valeurOverride != null
+      ? buildLogPayload(valeurOverride, props.habit.type_valeur)
+      : selectedDayLog.value ?? buildLogPayload(inputValue.value, props.habit.type_valeur)
+
+  const row = await updateHabitLogDetails(
+    supabase,
+    props.userId,
+    props.habit.id,
+    selectedDate.value,
+    details,
+    payload,
+  )
+
+  logsByDate.value = {
+    ...logsByDate.value,
+    [selectedDate.value]: { ...row, date_jour: normalizeDateISO(row.date_jour) },
+  }
+  readingHistoryLogs.value = {
+    ...readingHistoryLogs.value,
+    [selectedDate.value]: logsByDate.value[selectedDate.value],
+  }
+
+  if (valeurOverride != null && !isBoolean.value) {
+    inputValue.value = Math.max(0, Number(valeurOverride))
+  }
+}
+
 async function saveDetails() {
   if (!props.userId || !props.habit?.id) return
   if (!canShowDetails.value) return
@@ -177,18 +258,7 @@ async function saveDetails() {
   const details = isRichNoteEmpty(sanitized) ? null : sanitized
 
   try {
-    const row = await updateHabitLogDetails(
-      supabase,
-      props.userId,
-      props.habit.id,
-      selectedDate.value,
-      details,
-      selectedDayLog.value ?? buildLogPayload(inputValue.value, props.habit.type_valeur),
-    )
-    logsByDate.value = {
-      ...logsByDate.value,
-      [selectedDate.value]: { ...row, date_jour: normalizeDateISO(row.date_jour) },
-    }
+    await persistDetailsRow(details)
     clearHabitDetailsDraft()
     closeDetailsEditor()
   } catch (err) {
@@ -197,6 +267,36 @@ async function saveDetails() {
   } finally {
     detailsSaving.value = false
   }
+}
+
+async function saveReadingDetails(payload) {
+  if (!props.userId || !props.habit?.id) return
+
+  detailsSaving.value = true
+  detailsError.value = ''
+
+  try {
+    const details = payload.detailsHtml ?? null
+    const valeurOverride = isBoolean.value ? null : payload.totalPagesRead
+    await persistDetailsRow(details, valeurOverride)
+    if (payload.closeAfterSave) {
+      closeDetailsEditor()
+    }
+    saveMessage.value = 'Enregistré.'
+    emit('saved', selectedDate.value)
+    setTimeout(() => {
+      saveMessage.value = ''
+    }, 2000)
+  } catch (err) {
+    console.error(err)
+    detailsError.value = err.message || 'Impossible d’enregistrer la lecture.'
+  } finally {
+    detailsSaving.value = false
+  }
+}
+
+function onReadingHabitValueUpdate(value) {
+  inputValue.value = Math.max(0, Number(value) || 0)
 }
 
 function syncInputFromLog() {
@@ -870,32 +970,70 @@ watch(canShowDetails, (visible) => {
       </button>
 
       <div v-if="detailsOpen" class="habit-entry__details-panel">
-        <RichTextNoteEditor
-          v-model="detailsDraft"
-          :disabled="detailsSaving"
-          placeholder="Notes, contexte, ressenti…"
-        />
-        <p v-if="detailsError" class="habit-entry__feedback habit-entry__feedback--error">
-          {{ detailsError }}
-        </p>
-        <div class="habit-entry__details-actions">
-          <button
-            type="button"
-            class="habit-entry__details-cancel"
+        <template v-if="isReadingHabitMode">
+          <p v-if="readingContextLoading" class="habit-entry__loading">Chargement des livres…</p>
+          <template v-else>
+            <HabitReadingDetailsPanel
+              ref="readingPanelRef"
+              :habit="habit"
+              :selected-date="selectedDate"
+              :books="readingBooks"
+              :history-logs-by-date="readingHistoryLogs"
+              :saved-details-html="getSavedDetailsHtml()"
+              :habit-value="inputValue"
+              :user-id="userId"
+              :disabled="detailsSaving"
+              @save="saveReadingDetails"
+              @update:habit-value="onReadingHabitValueUpdate"
+              @books-updated="onReadingBooksUpdated"
+            />
+            <p v-if="readingContextError" class="habit-entry__feedback habit-entry__feedback--error">
+              {{ readingContextError }}
+            </p>
+          </template>
+          <p v-if="detailsError" class="habit-entry__feedback habit-entry__feedback--error">
+            {{ detailsError }}
+          </p>
+          <div class="habit-entry__details-actions">
+            <button
+              type="button"
+              class="habit-entry__details-cancel"
+              :disabled="detailsSaving"
+              @click="cancelDetailsEditor"
+            >
+              Annuler
+            </button>
+          </div>
+        </template>
+
+        <template v-else>
+          <RichTextNoteEditor
+            v-model="detailsDraft"
             :disabled="detailsSaving"
-            @click="cancelDetailsEditor"
-          >
-            Annuler
-          </button>
-          <button
-            type="button"
-            class="habit-entry__details-save"
-            :disabled="detailsSaving"
-            @click="saveDetails"
-          >
-            {{ detailsSaving ? 'Enregistrement…' : 'Valider' }}
-          </button>
-        </div>
+            placeholder="Notes, contexte, ressenti…"
+          />
+          <p v-if="detailsError" class="habit-entry__feedback habit-entry__feedback--error">
+            {{ detailsError }}
+          </p>
+          <div class="habit-entry__details-actions">
+            <button
+              type="button"
+              class="habit-entry__details-cancel"
+              :disabled="detailsSaving"
+              @click="cancelDetailsEditor"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              class="habit-entry__details-save"
+              :disabled="detailsSaving"
+              @click="saveDetails"
+            >
+              {{ detailsSaving ? 'Enregistrement…' : 'Valider' }}
+            </button>
+          </div>
+        </template>
       </div>
     </div>
 
