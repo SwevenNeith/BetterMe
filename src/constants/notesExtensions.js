@@ -6,6 +6,7 @@
  *   description: string,
  *   details: string,
  *   defaultEnabled: boolean,
+ *   hasSettings?: boolean,
  * }} NotesExtension
  */
 
@@ -58,6 +59,15 @@ export const NOTES_EXTENSIONS = [
     details:
       'Avec cette option (style GFM « breaks »), chaque Enter dans l’éditeur produit un retour visuel dans l’aperçu, sans devoir ajouter deux espaces ou une ligne vide.',
     defaultEnabled: true,
+  },
+  {
+    id: 'templates',
+    name: 'Templates',
+    description: 'Pré-remplit automatiquement les nouvelles notes selon des modèles et des règles.',
+    details:
+      'Crée un dossier Templates (ou choisis un dossier existant) dans lequel tu rédiges tes modèles.\n\n• Définis des règles : par dossier, par titre exact, par mot dans le titre, ou par défaut\n• À la création d’une note, le contenu du modèle correspondant est injecté\n• Toutes les variables ({{titre}}, {{titre-h1}}, {{date}}, etc.) sont listées dans la section **13. Templates** du Tutoriel Markdown\n\nOuvre les paramètres (⚙) après activation pour configurer le dossier et les règles.',
+    defaultEnabled: false,
+    hasSettings: true,
   },
 ]
 

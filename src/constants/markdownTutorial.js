@@ -1,7 +1,85 @@
+import { NOTE_TEMPLATE_VARIABLES } from './noteTemplates.js'
+
 /** Clé système du tutoriel Markdown (une note max par utilisateur). */
 export const MARKDOWN_TUTORIAL_SYSTEM_KEY = 'markdown-tutorial'
 
 export const MARKDOWN_TUTORIAL_TITLE = 'Tutoriel Markdown'
+
+export const MARKDOWN_TUTORIAL_TEMPLATE_SECTION_MARKER = '## 13. Templates'
+
+/**
+ * Section Templates pour le tutoriel Markdown (générée depuis NOTE_TEMPLATE_VARIABLES).
+ */
+export function buildMarkdownTutorialTemplateSection() {
+  const groups = [
+    { label: 'Titres', category: 'titre' },
+    { label: 'Dates', category: 'date' },
+    { label: 'Heures', category: 'heure' },
+  ]
+
+  let section = `${MARKDOWN_TUTORIAL_TEMPLATE_SECTION_MARKER} (extension Notes)
+
+L’extension **Templates** pré-remplit automatiquement les nouvelles notes à partir de modèles.
+Active-la dans les extensions Notes, configure ton dossier Templates, puis insère ces variables dans tes modèles.
+Elles sont remplacées à la création de la note.
+
+### Syntaxe
+
+Utilise la forme \`{{nom-de-la-variable}}\` (doubles accolades).
+
+### Exemple de modèle
+
+\`\`\`md
+{{titre-h1}}
+
+**Date :** {{date}}
+**Heure :** {{heure}}
+
+## Notes
+-
+\`\`\`
+
+### Variables disponibles
+
+`
+
+  for (const group of groups) {
+    const items = NOTE_TEMPLATE_VARIABLES.filter((item) => item.category === group.category)
+    section += `#### ${group.label}\n\n`
+    section += '| Variable | Description |\n| --- | --- |\n'
+    for (const variable of items) {
+      const aliasHint =
+        variable.aliases?.length > 0
+          ? ` Alias : ${variable.aliases.map((alias) => `\`{{${alias}}}\``).join(', ')}.`
+          : ''
+      section += `| \`${variable.example}\` | ${variable.description}${aliasHint} |\n`
+    }
+    section += '\n'
+  }
+
+  section += `> Les notes créées **dans** le dossier Templates ne sont jamais pré-remplies : ce sont tes sources de modèles.
+
+`
+
+  return section.trimEnd()
+}
+
+/**
+ * Ajoute la section Templates à un tutoriel existant si elle manque.
+ * @param {string} content
+ */
+export function appendTemplateSectionToTutorial(content) {
+  const raw = String(content ?? '')
+  if (raw.includes(MARKDOWN_TUTORIAL_TEMPLATE_SECTION_MARKER)) return raw
+
+  const section = buildMarkdownTutorialTemplateSection()
+  const footer = '*Bonnes notes !*'
+  if (raw.includes(footer)) {
+    return raw.replace(footer, `${section}\n\n---\n\n${footer}`)
+  }
+
+  return `${raw.trim()}\n\n---\n\n${section}\n`
+}
 
 /**
  * Contenu du tutoriel Markdown (GFM + syntaxe courante type Obsidian).
@@ -178,6 +256,10 @@ Exemple : H<sub>2</sub>O et x<sup>2</sup>
 3. Organise tes notes dans des **dossiers** (arborescence à gauche).
 4. Les dossiers et notes sont triés **par ordre alphabétique** (dossiers d’abord, puis notes).
 5. Utilise \`[[Titre de la note]]\` pour créer des hyperliens entre tes notes.
+
+---
+
+${buildMarkdownTutorialTemplateSection()}
 
 ---
 

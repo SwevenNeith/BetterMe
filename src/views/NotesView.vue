@@ -23,6 +23,7 @@ import { parseNoteWikiHref, renderMarkdownToSafeHtml } from '../utils/renderMark
 import NotesTreeNode from '../components/NotesTreeNode.vue'
 import AppConfirmDialog from '../components/AppConfirmDialog.vue'
 import NotesExtensionsModal from '../components/NotesExtensionsModal.vue'
+import NotesTemplateSettingsModal from '../components/NotesTemplateSettingsModal.vue'
 import NotesGraphView from '../components/NotesGraphView.vue'
 import NotesTabsBar from '../components/NotesTabsBar.vue'
 import {
@@ -32,6 +33,12 @@ import {
   saveNotesExtensionPrefs,
 } from '../services/notesExtensions.js'
 import { createDefaultNotesExtensionPrefs } from '../constants/notesExtensions.js'
+import { createDefaultNoteTemplatePrefs } from '../constants/noteTemplates.js'
+import {
+  loadNoteTemplatePrefs,
+  resolveTemplateContent,
+  saveNoteTemplatePrefs,
+} from '../services/noteTemplateExtension.js'
 
 const GRAPH_TAB = { type: 'graph', id: 'graph' }
 
@@ -62,7 +69,9 @@ const isMobileNotes = ref(false)
 const editorEl = ref(null)
 const previewEl = ref(null)
 const extensionsOpen = ref(false)
+const templateSettingsOpen = ref(false)
 const extensionPrefs = ref(createDefaultNotesExtensionPrefs())
+const templatePrefs = ref(createDefaultNoteTemplatePrefs())
 /** @type {import('vue').Ref<Array<{ type: 'note' | 'graph', id: string }>>} */
 const openTabs = ref([])
 /** @type {import('vue').Ref<Record<string, { title: string, content: string, folderId: string | null, dirty: boolean, viewMode: string, saveStatus: string, saveError: string }>>} */
@@ -189,6 +198,47 @@ function updateExtensionPrefs(nextPrefs) {
       errorMessage.value = err.message || 'Impossible d’enregistrer les extensions.'
     }
   })()
+}
+
+function onExtensionConfigure(extensionId) {
+  if (extensionId === 'templates') {
+    templateSettingsOpen.value = true
+  }
+}
+
+async function onTemplateSettingsSave(nextPrefs) {
+  if (!userId.value) return
+  try {
+    templatePrefs.value = await saveNoteTemplatePrefs(supabase, userId.value, nextPrefs)
+    if (nextPrefs.folder) {
+      const existing = folders.value.some((folder) => folder.id === nextPrefs.folder.id)
+      folders.value = existing
+        ? folders.value.map((folder) =>
+            folder.id === nextPrefs.folder.id ? nextPrefs.folder : folder,
+          )
+        : [...folders.value, nextPrefs.folder]
+      const nextExpanded = new Set(expandedFolderIds.value)
+      nextExpanded.add(nextPrefs.folder.id)
+      expandedFolderIds.value = nextExpanded
+    }
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible d’enregistrer les paramètres Templates.'
+  }
+}
+
+function resolveInitialNoteContent({ title, folderId }) {
+  if (!isExtEnabled('templates')) return ''
+  return resolveTemplateContent(templatePrefs.value, notes.value, { title, folderId })
+}
+
+async function createNoteFromContext({ title, folderId }) {
+  const contentMd = resolveInitialNoteContent({ title, folderId })
+  return createNote(supabase, userId.value, {
+    title,
+    contentMd,
+    folderId,
+  })
 }
 
 function tabsStorageKey(uid) {
@@ -642,9 +692,8 @@ async function submitPrompt() {
         expandedFolderIds.value = next
       }
     } else if (promptKind.value === 'note') {
-      const note = await createNote(supabase, userId.value, {
+      const note = await createNoteFromContext({
         title: value,
-        contentMd: '',
         folderId: promptParentId.value,
       })
       notes.value = [...notes.value, note]
@@ -789,9 +838,8 @@ function onPreviewClick(event) {
       })
       if (!create || !userId.value) return
       try {
-        const note = await createNote(supabase, userId.value, {
+        const note = await createNoteFromContext({
           title: parsed.title,
-          contentMd: '',
           folderId: draftFolderId.value,
         })
         notes.value = [...notes.value, note]
@@ -871,9 +919,11 @@ watch(userId, (id) => {
     openTabs.value = loadPersistedOpenTabs(id)
     try {
       extensionPrefs.value = await loadNotesExtensionPrefs(supabase, id)
+      templatePrefs.value = await loadNoteTemplatePrefs(supabase, id)
     } catch (err) {
       console.error(err)
       extensionPrefs.value = createDefaultNotesExtensionPrefs()
+      templatePrefs.value = createDefaultNoteTemplatePrefs()
     }
     await loadAll()
   })()
@@ -1207,6 +1257,17 @@ watch(draftFolderId, (value) => {
       :prefs="extensionPrefs"
       @close="extensionsOpen = false"
       @update:prefs="updateExtensionPrefs"
+      @configure="onExtensionConfigure"
+    />
+
+    <NotesTemplateSettingsModal
+      :open="templateSettingsOpen"
+      :prefs="templatePrefs"
+      :folders="folders"
+      :notes="notes"
+      :user-id="userId || ''"
+      @close="templateSettingsOpen = false"
+      @save="onTemplateSettingsSave"
     />
   </div>
 </template>

@@ -1,7 +1,9 @@
 import {
   MARKDOWN_TUTORIAL_CONTENT,
   MARKDOWN_TUTORIAL_SYSTEM_KEY,
+  MARKDOWN_TUTORIAL_TEMPLATE_SECTION_MARKER,
   MARKDOWN_TUTORIAL_TITLE,
+  appendTemplateSectionToTutorial,
 } from '../constants/markdownTutorial.js'
 
 const TABLE = 'notes'
@@ -194,11 +196,20 @@ export async function ensureMarkdownTutorial(supabase, userId) {
   if (existing) {
     const note = normalizeNote(existing)
     const needsWikiSection = !note.content_md.includes('Liens entre notes')
-    if (!needsWikiSection) return note
+    const needsTemplateSection = !note.content_md.includes(MARKDOWN_TUTORIAL_TEMPLATE_SECTION_MARKER)
+
+    if (!needsWikiSection && !needsTemplateSection) return note
+
+    if (needsWikiSection) {
+      return await updateNote(supabase, userId, note.id, {
+        title: MARKDOWN_TUTORIAL_TITLE,
+        contentMd: MARKDOWN_TUTORIAL_CONTENT,
+      })
+    }
 
     return await updateNote(supabase, userId, note.id, {
       title: MARKDOWN_TUTORIAL_TITLE,
-      contentMd: MARKDOWN_TUTORIAL_CONTENT,
+      contentMd: appendTemplateSectionToTutorial(note.content_md),
     })
   }
 

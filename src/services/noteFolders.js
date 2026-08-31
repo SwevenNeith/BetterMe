@@ -2,6 +2,10 @@ import {
   DAILY_NOTES_FOLDER_DEFAULT_NAME,
   DAILY_NOTES_FOLDER_SYSTEM_KEY,
 } from '../constants/dailyNotes.js'
+import {
+  NOTE_TEMPLATES_FOLDER_DEFAULT_NAME,
+  NOTE_TEMPLATES_FOLDER_SYSTEM_KEY,
+} from '../constants/noteTemplates.js'
 
 const TABLE = 'note_folders'
 const SELECT = 'id, user_id, parent_id, name, system_key, created_at, updated_at'
@@ -184,6 +188,61 @@ export async function ensureDailyNotesFolder(supabase, userId) {
         .select(SELECT)
         .eq('user_id', userId)
         .eq('system_key', DAILY_NOTES_FOLDER_SYSTEM_KEY)
+        .maybeSingle()
+      if (data) return normalizeFolder(data)
+    }
+    throw err
+  }
+}
+
+/**
+ * Retrouve le dossier Templates par system_key, ou le crée (nom personnalisable).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} [folderName]
+ */
+export async function ensureNoteTemplatesFolder(supabase, userId, folderName = NOTE_TEMPLATES_FOLDER_DEFAULT_NAME) {
+  if (!userId) throw new Error('Utilisateur non connecté.')
+
+  const name = String(folderName ?? '').trim() || NOTE_TEMPLATES_FOLDER_DEFAULT_NAME
+
+  const { data: existing, error } = await supabase
+    .from(TABLE)
+    .select(SELECT)
+    .eq('user_id', userId)
+    .eq('system_key', NOTE_TEMPLATES_FOLDER_SYSTEM_KEY)
+    .maybeSingle()
+
+  if (error) {
+    if (isMissingSystemKeyColumnError(error)) {
+      throw new Error(
+        'Colonne note_folders.system_key absente. Exécute scripts/migrate-note-folders-system-key.sql dans Supabase.',
+      )
+    }
+    throw error
+  }
+
+  if (existing) {
+    const folder = normalizeFolder(existing)
+    if (folder.name !== name) {
+      return updateNoteFolder(supabase, userId, folder.id, { name })
+    }
+    return folder
+  }
+
+  try {
+    return await createNoteFolder(supabase, userId, {
+      name,
+      parentId: null,
+      systemKey: NOTE_TEMPLATES_FOLDER_SYSTEM_KEY,
+    })
+  } catch (err) {
+    if (String(err?.code) === '23505' || String(err?.message ?? '').includes('duplicate')) {
+      const { data } = await supabase
+        .from(TABLE)
+        .select(SELECT)
+        .eq('user_id', userId)
+        .eq('system_key', NOTE_TEMPLATES_FOLDER_SYSTEM_KEY)
         .maybeSingle()
       if (data) return normalizeFolder(data)
     }

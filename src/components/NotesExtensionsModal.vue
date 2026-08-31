@@ -10,11 +10,15 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['close', 'update:prefs'])
+const emit = defineEmits(['close', 'update:prefs', 'configure'])
 
 const expandedIds = ref(new Set())
 
 const extensions = computed(() => NOTES_EXTENSIONS)
+
+function hasSettings(id) {
+  return extensions.value.find((item) => item.id === id)?.hasSettings === true
+}
 
 function isExpanded(id) {
   return expandedIds.value.has(id)
@@ -39,7 +43,15 @@ function setEnabled(id, enabled) {
 }
 
 function onToggle(id, event) {
-  setEnabled(id, event.target.checked)
+  const enabled = Boolean(event.target.checked)
+  setEnabled(id, enabled)
+  if (enabled && hasSettings(id)) {
+    emit('configure', id)
+  }
+}
+
+function openSettings(id) {
+  emit('configure', id)
 }
 
 function onKeydown(event) {
@@ -87,6 +99,16 @@ onUnmounted(() => {
                 <p class="notes-ext__desc">{{ ext.description }}</p>
               </div>
               <div class="notes-ext__controls">
+                <button
+                  v-if="hasSettings(ext.id) && isEnabled(ext.id)"
+                  type="button"
+                  class="notes-ext__settings"
+                  title="Paramètres"
+                  :aria-label="`Paramètres de ${ext.name}`"
+                  @click="openSettings(ext.id)"
+                >
+                  ⚙
+                </button>
                 <label class="notes-ext__switch" :title="isEnabled(ext.id) ? 'Désactiver' : 'Activer'">
                   <input
                     type="checkbox"
@@ -219,6 +241,22 @@ onUnmounted(() => {
   gap: 0.35rem;
   flex-shrink: 0;
   padding-top: 0.1rem;
+}
+
+.notes-ext__settings {
+  width: 1.6rem;
+  height: 1.6rem;
+  border: none;
+  background: rgba(213, 181, 234, 0.2);
+  color: #6d4f84;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  border-radius: 6px;
+}
+
+.notes-ext__settings:hover {
+  background: rgba(213, 181, 234, 0.35);
 }
 
 .notes-ext__switch {
