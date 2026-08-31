@@ -1,4 +1,5 @@
 import './assets/main.css'
+import './styles/readingLinedField.css'
 import './styles/reading-dark.css'
 
 import { createApp } from 'vue'

@@ -397,7 +397,7 @@ defineProps({
   color: #5a4a68;
 }
 
-.reading-fiche-value {
+.reading-fiche-value:not(.reading-fiche-value--multiline) {
   font-size: 0.95rem;
   color: #2c2434;
   border-bottom: 1px dashed rgba(173, 129, 190, 0.55);
@@ -408,26 +408,7 @@ defineProps({
 }
 
 .reading-fiche-value--multiline {
-  --lined-h: 1.75rem;
   border-bottom: none;
-  white-space: pre-wrap;
-  word-break: break-word;
-  min-height: calc(var(--lined-h) * 3);
-  line-height: var(--lined-h);
-  font-size: 0.95rem;
-  padding: 0;
-  color: #2c2434;
-  background-color: transparent;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent calc(var(--lined-h) - 1px),
-    rgba(173, 129, 190, 0.38) calc(var(--lined-h) - 1px),
-    rgba(173, 129, 190, 0.38) var(--lined-h)
-  );
-  background-size: 100% var(--lined-h);
-  background-position: left top;
-  background-attachment: local;
 }
 
 .reading-fiche-value--empty {
@@ -468,10 +449,13 @@ defineProps({
 
 .reading-fiche-box {
   border-radius: 16px;
-  background: rgba(244, 234, 252, 0.55);
   border: 1px solid rgba(213, 181, 234, 0.4);
   padding: 0.85rem 1rem;
   min-height: 5.5rem;
+}
+
+.reading-fiche-box:not(.reading-fiche-box--comments):not(.reading-fiche-box--quote) {
+  background: rgba(244, 234, 252, 0.55);
 }
 
 .reading-fiche-box--comments {
@@ -519,7 +503,6 @@ defineProps({
 }
 
 .reading-fiche-input,
-.reading-fiche-textarea,
 .reading-fiche-select {
   width: 100%;
   box-sizing: border-box;
@@ -529,25 +512,6 @@ defineProps({
   background: #fff;
   font-size: 0.92rem;
   color: #2c2434;
-}
-
-.reading-fiche-textarea {
-  --lined-h: 1.75rem;
-  min-height: calc(var(--lined-h) * 4);
-  resize: vertical;
-  line-height: var(--lined-h);
-  padding: 0 0.55rem;
-  background-color: #fff;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent calc(var(--lined-h) - 1px),
-    rgba(173, 129, 190, 0.32) calc(var(--lined-h) - 1px),
-    rgba(173, 129, 190, 0.32) var(--lined-h)
-  );
-  background-size: 100% var(--lined-h);
-  background-position: left top;
-  background-attachment: local;
 }
 
 .reading-fiche-input:focus,
@@ -690,7 +654,7 @@ defineProps({
   }
 
   .reading-fiche-info,
-  .reading-fiche-box,
+  .reading-fiche-box:not(.reading-fiche-box--comments):not(.reading-fiche-box--quote),
   .reading-fiche-saga {
     background: rgba(61, 47, 74, 0.45);
     border-color: rgba(213, 181, 234, 0.28);
@@ -699,17 +663,6 @@ defineProps({
   .reading-fiche-value {
     color: #f0e8f8;
     border-bottom-color: rgba(173, 129, 190, 0.45);
-  }
-
-  .reading-fiche-value--multiline {
-    color: #f0e8f8;
-    background-image: repeating-linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent calc(var(--lined-h) - 1px),
-      rgba(173, 129, 190, 0.28) calc(var(--lined-h) - 1px),
-      rgba(173, 129, 190, 0.28) var(--lined-h)
-    );
   }
 
   .reading-fiche-polaroid {
@@ -726,22 +679,10 @@ defineProps({
   }
 
   .reading-fiche-input,
-  .reading-fiche-textarea,
   .reading-fiche-select {
     background: rgba(35, 30, 48, 0.95);
     border-color: rgba(173, 129, 190, 0.4);
     color: #f0e8f8;
-  }
-
-  .reading-fiche-textarea {
-    background-color: rgba(35, 30, 48, 0.95);
-    background-image: repeating-linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent calc(var(--lined-h) - 1px),
-      rgba(173, 129, 190, 0.28) calc(var(--lined-h) - 1px),
-      rgba(173, 129, 190, 0.28) var(--lined-h)
-    );
   }
 
   .reading-fiche-cancel-btn,

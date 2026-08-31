@@ -1,0 +1,78 @@
+/* Cahier ligné — commentaires & citations (fiche Lecture)
+ * Lignes sur la boîte (zone de contenu), texte synchronisé via le même pas. */
+
+.reading-fiche-box.reading-fiche-box--comments,
+.reading-fiche-box.reading-fiche-box--quote {
+  --reading-lined-step: 1.75rem;
+  --reading-lined-rule: rgba(173, 129, 190, 0.38);
+
+  background-color: rgba(244, 234, 252, 0.55);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--reading-lined-rule) 0,
+    var(--reading-lined-rule) 1px,
+    transparent 1px,
+    transparent var(--reading-lined-step)
+  );
+  background-size: 100% var(--reading-lined-step);
+  background-repeat: repeat;
+  background-origin: content-box;
+  background-clip: content-box;
+  background-position: 0 0;
+}
+
+.reading-fiche-box.reading-fiche-box--comments .reading-fiche-textarea,
+.reading-fiche-box.reading-fiche-box--comments .reading-fiche-value--multiline,
+.reading-fiche-box.reading-fiche-box--quote .reading-fiche-textarea,
+.reading-fiche-box.reading-fiche-box--quote .reading-fiche-value--multiline {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-size: 0.95rem;
+  font-family: inherit;
+  font-weight: inherit;
+  line-height: var(--reading-lined-step);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #2c2434;
+  background: transparent;
+  text-align: left;
+  min-height: calc(var(--reading-lined-step) * 3);
+}
+
+.reading-fiche-box.reading-fiche-box--comments .reading-fiche-textarea,
+.reading-fiche-box.reading-fiche-box--quote .reading-fiche-textarea {
+  min-height: calc(var(--reading-lined-step) * 4);
+  resize: vertical;
+  outline: none;
+}
+
+.reading-fiche-box.reading-fiche-box--comments .reading-fiche-textarea:focus,
+.reading-fiche-box.reading-fiche-box--quote .reading-fiche-textarea:focus {
+  outline: 2px solid rgba(173, 129, 190, 0.45);
+  outline-offset: 1px;
+}
+
+.reading-fiche-box.reading-fiche-box--comments .reading-fiche-value--multiline[role='button'],
+.reading-fiche-box.reading-fiche-box--quote .reading-fiche-value--multiline[role='button'] {
+  cursor: pointer;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reading-fiche-box.reading-fiche-box--comments,
+  .reading-fiche-box.reading-fiche-box--quote {
+    --reading-lined-rule: rgba(173, 129, 190, 0.28);
+    background-color: rgba(61, 47, 74, 0.4);
+    border-color: rgba(213, 181, 234, 0.28);
+  }
+
+  .reading-fiche-box.reading-fiche-box--comments .reading-fiche-textarea,
+  .reading-fiche-box.reading-fiche-box--comments .reading-fiche-value--multiline,
+  .reading-fiche-box.reading-fiche-box--quote .reading-fiche-textarea,
+  .reading-fiche-box.reading-fiche-box--quote .reading-fiche-value--multiline {
+    color: #f0e8f8;
+  }
+}

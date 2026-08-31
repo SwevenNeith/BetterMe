@@ -762,18 +762,21 @@ function fieldClass(field) {
           @blur="commitEdit"
         />
       </template>
-      <button
+      <div
         v-else
-        type="button"
+        role="button"
+        :tabindex="disabled ? -1 : 0"
         class="reading-fiche-value reading-fiche-value--multiline reading-fiche-value--block"
         :class="[
           fieldClass('comments'),
           { 'reading-fiche-value--empty': !displayValue(book?.comments) },
         ]"
         @click="startEdit('comments')"
+        @keydown.enter.prevent="startEdit('comments')"
+        @keydown.space.prevent="startEdit('comments')"
       >
         {{ displayValue(book?.comments) || '' }}
-      </button>
+      </div>
     </template>
 
     <template #spoil>
@@ -810,15 +813,18 @@ function fieldClass(field) {
           @blur="commitEdit"
         />
       </template>
-      <button
+      <div
         v-else
-        type="button"
+        role="button"
+        :tabindex="disabled ? -1 : 0"
         class="reading-fiche-value reading-fiche-value--multiline reading-fiche-value--block"
         :class="[fieldClass('quote'), { 'reading-fiche-value--empty': !displayValue(book?.quote) }]"
         @click="startEdit('quote')"
+        @keydown.enter.prevent="startEdit('quote')"
+        @keydown.space.prevent="startEdit('quote')"
       >
         {{ displayValue(book?.quote) || '' }}
-      </button>
+      </div>
     </template>
 
     <template v-if="$slots.footer" #footer>
@@ -842,48 +848,39 @@ function fieldClass(field) {
   display: block;
   width: 100%;
   text-align: left;
-  font: inherit;
-  background: transparent;
   border: none;
   border-bottom: 1px dashed rgba(173, 129, 190, 0.55);
-  padding: 0.3rem 0;
+  padding: 0;
   color: #2c2434;
   cursor: default;
+}
+
+.reading-fiche-value:not(.reading-fiche-value--multiline) {
+  font: inherit;
+  padding: 0.3rem 0;
+  background-color: transparent;
+}
+
+.reading-fiche-value--multiline {
+  border-bottom: none;
 }
 
 .reading-fiche-value--clickable {
   cursor: pointer;
   border-radius: 4px;
-  transition: background 0.15s ease;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.reading-fiche-value--clickable:hover {
-  background: rgba(213, 181, 234, 0.2);
+.reading-fiche-value--clickable:not(.reading-fiche-value--multiline):hover {
+  background-color: rgba(213, 181, 234, 0.2);
+}
+
+.reading-fiche-value--clickable.reading-fiche-value--multiline:hover {
+  box-shadow: inset 0 0 0 9999px rgba(213, 181, 234, 0.2);
 }
 
 .reading-fiche-value--block {
   width: 100%;
-}
-
-.reading-fiche-value--multiline {
-  --lined-h: 1.75rem;
-  border-bottom: none;
-  white-space: pre-wrap;
-  word-break: break-word;
-  min-height: calc(var(--lined-h) * 3);
-  line-height: var(--lined-h);
-  font-size: 0.95rem;
-  padding: 0;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent calc(var(--lined-h) - 1px),
-    rgba(173, 129, 190, 0.38) calc(var(--lined-h) - 1px),
-    rgba(173, 129, 190, 0.38) var(--lined-h)
-  );
-  background-size: 100% var(--lined-h);
-  background-position: left top;
-  background-attachment: local;
 }
 
 .reading-fiche-value--empty {
@@ -897,18 +894,12 @@ function fieldClass(field) {
     border-bottom-color: rgba(173, 129, 190, 0.45);
   }
 
-  .reading-fiche-value--multiline {
-    background-image: repeating-linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent calc(var(--lined-h) - 1px),
-      rgba(173, 129, 190, 0.28) calc(var(--lined-h) - 1px),
-      rgba(173, 129, 190, 0.28) var(--lined-h)
-    );
+  .reading-fiche-value--clickable:not(.reading-fiche-value--multiline):hover {
+    background-color: rgba(173, 129, 190, 0.22);
   }
 
-  .reading-fiche-value--clickable:hover {
-    background: rgba(173, 129, 190, 0.22);
+  .reading-fiche-value--clickable.reading-fiche-value--multiline:hover {
+    box-shadow: inset 0 0 0 9999px rgba(173, 129, 190, 0.22);
   }
 }
 </style>

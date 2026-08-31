@@ -33,18 +33,7 @@
     border-bottom-color: rgba(173, 129, 190, 0.45);
   }
 
-  .reading-fiche-value--multiline {
-    color: #f0e8f8;
-    background-image: repeating-linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent calc(var(--lined-h) - 1px),
-      rgba(173, 129, 190, 0.28) calc(var(--lined-h) - 1px),
-      rgba(173, 129, 190, 0.28) var(--lined-h)
-    );
-  }
-
-  .reading-fiche-box {
+  .reading-fiche-box:not(.reading-fiche-box--comments):not(.reading-fiche-box--quote) {
     background: rgba(61, 47, 74, 0.4);
     border-color: rgba(213, 181, 234, 0.28);
   }
@@ -63,22 +52,10 @@
   }
 
   .reading-fiche-input,
-  .reading-fiche-textarea,
   .reading-fiche-select {
     background: rgba(35, 30, 48, 0.95);
     border-color: rgba(173, 129, 190, 0.4);
     color: #f0e8f8;
-  }
-
-  .reading-fiche-textarea {
-    background-color: rgba(35, 30, 48, 0.95);
-    background-image: repeating-linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent calc(var(--lined-h) - 1px),
-      rgba(173, 129, 190, 0.28) calc(var(--lined-h) - 1px),
-      rgba(173, 129, 190, 0.28) var(--lined-h)
-    );
   }
 
   .reading-fiche-cancel-btn,
