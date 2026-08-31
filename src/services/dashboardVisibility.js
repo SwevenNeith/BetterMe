@@ -165,7 +165,7 @@ export function normalizeMobileGroups(rawGroups, mobileOrder) {
     groups.unshift([comfortId])
   }
 
-  return upgradeLegacyDefaultFirstPage(groups)
+  return upgradeTimetableReadingPage(upgradeLegacyDefaultFirstPage(groups))
 }
 
 /**
@@ -192,6 +192,31 @@ function upgradeLegacyDefaultFirstPage(groups) {
   if (!isLegacyFirst) return groups
 
   return [[comfortId, wordId, todoId], ...groups.slice(2)]
+}
+
+/**
+ * Ancien défaut : lectures en cours sur sa propre page → fusion avec l'emploi du temps.
+ * @param {string[][]} groups
+ * @returns {string[][]}
+ */
+function upgradeTimetableReadingPage(groups) {
+  const timetableId = DASHBOARD_WIDGET_IDS.TIMETABLE
+  const readingId = DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS
+
+  let timetableGroupIndex = -1
+  let readingAloneGroupIndex = -1
+
+  groups.forEach((group, index) => {
+    if (group.length === 1 && group[0] === timetableId) timetableGroupIndex = index
+    if (group.length === 1 && group[0] === readingId) readingAloneGroupIndex = index
+  })
+
+  if (timetableGroupIndex < 0 || readingAloneGroupIndex < 0) return groups
+
+  const next = groups.map((group) => [...group])
+  next[timetableGroupIndex] = [timetableId, readingId]
+  next.splice(readingAloneGroupIndex, 1)
+  return next
 }
 
 function syncMobileFromGroups(groups) {

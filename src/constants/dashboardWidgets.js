@@ -114,8 +114,47 @@ export const DASHBOARD_MOBILE_FIRST_PAGE_COMPANIONS = [
   DASHBOARD_WIDGET_IDS.TODO,
 ]
 
+/** Widgets regroupés sur la page Emploi du temps (mobile). */
+export const DASHBOARD_MOBILE_TIMETABLE_PAGE_COMPANIONS = [
+  DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS,
+]
+
 /**
- * Groupes mobile par défaut : image + mot du jour + TODO sur la 1ʳᵉ page, puis 1 bloc / page.
+ * Construit les groupes pour les widgets hors 1ʳᵉ page.
+ * @param {string[]} rest
+ * @returns {string[][]}
+ */
+function buildMobileGroupsFromRest(rest) {
+  const used = new Set()
+  /** @type {string[][]} */
+  const groups = []
+
+  for (const id of rest) {
+    if (used.has(id)) continue
+
+    if (id === DASHBOARD_WIDGET_IDS.TIMETABLE) {
+      const page = [id]
+      for (const companionId of DASHBOARD_MOBILE_TIMETABLE_PAGE_COMPANIONS) {
+        if (rest.includes(companionId) && !used.has(companionId)) {
+          page.push(companionId)
+          used.add(companionId)
+        }
+      }
+      used.add(id)
+      groups.push(page)
+      continue
+    }
+
+    groups.push([id])
+    used.add(id)
+  }
+
+  return groups
+}
+
+/**
+ * Groupes mobile par défaut : image + mot du jour + TODO sur la 1ʳᵉ page ;
+ * emploi du temps + lectures en cours sur la même page ; sinon 1 bloc / page.
  * @param {string[]} [mobileOrder]
  * @returns {string[][]}
  */
@@ -126,24 +165,15 @@ export function createDefaultMobileGroups(mobileOrder = DASHBOARD_WIDGET_MOBILE_
   const comfortId = DASHBOARD_WIDGET_IDS.COMFORT
   const comfortVisible = ids.includes(comfortId)
   const rest = ids.filter((id) => id !== comfortId)
-  /** @type {string[][]} */
-  const groups = []
 
   if (comfortVisible) {
     const companions = DASHBOARD_MOBILE_FIRST_PAGE_COMPANIONS.filter((id) => rest.includes(id))
     const companionSet = new Set(companions)
     const leftover = rest.filter((id) => !companionSet.has(id))
-    groups.push([comfortId, ...companions])
-    for (const id of leftover) {
-      groups.push([id])
-    }
-    return groups
+    return [[comfortId, ...companions], ...buildMobileGroupsFromRest(leftover)]
   }
 
-  for (const id of rest) {
-    groups.push([id])
-  }
-  return groups
+  return buildMobileGroupsFromRest(rest)
 }
 
 /** @returns {{ desktop: { top: string[], left: string[], right: string[], bottom: string[] }, mobile: string[], mobileGroups: string[][] }} */
