@@ -8,6 +8,7 @@ import ReadingBookSheet from './ReadingBookSheet.vue'
 import ReadingHalfRating from './ReadingHalfRating.vue'
 import ReadingCollectionCombobox from './ReadingCollectionCombobox.vue'
 import ReadingSpoilSection from './ReadingSpoilSection.vue'
+import ReadingRereadingsSection from './ReadingRereadingsSection.vue'
 import {
   formatExtraTagsInput,
   formatFrenchDate,
@@ -80,6 +81,22 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  rereadings: {
+    type: Array,
+    default: () => [],
+  },
+  rereadingStarting: {
+    type: Boolean,
+    default: false,
+  },
+  rereadingInProgress: {
+    type: Boolean,
+    default: false,
+  },
+  rereadingCancelling: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits([
@@ -95,6 +112,9 @@ const emit = defineEmits([
   'is-saga-change',
   'collection-created',
   'delete-spoil-chapter',
+  'start-rereading',
+  'update-rereading',
+  'cancel-rereading',
 ])
 
 const fieldInputRef = ref(null)
@@ -388,7 +408,9 @@ function fieldClass(field) {
       <template v-if="mode === 'sheet'">
         <div class="reading-fiche-row reading-fiche-row--dates">
           <div class="reading-fiche-field">
-            <span class="reading-fiche-label">Date de début :</span>
+            <span class="reading-fiche-label">
+              {{ rereadingInProgress ? 'Relecture en cours · début :' : 'Date de début :' }}
+            </span>
             <template v-if="isEditing('dateStart')">
               <input
                 ref="fieldInputRef"
@@ -413,7 +435,9 @@ function fieldClass(field) {
             </button>
           </div>
           <div class="reading-fiche-field">
-            <span class="reading-fiche-label">Date de fin :</span>
+            <span class="reading-fiche-label">
+              {{ rereadingInProgress ? 'Relecture en cours · fin :' : 'Date de fin :' }}
+            </span>
             <template v-if="isEditing('dateEnd')">
               <input
                 ref="fieldInputRef"
@@ -450,6 +474,17 @@ function fieldClass(field) {
             formatRatingLabel(book.rating)
           }}</span>
         </div>
+
+        <ReadingRereadingsSection
+          :rereadings="rereadings"
+          :disabled="disabled"
+          :is-starting="rereadingStarting"
+          :rereading-in-progress="rereadingInProgress"
+          :is-cancelling="rereadingCancelling"
+          @start-rereading="emit('start-rereading')"
+          @update-rereading="emit('update-rereading', $event)"
+          @cancel-rereading="emit('cancel-rereading')"
+        />
       </template>
     </template>
 

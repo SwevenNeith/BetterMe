@@ -5,8 +5,15 @@ import ReadingBookFiche from '../components/ReadingBookFiche.vue'
 import { setFilePickerActive, setFileUploadInProgress } from '../composables/useAppTabResume.js'
 import { bookToEditForm, getBookGenre, formatExtraTagsInput } from '../utils/readingBookForm.js'
 import { deleteReadingBook, getReadingBookWithCover, updateReadingBook } from '../services/readingBooks.js'
-import { deleteSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/readingSpoilChapters.js'
+import {
+  listReadingRereadings,
+  startReadingRereading,
+  updateReadingRereading,
+  cancelReadingRereading,
+  resolveRereadUndo,
+} from '../services/readingRereadings.js'
 import { listReadingCollections } from '../services/readingCollections.js'
+import { deleteSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/readingSpoilChapters.js'
 import { supabase } from '../lib/supabase.js'
 
 const route = useRoute()
@@ -25,6 +32,10 @@ const coverPreviewUrl = ref('')
 const spoilChapters = ref([])
 const spoilSaving = ref(false)
 const spoilError = ref('')
+const rereadings = ref([])
+const rereadingStarting = ref(false)
+const rereadingCancelling = ref(false)
+const pendingRereadUndo = ref(null)
 const deleteConfirmOpen = ref(false)
 let coverPreviewObjectUrl = ''
 let skipNextBlurCommit = false
@@ -36,6 +47,66 @@ const coverForm = reactive({
 const coverFile = ref(null)
 
 const bookId = computed(() => String(route.params.bookId ?? ''))
+
+function rereadUndoStorageKey(id) {
+  return `betterme-reread-undo-${id}`
+}
+
+function saveRereadUndo(id, undo) {
+  if (!id || !undo) return
+  try {
+    sessionStorage.setItem(rereadUndoStorageKey(id), JSON.stringify(undo))
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function loadRereadUndo(id) {
+  if (!id) return null
+  try {
+    const raw = sessionStorage.getItem(rereadUndoStorageKey(id))
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function clearRereadUndo(id) {
+  if (!id) return
+  sessionStorage.removeItem(rereadUndoStorageKey(id))
+}
+
+const isRereadingInProgress = computed(() => {
+  if (!book.value) return false
+  if (pendingRereadUndo.value) return true
+
+  const emptyCurrent = !book.value.date_start && !book.value.date_end
+  if (!emptyCurrent || !rereadings.value.length) return false
+
+  const last = rereadings.value[rereadings.value.length - 1]
+  return Boolean(last?.date_start || last?.date_end)
+})
+
+function syncPendingRereadUndoFromStorage() {
+  if (!bookId.value) return
+
+  const emptyCurrent = !book.value?.date_start && !book.value?.date_end
+  if (!emptyCurrent) {
+    pendingRereadUndo.value = null
+    clearRereadUndo(bookId.value)
+    return
+  }
+
+  const stored = loadRereadUndo(bookId.value)
+  const resolved = resolveRereadUndo(stored, rereadings.value)
+  if (!resolved) {
+    pendingRereadUndo.value = null
+    return
+  }
+
+  pendingRereadUndo.value = resolved
+  saveRereadUndo(bookId.value, resolved)
+}
 
 const FIELD_GETTERS = {
   title: (item) => item?.title ?? '',
@@ -124,8 +195,25 @@ async function loadSpoilChapters() {
   }
 }
 
+async function loadRereadings() {
+  if (!userId.value || !bookId.value) {
+    rereadings.value = []
+    return
+  }
+  try {
+    rereadings.value = await listReadingRereadings(supabase, userId.value, bookId.value)
+  } catch (err) {
+    console.error(err)
+    rereadings.value = []
+    if (!errorMessage.value) {
+      errorMessage.value = err.message || 'Impossible de charger les relectures.'
+    }
+  }
+}
+
 async function reloadAll() {
-  await Promise.all([loadBook(), loadCollections(), loadSpoilChapters()])
+  await Promise.all([loadBook(), loadCollections(), loadSpoilChapters(), loadRereadings()])
+  syncPendingRereadUndoFromStorage()
 }
 
 async function startEdit(field) {
@@ -203,6 +291,10 @@ async function commitEdit() {
   try {
     book.value = await updateReadingBook(supabase, userId.value, book.value.id, payload)
     if (field === 'collection') await loadCollections()
+    if ((field === 'dateStart' || field === 'dateEnd') && String(nextValue ?? '').trim()) {
+      pendingRereadUndo.value = null
+      clearRereadUndo(book.value.id)
+    }
     resetInlineEdit()
   } catch (err) {
     console.error(err)
@@ -401,6 +493,82 @@ async function onDeleteSpoilChapter(chapterId) {
   }
 }
 
+async function onStartRereading() {
+  if (!userId.value || !book.value || rereadingStarting.value || isSaving.value) return
+
+  rereadingStarting.value = true
+  errorMessage.value = ''
+  try {
+    const result = await startReadingRereading(supabase, userId.value, book.value)
+    book.value = result.book
+    rereadings.value = result.rereadings
+    pendingRereadUndo.value = result.undo
+    saveRereadUndo(book.value.id, result.undo)
+    await loadCollections()
+    resetInlineEdit()
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible de démarrer une nouvelle relecture.'
+  } finally {
+    rereadingStarting.value = false
+  }
+}
+
+async function onCancelRereading() {
+  if (!userId.value || !book.value || rereadingCancelling.value || isSaving.value) return
+  if (!isRereadingInProgress.value) return
+
+  const undo = resolveRereadUndo(
+    pendingRereadUndo.value ?? loadRereadUndo(book.value.id),
+    rereadings.value,
+  )
+  if (!undo) {
+    errorMessage.value = 'Impossible d’annuler : aucune relecture en cours détectée.'
+    return
+  }
+
+  rereadingCancelling.value = true
+  errorMessage.value = ''
+  try {
+    const result = await cancelReadingRereading(
+      supabase,
+      userId.value,
+      book.value,
+      undo,
+      rereadings.value,
+    )
+    book.value = result.book
+    rereadings.value = result.rereadings
+    pendingRereadUndo.value = null
+    clearRereadUndo(book.value.id)
+    await loadCollections()
+    resetInlineEdit()
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible d’annuler la relecture.'
+  } finally {
+    rereadingCancelling.value = false
+  }
+}
+
+async function onUpdateRereading({ rereadingId, field, value }) {
+  if (!userId.value || !rereadingId || isSaving.value) return
+
+  isSaving.value = true
+  errorMessage.value = ''
+  try {
+    const payload =
+      field === 'dateStart' ? { dateStart: value } : field === 'dateEnd' ? { dateEnd: value } : {}
+    const updated = await updateReadingRereading(supabase, userId.value, rereadingId, payload)
+    rereadings.value = rereadings.value.map((item) => (item.id === updated.id ? updated : item))
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Erreur lors de la modification de la relecture.'
+  } finally {
+    isSaving.value = false
+  }
+}
+
 function onKeydown(event) {
   if (isSaving.value) return
   if (event.key !== 'Escape') return
@@ -431,6 +599,7 @@ watch([userId, bookId], () => {
 watch(bookId, () => {
   resetInlineEdit()
   deleteConfirmOpen.value = false
+  pendingRereadUndo.value = null
 })
 </script>
 
@@ -460,6 +629,10 @@ watch(bookId, () => {
       :spoil-chapters="spoilChapters"
       :spoil-saving="spoilSaving"
       :spoil-error="spoilError"
+      :rereadings="rereadings"
+      :rereading-starting="rereadingStarting"
+      :rereading-in-progress="isRereadingInProgress"
+      :rereading-cancelling="rereadingCancelling"
       @start-edit="startEdit"
       @commit-edit="commitEdit"
       @cancel-edit="cancelEdit"
@@ -471,6 +644,9 @@ watch(bookId, () => {
       @trigger-cover-picker="triggerCoverFilePicker"
       @image-url-input="onImageUrlInput"
       @delete-spoil-chapter="onDeleteSpoilChapter"
+      @start-rereading="onStartRereading"
+      @update-rereading="onUpdateRereading"
+      @cancel-rereading="onCancelRereading"
     >
       <template #actions>
         <button
