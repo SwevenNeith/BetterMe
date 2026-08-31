@@ -6,6 +6,7 @@ import HabitReadingLibraryPickerModal from './HabitReadingLibraryPickerModal.vue
 import HabitReadingImportModal from './HabitReadingImportModal.vue'
 import {
   buildReadingDetailsHtml,
+  buildReadingAliasIndex,
   collectUnmatchedReadingTitles,
   computeEndPageFromPagesRead,
   getLastReadingPosition,
@@ -25,6 +26,10 @@ const props = defineProps({
     required: true,
   },
   books: {
+    type: Array,
+    default: () => [],
+  },
+  bookAliases: {
     type: Array,
     default: () => [],
   },
@@ -76,10 +81,12 @@ const allBooks = computed(() => {
   return [...map.values()]
 })
 
+const aliasIndex = computed(() => buildReadingAliasIndex(props.bookAliases))
+
 const inProgressBooks = computed(() => allBooks.value.filter(isBookInProgress))
 
 const unmatchedTitles = computed(() =>
-  collectUnmatchedReadingTitles(props.historyLogsByDate, allBooks.value),
+  collectUnmatchedReadingTitles(props.historyLogsByDate, allBooks.value, aliasIndex.value),
 )
 
 function resolveBookFromEntry(entry) {
@@ -87,7 +94,7 @@ function resolveBookFromEntry(entry) {
     const byId = allBooks.value.find((book) => book.id === entry.bookId)
     if (byId) return byId
   }
-  return matchBookByTitleExact(entry.title, allBooks.value)
+  return matchBookByTitleExact(entry.title, allBooks.value, aliasIndex.value)
 }
 
 const booksForSelect = computed(() => {
@@ -143,6 +150,7 @@ const modalBaseline = computed(() => {
     modalBook.value.id,
     modalBook.value.title,
     props.selectedDate,
+    aliasIndex.value,
   )
   return { page: lastEndPage, date: lastDate }
 })
@@ -177,6 +185,7 @@ function getBaselineForBook(book) {
     book.id,
     book.title,
     props.selectedDate,
+    aliasIndex.value,
   )
   return { page: lastEndPage, date: lastDate }
 }
@@ -223,6 +232,10 @@ function onImportBooksCreated(createdBooks) {
   }
   emit('books-updated')
   importOpen.value = false
+}
+
+function onImportLinked() {
+  emit('books-updated')
 }
 
 function openImportModal() {
@@ -447,7 +460,7 @@ function persistAutoSave({ closeAfterSave = false } = {}) {
 }
 
 watch(
-  () => [props.savedDetailsHtml, props.selectedDate, props.books],
+  () => [props.savedDetailsHtml, props.selectedDate, props.books, props.bookAliases],
   () => {
     if (props.selectedDate) {
       importAutoOpened.value = false
@@ -660,9 +673,11 @@ defineExpose({
     <HabitReadingImportModal
       :open="importOpen"
       :titles="unmatchedTitles"
+      :books="allBooks"
       :user-id="userId"
       @close="onImportClose"
       @created="onImportBooksCreated"
+      @linked="onImportLinked"
     />
   </div>
 </template>

@@ -6,6 +6,7 @@ import { listHabitLogsForRange, updateHabitLogDetails, upsertHabitLog } from '..
 import RichTextNoteEditor from './RichTextNoteEditor.vue'
 import HabitReadingDetailsPanel from './HabitReadingDetailsPanel.vue'
 import { listReadingBooksWithCovers } from '../services/readingBooks.js'
+import { listReadingBookAliases } from '../services/readingBookAliases.js'
 import { isRichNoteEmpty, sanitizeRichNoteHtml } from '../utils/sanitizeHtml.js'
 import { isReadingHabit } from '../utils/habitReadingLink.js'
 import { HABIT_VALUE_TYPE } from '../constants/habitOptions.js'
@@ -79,6 +80,7 @@ const detailsSaving = ref(false)
 const detailsError = ref('')
 const readingPanelRef = ref(null)
 const readingBooks = ref([])
+const readingBookAliases = ref([])
 const readingHistoryLogs = ref({})
 const readingContextLoading = ref(false)
 const readingContextError = ref('')
@@ -145,8 +147,9 @@ async function loadReadingContext() {
   readingContextError.value = ''
 
   try {
-    const [books, rows] = await Promise.all([
+    const [books, aliases, rows] = await Promise.all([
       listReadingBooksWithCovers(supabase, props.userId),
+      listReadingBookAliases(supabase, props.userId),
       listHabitLogsForRange(
         supabase,
         props.userId,
@@ -157,11 +160,13 @@ async function loadReadingContext() {
     ])
 
     readingBooks.value = books
+    readingBookAliases.value = aliases
     readingHistoryLogs.value = mergeLogsRows(rows, { ...logsByDate.value })
   } catch (err) {
     console.error(err)
     readingContextError.value = err.message || 'Impossible de charger les livres.'
     readingBooks.value = []
+    readingBookAliases.value = []
     readingHistoryLogs.value = { ...logsByDate.value }
   } finally {
     readingContextLoading.value = false
@@ -978,6 +983,7 @@ watch(canShowDetails, (visible) => {
               :habit="habit"
               :selected-date="selectedDate"
               :books="readingBooks"
+              :book-aliases="readingBookAliases"
               :history-logs-by-date="readingHistoryLogs"
               :saved-details-html="getSavedDetailsHtml()"
               :habit-value="inputValue"

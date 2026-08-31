@@ -204,21 +204,44 @@ export function formatReadingLogLine(title, startPage, endPage) {
 }
 
 /**
- * @param {string} title
- * @param {Array<{ id: string, title: string, author?: string }>} books
+ * @param {Array<{ alias: string, book_id?: string, bookId?: string }>} aliases
+ * @returns {Map<string, string>}
  */
-export function matchBookByTitleExact(title, books) {
-  const key = normalizeReadingTitleKey(title)
-  if (!key) return null
-  return books.find((book) => normalizeReadingTitleKey(book.title) === key) ?? null
+export function buildReadingAliasIndex(aliases) {
+  /** @type {Map<string, string>} */
+  const map = new Map()
+  for (const row of aliases ?? []) {
+    const key = normalizeReadingTitleKey(row.alias)
+    const bookId = row.book_id ?? row.bookId
+    if (key && bookId) map.set(key, bookId)
+  }
+  return map
 }
 
 /**
  * @param {string} title
  * @param {Array<{ id: string, title: string, author?: string }>} books
+ * @param {Map<string, string>|null} [aliasIndex]
  */
-export function matchBookByTitle(title, books) {
-  const exact = matchBookByTitleExact(title, books)
+export function matchBookByTitleExact(title, books, aliasIndex = null) {
+  const key = normalizeReadingTitleKey(title)
+  if (!key) return null
+
+  const exact = books.find((book) => normalizeReadingTitleKey(book.title) === key) ?? null
+  if (exact) return exact
+
+  const bookId = aliasIndex?.get(key)
+  if (!bookId) return null
+  return books.find((book) => book.id === bookId) ?? null
+}
+
+/**
+ * @param {string} title
+ * @param {Array<{ id: string, title: string, author?: string }>} books
+ * @param {Map<string, string>|null} [aliasIndex]
+ */
+export function matchBookByTitle(title, books, aliasIndex = null) {
+  const exact = matchBookByTitleExact(title, books, aliasIndex)
   if (exact) return exact
 
   const key = normalizeReadingTitleKey(title)
@@ -236,10 +259,16 @@ export function matchBookByTitle(title, books) {
  * @param {string|null|undefined} bookId
  * @param {string} title
  * @param {{ bookId?: string|null, title: string, startPage: number, endPage: number }} entry
+ * @param {Map<string, string>|null} [aliasIndex]
  */
-function entryMatchesBook(bookId, title, entry) {
+function entryMatchesBook(bookId, title, entry, aliasIndex = null) {
   if (bookId && entry.bookId) return entry.bookId === bookId
-  return normalizeReadingTitleKey(entry.title) === normalizeReadingTitleKey(title)
+
+  const entryKey = normalizeReadingTitleKey(entry.title)
+  const titleKey = normalizeReadingTitleKey(title)
+  if (entryKey === titleKey) return true
+  if (bookId && aliasIndex?.get(entryKey) === bookId) return true
+  return false
 }
 
 /**
@@ -248,8 +277,9 @@ function entryMatchesBook(bookId, title, entry) {
  * @param {string|null} bookId
  * @param {string} title
  * @param {string|null} [asOfDate] Date du jour édité (YYYY-MM-DD) : seuls les logs antérieurs comptent
+ * @param {Map<string, string>|null} [aliasIndex]
  */
-export function getLastReadingPosition(logsByDate, bookId, title, asOfDate = null) {
+export function getLastReadingPosition(logsByDate, bookId, title, asOfDate = null, aliasIndex = null) {
   let lastEndPage = 0
   let lastDate = null
 
@@ -261,7 +291,7 @@ export function getLastReadingPosition(logsByDate, bookId, title, asOfDate = nul
 
     const { readingEntries } = splitReadingDetails(log.details)
     for (const entry of readingEntries) {
-      if (!entryMatchesBook(bookId, title, entry)) continue
+      if (!entryMatchesBook(bookId, title, entry, aliasIndex)) continue
       if (entry.endPage >= lastEndPage) {
         lastEndPage = entry.endPage
         lastDate = date
@@ -355,8 +385,9 @@ export function buildReadingDetailsHtml(payload) {
 /**
  * @param {Record<string, { details?: string|null }>} logsByDate
  * @param {Array<{ id: string, title: string, author?: string }>} books
+ * @param {Map<string, string>|null} [aliasIndex]
  */
-export function collectUnmatchedReadingTitles(logsByDate, books) {
+export function collectUnmatchedReadingTitles(logsByDate, books, aliasIndex = null) {
   const seen = new Set()
   /** @type {string[]} */
   const unmatched = []
@@ -373,7 +404,7 @@ export function collectUnmatchedReadingTitles(logsByDate, books) {
 
       const matched =
         (entry.bookId && books.some((book) => book.id === entry.bookId)) ||
-        Boolean(matchBookByTitleExact(title, books))
+        Boolean(matchBookByTitleExact(title, books, aliasIndex))
       if (!matched) unmatched.push(title)
     }
   }
