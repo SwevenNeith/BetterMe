@@ -1,9 +1,6 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
-import {
-  accumulateSeenTags,
-  pickNextReadingSuggestion,
-} from '../utils/readingPick.js'
+import { accumulateSeenTags, pickNextReadingSuggestion } from '../utils/readingPick.js'
 import { bookToEditForm } from '../utils/readingBookForm.js'
 import { updateReadingBook } from '../services/readingBooks.js'
 import { READING_COLLECTION_EN_COURS } from '../services/readingCollections.js'
@@ -32,11 +29,12 @@ const emptyMessage = ref('')
 const currentBook = ref(null)
 const shownIds = ref([])
 const seenTags = ref([])
+const pickStep = ref('saga-pref')
+const allowSaga = ref(true)
 
-const displayTags = computed(() => {
-  const tags = currentBook.value?.tags ?? []
-  return (tags ?? []).map((tag) => String(tag).trim()).filter(Boolean)
-})
+const sagaPreferenceLabel = computed(() =>
+  allowSaga.value ? 'Séries acceptées' : 'Hors séries uniquement',
+)
 
 function resetSession() {
   shownIds.value = []
@@ -45,6 +43,28 @@ function resetSession() {
   errorMessage.value = ''
   emptyMessage.value = ''
   isSaving.value = false
+  pickStep.value = 'saga-pref'
+  allowSaga.value = true
+}
+
+function startPicking() {
+  pickStep.value = 'book'
+  proposeNext(false)
+}
+
+function chooseSagaPreference(withSaga) {
+  allowSaga.value = withSaga
+  startPicking()
+}
+
+function changeSagaPreference() {
+  if (isSaving.value) return
+  shownIds.value = []
+  seenTags.value = []
+  currentBook.value = null
+  emptyMessage.value = ''
+  errorMessage.value = ''
+  pickStep.value = 'saga-pref'
 }
 
 function proposeNext(fromReject = false) {
@@ -60,13 +80,17 @@ function proposeNext(fromReject = false) {
   const next = pickNextReadingSuggestion(props.books, {
     shownIds: shownIds.value,
     seenTags: seenTags.value,
+    allowSaga: allowSaga.value,
   })
 
   if (!next) {
     currentBook.value = null
+    const sagaHint = allowSaga.value ? '' : ' hors série'
     emptyMessage.value = fromReject
-      ? 'Plus de suggestion avec des tags différents. Réessaie plus tard ou ajoute des livres.'
-      : 'Aucun livre disponible (hors « En cours » et « Terminé »).'
+      ? `Plus de suggestion${sagaHint} avec des tags différents. Réessaie plus tard ou ajoute des livres.`
+      : allowSaga.value
+        ? 'Aucun livre disponible (hors « En cours » et « Terminé »).'
+        : 'Aucun livre hors série disponible (hors « En cours » et « Terminé »).'
     return
   }
 
@@ -76,6 +100,11 @@ function proposeNext(fromReject = false) {
   currentBook.value = next
   emptyMessage.value = ''
 }
+
+const displayTags = computed(() => {
+  const tags = currentBook.value?.tags ?? []
+  return (tags ?? []).map((tag) => String(tag).trim()).filter(Boolean)
+})
 
 function handleClose() {
   if (isSaving.value) return
@@ -123,7 +152,6 @@ watch(
   (isOpen) => {
     if (isOpen) {
       resetSession()
-      proposeNext(false)
       document.addEventListener('keydown', onKeydown)
     } else {
       document.removeEventListener('keydown', onKeydown)
@@ -149,7 +177,20 @@ onUnmounted(() => {
     >
       <div class="reading-pick-panel" @click.stop>
         <header class="reading-pick-header">
-          <h2 class="reading-pick-title">Choisir ma lecture</h2>
+          <div class="reading-pick-header__text">
+            <h2 class="reading-pick-title">Choisir ma lecture</h2>
+            <p v-if="pickStep === 'book'" class="reading-pick-scope">
+              {{ sagaPreferenceLabel }}
+              <button
+                type="button"
+                class="reading-pick-scope__change"
+                :disabled="isSaving"
+                @click="changeSagaPreference"
+              >
+                Modifier
+              </button>
+            </p>
+          </div>
           <button
             type="button"
             class="reading-pick-close"
@@ -164,7 +205,31 @@ onUnmounted(() => {
 
         <div v-if="errorMessage" class="reading-pick-error">{{ errorMessage }}</div>
 
-        <div v-if="emptyMessage" class="reading-pick-empty">
+        <div v-if="pickStep === 'saga-pref'" class="reading-pick-saga-pref">
+          <p class="reading-pick-saga-pref__lead">Veux-tu pouvoir lire une série ?</p>
+          <div class="reading-pick-saga-pref__options">
+            <button
+              type="button"
+              class="reading-pick-saga-option"
+              :class="{ 'reading-pick-saga-option--active': allowSaga }"
+              @click="chooseSagaPreference(true)"
+            >
+              <span class="reading-pick-saga-option__title">Oui</span>
+              <span class="reading-pick-saga-option__hint">Toute la bibliothèque</span>
+            </button>
+            <button
+              type="button"
+              class="reading-pick-saga-option"
+              :class="{ 'reading-pick-saga-option--active': !allowSaga }"
+              @click="chooseSagaPreference(false)"
+            >
+              <span class="reading-pick-saga-option__title">Non</span>
+              <span class="reading-pick-saga-option__hint">Hors livres « Série »</span>
+            </button>
+          </div>
+        </div>
+
+        <div v-else-if="emptyMessage" class="reading-pick-empty">
           <p>{{ emptyMessage }}</p>
           <button type="button" class="reading-pick-secondary" @click="handleClose">Fermer</button>
         </div>
@@ -200,8 +265,16 @@ onUnmounted(() => {
               :disabled="isSaving"
               @click="acceptBook"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z" />
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                aria-hidden="true"
+              >
+                <path
+                  d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"
+                />
                 <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
               </svg>
               <span>Je lis ce livre</span>
@@ -215,8 +288,16 @@ onUnmounted(() => {
               :disabled="isSaving"
               @click="rejectBook"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z" />
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                aria-hidden="true"
+              >
+                <path
+                  d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"
+                />
                 <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
               </svg>
               <span>Pas cette fois</span>
@@ -261,6 +342,94 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 1rem;
+}
+
+.reading-pick-header__text {
+  min-width: 0;
+}
+
+.reading-pick-scope {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+  color: #7a6b86;
+}
+
+.reading-pick-scope__change {
+  margin-left: 0.35rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #8c6a9e;
+  font-size: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.reading-pick-scope__change:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.reading-pick-saga-pref {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.reading-pick-saga-pref__lead {
+  margin: 0;
+  text-align: center;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: #5a4a68;
+}
+
+.reading-pick-saga-pref__options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+
+.reading-pick-saga-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.75rem 0.55rem;
+  border-radius: 12px;
+  border: 1px solid rgba(173, 129, 190, 0.35);
+  background: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+
+.reading-pick-saga-option:hover {
+  transform: translateY(-1px);
+  border-color: rgba(173, 129, 190, 0.55);
+  background: rgba(213, 181, 234, 0.12);
+}
+
+.reading-pick-saga-option--active {
+  border-color: rgba(173, 129, 190, 0.65);
+  background: rgba(213, 181, 234, 0.22);
+}
+
+.reading-pick-saga-option__title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #3d2f4a;
+}
+
+.reading-pick-saga-option__hint {
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: #7a6b86;
+  text-align: center;
+  line-height: 1.25;
 }
 
 .reading-pick-title {
@@ -403,7 +572,9 @@ onUnmounted(() => {
   font-weight: 700;
   font-size: 0.82rem;
   cursor: pointer;
-  transition: transform 0.15s ease, filter 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    filter 0.15s ease;
 }
 
 .reading-pick-thumb svg {
@@ -450,8 +621,30 @@ onUnmounted(() => {
   }
 
   .reading-pick-title,
-  .reading-pick-book-title {
+  .reading-pick-book-title,
+  .reading-pick-saga-option__title {
     color: #f0e8f8;
+  }
+
+  .reading-pick-scope,
+  .reading-pick-saga-pref__lead,
+  .reading-pick-saga-option__hint {
+    color: #c5b8d2;
+  }
+
+  .reading-pick-scope__change {
+    color: #d5b5ea;
+  }
+
+  .reading-pick-saga-option {
+    background: rgba(35, 30, 48, 0.95);
+    border-color: rgba(173, 129, 190, 0.35);
+  }
+
+  .reading-pick-saga-option:hover,
+  .reading-pick-saga-option--active {
+    background: rgba(173, 129, 190, 0.18);
+    border-color: rgba(213, 181, 234, 0.45);
   }
 
   .reading-pick-book-author,
