@@ -17,7 +17,7 @@ const COLUMN = 'dashboard_visibility'
 export const DASHBOARD_VISIBILITY_UPDATED_EVENT = 'betterme-dashboard-visibility-updated'
 
 /**
- * @typedef {{ visible: boolean }} DashboardVisibilityEntry
+ * @typedef {{ visible: boolean, notesVaultId?: string | null }} DashboardVisibilityEntry
  * @typedef {{
  *   desktop: { top: string[], left: string[], right: string[], bottom: string[] },
  *   mobile: string[],
@@ -356,7 +356,10 @@ export function createDefaultDashboardVisibility() {
   /** @type {DashboardVisibilityMap} */
   const map = {}
   for (const widget of DASHBOARD_WIDGETS) {
-    map[widget.id] = { visible: true }
+    map[widget.id] =
+      widget.id === DASHBOARD_WIDGET_IDS.NOTES_GRAPH
+        ? { visible: true, notesVaultId: null }
+        : { visible: true }
   }
   map.layout = createDefaultDashboardLayout()
   return map
@@ -376,6 +379,13 @@ export function mergeDashboardVisibility(raw) {
     if (typeof entry.visible === 'boolean') {
       defaults[widget.id].visible = entry.visible
     }
+    if (widget.id === DASHBOARD_WIDGET_IDS.NOTES_GRAPH) {
+      if (entry.notesVaultId === null || entry.notesVaultId === '') {
+        defaults[widget.id].notesVaultId = null
+      } else if (typeof entry.notesVaultId === 'string') {
+        defaults[widget.id].notesVaultId = entry.notesVaultId
+      }
+    }
   }
 
   defaults.layout = normalizeDashboardLayout(raw.layout)
@@ -388,6 +398,31 @@ export function mergeDashboardVisibility(raw) {
  */
 export function getDashboardLayout(visibility) {
   return normalizeDashboardLayout(visibility?.layout)
+}
+
+/**
+ * @param {DashboardVisibilityMap | null | undefined} visibility
+ * @returns {string | null}
+ */
+export function getDashboardNotesGraphVaultId(visibility) {
+  const entry = visibility?.[DASHBOARD_WIDGET_IDS.NOTES_GRAPH]
+  const vaultId = entry?.notesVaultId
+  return typeof vaultId === 'string' && vaultId ? vaultId : null
+}
+
+/**
+ * @param {DashboardVisibilityMap | null | undefined} visibility
+ * @param {string | null | undefined} vaultId
+ * @returns {DashboardVisibilityMap}
+ */
+export function patchDashboardNotesGraphVaultId(visibility, vaultId) {
+  const next = mergeDashboardVisibility(visibility)
+  const widgetId = DASHBOARD_WIDGET_IDS.NOTES_GRAPH
+  next[widgetId] = {
+    ...next[widgetId],
+    notesVaultId: typeof vaultId === 'string' && vaultId ? vaultId : null,
+  }
+  return next
 }
 
 /**

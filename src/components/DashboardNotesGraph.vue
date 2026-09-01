@@ -10,7 +10,17 @@ import {
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
 } from '../services/pageVisibility.js'
+import {
+  DASHBOARD_VISIBILITY_UPDATED_EVENT,
+  getDashboardNotesGraphVaultId,
+  loadDashboardVisibility,
+  mergeDashboardVisibility,
+  patchDashboardNotesGraphVaultId,
+  saveDashboardVisibility,
+} from '../services/dashboardVisibility.js'
 import { listNotes } from '../services/notes.js'
+import { listNoteVaults } from '../services/noteVaults.js'
+import { normalizeVaultIcon, vaultThemeStyle } from '../constants/noteVaults.js'
 import NotesGraphView from './NotesGraphView.vue'
 
 const props = defineProps({
@@ -24,13 +34,68 @@ const router = useRouter()
 const { pageTitle: notesPageTitle } = usePageDisplayLabel(APP_PAGE_IDS.NOTES)
 
 const pageVisibility = ref(mergePageVisibility(null))
+const dashboardVisibility = ref(mergeDashboardVisibility(null))
 const isLoading = ref(false)
 const loadError = ref('')
 const notes = ref([])
+const vaults = ref([])
+const selectedVaultId = ref('')
+const isSavingScope = ref(false)
 
 const isNotesPageVisible = computed(() =>
   isPageVisible(APP_PAGE_IDS.NOTES, pageVisibility.value),
 )
+
+const activeVault = computed(() => {
+  if (!selectedVaultId.value) return null
+  return vaults.value.find((vault) => vault.id === selectedVaultId.value) ?? null
+})
+
+const scopedNotes = computed(() => {
+  const vaultId = selectedVaultId.value || null
+  return notes.value.filter((note) => (note.vault_id ?? null) === vaultId)
+})
+
+const graphThemeStyle = computed(() =>
+  activeVault.value ? vaultThemeStyle(activeVault.value) : null,
+)
+
+const graphLinkTarget = computed(() => {
+  if (selectedVaultId.value) {
+    return {
+      name: 'notes-vault-graph',
+      params: { vaultId: selectedVaultId.value },
+    }
+  }
+  return { name: 'notes-graph' }
+})
+
+const scopeLabel = computed(() => {
+  if (!selectedVaultId.value) return 'Hors coffre'
+  const vault = activeVault.value
+  if (!vault) return 'Coffre'
+  return `${normalizeVaultIcon(vault.icon)} ${vault.name}`
+})
+
+function syncSelectedVaultFromSettings({ persistInvalid = false } = {}) {
+  const savedVaultId = getDashboardNotesGraphVaultId(dashboardVisibility.value)
+  if (!savedVaultId) {
+    selectedVaultId.value = ''
+    return
+  }
+  if (!vaults.value.length) {
+    selectedVaultId.value = savedVaultId
+    return
+  }
+  if (vaults.value.some((vault) => vault.id === savedVaultId)) {
+    selectedVaultId.value = savedVaultId
+    return
+  }
+  selectedVaultId.value = ''
+  if (persistInvalid) {
+    void persistScopeSelection('')
+  }
+}
 
 async function loadPageVisibilityState() {
   if (!props.userId) {
@@ -42,6 +107,34 @@ async function loadPageVisibilityState() {
   } catch (err) {
     console.error('dashboard notes visibility:', err)
     pageVisibility.value = mergePageVisibility(null)
+  }
+}
+
+async function loadDashboardSettings() {
+  if (!props.userId) {
+    dashboardVisibility.value = mergeDashboardVisibility(null)
+    selectedVaultId.value = ''
+    return
+  }
+  try {
+    dashboardVisibility.value = await loadDashboardVisibility(supabase, props.userId)
+  } catch (err) {
+    console.error('dashboard notes graph settings:', err)
+    dashboardVisibility.value = mergeDashboardVisibility(null)
+    selectedVaultId.value = ''
+  }
+}
+
+async function loadVaults() {
+  if (!props.userId) {
+    vaults.value = []
+    return
+  }
+  try {
+    vaults.value = await listNoteVaults(supabase, props.userId)
+  } catch (err) {
+    console.error('dashboard notes vaults:', err)
+    vaults.value = []
   }
 }
 
@@ -64,14 +157,45 @@ async function loadNotes() {
   }
 }
 
+async function persistScopeSelection(vaultId) {
+  if (!props.userId || isSavingScope.value) return
+  isSavingScope.value = true
+  try {
+    const next = patchDashboardNotesGraphVaultId(dashboardVisibility.value, vaultId || null)
+    await saveDashboardVisibility(supabase, props.userId, next)
+    dashboardVisibility.value = next
+  } catch (err) {
+    console.error('dashboard notes graph scope:', err)
+  } finally {
+    isSavingScope.value = false
+  }
+}
+
+async function onScopeChange() {
+  await persistScopeSelection(selectedVaultId.value)
+}
+
 async function reload() {
-  await loadPageVisibilityState()
+  await Promise.all([loadPageVisibilityState(), loadDashboardSettings(), loadVaults()])
+  syncSelectedVaultFromSettings({ persistInvalid: true })
   await loadNotes()
 }
 
 function onSelectNote(noteId) {
   if (!noteId) return
+  const note = notes.value.find((item) => item.id === noteId)
+  const vaultId = note?.vault_id ?? null
+  if (vaultId) {
+    router.push({ name: 'notes-vault-detail', params: { vaultId, noteId } })
+    return
+  }
   router.push({ name: 'notes-detail', params: { noteId } })
+}
+
+function onDashboardVisibilityUpdated() {
+  void loadDashboardSettings().then(() => {
+    syncSelectedVaultFromSettings({ persistInvalid: true })
+  })
 }
 
 watch(
@@ -84,10 +208,12 @@ watch(
 onMounted(() => {
   reload()
   window.addEventListener(PAGE_VISIBILITY_UPDATED_EVENT, reload)
+  window.addEventListener(DASHBOARD_VISIBILITY_UPDATED_EVENT, onDashboardVisibilityUpdated)
 })
 
 onUnmounted(() => {
   window.removeEventListener(PAGE_VISIBILITY_UPDATED_EVENT, reload)
+  window.removeEventListener(DASHBOARD_VISIBILITY_UPDATED_EVENT, onDashboardVisibilityUpdated)
 })
 </script>
 
@@ -98,10 +224,30 @@ onUnmounted(() => {
     aria-labelledby="dashboard-notes-graph-title"
   >
     <div class="dashboard-notes-graph__header">
-      <h2 id="dashboard-notes-graph-title" class="dashboard-notes-graph__title">Vue globale</h2>
-      <RouterLink :to="{ name: 'notes-graph' }" class="dashboard-notes-graph__link">
-        {{ notesPageTitle }}
-      </RouterLink>
+      <div class="dashboard-notes-graph__title-row">
+        <h2 id="dashboard-notes-graph-title" class="dashboard-notes-graph__title">Vue globale</h2>
+        <RouterLink :to="graphLinkTarget" class="dashboard-notes-graph__link">
+          {{ notesPageTitle }}
+        </RouterLink>
+      </div>
+
+      <label class="dashboard-notes-graph__scope">
+        <span class="dashboard-notes-graph__scope-label">Périmètre</span>
+        <select
+          v-model="selectedVaultId"
+          class="dashboard-notes-graph__scope-select"
+          :disabled="isSavingScope"
+          aria-label="Choisir le périmètre de la vue globale"
+          @change="onScopeChange"
+        >
+          <option value="">Hors coffre (général)</option>
+          <option v-for="vault in vaults" :key="vault.id" :value="vault.id">
+            {{ normalizeVaultIcon(vault.icon) }} {{ vault.name }}
+          </option>
+        </select>
+      </label>
+
+      <p class="dashboard-notes-graph__scope-meta">{{ scopeLabel }}</p>
     </div>
 
     <div v-if="isLoading" class="dashboard-notes-graph__state">
@@ -111,11 +257,12 @@ onUnmounted(() => {
 
     <p v-else-if="loadError" class="dashboard-notes-graph__error">{{ loadError }}</p>
 
-    <div v-else class="dashboard-notes-graph__body">
+    <div v-else class="dashboard-notes-graph__body" :style="graphThemeStyle || undefined">
       <NotesGraphView
         compact
         :active="true"
-        :notes="notes"
+        :notes="scopedNotes"
+        :theme-style="graphThemeStyle"
         @select-note="onSelectNote"
       />
     </div>
@@ -139,6 +286,12 @@ onUnmounted(() => {
 
 .dashboard-notes-graph__header {
   display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.dashboard-notes-graph__title-row {
+  display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 0.75rem;
@@ -161,6 +314,38 @@ onUnmounted(() => {
 
 .dashboard-notes-graph__link:hover {
   text-decoration: underline;
+}
+
+.dashboard-notes-graph__scope {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.dashboard-notes-graph__scope-label {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #6d5a7e;
+}
+
+.dashboard-notes-graph__scope-select {
+  flex: 1;
+  min-width: 0;
+  padding: 0.32rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid rgba(173, 129, 190, 0.35);
+  background: rgba(255, 255, 255, 0.92);
+  color: #3b2a4a;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.dashboard-notes-graph__scope-meta {
+  margin: 0;
+  font-size: 0.68rem;
+  color: #8b7a96;
 }
 
 .dashboard-notes-graph__state {
@@ -219,6 +404,17 @@ onUnmounted(() => {
   .dashboard-notes-graph {
     background: rgba(25, 20, 35, 0.65);
     border-color: rgba(213, 181, 234, 0.2);
+  }
+
+  .dashboard-notes-graph__scope-label,
+  .dashboard-notes-graph__scope-meta {
+    color: #c5b8d2;
+  }
+
+  .dashboard-notes-graph__scope-select {
+    background: rgba(35, 30, 48, 0.95);
+    border-color: rgba(173, 129, 190, 0.35);
+    color: #f0e8f8;
   }
 
   .dashboard-notes-graph__state {
