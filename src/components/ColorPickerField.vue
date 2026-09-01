@@ -96,14 +96,14 @@ function onHexInput(event) {
 }
 
 .color-picker-field--compact .color-picker-field__swatch {
-  width: 2.35rem;
-  height: 2.35rem;
+  width: 2rem;
+  height: 2rem;
   border-width: 2px;
 }
 
 .color-picker-field--compact .color-picker-field__wheel {
-  width: 2.35rem;
-  height: 2.35rem;
+  width: 2rem;
+  height: 2rem;
 }
 
 .color-picker-field {

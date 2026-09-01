@@ -8,13 +8,21 @@ import {
 } from '../constants/noteTemplates.js'
 
 const TABLE = 'note_folders'
-const SELECT = 'id, user_id, parent_id, name, system_key, created_at, updated_at'
+const SELECT = 'id, user_id, parent_id, name, system_key, vault_id, created_at, updated_at'
 
 function isMissingSystemKeyColumnError(error) {
   return (
     error?.code === 'PGRST204' &&
     typeof error.message === 'string' &&
     error.message.includes("'system_key'")
+  )
+}
+
+function isMissingVaultIdColumnError(error) {
+  return (
+    error?.code === 'PGRST204' &&
+    typeof error.message === 'string' &&
+    error.message.includes("'vault_id'")
   )
 }
 
@@ -25,6 +33,7 @@ function normalizeFolder(row) {
     parent_id: row.parent_id ?? null,
     name: String(row.name ?? '').trim(),
     system_key: row.system_key ?? null,
+    vault_id: row.vault_id ?? null,
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? row.created_at ?? null,
   }
@@ -42,14 +51,16 @@ export async function listNoteFolders(supabase, userId) {
     .order('name', { ascending: true })
 
   if (error) {
-    if (isMissingSystemKeyColumnError(error)) {
+    if (isMissingVaultIdColumnError(error) || isMissingSystemKeyColumnError(error)) {
       const legacy = await supabase
         .from(TABLE)
         .select('id, user_id, parent_id, name, created_at, updated_at')
         .eq('user_id', userId)
         .order('name', { ascending: true })
       if (legacy.error) throw legacy.error
-      return (legacy.data ?? []).map((row) => normalizeFolder({ ...row, system_key: null }))
+      return (legacy.data ?? []).map((row) =>
+        normalizeFolder({ ...row, system_key: null, vault_id: null }),
+      )
     }
     throw error
   }
@@ -59,7 +70,7 @@ export async function listNoteFolders(supabase, userId) {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
- * @param {{ name: string, parentId?: string | null, systemKey?: string | null }} input
+ * @param {{ name: string, parentId?: string | null, systemKey?: string | null, vaultId?: string | null }} input
  */
 export async function createNoteFolder(supabase, userId, input) {
   if (!userId) throw new Error('Utilisateur non connecté.')
@@ -77,6 +88,9 @@ export async function createNoteFolder(supabase, userId, input) {
 
   const systemKey = input?.systemKey ?? input?.system_key ?? null
   if (systemKey) row.system_key = systemKey
+
+  const vaultId = input?.vaultId ?? input?.vault_id ?? null
+  if (vaultId) row.vault_id = vaultId
 
   const { data, error } = await supabase.from(TABLE).insert(row).select(SELECT).single()
 
@@ -200,18 +214,28 @@ export async function ensureDailyNotesFolder(supabase, userId) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {string} [folderName]
+ * @param {string | null} [vaultId]
  */
-export async function ensureNoteTemplatesFolder(supabase, userId, folderName = NOTE_TEMPLATES_FOLDER_DEFAULT_NAME) {
+export async function ensureNoteTemplatesFolder(
+  supabase,
+  userId,
+  folderName = NOTE_TEMPLATES_FOLDER_DEFAULT_NAME,
+  vaultId = null,
+) {
   if (!userId) throw new Error('Utilisateur non connecté.')
 
   const name = String(folderName ?? '').trim() || NOTE_TEMPLATES_FOLDER_DEFAULT_NAME
 
-  const { data: existing, error } = await supabase
+  let query = supabase
     .from(TABLE)
     .select(SELECT)
     .eq('user_id', userId)
     .eq('system_key', NOTE_TEMPLATES_FOLDER_SYSTEM_KEY)
-    .maybeSingle()
+
+  if (vaultId) query = query.eq('vault_id', vaultId)
+  else query = query.is('vault_id', null)
+
+  const { data: existing, error } = await query.maybeSingle()
 
   if (error) {
     if (isMissingSystemKeyColumnError(error)) {
@@ -235,15 +259,18 @@ export async function ensureNoteTemplatesFolder(supabase, userId, folderName = N
       name,
       parentId: null,
       systemKey: NOTE_TEMPLATES_FOLDER_SYSTEM_KEY,
+      vaultId,
     })
   } catch (err) {
     if (String(err?.code) === '23505' || String(err?.message ?? '').includes('duplicate')) {
-      const { data } = await supabase
+      let retry = supabase
         .from(TABLE)
         .select(SELECT)
         .eq('user_id', userId)
         .eq('system_key', NOTE_TEMPLATES_FOLDER_SYSTEM_KEY)
-        .maybeSingle()
+      if (vaultId) retry = retry.eq('vault_id', vaultId)
+      else retry = retry.is('vault_id', null)
+      const { data } = await retry.maybeSingle()
       if (data) return normalizeFolder(data)
     }
     throw err

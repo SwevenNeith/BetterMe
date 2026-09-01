@@ -110,6 +110,21 @@ function createAppChildRoutes(namePrefix = '') {
       component: JournalEntryView,
     },
     {
+      path: 'notes/coffre/:vaultId/graphe',
+      name: n('notes-vault-graph'),
+      component: NotesView,
+    },
+    {
+      path: 'notes/coffre/:vaultId/:noteId',
+      name: n('notes-vault-detail'),
+      component: NotesView,
+    },
+    {
+      path: 'notes/coffre/:vaultId',
+      name: n('notes-vault'),
+      component: NotesView,
+    },
+    {
       path: 'notes',
       name: n('notes'),
       component: NotesView,

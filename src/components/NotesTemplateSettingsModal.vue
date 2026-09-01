@@ -24,6 +24,10 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  vaultId: {
+    type: String,
+    default: null,
+  },
 })
 
 const emit = defineEmits(['close', 'save'])
@@ -166,6 +170,7 @@ async function save() {
         supabase,
         props.userId,
         draftFolderName.value.trim(),
+        props.vaultId,
       )
     }
 

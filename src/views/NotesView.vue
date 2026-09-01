@@ -28,17 +28,27 @@ import NotesGraphView from '../components/NotesGraphView.vue'
 import NotesTabsBar from '../components/NotesTabsBar.vue'
 import {
   isNotesExtensionEnabled,
-  loadNotesExtensionPrefs,
   mergeNotesExtensionPrefs,
-  saveNotesExtensionPrefs,
 } from '../services/notesExtensions.js'
 import { createDefaultNotesExtensionPrefs } from '../constants/notesExtensions.js'
 import { createDefaultNoteTemplatePrefs } from '../constants/noteTemplates.js'
+import { resolveTemplateContent } from '../services/noteTemplateExtension.js'
 import {
-  loadNoteTemplatePrefs,
-  resolveTemplateContent,
-  saveNoteTemplatePrefs,
-} from '../services/noteTemplateExtension.js'
+  loadVaultExtensionPrefs,
+  loadVaultTemplatePrefs,
+  saveVaultExtensionPrefs,
+  saveVaultTemplatePrefs,
+  ensureVaultSettings,
+  removeVaultSettings,
+} from '../services/noteVaultSettings.js'
+import {
+  createNoteVault,
+  deleteNoteVault,
+  listNoteVaults,
+  updateNoteVault,
+} from '../services/noteVaults.js'
+import { vaultThemeStyle, normalizeVaultIcon } from '../constants/noteVaults.js'
+import NotesVaultThemeModal from '../components/NotesVaultThemeModal.vue'
 
 const GRAPH_TAB = { type: 'graph', id: 'graph' }
 
@@ -52,6 +62,11 @@ const isLoading = ref(true)
 const errorMessage = ref('')
 const folders = ref([])
 const notes = ref([])
+const vaults = ref([])
+const activeVaultId = ref(null)
+const vaultThemeModalOpen = ref(false)
+const vaultThemeModalMode = ref('create')
+const vaultThemeTarget = ref(null)
 const expandedFolderIds = ref(new Set())
 const selectedNoteId = ref(null)
 const selectedNote = ref(null)
@@ -81,8 +96,47 @@ let switchingTabs = false
 
 const isGraphView = computed(() => {
   const name = route.name?.toString() ?? ''
-  return name === 'notes-graph' || name === 'embed-notes-graph'
+  return (
+    name === 'notes-graph' ||
+    name === 'embed-notes-graph' ||
+    name === 'notes-vault-graph' ||
+    name === 'embed-notes-vault-graph'
+  )
 })
+
+function isEmbedRoute() {
+  return route.name?.toString().startsWith('embed-') ?? false
+}
+
+function routeName(base) {
+  return isEmbedRoute() ? `embed-${base}` : base
+}
+
+const activeVault = computed(() =>
+  activeVaultId.value ? vaults.value.find((vault) => vault.id === activeVaultId.value) ?? null : null,
+)
+
+const activeVaultStyle = computed(() => vaultThemeStyle(activeVault.value))
+
+const contextFolders = computed(() =>
+  folders.value.filter((folder) => (folder.vault_id ?? null) === (activeVaultId.value ?? null)),
+)
+
+const contextNotes = computed(() =>
+  notes.value.filter((note) => (note.vault_id ?? null) === (activeVaultId.value ?? null)),
+)
+
+const vaultSummaries = computed(() =>
+  vaults.value.map((vault) => {
+    const vaultFolders = folders.value.filter((folder) => folder.vault_id === vault.id)
+    const vaultNotes = notes.value.filter((note) => note.vault_id === vault.id)
+    return {
+      ...vault,
+      folderCount: vaultFolders.length,
+      noteCount: vaultNotes.length,
+    }
+  }),
+)
 
 const effectiveViewMode = computed(() => {
   if (isMobileNotes.value && viewMode.value === 'split') return 'edit'
@@ -120,7 +174,11 @@ const activeTabKey = computed(() => {
 const tabItems = computed(() =>
   openTabs.value.map((tab) => {
     if (tab.type === 'graph') {
-      return { ...tab, key: 'graph', label: 'Vue globale' }
+      return {
+        ...tab,
+        key: 'graph',
+        label: activeVault.value ? `Vue · ${activeVault.value.name}` : 'Vue globale',
+      }
     }
     const fromDraft =
       tab.id === selectedNoteId.value && !isGraphView.value
@@ -192,7 +250,12 @@ function updateExtensionPrefs(nextPrefs) {
   if (!userId.value) return
   void (async () => {
     try {
-      extensionPrefs.value = await saveNotesExtensionPrefs(supabase, userId.value, nextPrefs)
+      extensionPrefs.value = await saveVaultExtensionPrefs(
+        supabase,
+        userId.value,
+        activeVaultId.value,
+        nextPrefs,
+      )
     } catch (err) {
       console.error(err)
       errorMessage.value = err.message || 'Impossible d’enregistrer les extensions.'
@@ -209,7 +272,12 @@ function onExtensionConfigure(extensionId) {
 async function onTemplateSettingsSave(nextPrefs) {
   if (!userId.value) return
   try {
-    templatePrefs.value = await saveNoteTemplatePrefs(supabase, userId.value, nextPrefs)
+    templatePrefs.value = await saveVaultTemplatePrefs(
+      supabase,
+      userId.value,
+      activeVaultId.value,
+      nextPrefs,
+    )
     if (nextPrefs.folder) {
       const existing = folders.value.some((folder) => folder.id === nextPrefs.folder.id)
       folders.value = existing
@@ -229,7 +297,7 @@ async function onTemplateSettingsSave(nextPrefs) {
 
 function resolveInitialNoteContent({ title, folderId }) {
   if (!isExtEnabled('templates')) return ''
-  return resolveTemplateContent(templatePrefs.value, notes.value, { title, folderId })
+  return resolveTemplateContent(templatePrefs.value, contextNotes.value, { title, folderId })
 }
 
 async function createNoteFromContext({ title, folderId }) {
@@ -238,11 +306,13 @@ async function createNoteFromContext({ title, folderId }) {
     title,
     contentMd,
     folderId,
+    vaultId: activeVaultId.value,
   })
 }
 
 function tabsStorageKey(uid) {
-  return `betterme-notes-open-tabs:${uid || 'anon'}`
+  const vaultKey = activeVaultId.value ?? 'root'
+  return `betterme-notes-open-tabs:${uid || 'anon'}:${vaultKey}`
 }
 
 function persistOpenTabs() {
@@ -294,6 +364,10 @@ function pruneOpenTabs(noteRows) {
   const ids = new Set((noteRows ?? []).map((note) => note.id))
   openTabs.value = openTabs.value.filter((tab) => tab.type === 'graph' || ids.has(tab.id))
   persistOpenTabs()
+}
+
+function pruneOpenTabsForContext() {
+  pruneOpenTabs(contextNotes.value)
 }
 
 function stashCurrentNoteSession() {
@@ -384,11 +458,21 @@ async function closeTab(tab) {
   }
 
   clearSelection()
-  const name = route.name?.toString().startsWith('embed-') ? 'embed-notes' : 'notes'
-  await router.replace({ name })
+  await navigateToNotesHome()
 }
 
-const tree = computed(() => buildNotesTree(folders.value, notes.value, null))
+async function navigateToNotesHome() {
+  if (activeVaultId.value) {
+    await router.replace({
+      name: routeName('notes-vault'),
+      params: { vaultId: activeVaultId.value },
+    })
+    return
+  }
+  await router.replace({ name: routeName('notes') })
+}
+
+const tree = computed(() => buildNotesTree(contextFolders.value, contextNotes.value, null))
 
 const filteredTree = computed(() => {
   if (!isExtEnabled('tree-search')) return tree.value
@@ -400,7 +484,7 @@ const filteredTree = computed(() => {
 const showTreeSearch = computed(() => isExtEnabled('tree-search'))
 
 const folderOptions = computed(() =>
-  flattenFolderOptions(folders.value).map((opt) => ({
+  flattenFolderOptions(contextFolders.value).map((opt) => ({
     id: opt.id ?? '',
     label: opt.label,
   })),
@@ -415,20 +499,23 @@ const draftFolderSelect = computed({
 
 const previewHtml = computed(() =>
   renderMarkdownToSafeHtml(draftContent.value, {
-    notes: notes.value,
+    notes: contextNotes.value,
     enableWikiLinks: isExtEnabled('wikilinks'),
     breaks: isExtEnabled('line-breaks'),
   }),
 )
 
 const noteCountLabel = computed(() => {
-  const n = notes.value.length
-  const f = folders.value.length
+  const n = contextNotes.value.length
+  const f = contextFolders.value.length
   const parts = []
+  if (activeVault.value) parts.push(activeVault.value.name)
   if (f) parts.push(`${f} dossier${f > 1 ? 's' : ''}`)
   parts.push(`${n} note${n > 1 ? 's' : ''}`)
   return parts.join(' · ')
 })
+
+const graphNotes = computed(() => contextNotes.value)
 
 function filterTree(nodes, query) {
   const result = []
@@ -468,49 +555,222 @@ function expandAncestorsOfNote(noteId) {
   expandedFolderIds.value = next
 }
 
-async function loadAll() {
+async function loadVaultPrefs() {
   if (!userId.value) return
-  isLoading.value = true
-  errorMessage.value = ''
   try {
-    await ensureMarkdownTutorial(supabase, userId.value)
+    extensionPrefs.value = await loadVaultExtensionPrefs(
+      supabase,
+      userId.value,
+      activeVaultId.value,
+    )
+    templatePrefs.value = await loadVaultTemplatePrefs(
+      supabase,
+      userId.value,
+      activeVaultId.value,
+    )
+  } catch (err) {
+    console.error(err)
+    extensionPrefs.value = createDefaultNotesExtensionPrefs()
+    templatePrefs.value = createDefaultNoteTemplatePrefs()
+  }
+}
+
+async function openVault(vaultId, { syncRoute = true } = {}) {
+  if (!vaultId) {
+    await leaveVault({ syncRoute })
+    return
+  }
+  const vault = vaults.value.find((item) => item.id === vaultId)
+  if (!vault) return
+
+  if (selectedNoteId.value) {
+    stashCurrentNoteSession()
+    if (dirty.value) await flushSave()
+  }
+
+  activeVaultId.value = vaultId
+  if (userId.value) {
+    openTabs.value = loadPersistedOpenTabs(userId.value)
+  }
+  await loadVaultPrefs()
+  pruneOpenTabsForContext()
+  clearSelection()
+
+  if (syncRoute) {
+    await router.push({ name: routeName('notes-vault'), params: { vaultId } })
+  }
+  closeMobileDrawer()
+}
+
+async function leaveVault({ syncRoute = true } = {}) {
+  if (selectedNoteId.value) {
+    stashCurrentNoteSession()
+    if (dirty.value) await flushSave()
+  }
+
+  activeVaultId.value = null
+  if (userId.value) {
+    openTabs.value = loadPersistedOpenTabs(userId.value)
+  }
+  await loadVaultPrefs()
+  pruneOpenTabsForContext()
+  clearSelection()
+
+  if (syncRoute) {
+    await router.push({ name: routeName('notes') })
+  }
+  closeMobileDrawer()
+}
+
+async function onCreateVault(payload) {
+  if (!userId.value) return
+  try {
+    const vault = await createNoteVault(supabase, userId.value, payload)
+    const merged = {
+      ...vault,
+      icon: normalizeVaultIcon(payload.icon ?? vault.icon),
+    }
+    await ensureVaultSettings(supabase, userId.value, merged.id)
+    vaults.value = [...vaults.value, merged]
+    await openVault(merged.id)
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible de créer le coffre.'
+  }
+}
+
+function openVaultThemeCreate() {
+  vaultThemeModalMode.value = 'create'
+  vaultThemeTarget.value = null
+  vaultThemeModalOpen.value = true
+}
+
+function openVaultThemeEditor(vault) {
+  if (!vault) return
+  vaultThemeModalMode.value = 'edit'
+  vaultThemeTarget.value = vault
+  vaultThemeModalOpen.value = true
+}
+
+async function onSaveVaultTheme(payload) {
+  if (!userId.value) return
+  try {
+    if (payload.vaultId) {
+      const updated = await updateNoteVault(supabase, userId.value, payload.vaultId, payload)
+      const merged = {
+        ...updated,
+        icon: normalizeVaultIcon(payload.icon ?? updated.icon),
+      }
+      vaults.value = vaults.value.map((item) => (item.id === merged.id ? merged : item))
+    } else {
+      await onCreateVault(payload)
+    }
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible d’enregistrer le thème du coffre.'
+  }
+}
+
+async function onDeleteVault(vaultId) {
+  const vault = vaults.value.find((item) => item.id === vaultId)
+  if (!vault || !userId.value) return
+  const ok = await askConfirm({
+    title: 'Supprimer le coffre',
+    message: `Supprimer le coffre « ${vault.name} » et tout son contenu ?\nCette action est définitive.`,
+    confirmLabel: 'Supprimer',
+    danger: true,
+  })
+  if (!ok) return
+
+  try {
+    if (activeVaultId.value === vaultId) {
+      activeVaultId.value = null
+      clearSelection()
+    }
+    await deleteNoteVault(supabase, userId.value, vaultId)
+    await removeVaultSettings(supabase, userId.value, vaultId)
+    vaults.value = vaults.value.filter((item) => item.id !== vaultId)
     const [folderRows, noteRows] = await Promise.all([
       listNoteFolders(supabase, userId.value),
       listNotes(supabase, userId.value),
     ])
     folders.value = folderRows
     notes.value = noteRows
+    pruneOpenTabsForContext()
+    if (!activeVaultId.value) {
+      await router.push({ name: routeName('notes') })
+    }
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Suppression du coffre impossible.'
+  }
+}
+
+async function loadAll() {
+  if (!userId.value) return
+  isLoading.value = true
+  errorMessage.value = ''
+  try {
+    await ensureMarkdownTutorial(supabase, userId.value)
+    const [folderRows, noteRows, vaultRows] = await Promise.all([
+      listNoteFolders(supabase, userId.value),
+      listNotes(supabase, userId.value),
+      listNoteVaults(supabase, userId.value),
+    ])
+    folders.value = folderRows
+    notes.value = noteRows
+    vaults.value = vaultRows
+
+    const routeVaultId =
+      typeof route.params.vaultId === 'string' && route.params.vaultId
+        ? route.params.vaultId
+        : null
+    if (routeVaultId && vaultRows.some((vault) => vault.id === routeVaultId)) {
+      activeVaultId.value = routeVaultId
+    } else if (routeVaultId) {
+      activeVaultId.value = null
+    }
 
     if (!openTabs.value.length) {
       openTabs.value = loadPersistedOpenTabs(userId.value)
     }
-    pruneOpenTabs(noteRows)
-    const ids = new Set(noteRows.map((n) => n.id))
+
+    const scopedNotes = noteRows.filter(
+      (note) => (note.vault_id ?? null) === (activeVaultId.value ?? null),
+    )
+    pruneOpenTabs(scopedNotes)
+    const ids = new Set(scopedNotes.map((n) => n.id))
 
     if (isGraphView.value) {
       ensureGraphTab()
       const keepId =
-        (selectedNoteId.value && noteRows.some((n) => n.id === selectedNoteId.value)
+        (selectedNoteId.value && scopedNotes.some((n) => n.id === selectedNoteId.value)
           ? selectedNoteId.value
           : null) ||
-        noteRows.find((n) => n.system_key === 'markdown-tutorial')?.id ||
-        noteRows[0]?.id ||
+        scopedNotes.find((n) => n.system_key === 'markdown-tutorial')?.id ||
+        scopedNotes[0]?.id ||
         null
       if (keepId) await selectNote(keepId, { syncRoute: false, openTab: false })
       else clearSelection()
     } else {
       const routeNoteId = typeof route.params.noteId === 'string' ? route.params.noteId : null
       if (routeNoteId && noteRows.some((n) => n.id === routeNoteId)) {
+        const note = noteRows.find((n) => n.id === routeNoteId)
+        if ((note?.vault_id ?? null) !== (activeVaultId.value ?? null)) {
+          activeVaultId.value = note?.vault_id ?? null
+          await loadVaultPrefs()
+          openTabs.value = loadPersistedOpenTabs(userId.value)
+        }
         await selectNote(routeNoteId, { syncRoute: false })
-      } else if (selectedNoteId.value && noteRows.some((n) => n.id === selectedNoteId.value)) {
+      } else if (selectedNoteId.value && scopedNotes.some((n) => n.id === selectedNoteId.value)) {
         await selectNote(selectedNoteId.value, { syncRoute: false })
       } else if (openTabs.value.some((tab) => tab.type === 'note' && ids.has(tab.id))) {
         const firstTab = openTabs.value.find((tab) => tab.type === 'note' && ids.has(tab.id))
         if (firstTab) await selectNote(firstTab.id)
       } else {
-        const tutorial = noteRows.find((n) => n.system_key === 'markdown-tutorial')
+        const tutorial = scopedNotes.find((n) => n.system_key === 'markdown-tutorial')
         const first =
-          tutorial ?? noteRows.slice().sort((a, b) => a.title.localeCompare(b.title, 'fr'))[0]
+          tutorial ?? scopedNotes.slice().sort((a, b) => a.title.localeCompare(b.title, 'fr'))[0]
         if (first) await selectNote(first.id)
         else clearSelection()
       }
@@ -520,6 +780,7 @@ async function loadAll() {
     errorMessage.value = err.message || 'Impossible de charger les notes.'
     folders.value = []
     notes.value = []
+    vaults.value = []
   } finally {
     isLoading.value = false
   }
@@ -539,6 +800,14 @@ function clearSelection() {
 async function selectNote(noteId, { syncRoute = true, openTab = true } = {}) {
   if (!noteId || !userId.value) return
 
+  const listed = notes.value.find((note) => note.id === noteId)
+  if (listed && (listed.vault_id ?? null) !== (activeVaultId.value ?? null)) {
+    activeVaultId.value = listed.vault_id ?? null
+    if (userId.value) openTabs.value = loadPersistedOpenTabs(userId.value)
+    await loadVaultPrefs()
+    pruneOpenTabsForContext()
+  }
+
   if (selectedNoteId.value && selectedNoteId.value !== noteId) {
     stashCurrentNoteSession()
     if (dirty.value) await flushSave()
@@ -554,10 +823,20 @@ async function selectNote(noteId, { syncRoute = true, openTab = true } = {}) {
     expandAncestorsOfNote(note.id)
     if (openTab) ensureNoteTab(note.id)
     if (syncRoute) {
-      const name = route.name?.toString().startsWith('embed-') ? 'embed-notes-detail' : 'notes-detail'
       const onGraph = isGraphView.value
-      if (onGraph || route.params.noteId !== note.id) {
-        await router.push({ name, params: { noteId: note.id } })
+      if (activeVaultId.value) {
+        const name = routeName('notes-vault-detail')
+        if (onGraph || route.params.noteId !== note.id) {
+          await router.push({
+            name,
+            params: { vaultId: activeVaultId.value, noteId: note.id },
+          })
+        }
+      } else {
+        const name = routeName('notes-detail')
+        if (onGraph || route.params.noteId !== note.id) {
+          await router.push({ name, params: { noteId: note.id } })
+        }
       }
     }
     closeMobileDrawer()
@@ -576,8 +855,14 @@ async function openGraphView() {
   ensureGraphTab()
   closeMobileDrawer()
   if (isGraphView.value) return
-  const name = route.name?.toString().startsWith('embed-') ? 'embed-notes-graph' : 'notes-graph'
-  await router.push({ name })
+  if (activeVaultId.value) {
+    await router.push({
+      name: routeName('notes-vault-graph'),
+      params: { vaultId: activeVaultId.value },
+    })
+    return
+  }
+  await router.push({ name: routeName('notes-graph') })
 }
 
 function markDirty() {
@@ -684,6 +969,7 @@ async function submitPrompt() {
       const folder = await createNoteFolder(supabase, userId.value, {
         name: value,
         parentId: promptParentId.value,
+        vaultId: activeVaultId.value,
       })
       folders.value = [...folders.value, folder]
       if (promptParentId.value) {
@@ -752,8 +1038,7 @@ async function onDeleteNote(noteId) {
         await activateTab(fallback)
       } else {
         clearSelection()
-        const name = route.name?.toString().startsWith('embed-') ? 'embed-notes' : 'notes'
-        await router.replace({ name })
+        await navigateToNotesHome()
       }
     }
   } catch (err) {
@@ -802,8 +1087,7 @@ async function onDeleteFolder(folderId) {
         await activateTab(fallback)
       } else {
         clearSelection()
-        const name = route.name?.toString().startsWith('embed-') ? 'embed-notes' : 'notes'
-        await router.replace({ name })
+        await navigateToNotesHome()
       }
     }
   } catch (err) {
@@ -916,18 +1200,34 @@ onUnmounted(() => {
 watch(userId, (id) => {
   if (!id) return
   void (async () => {
+    const routeVaultId =
+      typeof route.params.vaultId === 'string' && route.params.vaultId
+        ? route.params.vaultId
+        : null
+    activeVaultId.value = routeVaultId
     openTabs.value = loadPersistedOpenTabs(id)
-    try {
-      extensionPrefs.value = await loadNotesExtensionPrefs(supabase, id)
-      templatePrefs.value = await loadNoteTemplatePrefs(supabase, id)
-    } catch (err) {
-      console.error(err)
-      extensionPrefs.value = createDefaultNotesExtensionPrefs()
-      templatePrefs.value = createDefaultNoteTemplatePrefs()
-    }
+    await loadVaultPrefs()
     await loadAll()
   })()
 })
+
+watch(
+  () => route.params.vaultId,
+  async (vaultId) => {
+    const nextVaultId = typeof vaultId === 'string' && vaultId ? vaultId : null
+    if (nextVaultId === activeVaultId.value) return
+    if (selectedNoteId.value) {
+      stashCurrentNoteSession()
+      if (dirty.value) await flushSave()
+    }
+    activeVaultId.value = nextVaultId
+    if (!userId.value) return
+    openTabs.value = loadPersistedOpenTabs(userId.value)
+    await loadVaultPrefs()
+    pruneOpenTabsForContext()
+    clearSelection()
+  },
+)
 
 watch(
   () => route.params.noteId,
@@ -973,7 +1273,9 @@ watch(draftFolderId, (value) => {
       'notes-page--sidebar-collapsed': sidebarCollapsed || isMobileNotes,
       'notes-page--mobile': isMobileNotes,
       'notes-page--drawer-open': isMobileNotes && !sidebarCollapsed,
+      'notes-page--in-vault': Boolean(activeVault),
     }"
+    :style="activeVault ? activeVaultStyle : undefined"
   >
     <div
       v-if="isMobileNotes && !sidebarCollapsed"
@@ -987,8 +1289,41 @@ watch(draftFolderId, (value) => {
       :aria-hidden="isMobileNotes && sidebarCollapsed ? 'true' : undefined"
     >
       <header class="notes-page__sidebar-header">
+        <div v-if="activeVault" class="notes-page__vault-nav">
+          <button type="button" class="notes-page__back-btn" @click="leaveVault()">
+            ← Retour
+          </button>
+          <span class="notes-page__vault-badge" :style="activeVaultStyle">
+            <span class="notes-page__vault-badge-icon" aria-hidden="true">
+              {{ normalizeVaultIcon(activeVault.icon) }}
+            </span>
+            {{ activeVault.name }}
+          </span>
+          <button
+            type="button"
+            class="notes-page__vault-theme-btn"
+            title="Personnaliser le thème"
+            aria-label="Personnaliser le thème du coffre"
+            @click="openVaultThemeEditor(activeVault)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 2a10 10 0 0 0-10 10c0 1.7 1.4 3 3 3h1.2c.9 0 1.6.7 1.6 1.6 0 .9.7 1.6 1.6 1.6H12a10 10 0 0 0 0-20z" />
+              <circle cx="8" cy="11" r="1.1" fill="currentColor" stroke="none" />
+              <circle cx="12" cy="8" r="1.1" fill="currentColor" stroke="none" />
+              <circle cx="16" cy="11" r="1.1" fill="currentColor" stroke="none" />
+              <circle cx="14.5" cy="15" r="1.1" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+        </div>
         <div class="notes-page__sidebar-title-row">
-          <h1 class="notes-page__title">{{ pageTitle }}</h1>
+          <h1 class="notes-page__title">
+            <span
+              v-if="activeVault"
+              class="notes-page__vault-title-icon"
+              aria-hidden="true"
+            >{{ normalizeVaultIcon(activeVault.icon) }}</span>
+            {{ activeVault ? activeVault.name : pageTitle }}
+          </h1>
           <button
             type="button"
             class="notes-page__sidebar-toggle"
@@ -1060,25 +1395,96 @@ watch(draftFolderId, (value) => {
       <div v-else-if="errorMessage" class="notes-page__tree-status notes-page__tree-status--error">
         {{ errorMessage }}
       </div>
-      <nav v-else class="notes-page__tree" aria-label="Arborescence des notes">
-        <NotesTreeNode
-          v-for="node in filteredTree"
-          :key="`${node.type}-${node.id}`"
-          :node="node"
-          :depth="0"
-          :selected-note-id="selectedNoteId"
-          :is-folder-expanded="isFolderExpanded"
-          @select-note="selectNote"
-          @toggle-folder="toggleFolder"
-          @create-note="onTreeCreateNote"
-          @create-folder="onTreeCreateFolder"
-          @rename-folder="onTreeRenameFolder"
-          @rename-note="onTreeRenameNote"
-          @delete-note="onDeleteNote"
-          @delete-folder="onDeleteFolder"
-        />
-        <p v-if="!filteredTree.length" class="notes-page__tree-empty">Aucun élément.</p>
-      </nav>
+      <div v-else class="notes-page__tree-scroll">
+        <section v-if="!activeVault" class="notes-page__vaults">
+          <div class="notes-page__vaults-head">
+            <h2 class="notes-page__vaults-title">Coffres</h2>
+            <button
+              type="button"
+              class="notes-page__vaults-add"
+              title="Nouveau coffre"
+              @click="openVaultThemeCreate()"
+            >
+              +
+            </button>
+          </div>
+          <p class="notes-page__vaults-hint">
+            Ouvre un coffre pour y ranger dossiers et notes avec leurs propres extensions.
+          </p>
+          <div v-if="vaultSummaries.length" class="notes-page__vaults-grid">
+            <button
+              v-for="vault in vaultSummaries"
+              :key="vault.id"
+              type="button"
+              class="notes-page__vault-card"
+              :style="vaultThemeStyle(vault)"
+              @click="openVault(vault.id)"
+            >
+              <div class="notes-page__vault-card-head">
+                <span class="notes-page__vault-card-icon" aria-hidden="true">
+                  {{ normalizeVaultIcon(vault.icon) }}
+                </span>
+                <span class="notes-page__vault-card-name">{{ vault.name }}</span>
+              </div>
+              <span class="notes-page__vault-card-meta">
+                {{ vault.noteCount }} note{{ vault.noteCount > 1 ? 's' : '' }}
+                · {{ vault.folderCount }} dossier{{ vault.folderCount > 1 ? 's' : '' }}
+              </span>
+              <span
+                class="notes-page__vault-card-theme"
+                role="button"
+                tabindex="0"
+                title="Personnaliser le thème"
+                @click.stop="openVaultThemeEditor(vault)"
+                @keydown.enter.stop.prevent="openVaultThemeEditor(vault)"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 2a10 10 0 0 0-10 10c0 1.7 1.4 3 3 3h1.2c.9 0 1.6.7 1.6 1.6 0 .9.7 1.6 1.6 1.6H12a10 10 0 0 0 0-20z" />
+                  <circle cx="8" cy="11" r="1.1" fill="currentColor" stroke="none" />
+                  <circle cx="12" cy="8" r="1.1" fill="currentColor" stroke="none" />
+                  <circle cx="16" cy="11" r="1.1" fill="currentColor" stroke="none" />
+                  <circle cx="14.5" cy="15" r="1.1" fill="currentColor" stroke="none" />
+                </svg>
+              </span>
+              <span
+                class="notes-page__vault-card-delete"
+                role="button"
+                tabindex="0"
+                title="Supprimer le coffre"
+                @click.stop="onDeleteVault(vault.id)"
+                @keydown.enter.stop.prevent="onDeleteVault(vault.id)"
+              >
+                ×
+              </span>
+            </button>
+          </div>
+          <p v-else class="notes-page__vaults-empty">Aucun coffre pour l’instant.</p>
+        </section>
+
+        <section v-if="!activeVault" class="notes-page__section-label">Hors coffre</section>
+
+        <nav class="notes-page__tree" aria-label="Arborescence des notes">
+          <NotesTreeNode
+            v-for="node in filteredTree"
+            :key="`${node.type}-${node.id}`"
+            :node="node"
+            :depth="0"
+            :selected-note-id="selectedNoteId"
+            :is-folder-expanded="isFolderExpanded"
+            @select-note="selectNote"
+            @toggle-folder="toggleFolder"
+            @create-note="onTreeCreateNote"
+            @create-folder="onTreeCreateFolder"
+            @rename-folder="onTreeRenameFolder"
+            @rename-note="onTreeRenameNote"
+            @delete-note="onDeleteNote"
+            @delete-folder="onDeleteFolder"
+          />
+          <p v-if="!filteredTree.length" class="notes-page__tree-empty">
+            {{ activeVault ? 'Ce coffre est vide.' : 'Aucun élément hors coffre.' }}
+          </p>
+        </nav>
+      </div>
 
       <footer class="notes-page__sidebar-footer">
         <button
@@ -1120,8 +1526,9 @@ watch(draftFolderId, (value) => {
       <NotesGraphView
         v-if="isGraphView"
         :active="isGraphView"
-        :notes="notes"
+        :notes="graphNotes"
         :selected-note-id="selectedNoteId"
+        :theme-style="activeVault ? activeVaultStyle : null"
         @select-note="selectNote"
       />
 
@@ -1263,11 +1670,20 @@ watch(draftFolderId, (value) => {
     <NotesTemplateSettingsModal
       :open="templateSettingsOpen"
       :prefs="templatePrefs"
-      :folders="folders"
-      :notes="notes"
+      :folders="contextFolders"
+      :notes="contextNotes"
       :user-id="userId || ''"
+      :vault-id="activeVaultId"
       @close="templateSettingsOpen = false"
       @save="onTemplateSettingsSave"
+    />
+
+    <NotesVaultThemeModal
+      :open="vaultThemeModalOpen"
+      :mode="vaultThemeModalMode"
+      :vault="vaultThemeTarget"
+      @close="vaultThemeModalOpen = false"
+      @save="onSaveVaultTheme"
     />
   </div>
 </template>
@@ -1368,6 +1784,363 @@ watch(draftFolderId, (value) => {
   margin: 0.2rem 0 0.5rem;
   font-size: 0.72rem;
   color: #6d5a7e;
+}
+
+.notes-page--in-vault {
+  background: var(--notes-vault-page-bg, #f4f0fa);
+  border-color: var(--notes-vault-border-strong, #e6ddf2);
+}
+
+.notes-page--in-vault .notes-page__sidebar {
+  background: var(--notes-vault-sidebar-bg, #faf7ff);
+  border-right-color: var(--notes-vault-border, #e6ddf2);
+}
+
+.notes-page--in-vault .notes-page__sidebar-footer {
+  border-top-color: var(--notes-vault-border, #e6ddf2);
+}
+
+.notes-page--in-vault .notes-page__main {
+  background: var(--notes-vault-main-bg, #faf7fd);
+}
+
+.notes-page--in-vault :deep(.notes-tabs) {
+  background: var(--notes-vault-tabs-bg, #efe6f8);
+  border-bottom-color: var(--notes-vault-border, #e0d4ee);
+}
+
+.notes-page--in-vault :deep(.notes-tabs__tab--active) {
+  background: var(--notes-vault-main-bg, #faf7fd);
+  border-color: var(--notes-vault-border, #e0d4ee);
+  color: var(--notes-vault-text, #3b2a4a);
+}
+
+.notes-page--in-vault :deep(.notes-tabs__tab:hover) {
+  background: var(--notes-vault-icon-hover-bg, rgba(255, 255, 255, 0.45));
+  color: var(--notes-vault-text, #3b2a4a);
+}
+
+.notes-page--in-vault .notes-page__editor-header {
+  background: var(--notes-vault-header-bg, #f3ebf9);
+  border-bottom-color: var(--notes-vault-border, #e6ddf2);
+}
+
+.notes-page--in-vault .notes-page__title-input {
+  color: var(--notes-vault-text, #3b2a4a);
+}
+
+.notes-page--in-vault .notes-page__folder-label,
+.notes-page--in-vault .notes-page__meta,
+.notes-page--in-vault .notes-page__save-msg {
+  color: var(--notes-vault-text-muted, #6d5a7e);
+}
+
+.notes-page--in-vault .notes-page__folder-select,
+.notes-page--in-vault .notes-page__search {
+  border-color: var(--notes-vault-border-strong, #d5c4e6);
+  background: var(--notes-vault-input-bg, #fff);
+  color: var(--notes-vault-text, #3b2a4a);
+}
+
+.notes-page--in-vault .notes-page__icon-btn {
+  color: var(--notes-vault-icon, #72a098);
+}
+
+.notes-page--in-vault .notes-page__icon-btn:hover {
+  color: var(--notes-vault-color, #ad81be);
+  background: var(--notes-vault-icon-hover-bg, transparent);
+}
+
+.notes-page--in-vault .notes-page__icon-btn--active {
+  color: var(--notes-vault-color, #ad81be);
+}
+
+.notes-page--in-vault .notes-page__mode-switch {
+  border-color: var(--notes-vault-border-strong, #72a098);
+  background: var(--notes-vault-mode-bg, #e8f6ee);
+}
+
+.notes-page--in-vault .notes-page__mode {
+  color: var(--notes-vault-text, #3d5c50);
+}
+
+.notes-page--in-vault .notes-page__mode--active {
+  background: var(--notes-vault-mode-active, #95d1aa);
+  color: var(--notes-vault-text, #244438);
+}
+
+.notes-page--in-vault .notes-page__btn {
+  border-color: var(--notes-vault-border-strong, #d5c4e6);
+  background: var(--notes-vault-input-bg, #fff);
+  color: var(--notes-vault-text, #3b2a4a);
+}
+
+.notes-page--in-vault .notes-page__btn--primary {
+  background: var(--notes-vault-btn-bg, #d5b5ea);
+  border-color: var(--notes-vault-color, #c5a0dc);
+  color: var(--notes-vault-btn-text, #fff);
+}
+
+.notes-page--in-vault .notes-page__back-btn {
+  border-color: var(--notes-vault-border-strong, rgba(173, 129, 190, 0.35));
+  color: var(--notes-vault-text, #3d2f4a);
+  background: var(--notes-vault-input-bg, #fff);
+}
+
+.notes-page--in-vault .notes-page__vault-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--notes-vault-text, #3d2f4a);
+  background: color-mix(in srgb, var(--notes-vault-accent, #d5b5ea) 65%, white);
+  border: 1px solid color-mix(in srgb, var(--notes-vault-color, #ad81be) 30%, transparent);
+}
+
+.notes-page--in-vault .notes-page__title {
+  color: var(--notes-vault-text, #3b2a4a);
+}
+
+.notes-page--in-vault .notes-page__sidebar-rail {
+  background: var(--notes-vault-sidebar-bg, #efe6f8);
+  border-right-color: var(--notes-vault-border, #e0d4ee);
+  color: var(--notes-vault-icon, #ad81be);
+}
+
+.notes-page__vault-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.notes-page__back-btn {
+  border: 1px solid color-mix(in srgb, var(--notes-vault-color, #ad81be) 35%, transparent);
+  background: #fff;
+  color: #3d2f4a;
+  border-radius: 8px;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.notes-page__vault-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #3d2f4a;
+  background: color-mix(in srgb, var(--notes-vault-accent, #d5b5ea) 65%, white);
+  border: 1px solid color-mix(in srgb, var(--notes-vault-color, #ad81be) 30%, transparent);
+  min-width: 0;
+}
+
+.notes-page__vault-badge-icon {
+  font-size: 0.68rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.notes-page__vault-title-icon {
+  margin-right: 0.3rem;
+  font-size: 0.82em;
+  line-height: 1;
+}
+
+.notes-page__vault-theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  margin-left: auto;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--notes-vault-color, #ad81be) 35%, transparent);
+  background: var(--notes-vault-input-bg, #fff);
+  color: var(--notes-vault-icon, #ad81be);
+  cursor: pointer;
+}
+
+.notes-page__vault-theme-btn svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.notes-page__vault-theme-btn:hover {
+  background: var(--notes-vault-icon-hover-bg, rgba(255, 255, 255, 0.6));
+  color: var(--notes-vault-color, #ad81be);
+}
+
+.notes-page__tree-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.notes-page__vaults {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px dashed #d5c4e6;
+}
+
+.notes-page__vaults-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.notes-page__vaults-title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #3d2f4a;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.notes-page__vaults-add {
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 8px;
+  border: 1px solid #d5c4e6;
+  background: #fff;
+  color: #5a4a68;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.notes-page__vaults-hint {
+  margin: 0 0 0.55rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #6d5a7e;
+}
+
+.notes-page__vaults-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+}
+
+.notes-page__vault-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--notes-vault-color, #ad81be) 35%, transparent);
+  background: var(--notes-vault-graph-bg);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.notes-page__vault-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--notes-vault-color, #ad81be) 18%, transparent);
+}
+
+.notes-page__vault-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.32rem;
+  width: 100%;
+  min-width: 0;
+  padding-right: 2.4rem;
+}
+
+.notes-page__vault-card-icon {
+  font-size: 0.76rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.notes-page__vault-card-name {
+  font-size: 0.84rem;
+  font-weight: 750;
+  color: #2c2434;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes-page__vault-card-meta {
+  font-size: 0.68rem;
+  color: #6d5a7e;
+}
+
+.notes-page__vault-card-delete {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.4rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: #8b7a96;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.notes-page__vault-card-theme {
+  position: absolute;
+  top: 0.35rem;
+  right: 1.75rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--notes-vault-icon, #8b7a96);
+}
+
+.notes-page__vault-card-theme svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.notes-page__vault-card-theme:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--notes-vault-color, #ad81be);
+}
+
+.notes-page__vault-card-delete:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #c0392b;
+}
+
+.notes-page__vaults-empty {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #8b7a96;
+  font-style: italic;
+}
+
+.notes-page__section-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8b7a96;
 }
 
 .notes-page__sidebar-actions {

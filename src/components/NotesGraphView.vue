@@ -8,7 +8,11 @@ const props = defineProps({
   selectedNoteId: { type: String, default: null },
   /** Mode embarqué (dashboard) : pas d’en-tête local, hauteur plus compacte. */
   compact: { type: Boolean, default: false },
+  /** Variables CSS du thème coffre (vue globale en dégradé). */
+  themeStyle: { type: Object, default: null },
 })
+
+const hasVaultTheme = computed(() => Boolean(props.themeStyle && Object.keys(props.themeStyle).length))
 
 const emit = defineEmits(['select-note'])
 
@@ -235,7 +239,11 @@ onUnmounted(() => {
 <template>
   <div
     class="notes-graph"
-    :class="{ 'notes-graph--compact': compact }"
+    :class="{
+      'notes-graph--compact': compact,
+      'notes-graph--themed': hasVaultTheme,
+    }"
+    :style="themeStyle || undefined"
     aria-label="Vue globale des notes"
   >
     <header v-if="!compact" class="notes-graph__header">
@@ -309,6 +317,55 @@ onUnmounted(() => {
 
 .notes-graph--compact {
   background: transparent;
+}
+
+.notes-graph--themed {
+  background: var(--notes-vault-main-bg, #faf7fd);
+}
+
+.notes-graph--themed.notes-graph--compact {
+  background: transparent;
+}
+
+.notes-graph--themed .notes-graph__header {
+  border-bottom-color: var(--notes-vault-border, #e6ddf2);
+  background: var(--notes-vault-graph-header-bg, #f3ebf9);
+}
+
+.notes-graph--themed .notes-graph__title {
+  color: var(--notes-vault-text, #3b2a4a);
+}
+
+.notes-graph--themed .notes-graph__meta {
+  color: var(--notes-vault-text-muted, #6d5a7e);
+}
+
+.notes-graph--themed .notes-graph__viewport {
+  background: var(--notes-vault-graph-bg);
+}
+
+.notes-graph--themed .notes-graph__link {
+  stroke: var(--notes-vault-graph-link, #ad81be);
+  stroke-opacity: 0.55;
+}
+
+.notes-graph--themed .notes-graph__dot {
+  fill: var(--notes-vault-graph-node, #9b6fb3);
+  stroke: var(--notes-vault-graph-node-stroke, #7a528f);
+}
+
+.notes-graph--themed .notes-graph__node--hover .notes-graph__dot,
+.notes-graph--themed .notes-graph__node--active .notes-graph__dot {
+  fill: var(--notes-vault-graph-node-active, #ad81be);
+  stroke: var(--notes-vault-graph-node-active-stroke, #6d4a82);
+}
+
+.notes-graph--themed .notes-graph__label {
+  fill: var(--notes-vault-text, #3b2a4a);
+}
+
+.notes-graph--themed .notes-graph__empty {
+  color: var(--notes-vault-text-muted, #6d5a7e);
 }
 
 .notes-graph__header {

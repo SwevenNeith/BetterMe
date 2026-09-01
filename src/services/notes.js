@@ -8,7 +8,7 @@ import {
 
 const TABLE = 'notes'
 const SEED_TABLE = 'notes_seed_state'
-const SELECT = 'id, user_id, folder_id, title, content_md, system_key, created_at, updated_at'
+const SELECT = 'id, user_id, folder_id, title, content_md, system_key, vault_id, created_at, updated_at'
 
 function normalizeNote(row) {
   return {
@@ -18,6 +18,7 @@ function normalizeNote(row) {
     title: String(row.title ?? '').trim() || 'Sans titre',
     content_md: row.content_md ?? '',
     system_key: row.system_key ?? null,
+    vault_id: row.vault_id ?? null,
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? row.created_at ?? null,
   }
@@ -60,7 +61,7 @@ export async function getNote(supabase, userId, noteId) {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
- * @param {{ title?: string, contentMd?: string, folderId?: string | null, systemKey?: string | null }} input
+ * @param {{ title?: string, contentMd?: string, folderId?: string | null, systemKey?: string | null, vaultId?: string | null }} input
  */
 export async function createNote(supabase, userId, input = {}) {
   if (!userId) throw new Error('Utilisateur non connecté.')
@@ -80,6 +81,9 @@ export async function createNote(supabase, userId, input = {}) {
 
   const systemKey = input?.systemKey ?? input?.system_key ?? null
   if (systemKey) row.system_key = systemKey
+
+  const vaultId = input?.vaultId ?? input?.vault_id ?? null
+  if (vaultId) row.vault_id = vaultId
 
   const { data, error } = await supabase.from(TABLE).insert(row).select(SELECT).single()
   if (error) throw error
