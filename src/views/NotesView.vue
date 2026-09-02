@@ -78,6 +78,7 @@ const vaultThemeModalOpen = ref(false)
 const vaultThemeModalMode = ref('create')
 const vaultThemeTarget = ref(null)
 const expandedFolderIds = ref(new Set())
+const vaultsSectionCollapsed = ref(false)
 const selectedNoteId = ref(null)
 const selectedNote = ref(null)
 const draftTitle = ref('')
@@ -362,6 +363,30 @@ function loadPersistedOpenTabs(uid) {
   }
 }
 
+function vaultsCollapsedStorageKey(uid) {
+  return `betterme-notes-vaults-collapsed:${uid || 'anon'}`
+}
+
+function loadVaultsSectionCollapsed(uid) {
+  try {
+    return localStorage.getItem(vaultsCollapsedStorageKey(uid)) === '1'
+  } catch {
+    return false
+  }
+}
+
+function persistVaultsSectionCollapsed() {
+  if (!userId.value) return
+  try {
+    localStorage.setItem(
+      vaultsCollapsedStorageKey(userId.value),
+      vaultsSectionCollapsed.value ? '1' : '0',
+    )
+  } catch {
+    // ignore
+  }
+}
+
 function ensureNoteTab(noteId) {
   if (!noteId) return
   if (openTabs.value.some((tab) => tab.type === 'note' && tab.id === noteId)) return
@@ -582,6 +607,29 @@ function toggleFolder(id) {
   if (next.has(id)) next.delete(id)
   else next.add(id)
   expandedFolderIds.value = next
+}
+
+const hasContextFolders = computed(() => contextFolders.value.length > 0)
+
+const allFoldersExpanded = computed(() => {
+  const ids = contextFolders.value.map((folder) => folder.id)
+  if (!ids.length) return false
+  return ids.every((id) => expandedFolderIds.value.has(id))
+})
+
+function toggleAllFolders() {
+  const ids = contextFolders.value.map((folder) => folder.id)
+  if (!ids.length) return
+  if (allFoldersExpanded.value) {
+    expandedFolderIds.value = new Set()
+    return
+  }
+  expandedFolderIds.value = new Set(ids)
+}
+
+function toggleVaultsSection() {
+  vaultsSectionCollapsed.value = !vaultsSectionCollapsed.value
+  persistVaultsSectionCollapsed()
 }
 
 function expandAncestorsOfNote(noteId) {
@@ -1375,6 +1423,7 @@ watch(userId, (id) => {
         : null
     activeVaultId.value = routeVaultId
     openTabs.value = loadPersistedOpenTabs(id)
+    vaultsSectionCollapsed.value = loadVaultsSectionCollapsed(id)
     await loadVaultPrefs()
     await Promise.all([loadAll(), loadDictionary()])
   })()
@@ -1538,6 +1587,26 @@ watch(draftFolderId, (value) => {
           <button
             type="button"
             class="notes-page__icon-btn"
+            :class="{ 'notes-page__icon-btn--active': allFoldersExpanded }"
+            :title="allFoldersExpanded ? 'Tout replier' : 'Tout déplier'"
+            :aria-label="allFoldersExpanded ? 'Replier tous les dossiers' : 'Déplier tous les dossiers'"
+            :disabled="!hasContextFolders"
+            @click="toggleAllFolders"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <template v-if="allFoldersExpanded">
+                <polyline points="7 11 12 6 17 11" />
+                <polyline points="7 18 12 13 17 18" />
+              </template>
+              <template v-else>
+                <polyline points="7 13 12 18 17 13" />
+                <polyline points="7 6 12 11 17 6" />
+              </template>
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="notes-page__icon-btn"
             :class="{ 'notes-page__icon-btn--active': isGraphView }"
             title="Vue globale"
             aria-label="Ouvrir la vue globale des notes"
@@ -1568,20 +1637,43 @@ watch(draftFolderId, (value) => {
         {{ errorMessage }}
       </div>
       <div v-else class="notes-page__tree-scroll">
-        <section v-if="!activeVault" class="notes-page__vaults">
+        <section
+          v-if="!activeVault"
+          class="notes-page__vaults"
+          :class="{ 'notes-page__vaults--collapsed': vaultsSectionCollapsed }"
+        >
           <div class="notes-page__vaults-head">
             <h2 class="notes-page__vaults-title">Coffres</h2>
-            <button
-              type="button"
-              class="notes-page__vaults-add"
-              title="Nouveau coffre"
-              @click="openVaultThemeCreate()"
-            >
-              +
-            </button>
+            <div class="notes-page__vaults-head-actions">
+              <button
+                type="button"
+                class="notes-page__icon-btn notes-page__vaults-toggle"
+                :title="vaultsSectionCollapsed ? 'Afficher les coffres' : 'Masquer les coffres'"
+                :aria-label="vaultsSectionCollapsed ? 'Afficher la liste des coffres' : 'Masquer la liste des coffres'"
+                :aria-expanded="!vaultsSectionCollapsed"
+                @click="toggleVaultsSection"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="notes-page__icon-btn"
+                title="Nouveau coffre"
+                aria-label="Nouveau coffre"
+                @click="openVaultThemeCreate()"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+            </div>
           </div>
+          <template v-if="!vaultsSectionCollapsed">
           <p class="notes-page__vaults-hint">
-            Ouvre un coffre pour y ranger dossiers et notes avec leurs propres extensions.
+            Espaces isolés avec dossiers, notes et extensions dédiées.
           </p>
           <div v-if="vaultSummaries.length" class="notes-page__vaults-grid">
             <button
@@ -1631,6 +1723,7 @@ watch(draftFolderId, (value) => {
             </button>
           </div>
           <p v-else class="notes-page__vaults-empty">Aucun coffre pour l’instant.</p>
+          </template>
         </section>
 
         <section v-if="!activeVault" class="notes-page__section-label">Hors coffre</section>
@@ -2229,6 +2322,11 @@ watch(draftFolderId, (value) => {
   border-bottom: 1px dashed #d5c4e6;
 }
 
+.notes-page__vaults--collapsed {
+  margin-bottom: 0.45rem;
+  padding-bottom: 0.35rem;
+}
+
 .notes-page__vaults-head {
   display: flex;
   align-items: center;
@@ -2237,32 +2335,59 @@ watch(draftFolderId, (value) => {
   margin-bottom: 0.25rem;
 }
 
+.notes-page__vaults--collapsed .notes-page__vaults-head {
+  margin-bottom: 0;
+}
+
+.notes-page__vaults-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  flex-shrink: 0;
+}
+
+.notes-page__vaults-head-actions .notes-page__icon-btn {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.notes-page__vaults-head-actions .notes-page__icon-btn svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.notes-page__vaults-toggle {
+  transition: transform 0.15s ease;
+}
+
+.notes-page__vaults--collapsed .notes-page__vaults-toggle {
+  transform: rotate(-90deg);
+}
+
+.notes-page__icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.notes-page__icon-btn:disabled:hover {
+  color: var(--color-tertiary, #72a098);
+  background: transparent;
+}
+
 .notes-page__vaults-title {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 800;
   color: #3d2f4a;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
-.notes-page__vaults-add {
-  width: 1.65rem;
-  height: 1.65rem;
-  border-radius: 8px;
-  border: 1px solid #d5c4e6;
-  background: #fff;
-  color: #5a4a68;
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
 .notes-page__vaults-hint {
-  margin: 0 0 0.55rem;
-  font-size: 0.72rem;
-  line-height: 1.4;
-  color: #6d5a7e;
+  margin: 0 0 0.35rem;
+  font-size: 0.65rem;
+  line-height: 1.3;
+  color: #8b7a96;
 }
 
 .notes-page__vaults-grid {
