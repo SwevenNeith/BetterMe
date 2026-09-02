@@ -53,6 +53,14 @@ export const NOTES_EXTENSIONS = [
     defaultEnabled: true,
   },
   {
+    id: 'dictionary-hints',
+    name: 'Dictionnaire dans les notes',
+    description: 'Surligne les mots du dictionnaire et affiche leur définition au survol.',
+    details:
+      'Les mots présents dans ton dictionnaire personnel (ou liés via une forme alternative) sont soulignés dans l’aperçu.\n\n• Survole un mot pour voir sa définition\n• Clic droit sur une sélection dans l’éditeur : Ajouter au dictionnaire ou Lier à une définition existante',
+    defaultEnabled: true,
+  },
+  {
     id: 'line-breaks',
     name: 'Retours à la ligne souples',
     description: 'Un simple retour à la ligne dans le Markdown devient un saut de ligne à l’écran.',

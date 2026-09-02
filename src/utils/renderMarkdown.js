@@ -63,7 +63,7 @@ const ALLOWED_ATTRS = {
   TH: new Set(['align', 'colspan', 'rowspan']),
   CODE: new Set(['class']),
   PRE: new Set(['class']),
-  SPAN: new Set(['class']),
+  SPAN: new Set(['class', 'data-dict-id', 'data-dict-word', 'data-dict-alias']),
   DIV: new Set(['class']),
   ABBR: new Set(['title']),
 }

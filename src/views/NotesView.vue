@@ -49,6 +49,16 @@ import {
 } from '../services/noteVaults.js'
 import { vaultThemeStyle, normalizeVaultIcon } from '../constants/noteVaults.js'
 import NotesVaultThemeModal from '../components/NotesVaultThemeModal.vue'
+import DictionaryEntryModal from '../components/DictionaryEntryModal.vue'
+import DictionaryLinkEntryModal from '../components/DictionaryLinkEntryModal.vue'
+import { listDictionaryEntries } from '../services/dictionaryEntries.js'
+import { listDictionaryAliases } from '../services/dictionaryAliases.js'
+import {
+  annotateHtmlWithDictionary,
+  buildDictionaryLookup,
+  formatDictionaryTooltip,
+  lookupDictionarySelection,
+} from '../utils/dictionaryLookup.js'
 
 const GRAPH_TAB = { type: 'graph', id: 'graph' }
 
@@ -83,6 +93,16 @@ const sidebarCollapsed = ref(false)
 const isMobileNotes = ref(false)
 const editorEl = ref(null)
 const previewEl = ref(null)
+const dictionaryEntries = ref([])
+const dictionaryAliases = ref([])
+const dictionaryEntryModalOpen = ref(false)
+const dictionaryLinkModalOpen = ref(false)
+const dictionaryModalWord = ref('')
+const dictionaryEditEntry = ref(null)
+/** @type {import('vue').Ref<{ x: number, y: number, word: string } | null>} */
+const editorContextMenu = ref(null)
+/** @type {import('vue').Ref<{ x: number, y: number, text: string } | null>} */
+const dictionaryTooltip = ref(null)
 const extensionsOpen = ref(false)
 const templateSettingsOpen = ref(false)
 const extensionPrefs = ref(createDefaultNotesExtensionPrefs())
@@ -497,13 +517,34 @@ const draftFolderSelect = computed({
   },
 })
 
-const previewHtml = computed(() =>
-  renderMarkdownToSafeHtml(draftContent.value, {
+const previewHtml = computed(() => {
+  let html = renderMarkdownToSafeHtml(draftContent.value, {
     notes: contextNotes.value,
     enableWikiLinks: isExtEnabled('wikilinks'),
     breaks: isExtEnabled('line-breaks'),
-  }),
+  })
+  if (isExtEnabled('dictionary-hints') && dictionaryLookup.value.size) {
+    html = annotateHtmlWithDictionary(html, dictionaryLookup.value)
+  }
+  return html
+})
+
+const dictionaryLookup = computed(() =>
+  buildDictionaryLookup(dictionaryEntries.value, dictionaryAliases.value),
 )
+
+const dictionaryEntriesById = computed(() => {
+  const map = new Map()
+  for (const entry of dictionaryEntries.value) {
+    map.set(entry.id, entry)
+  }
+  return map
+})
+
+const editorContextSelectionHit = computed(() => {
+  if (!editorContextMenu.value?.word) return null
+  return lookupDictionarySelection(editorContextMenu.value.word, dictionaryLookup.value)
+})
 
 const noteCountLabel = computed(() => {
   const n = contextNotes.value.length
@@ -1101,6 +1142,128 @@ async function onMoveNoteFolder() {
   await flushSave()
 }
 
+async function loadDictionary() {
+  if (!userId.value) return
+  try {
+    const [entries, aliases] = await Promise.all([
+      listDictionaryEntries(supabase, userId.value),
+      listDictionaryAliases(supabase, userId.value),
+    ])
+    dictionaryEntries.value = entries
+    dictionaryAliases.value = aliases
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+function isValidDictionarySelection(value) {
+  const trimmed = String(value ?? '').trim()
+  return Boolean(trimmed) && trimmed.length <= 120
+}
+
+function openEditorContextMenu(event, word) {
+  if (!isValidDictionarySelection(word)) return
+  event.preventDefault()
+  editorContextMenu.value = { x: event.clientX, y: event.clientY, word: word.trim() }
+}
+
+function onEditorContextMenu(event) {
+  const el = editorEl.value
+  if (!el) return
+  const start = el.selectionStart ?? 0
+  const end = el.selectionEnd ?? 0
+  if (start === end) return
+  openEditorContextMenu(event, el.value.slice(start, end))
+}
+
+function onPreviewContextMenu(event) {
+  const selection = window.getSelection()
+  const selected = selection?.toString().trim()
+  if (!selected) return
+  if (!previewEl.value?.contains(selection?.anchorNode ?? null)) return
+  openEditorContextMenu(event, selected)
+}
+
+function closeEditorContextMenu() {
+  editorContextMenu.value = null
+}
+
+function openDictionaryEntryModal(word) {
+  dictionaryEditEntry.value = null
+  dictionaryModalWord.value = word
+  dictionaryEntryModalOpen.value = true
+  closeEditorContextMenu()
+}
+
+function openDictionaryLinkModal(word) {
+  dictionaryModalWord.value = word
+  dictionaryLinkModalOpen.value = true
+  closeEditorContextMenu()
+}
+
+function onDictionaryEntrySaved(entry) {
+  const index = dictionaryEntries.value.findIndex((item) => item.id === entry.id)
+  if (index >= 0) {
+    dictionaryEntries.value = dictionaryEntries.value.map((item) =>
+      item.id === entry.id ? entry : item,
+    )
+  } else {
+    dictionaryEntries.value = [...dictionaryEntries.value, entry]
+  }
+}
+
+function onDictionaryAliasLinked(alias) {
+  dictionaryAliases.value = [...dictionaryAliases.value, alias]
+}
+
+function hideDictionaryTooltip() {
+  dictionaryTooltip.value = null
+}
+
+function onPreviewMouseOver(event) {
+  if (!isExtEnabled('dictionary-hints')) {
+    hideDictionaryTooltip()
+    return
+  }
+  const term = event.target?.closest?.('.notes-dict-term')
+  if (!term || !previewEl.value?.contains(term)) {
+    hideDictionaryTooltip()
+    return
+  }
+  const entryId = term.getAttribute('data-dict-id')
+  const entry = dictionaryEntriesById.value.get(entryId)
+  if (!entry) {
+    hideDictionaryTooltip()
+    return
+  }
+  const alias = term.getAttribute('data-dict-alias')
+  const hit = lookupDictionarySelection(alias || term.textContent, dictionaryLookup.value)
+  if (!hit) {
+    hideDictionaryTooltip()
+    return
+  }
+  const rect = term.getBoundingClientRect()
+  dictionaryTooltip.value = {
+    x: rect.left + rect.width / 2,
+    y: rect.top,
+    text: formatDictionaryTooltip(hit),
+  }
+}
+
+function onGlobalPointerDown(event) {
+  if (!editorContextMenu.value) return
+  const target = event.target
+  if (target instanceof Element && target.closest('.notes-dict-context')) return
+  closeEditorContextMenu()
+}
+
+function onGlobalKeyDown(event) {
+  if (event.key === 'Escape') {
+    closeEditorContextMenu()
+    hideDictionaryTooltip()
+  }
+}
+
 function onPreviewClick(event) {
   const anchor = event.target?.closest?.('a')
   if (!anchor) return
@@ -1181,6 +1344,8 @@ onMounted(async () => {
   if (typeof window !== 'undefined') {
     mobileNotesMql = window.matchMedia(MOBILE_NOTES_MQ)
     mobileNotesMql.addEventListener('change', syncMobileNotesLayout)
+    window.addEventListener('pointerdown', onGlobalPointerDown, true)
+    window.addEventListener('keydown', onGlobalKeyDown)
   }
   const {
     data: { user },
@@ -1189,6 +1354,10 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('pointerdown', onGlobalPointerDown, true)
+    window.removeEventListener('keydown', onGlobalKeyDown)
+  }
   if (mobileNotesMql) {
     mobileNotesMql.removeEventListener('change', syncMobileNotesLayout)
     mobileNotesMql = null
@@ -1207,7 +1376,7 @@ watch(userId, (id) => {
     activeVaultId.value = routeVaultId
     openTabs.value = loadPersistedOpenTabs(id)
     await loadVaultPrefs()
-    await loadAll()
+    await Promise.all([loadAll(), loadDictionary()])
   })()
 })
 
@@ -1606,6 +1775,7 @@ watch(draftFolderId, (value) => {
             placeholder="Écris en Markdown…"
             @scroll="onEditorScroll"
             @blur="flushSave"
+            @contextmenu="onEditorContextMenu"
           />
           <div
             v-if="effectiveViewMode !== 'edit'"
@@ -1613,6 +1783,9 @@ watch(draftFolderId, (value) => {
             class="notes-page__preview markdown-body"
             @scroll="onPreviewScroll"
             @click="onPreviewClick"
+            @contextmenu="onPreviewContextMenu"
+            @mouseover="onPreviewMouseOver"
+            @mouseleave="hideDictionaryTooltip"
             v-html="previewHtml"
           />
         </div>
@@ -1685,6 +1858,61 @@ watch(draftFolderId, (value) => {
       @close="vaultThemeModalOpen = false"
       @save="onSaveVaultTheme"
     />
+
+    <DictionaryEntryModal
+      :open="dictionaryEntryModalOpen"
+      :user-id="userId || ''"
+      :initial-word="dictionaryModalWord"
+      :entry="dictionaryEditEntry"
+      @close="dictionaryEntryModalOpen = false"
+      @saved="onDictionaryEntrySaved"
+    />
+
+    <DictionaryLinkEntryModal
+      :open="dictionaryLinkModalOpen"
+      :user-id="userId || ''"
+      :alias-text="dictionaryModalWord"
+      :entries="dictionaryEntries"
+      @close="dictionaryLinkModalOpen = false"
+      @linked="onDictionaryAliasLinked"
+    />
+
+    <div
+      v-if="editorContextMenu"
+      class="notes-dict-context"
+      role="menu"
+      :style="{ top: `${editorContextMenu.y}px`, left: `${editorContextMenu.x}px` }"
+      @contextmenu.prevent
+    >
+      <p v-if="editorContextSelectionHit" class="notes-dict-context__hint">
+        Déjà connu : {{ editorContextSelectionHit.word }}
+      </p>
+      <button
+        type="button"
+        class="notes-dict-context__item"
+        role="menuitem"
+        @click="openDictionaryEntryModal(editorContextMenu.word)"
+      >
+        Ajouter au dictionnaire
+      </button>
+      <button
+        type="button"
+        class="notes-dict-context__item"
+        role="menuitem"
+        @click="openDictionaryLinkModal(editorContextMenu.word)"
+      >
+        Lier à une définition existante
+      </button>
+    </div>
+
+    <div
+      v-if="dictionaryTooltip"
+      class="notes-dict-tooltip"
+      role="tooltip"
+      :style="{ top: `${dictionaryTooltip.y}px`, left: `${dictionaryTooltip.x}px` }"
+    >
+      {{ dictionaryTooltip.text }}
+    </div>
   </div>
 </template>
 
@@ -2532,6 +2760,61 @@ watch(draftFolderId, (value) => {
 :deep(.markdown-body a.note-wikilink--missing) {
   color: #a33;
   text-decoration-style: dashed;
+}
+
+:deep(.markdown-body .notes-dict-term) {
+  border-bottom: 1px dotted #9b7ab8;
+  cursor: help;
+}
+
+.notes-dict-context {
+  position: fixed;
+  z-index: 1100;
+  min-width: 220px;
+  padding: 0.35rem;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e6ddf2;
+  box-shadow: 0 12px 32px rgba(58, 34, 86, 0.16);
+}
+
+.notes-dict-context__hint {
+  margin: 0.15rem 0.55rem 0.35rem;
+  font-size: 0.78rem;
+  color: #7a688c;
+}
+
+.notes-dict-context__item {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  font: inherit;
+  color: #3a2256;
+  cursor: pointer;
+}
+
+.notes-dict-context__item:hover {
+  background: #f4edf9;
+}
+
+.notes-dict-tooltip {
+  position: fixed;
+  z-index: 1150;
+  transform: translate(-50%, calc(-100% - 8px));
+  max-width: min(320px, calc(100vw - 2rem));
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  background: #2f203f;
+  color: #f8f4fc;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  pointer-events: none;
+  box-shadow: 0 10px 24px rgba(24, 16, 36, 0.28);
 }
 
 :deep(.markdown-body img) {
