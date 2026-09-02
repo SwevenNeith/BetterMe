@@ -111,7 +111,12 @@ export async function listNoteVaults(supabase, userId) {
     omitSelect.add(missingColumn)
     if (missingColumn === 'icon') {
       console.warn(
-        'Colonne note_vaults.icon absente. Exécute scripts/migrate-note-vaults-icon.sql dans Supabase.',
+        'Colonne note_vaults.icon absente. Exécute scripts/create-note-vaults.sql dans Supabase.',
+      )
+    }
+    if (missingColumn === 'surface_color' || missingColumn === 'gradient_color') {
+      console.warn(
+        'Colonnes thème note_vaults absentes. Exécute scripts/create-note-vaults.sql dans Supabase.',
       )
     }
   }

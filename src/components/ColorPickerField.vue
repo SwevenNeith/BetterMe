@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 const props = defineProps({
   modelValue: {
@@ -15,10 +15,12 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const DEFAULT_COLOR = '#ad81be'
+const hexDraft = ref('')
+const hexFocused = ref(false)
 
-function normalizeHex(value) {
+function normalizeHex(value, fallback = null) {
   const raw = String(value || '').trim()
-  if (!raw) return DEFAULT_COLOR
+  if (!raw) return fallback
   const withHash = raw.startsWith('#') ? raw : `#${raw}`
   if (/^#[0-9a-fA-F]{6}$/.test(withHash)) {
     return withHash.toLowerCase()
@@ -27,31 +29,45 @@ function normalizeHex(value) {
     const h = withHash.slice(1)
     return `#${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}`.toLowerCase()
   }
-  return null
+  return fallback
+}
+
+function isCompleteHex(value) {
+  return normalizeHex(value, null) != null
 }
 
 const colorValue = computed({
   get() {
-    return normalizeHex(props.modelValue) ?? DEFAULT_COLOR
+    return normalizeHex(props.modelValue, DEFAULT_COLOR) ?? DEFAULT_COLOR
   },
   set(value) {
-    const next = normalizeHex(value)
+    const next = normalizeHex(value, null)
     if (next) emit('update:modelValue', next)
   },
 })
 
-const hexInput = computed({
-  get() {
-    return colorValue.value
-  },
-  set(value) {
-    const next = normalizeHex(value)
-    if (next) emit('update:modelValue', next)
-  },
+const hexInputDisplay = computed(() => {
+  if (hexFocused.value) return hexDraft.value
+  return colorValue.value
 })
+
+function onHexFocus() {
+  hexFocused.value = true
+  hexDraft.value = colorValue.value
+}
 
 function onHexInput(event) {
-  hexInput.value = event.target.value
+  const value = event.target.value
+  hexDraft.value = value
+  const next = normalizeHex(value, null)
+  if (next) emit('update:modelValue', next)
+}
+
+function onHexBlur() {
+  const next = normalizeHex(hexDraft.value, colorValue.value)
+  emit('update:modelValue', next)
+  hexFocused.value = false
+  hexDraft.value = ''
 }
 </script>
 
@@ -73,14 +89,16 @@ function onHexInput(event) {
     <label v-if="!compact" class="color-picker-field__hex">
       <span class="color-picker-field__hex-label">Code couleur</span>
       <input
-        :value="hexInput"
+        :value="hexInputDisplay"
         type="text"
         class="color-picker-field__hex-input"
         maxlength="7"
         spellcheck="false"
         autocomplete="off"
         placeholder="#ad81be"
+        @focus="onHexFocus"
         @input="onHexInput"
+        @blur="onHexBlur"
       />
     </label>
   </div>

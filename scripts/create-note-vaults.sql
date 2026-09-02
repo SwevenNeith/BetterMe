@@ -1,21 +1,44 @@
 -- Coffres Notes (style Obsidian Vaults) — BetterMe
 -- Exécute dans le SQL Editor Supabase.
+-- Idempotent : crée la table OU complète une installation existante (colonnes manquantes).
 
 BEGIN;
 
+-- Schéma de base (compatible avec les anciennes versions déjà déployées)
 CREATE TABLE IF NOT EXISTS public.note_vaults (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
   name text NOT NULL CHECK (char_length(trim(name)) > 0),
   color text NOT NULL DEFAULT '#AD81BE',
   accent_color text NOT NULL DEFAULT '#D5B5EA',
-  surface_color text NOT NULL DEFAULT '#F4F0FA',
-  gradient_color text NOT NULL DEFAULT '#95D1AA',
-  icon text NOT NULL DEFAULT '🗄️',
   sort_order integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
   updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
+
+-- Colonnes ajoutées après coup (thème 4 couleurs, icône)
+ALTER TABLE public.note_vaults
+  ADD COLUMN IF NOT EXISTS surface_color text NOT NULL DEFAULT '#F4F0FA';
+
+ALTER TABLE public.note_vaults
+  ADD COLUMN IF NOT EXISTS gradient_color text NOT NULL DEFAULT '#95D1AA';
+
+ALTER TABLE public.note_vaults
+  ADD COLUMN IF NOT EXISTS icon text NOT NULL DEFAULT '🗄️';
+
+-- Valeurs par défaut pour les lignes créées avant ces colonnes (migrations partielles)
+UPDATE public.note_vaults
+SET
+  accent_color = COALESCE(accent_color, '#D5B5EA'),
+  surface_color = COALESCE(surface_color, '#F4F0FA'),
+  gradient_color = COALESCE(gradient_color, '#95D1AA'),
+  icon = COALESCE(NULLIF(trim(icon), ''), '🗄️')
+WHERE
+  accent_color IS NULL
+  OR surface_color IS NULL
+  OR gradient_color IS NULL
+  OR icon IS NULL
+  OR trim(icon) = '';
 
 COMMENT ON TABLE public.note_vaults IS
   'Coffres Notes : espaces isolés (dossiers, notes, extensions par coffre).';

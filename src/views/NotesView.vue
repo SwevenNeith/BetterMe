@@ -1468,21 +1468,6 @@ watch(draftFolderId, (value) => {
             </span>
             {{ activeVault.name }}
           </span>
-          <button
-            type="button"
-            class="notes-page__vault-theme-btn"
-            title="Personnaliser le thème"
-            aria-label="Personnaliser le thème du coffre"
-            @click="openVaultThemeEditor(activeVault)"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M12 2a10 10 0 0 0-10 10c0 1.7 1.4 3 3 3h1.2c.9 0 1.6.7 1.6 1.6 0 .9.7 1.6 1.6 1.6H12a10 10 0 0 0 0-20z" />
-              <circle cx="8" cy="11" r="1.1" fill="currentColor" stroke="none" />
-              <circle cx="12" cy="8" r="1.1" fill="currentColor" stroke="none" />
-              <circle cx="16" cy="11" r="1.1" fill="currentColor" stroke="none" />
-              <circle cx="14.5" cy="15" r="1.1" fill="currentColor" stroke="none" />
-            </svg>
-          </button>
         </div>
         <div class="notes-page__sidebar-title-row">
           <h1 class="notes-page__title">
@@ -1493,15 +1478,33 @@ watch(draftFolderId, (value) => {
             >{{ normalizeVaultIcon(activeVault.icon) }}</span>
             {{ activeVault ? activeVault.name : pageTitle }}
           </h1>
-          <button
-            type="button"
-            class="notes-page__sidebar-toggle"
-            title="Masquer la liste"
-            aria-label="Masquer la liste des notes"
-            @click="sidebarCollapsed = true"
-          >
-            «
-          </button>
+          <div class="notes-page__sidebar-title-actions">
+            <button
+              v-if="activeVault"
+              type="button"
+              class="notes-page__vault-theme-btn"
+              title="Personnaliser le thème"
+              aria-label="Personnaliser le thème du coffre"
+              @click="openVaultThemeEditor(activeVault)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2a10 10 0 0 0-10 10c0 1.7 1.4 3 3 3h1.2c.9 0 1.6.7 1.6 1.6 0 .9.7 1.6 1.6 1.6H12a10 10 0 0 0 0-20z" />
+                <circle cx="8" cy="11" r="1.1" fill="currentColor" stroke="none" />
+                <circle cx="12" cy="8" r="1.1" fill="currentColor" stroke="none" />
+                <circle cx="16" cy="11" r="1.1" fill="currentColor" stroke="none" />
+                <circle cx="14.5" cy="15" r="1.1" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="notes-page__sidebar-toggle"
+              title="Masquer la liste"
+              aria-label="Masquer la liste des notes"
+              @click="sidebarCollapsed = true"
+            >
+              «
+            </button>
+          </div>
         </div>
         <p class="notes-page__meta">{{ noteCountLabel }}</p>
         <div class="notes-page__sidebar-actions">
@@ -1955,6 +1958,13 @@ watch(draftFolderId, (value) => {
   gap: 0.35rem;
 }
 
+.notes-page__sidebar-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
 .notes-page__title {
   flex: 1;
   min-width: 0;
@@ -2186,10 +2196,9 @@ watch(draftFolderId, (value) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.65rem;
-  height: 1.65rem;
-  margin-left: auto;
-  border-radius: 8px;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--notes-vault-color, #ad81be) 35%, transparent);
   background: var(--notes-vault-input-bg, #fff);
   color: var(--notes-vault-icon, #ad81be);

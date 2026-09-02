@@ -36,6 +36,10 @@ const gradientColor = ref(NOTE_VAULT_DEFAULT_GRADIENT)
 const autoPalette = ref(true)
 const errorMessage = ref('')
 const isSaving = ref(false)
+/** @type {import('vue').Ref<string | null>} */
+const hexFocusField = ref(null)
+/** @type {import('vue').Ref<Record<string, string>>} */
+const hexDraftByField = ref({})
 
 const primaryRgb = ref({ r: 173, g: 129, b: 190 })
 const accentRgb = ref({ r: 213, g: 181, b: 234 })
@@ -78,8 +82,15 @@ function applyDerivedPalette() {
   syncRgbFromHex(gradientRgb.value, gradient)
 }
 
+function isCompleteHex(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return false
+  const withHash = raw.startsWith('#') ? raw : `#${raw}`
+  return /^#[0-9a-fA-F]{6}$/.test(withHash) || /^#[0-9a-fA-F]{3}$/.test(withHash)
+}
+
 function applyPrimaryHex(hex) {
-  const next = normalizeVaultHex(hex, NOTE_VAULT_DEFAULT_PRIMARY)
+  const next = normalizeVaultHex(hex, primaryColor.value)
   primaryColor.value = next
   syncRgbFromHex(primaryRgb.value, next)
   applyDerivedPalette()
@@ -87,21 +98,21 @@ function applyPrimaryHex(hex) {
 
 function applyAccentHex(hex) {
   autoPalette.value = false
-  const next = normalizeVaultHex(hex, NOTE_VAULT_DEFAULT_ACCENT)
+  const next = normalizeVaultHex(hex, accentColor.value)
   accentColor.value = next
   syncRgbFromHex(accentRgb.value, next)
 }
 
 function applySurfaceHex(hex) {
   autoPalette.value = false
-  const next = normalizeVaultHex(hex, NOTE_VAULT_DEFAULT_SURFACE)
+  const next = normalizeVaultHex(hex, surfaceColor.value)
   surfaceColor.value = next
   syncRgbFromHex(surfaceRgb.value, next)
 }
 
 function applyGradientHex(hex) {
   autoPalette.value = false
-  const next = normalizeVaultHex(hex, NOTE_VAULT_DEFAULT_GRADIENT)
+  const next = normalizeVaultHex(hex, gradientColor.value)
   gradientColor.value = next
   syncRgbFromHex(gradientRgb.value, next)
 }
@@ -144,12 +155,43 @@ function resetDefaultTheme() {
   syncRgbFromHex(gradientRgb.value, gradientColor.value)
 }
 
+function onColorHexFocus(fieldId) {
+  hexFocusField.value = fieldId
+  hexDraftByField.value = {
+    ...hexDraftByField.value,
+    [fieldId]: colorValueById(fieldId),
+  }
+}
+
 function onColorHexInput(fieldId, event) {
   const value = event.target.value
+  hexDraftByField.value = { ...hexDraftByField.value, [fieldId]: value }
+  if (!isCompleteHex(value)) return
   if (fieldId === 'primary') applyPrimaryHex(value)
   else if (fieldId === 'accent') applyAccentHex(value)
   else if (fieldId === 'surface') applySurfaceHex(value)
   else applyGradientHex(value)
+}
+
+function onColorHexBlur(fieldId) {
+  const draft = hexDraftByField.value[fieldId]
+  if (draft != null && draft !== colorValueById(fieldId)) {
+    if (fieldId === 'primary') applyPrimaryHex(draft)
+    else if (fieldId === 'accent') applyAccentHex(draft)
+    else if (fieldId === 'surface') applySurfaceHex(draft)
+    else applyGradientHex(draft)
+  }
+  hexFocusField.value = null
+  const nextDrafts = { ...hexDraftByField.value }
+  delete nextDrafts[fieldId]
+  hexDraftByField.value = nextDrafts
+}
+
+function colorHexDisplay(fieldId) {
+  if (hexFocusField.value === fieldId && fieldId in hexDraftByField.value) {
+    return hexDraftByField.value[fieldId]
+  }
+  return colorValueById(fieldId)
 }
 
 function colorValueById(fieldId) {
@@ -222,6 +264,8 @@ function reset() {
   errorMessage.value = ''
   isSaving.value = false
   autoPalette.value = !isEditMode.value
+  hexFocusField.value = null
+  hexDraftByField.value = {}
 
   if (isEditMode.value && props.vault) {
     const theme = normalizeVaultTheme(props.vault)
@@ -347,14 +391,16 @@ function submit() {
                   @update:model-value="setColorById(field.id, $event)"
                 />
                 <input
-                  :value="colorValueById(field.id)"
+                  :value="colorHexDisplay(field.id)"
                   type="text"
                   class="notes-vault-modal__hex-input"
                   maxlength="7"
                   spellcheck="false"
                   autocomplete="off"
                   :disabled="field.id !== 'primary' && autoPalette"
+                  @focus="onColorHexFocus(field.id)"
                   @input="onColorHexInput(field.id, $event)"
+                  @blur="onColorHexBlur(field.id)"
                 />
                 <div class="notes-vault-modal__rgb">
                   <input
