@@ -2992,18 +2992,23 @@ watch(draftFolderId, (value) => {
 
 :deep(.markdown-body .notes-html-widget) {
   margin: 0.85rem 0;
-  padding: 0.35rem;
+  padding: 0.45rem 0.4rem 0.55rem;
   border-radius: 12px;
   border: 1px solid #e0d4ee;
   background: #fff;
-  overflow: hidden;
+  overflow: visible;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 :deep(.markdown-body .notes-html-widget__frame) {
   width: 100%;
+  max-width: 100%;
   border: 0;
   display: block;
   background: transparent;
+  overflow: visible;
 }
 
 :deep(.markdown-body a.note-wikilink--missing) {
