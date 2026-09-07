@@ -23,6 +23,10 @@ import {
 } from '../services/todoItems.js'
 import { loadTodoPromesseLimits } from '../services/todoPromesseSettings.js'
 import {
+  rolloverOverdueNoteTodos,
+  syncNoteStatusFromTodoCompletion,
+} from '../services/noteTodoSync.js'
+import {
   TODO_VIEW_MODE,
   buildCompletionProgressMap,
   hasTodoQuantiteCible,
@@ -595,6 +599,11 @@ async function loadData() {
   isLoading.value = true
   loadError.value = ''
   try {
+    try {
+      await rolloverOverdueNoteTodos(supabase, userId.value)
+    } catch (rolloverErr) {
+      console.error('note todo rollover:', rolloverErr)
+    }
     const { start, end } = getTodoCompletionsFetchRange(anchorDate.value, viewMode.value)
     const [itemsData, completionsData, limits] = await Promise.all([
       listTodoItems(supabase, userId.value),
@@ -868,6 +877,13 @@ async function adjustItemQuantite(item, delta) {
 
   try {
     await setTodoQuantiteForDate(supabase, userId.value, item, dateISO, next)
+    if (item.note_id) {
+      try {
+        await syncNoteStatusFromTodoCompletion(supabase, userId.value, item, next >= cible)
+      } catch (syncErr) {
+        console.error(syncErr)
+      }
+    }
   } catch (err) {
     console.error(err)
     if (prevEntry) completionProgress.value.set(key, prevEntry)
@@ -905,6 +921,13 @@ async function toggleItem(item) {
 
   try {
     await setTodoCompletionForDate(supabase, userId.value, item, dateISO, next)
+    if (item.note_id) {
+      try {
+        await syncNoteStatusFromTodoCompletion(supabase, userId.value, item, next)
+      } catch (syncErr) {
+        console.error(syncErr)
+      }
+    }
   } catch (err) {
     console.error(err)
     if (next) {

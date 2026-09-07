@@ -65,10 +65,19 @@ import {
   derivePinnedNotePartTitle,
 } from '../constants/dashboardPinnedNotes.js'
 import {
+  NOTE_STATUS_OPTIONS,
+  NOTE_STATUS_TODOS_EXTENSION_ID,
+} from '../constants/noteStatus.js'
+import {
   addDashboardPinnedNote,
   loadDashboardVisibility,
   saveDashboardVisibility,
 } from '../services/dashboardVisibility.js'
+import {
+  applyNoteStatusChange,
+  rolloverOverdueNoteTodos,
+  syncLinkedTodoTitle,
+} from '../services/noteTodoSync.js'
 
 const GRAPH_TAB = { type: 'graph', id: 'graph' }
 
@@ -94,6 +103,7 @@ const selectedNote = ref(null)
 const draftTitle = ref('')
 const draftContent = ref('')
 const draftFolderId = ref(null)
+const draftStatus = ref('')
 const viewMode = ref('split') // edit | preview | split
 const isSaving = ref(false)
 const saveError = ref('')
@@ -278,6 +288,9 @@ function isExtEnabled(extensionId) {
   return isNotesExtensionEnabled(extensionPrefs.value, extensionId)
 }
 
+const showNoteStatus = computed(() => isExtEnabled(NOTE_STATUS_TODOS_EXTENSION_ID))
+const noteStatusOptions = NOTE_STATUS_OPTIONS
+
 function updateExtensionPrefs(nextPrefs) {
   extensionPrefs.value = mergeNotesExtensionPrefs(nextPrefs)
   if (!userId.value) return
@@ -435,6 +448,7 @@ function stashCurrentNoteSession() {
       title: draftTitle.value,
       content: draftContent.value,
       folderId: draftFolderId.value,
+      status: draftStatus.value,
       dirty: dirty.value,
       viewMode: viewMode.value,
       saveStatus: saveStatus.value,
@@ -451,6 +465,7 @@ function applyNoteToEditor(note) {
     draftTitle.value = session.title
     draftContent.value = session.content
     draftFolderId.value = session.folderId
+    draftStatus.value = session.status ?? note.status ?? ''
     dirty.value = Boolean(session.dirty)
     viewMode.value =
       session.viewMode === 'split' && isMobileNotes.value
@@ -462,6 +477,7 @@ function applyNoteToEditor(note) {
     draftTitle.value = note.title
     draftContent.value = note.content_md
     draftFolderId.value = note.folder_id
+    draftStatus.value = note.status || ''
     dirty.value = false
     viewMode.value = defaultViewMode.value
     saveStatus.value = ''
@@ -840,6 +856,14 @@ async function loadAll() {
     notes.value = noteRows
     vaults.value = vaultRows
 
+    try {
+      await rolloverOverdueNoteTodos(supabase, userId.value)
+      // Recharger les notes si le rollover a modifié des statuts / liens
+      notes.value = await listNotes(supabase, userId.value)
+    } catch (rolloverErr) {
+      console.error('note todo rollover:', rolloverErr)
+    }
+
     const routeVaultId =
       typeof route.params.vaultId === 'string' && route.params.vaultId
         ? route.params.vaultId
@@ -911,9 +935,41 @@ function clearSelection() {
   draftTitle.value = ''
   draftContent.value = ''
   draftFolderId.value = null
+  draftStatus.value = ''
   dirty.value = false
   saveStatus.value = ''
   saveError.value = ''
+}
+
+async function onDraftStatusChange() {
+  if (!userId.value || !selectedNoteId.value || !showNoteStatus.value) return
+  const previousStatus = selectedNote.value?.status || ''
+  try {
+    const base = {
+      ...(selectedNote.value || {}),
+      id: selectedNoteId.value,
+      title: draftTitle.value,
+      vault_id: selectedNote.value?.vault_id ?? activeVaultId.value,
+      status: previousStatus,
+      status_set_at: selectedNote.value?.status_set_at ?? null,
+      todo_item_id: selectedNote.value?.todo_item_id ?? null,
+    }
+    const updated = await applyNoteStatusChange(
+      supabase,
+      userId.value,
+      base,
+      draftStatus.value,
+    )
+    selectedNote.value = updated
+    draftStatus.value = updated.status || ''
+    notes.value = notes.value.map((n) => (n.id === updated.id ? { ...n, ...updated } : n))
+  } catch (err) {
+    console.error(err)
+    draftStatus.value = previousStatus
+    errorMessage.value =
+      err.message ||
+      'Impossible de mettre à jour le statut. Vérifie scripts/migrate-notes-status-todos.sql.'
+  }
 }
 
 async function selectNote(noteId, { syncRoute = true, openTab = true } = {}) {
@@ -1021,7 +1077,7 @@ async function flushSave() {
       folderId: draftFolderId.value,
     })
     selectedNote.value = updated
-    notes.value = notes.value.map((n) => (n.id === updated.id ? updated : n))
+    notes.value = notes.value.map((n) => (n.id === updated.id ? { ...n, ...updated } : n))
     dirty.value = false
     saveStatus.value = 'Enregistré'
     noteSessions.value = {
@@ -1030,11 +1086,23 @@ async function flushSave() {
         title: draftTitle.value,
         content: draftContent.value,
         folderId: draftFolderId.value,
+        status: draftStatus.value,
         dirty: false,
         viewMode: viewMode.value,
         saveStatus: 'Enregistré',
         saveError: '',
       },
+    }
+    if (showNoteStatus.value) {
+      try {
+        await syncLinkedTodoTitle(supabase, userId.value, {
+          ...updated,
+          title,
+          status: draftStatus.value || updated.status,
+        })
+      } catch (syncErr) {
+        console.error(syncErr)
+      }
     }
   } catch (err) {
     console.error(err)
@@ -2090,6 +2158,22 @@ watch(draftFolderId, (value) => {
               Dossier
               <select v-model="draftFolderSelect" class="notes-page__folder-select">
                 <option v-for="opt in folderOptions" :key="opt.id || 'root'" :value="opt.id">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </label>
+            <label v-if="showNoteStatus" class="notes-page__folder-label">
+              Statut
+              <select
+                v-model="draftStatus"
+                class="notes-page__folder-select"
+                @change="onDraftStatusChange"
+              >
+                <option
+                  v-for="opt in noteStatusOptions"
+                  :key="opt.id || 'none'"
+                  :value="opt.id"
+                >
                   {{ opt.label }}
                 </option>
               </select>

@@ -2,11 +2,29 @@ import {
   dailyNoteSystemKeyForDate,
   formatDailyNoteTitle,
 } from '../constants/dailyNotes.js'
+import { NOTE_STATUS } from '../constants/noteStatus.js'
 import { ensureDailyNotesFolder } from './noteFolders.js'
 import { createNote, updateNote } from './notes.js'
+import {
+  applyNoteStatusChange,
+  isNoteStatusTodosEnabled,
+} from './noteTodoSync.js'
 
 const TABLE = 'notes'
-const SELECT = 'id, user_id, folder_id, title, content_md, system_key, created_at, updated_at'
+const SELECT =
+  'id, user_id, folder_id, title, content_md, system_key, vault_id, status, status_set_at, todo_item_id, created_at, updated_at'
+const SELECT_LEGACY =
+  'id, user_id, folder_id, title, content_md, system_key, vault_id, created_at, updated_at'
+
+function isMissingStatusColumnError(error) {
+  return (
+    error?.code === 'PGRST204' &&
+    typeof error.message === 'string' &&
+    (error.message.includes("'status'") ||
+      error.message.includes("'status_set_at'") ||
+      error.message.includes("'todo_item_id'"))
+  )
+}
 
 function normalizeNote(row) {
   return {
@@ -16,6 +34,10 @@ function normalizeNote(row) {
     title: String(row.title ?? '').trim() || 'Sans titre',
     content_md: row.content_md ?? '',
     system_key: row.system_key ?? null,
+    vault_id: row.vault_id ?? null,
+    status: row.status ?? '',
+    status_set_at: row.status_set_at ?? null,
+    todo_item_id: row.todo_item_id ?? null,
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? row.created_at ?? null,
   }
@@ -31,15 +53,44 @@ export async function getTodayDailyNote(supabase, userId, date = new Date()) {
   if (!userId) return null
 
   const systemKey = dailyNoteSystemKeyForDate(date)
-  const { data, error } = await supabase
+  let result = await supabase
     .from(TABLE)
     .select(SELECT)
     .eq('user_id', userId)
     .eq('system_key', systemKey)
     .maybeSingle()
 
-  if (error) throw error
-  return data ? normalizeNote(data) : null
+  if (result.error && isMissingStatusColumnError(result.error)) {
+    result = await supabase
+      .from(TABLE)
+      .select(SELECT_LEGACY)
+      .eq('user_id', userId)
+      .eq('system_key', systemKey)
+      .maybeSingle()
+  }
+
+  if (result.error) throw result.error
+  return result.data ? normalizeNote(result.data) : null
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {object} note
+ * @param {boolean} isNew
+ */
+async function maybeApplyDailyNoteStatus(supabase, userId, note, isNew) {
+  if (!isNew || !note?.id) return note
+  try {
+    const enabled = await isNoteStatusTodosEnabled(supabase, userId, note.vault_id ?? null)
+    if (!enabled) return note
+    return await applyNoteStatusChange(supabase, userId, note, NOTE_STATUS.A_TRAITER, {
+      skipEnabledCheck: true,
+    })
+  } catch (err) {
+    console.error('daily note status:', err)
+    return note
+  }
 }
 
 /**
@@ -77,12 +128,13 @@ export async function saveTodayDailyNote(supabase, userId, content, options = {}
   const folder = await ensureDailyNotesFolder(supabase, userId)
 
   try {
-    return await createNote(supabase, userId, {
+    const created = await createNote(supabase, userId, {
       title,
       contentMd,
       folderId: folder.id,
       systemKey,
     })
+    return await maybeApplyDailyNoteStatus(supabase, userId, created, true)
   } catch (err) {
     if (String(err?.code) === '23505' || String(err?.message ?? '').includes('duplicate')) {
       const raced = await getTodayDailyNote(supabase, userId, date)

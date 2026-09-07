@@ -77,6 +77,15 @@ export const NOTES_EXTENSIONS = [
     defaultEnabled: true,
   },
   {
+    id: 'note-status-todos',
+    name: 'Statuts de notes',
+    description:
+      'Ajoute un statut aux notes et synchronise « À traiter » avec les TODO de la semaine.',
+    details:
+      'Quand cette extension est active :\n\n• Chaque note peut avoir un statut : Aucun, À traiter, Fait\n• Les Daily Notes reçoivent automatiquement le statut « À traiter » à la création\n• Une note « À traiter » apparaît dans les TODO « Cette semaine » (semaine de la mise du statut)\n• Si elle n’est pas faite en fin de semaine, elle est reportée à la semaine suivante\n• Passer une note à « Fait » coche le TODO correspondant',
+    defaultEnabled: false,
+  },
+  {
     id: 'templates',
     name: 'Templates',
     description: 'Pré-remplit automatiquement les nouvelles notes selon des modèles et des règles.',

@@ -6,7 +6,7 @@ const TABLE = 'todo_items'
 const COMPLETIONS_TABLE = 'todo_item_completions'
 
 const TODO_ITEM_SELECT =
-  'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, timetable_event_id, reminder, reminder_time, created_at, updated_at'
+  'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, timetable_event_id, note_id, reminder, reminder_time, created_at, updated_at'
 
 async function refreshTodoPromesseReminder(userId) {
   if (!userId) return
@@ -133,6 +133,20 @@ export async function listTodoItems(supabase, userId) {
 
   if (error) {
     const msg = String(error.message ?? '')
+    if (msg.includes('note_id') || (error.code === 'PGRST204' && msg.includes("'note_id'"))) {
+      const withoutNote = await supabase
+        .from(TABLE)
+        .select(
+          'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, timetable_event_id, reminder, reminder_time, created_at, updated_at',
+        )
+        .eq('user_id', userId)
+        .order('sort_order', { ascending: true })
+      if (withoutNote.error) {
+        // continue to reminder fallback below
+      } else {
+        return (withoutNote.data ?? []).map((row) => ({ ...row, note_id: null }))
+      }
+    }
     if (msg.includes('reminder') || error.code === 'PGRST204') {
       const fallback = await supabase
         .from(TABLE)
@@ -146,6 +160,7 @@ export async function listTodoItems(supabase, userId) {
         ...row,
         reminder: false,
         reminder_time: null,
+        note_id: null,
       }))
     }
     throw error
@@ -197,11 +212,33 @@ export async function createTodoItem(supabase, userId, payload) {
       ...row,
       is_done: false,
       sort_order: sortOrder,
+      ...(payload.note_id ? { note_id: payload.note_id } : {}),
     })
     .select(TODO_ITEM_SELECT)
     .single()
 
-  if (error) throw error
+  if (error) {
+    const msg = String(error.message ?? '')
+    if (error.code === 'PGRST204' && msg.includes("'note_id'")) {
+      const retry = await supabase
+        .from(TABLE)
+        .insert({
+          user_id: userId,
+          ...row,
+          is_done: false,
+          sort_order: sortOrder,
+        })
+        .select(
+          'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, timetable_event_id, reminder, reminder_time, created_at, updated_at',
+        )
+        .single()
+      if (retry.error) throw retry.error
+      await refreshTodoPromesseReminder(userId)
+      await refreshTodoItemReminder(userId, retry.data)
+      return { ...retry.data, note_id: null }
+    }
+    throw error
+  }
   await refreshTodoPromesseReminder(userId)
   await refreshTodoItemReminder(userId, data)
   return data
@@ -226,13 +263,34 @@ export async function replaceTodoItem(supabase, userId, itemId, payload) {
 
   const { data, error } = await supabase
     .from(TABLE)
-    .update(row)
+    .update({
+      ...row,
+      ...(payload.note_id !== undefined ? { note_id: payload.note_id || null } : {}),
+    })
     .eq('id', itemId)
     .eq('user_id', userId)
     .select(TODO_ITEM_SELECT)
     .single()
 
-  if (error) throw error
+  if (error) {
+    const msg = String(error.message ?? '')
+    if (error.code === 'PGRST204' && msg.includes("'note_id'")) {
+      const retry = await supabase
+        .from(TABLE)
+        .update(row)
+        .eq('id', itemId)
+        .eq('user_id', userId)
+        .select(
+          'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, timetable_event_id, reminder, reminder_time, created_at, updated_at',
+        )
+        .single()
+      if (retry.error) throw retry.error
+      await refreshTodoPromesseReminder(userId)
+      await refreshTodoItemReminder(userId, retry.data)
+      return { ...retry.data, note_id: null }
+    }
+    throw error
+  }
   await refreshTodoPromesseReminder(userId)
   await refreshTodoItemReminder(userId, data)
   return data
