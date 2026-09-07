@@ -69,11 +69,19 @@ export const NOTES_EXTENSIONS = [
     defaultEnabled: true,
   },
   {
+    id: 'html-widgets',
+    name: 'Widgets interactifs',
+    description: 'Exécute des blocs HTML/JS dans l’aperçu (tableaux cliquables, etc.).',
+    details:
+      'Ajoute des programmes interactifs dans tes notes via un bloc de code spécial :\n\n```widget\n<!-- ton HTML + CSS + JS -->\n```\n\n• Langages reconnus : widget, interactive, html-run\n• Affiché dans l’aperçu dans une iframe isolée (sans accès à ton compte BetterMe)\n• Les blocs ```js / ```html classiques restent du code non exécuté\n\nExemple : grille de cases colorées, clics, surbrillance…',
+    defaultEnabled: true,
+  },
+  {
     id: 'templates',
     name: 'Templates',
     description: 'Pré-remplit automatiquement les nouvelles notes selon des modèles et des règles.',
     details:
-      'Crée un dossier Templates (ou choisis un dossier existant) dans lequel tu rédiges tes modèles.\n\n• Définis des règles : par dossier, par titre exact, par mot dans le titre, ou par défaut\n• À la création d’une note, le contenu du modèle correspondant est injecté\n• Toutes les variables ({{titre}}, {{titre-h1}}, {{date}}, etc.) sont listées dans la section **13. Templates** du Tutoriel Markdown\n\nOuvre les paramètres (⚙) après activation pour configurer le dossier et les règles.',
+      'Crée un dossier Templates (ou choisis un dossier existant) dans lequel tu rédiges tes modèles.\n\n• Définis des règles : par dossier, par titre exact, par mot dans le titre, ou par défaut\n• À la création d’une note, le contenu du modèle correspondant est injecté\n• Toutes les variables ({{titre}}, {{titre-h1}}, {{date}}, etc.) sont listées dans la section **14. Templates** du Tutoriel Markdown\n\nOuvre les paramètres (⚙) après activation pour configurer le dossier et les règles.',
     defaultEnabled: false,
     hasSettings: true,
   },

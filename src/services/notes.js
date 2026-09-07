@@ -1,9 +1,8 @@
 import {
   MARKDOWN_TUTORIAL_CONTENT,
   MARKDOWN_TUTORIAL_SYSTEM_KEY,
-  MARKDOWN_TUTORIAL_TEMPLATE_SECTION_MARKER,
   MARKDOWN_TUTORIAL_TITLE,
-  appendTemplateSectionToTutorial,
+  needsMarkdownTutorialUpgrade,
 } from '../constants/markdownTutorial.js'
 
 const TABLE = 'notes'
@@ -181,7 +180,7 @@ async function markMarkdownTutorialRemoved(supabase, userId) {
 
 /**
  * Crée le tutoriel Markdown s’il n’existe pas et n’a pas été supprimé.
- * Met à jour le contenu système s’il manque la section wikilinks.
+ * Met à jour le contenu système s’il est obsolète (widgets, Templates en double, etc.).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  */
@@ -199,21 +198,11 @@ export async function ensureMarkdownTutorial(supabase, userId) {
 
   if (existing) {
     const note = normalizeNote(existing)
-    const needsWikiSection = !note.content_md.includes('Liens entre notes')
-    const needsTemplateSection = !note.content_md.includes(MARKDOWN_TUTORIAL_TEMPLATE_SECTION_MARKER)
-
-    if (!needsWikiSection && !needsTemplateSection) return note
-
-    if (needsWikiSection) {
-      return await updateNote(supabase, userId, note.id, {
-        title: MARKDOWN_TUTORIAL_TITLE,
-        contentMd: MARKDOWN_TUTORIAL_CONTENT,
-      })
-    }
+    if (!needsMarkdownTutorialUpgrade(note.content_md)) return note
 
     return await updateNote(supabase, userId, note.id, {
       title: MARKDOWN_TUTORIAL_TITLE,
-      contentMd: appendTemplateSectionToTutorial(note.content_md),
+      contentMd: MARKDOWN_TUTORIAL_CONTENT,
     })
   }
 

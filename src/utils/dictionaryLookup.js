@@ -108,6 +108,7 @@ export function annotateHtmlWithDictionary(html, lookup) {
       const parent = node.parentElement
       if (!parent || SKIP_TAGS.has(parent.tagName)) return
       if (parent.classList?.contains('notes-dict-term')) return
+      if (parent.closest?.('.notes-html-widget')) return
 
       const text = node.textContent ?? ''
       const parts = splitTextByDictionaryTerms(text, lookup)
@@ -135,6 +136,7 @@ export function annotateHtmlWithDictionary(html, lookup) {
 
     if (node.nodeType !== Node.ELEMENT_NODE) return
     if (SKIP_TAGS.has(node.tagName)) return
+    if (node.classList?.contains('notes-html-widget')) return
     ;[...node.childNodes].forEach(processNode)
   }
 

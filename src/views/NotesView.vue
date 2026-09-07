@@ -20,6 +20,7 @@ import {
 } from '../services/noteFolders.js'
 import { buildNotesTree, flattenFolderOptions } from '../utils/notesTree.js'
 import { parseNoteWikiHref, renderMarkdownToSafeHtml } from '../utils/renderMarkdown.js'
+import { mountNoteWidgets } from '../utils/noteWidgets.js'
 import NotesTreeNode from '../components/NotesTreeNode.vue'
 import AppConfirmDialog from '../components/AppConfirmDialog.vue'
 import NotesExtensionsModal from '../components/NotesExtensionsModal.vue'
@@ -542,17 +543,35 @@ const draftFolderSelect = computed({
   },
 })
 
-const previewHtml = computed(() => {
-  let html = renderMarkdownToSafeHtml(draftContent.value, {
+const renderedPreview = computed(() =>
+  renderMarkdownToSafeHtml(draftContent.value, {
     notes: contextNotes.value,
     enableWikiLinks: isExtEnabled('wikilinks'),
     breaks: isExtEnabled('line-breaks'),
-  })
+    enableHtmlWidgets: isExtEnabled('html-widgets'),
+  }),
+)
+
+const previewWidgets = computed(() => renderedPreview.value.widgets)
+
+const previewHtml = computed(() => {
+  let html = renderedPreview.value.html
   if (isExtEnabled('dictionary-hints') && dictionaryLookup.value.size) {
     html = annotateHtmlWithDictionary(html, dictionaryLookup.value)
   }
   return html
 })
+
+let unmountPreviewWidgets = /** @type {null | (() => void)} */ (null)
+
+function remountPreviewWidgets() {
+  if (unmountPreviewWidgets) {
+    unmountPreviewWidgets()
+    unmountPreviewWidgets = null
+  }
+  if (!previewEl.value || !isExtEnabled('html-widgets')) return
+  unmountPreviewWidgets = mountNoteWidgets(previewEl.value, previewWidgets.value)
+}
 
 const dictionaryLookup = computed(() =>
   buildDictionaryLookup(dictionaryEntries.value, dictionaryAliases.value),
@@ -1406,6 +1425,10 @@ onUnmounted(() => {
     window.removeEventListener('pointerdown', onGlobalPointerDown, true)
     window.removeEventListener('keydown', onGlobalKeyDown)
   }
+  if (unmountPreviewWidgets) {
+    unmountPreviewWidgets()
+    unmountPreviewWidgets = null
+  }
   if (mobileNotesMql) {
     mobileNotesMql.removeEventListener('change', syncMobileNotesLayout)
     mobileNotesMql = null
@@ -1428,6 +1451,15 @@ watch(userId, (id) => {
     await Promise.all([loadAll(), loadDictionary()])
   })()
 })
+
+watch(
+  [previewHtml, previewWidgets, effectiveViewMode],
+  async () => {
+    await nextTick()
+    remountPreviewWidgets()
+  },
+  { flush: 'post' },
+)
 
 watch(
   () => route.params.vaultId,
@@ -2889,6 +2921,22 @@ watch(draftFolderId, (value) => {
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
+}
+
+:deep(.markdown-body .notes-html-widget) {
+  margin: 0.85rem 0;
+  padding: 0.35rem;
+  border-radius: 12px;
+  border: 1px solid #e0d4ee;
+  background: #fff;
+  overflow: hidden;
+}
+
+:deep(.markdown-body .notes-html-widget__frame) {
+  width: 100%;
+  border: 0;
+  display: block;
+  background: transparent;
 }
 
 :deep(.markdown-body a.note-wikilink--missing) {

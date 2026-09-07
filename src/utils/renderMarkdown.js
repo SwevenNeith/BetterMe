@@ -1,4 +1,5 @@
 import { marked } from 'marked'
+import { extractNoteWidgets } from './noteWidgets.js'
 
 marked.setOptions({
   gfm: true,
@@ -64,7 +65,7 @@ const ALLOWED_ATTRS = {
   CODE: new Set(['class']),
   PRE: new Set(['class']),
   SPAN: new Set(['class', 'data-dict-id', 'data-dict-word', 'data-dict-alias']),
-  DIV: new Set(['class']),
+  DIV: new Set(['class', 'data-widget-index']),
   ABBR: new Set(['title']),
 }
 
@@ -218,13 +219,28 @@ export function expandNoteWikiLinks(text, notes = []) {
 }
 
 /**
- * Convertit du Markdown en HTML sécurisé (avec wikilinks optionnels).
+ * Convertit du Markdown en HTML sécurisé (avec wikilinks / widgets optionnels).
  * @param {string} markdown
- * @param {{ notes?: { id: string, title: string }[], enableWikiLinks?: boolean, breaks?: boolean }} [options]
+ * @param {{
+ *   notes?: { id: string, title: string }[],
+ *   enableWikiLinks?: boolean,
+ *   breaks?: boolean,
+ *   enableHtmlWidgets?: boolean,
+ * }} [options]
+ * @returns {{ html: string, widgets: string[] }}
  */
 export function renderMarkdownToSafeHtml(markdown, options = {}) {
-  const source = String(markdown ?? '')
-  if (!source.trim()) return ''
+  let source = String(markdown ?? '')
+  /** @type {string[]} */
+  let widgets = []
+
+  if (!source.trim()) return { html: '', widgets }
+
+  if (options.enableHtmlWidgets) {
+    const extracted = extractNoteWidgets(source)
+    source = extracted.text
+    widgets = extracted.widgets
+  }
 
   const { text, segments } = protectCodeSegments(source)
   const withWiki =
@@ -236,7 +252,10 @@ export function renderMarkdownToSafeHtml(markdown, options = {}) {
     gfm: true,
     breaks: options.breaks !== false,
   })
-  return sanitizeMarkdownHtml(typeof html === 'string' ? html : String(html))
+  return {
+    html: sanitizeMarkdownHtml(typeof html === 'string' ? html : String(html)),
+    widgets,
+  }
 }
 
 /**
