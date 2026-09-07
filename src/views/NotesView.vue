@@ -21,6 +21,7 @@ import {
 import { buildNotesTree, flattenFolderOptions } from '../utils/notesTree.js'
 import { parseNoteWikiHref, renderMarkdownToSafeHtml } from '../utils/renderMarkdown.js'
 import { mountNoteWidgets } from '../utils/noteWidgets.js'
+import { scrollPreviewToEditorCursor } from '../utils/notesSplitSync.js'
 import NotesTreeNode from '../components/NotesTreeNode.vue'
 import AppConfirmDialog from '../components/AppConfirmDialog.vue'
 import NotesExtensionsModal from '../components/NotesExtensionsModal.vue'
@@ -1368,7 +1369,7 @@ function onPreviewClick(event) {
 
 function syncSplitScroll(source, target) {
   if (!isExtEnabled('sync-scroll')) return
-  if (viewMode.value !== 'split' || !source || !target || scrollSyncLock) return
+  if (effectiveViewMode.value !== 'split' || !source || !target || scrollSyncLock) return
   const sourceMax = source.scrollHeight - source.clientHeight
   const targetMax = target.scrollHeight - target.clientHeight
   if (sourceMax <= 0 || targetMax <= 0) {
@@ -1380,6 +1381,56 @@ function syncSplitScroll(source, target) {
   requestAnimationFrame(() => {
     scrollSyncLock = false
   })
+}
+
+let cursorPreviewSyncTimer = 0
+
+function syncPreviewToEditorCursor({ behavior = 'auto', force = false } = {}) {
+  if (!isExtEnabled('sync-scroll')) return
+  if (effectiveViewMode.value !== 'split') return
+  if (scrollSyncLock && !force) return
+  const editor = editorEl.value
+  const preview = previewEl.value
+  if (!editor || !preview) return
+
+  scrollSyncLock = true
+  scrollPreviewToEditorCursor(editor, preview, { behavior })
+  requestAnimationFrame(() => {
+    scrollSyncLock = false
+  })
+}
+
+function schedulePreviewCursorSync() {
+  if (!isExtEnabled('sync-scroll')) return
+  if (effectiveViewMode.value !== 'split') return
+  if (cursorPreviewSyncTimer) window.clearTimeout(cursorPreviewSyncTimer)
+  cursorPreviewSyncTimer = window.setTimeout(async () => {
+    cursorPreviewSyncTimer = 0
+    await nextTick()
+    syncPreviewToEditorCursor({ behavior: 'auto' })
+  }, 80)
+}
+
+function onEditorCursorNavigate(event) {
+  if (event?.type === 'keyup') {
+    const key = event.key
+    const isNav =
+      key === 'ArrowUp' ||
+      key === 'ArrowDown' ||
+      key === 'ArrowLeft' ||
+      key === 'ArrowRight' ||
+      key === 'Home' ||
+      key === 'End' ||
+      key === 'PageUp' ||
+      key === 'PageDown' ||
+      key === 'Enter'
+    if (!isNav) return
+  }
+  schedulePreviewCursorSync()
+}
+
+function onEditorInput() {
+  schedulePreviewCursorSync()
 }
 
 function onEditorScroll() {
@@ -1429,6 +1480,10 @@ onUnmounted(() => {
     unmountPreviewWidgets()
     unmountPreviewWidgets = null
   }
+  if (cursorPreviewSyncTimer) {
+    window.clearTimeout(cursorPreviewSyncTimer)
+    cursorPreviewSyncTimer = 0
+  }
   if (mobileNotesMql) {
     mobileNotesMql.removeEventListener('change', syncMobileNotesLayout)
     mobileNotesMql = null
@@ -1457,6 +1512,14 @@ watch(
   async () => {
     await nextTick()
     remountPreviewWidgets()
+    if (
+      isExtEnabled('sync-scroll') &&
+      effectiveViewMode.value === 'split' &&
+      editorEl.value &&
+      document.activeElement === editorEl.value
+    ) {
+      syncPreviewToEditorCursor({ behavior: 'auto', force: true })
+    }
   },
   { flush: 'post' },
 )
@@ -1902,6 +1965,10 @@ watch(draftFolderId, (value) => {
             spellcheck="true"
             placeholder="Écris en Markdown…"
             @scroll="onEditorScroll"
+            @click="onEditorCursorNavigate"
+            @keyup="onEditorCursorNavigate"
+            @select="onEditorCursorNavigate"
+            @input="onEditorInput"
             @blur="flushSave"
             @contextmenu="onEditorContextMenu"
           />

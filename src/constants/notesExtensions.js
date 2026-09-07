@@ -33,7 +33,7 @@ export const NOTES_EXTENSIONS = [
     name: 'Scroll synchronisé',
     description: 'En mode Split, l’édition et l’aperçu défilent ensemble.',
     details:
-      'Conserve le comparatif côte à côte : quand tu scrolles dans l’éditeur Markdown, l’aperçu suit (et inversement), proportionnellement à la hauteur du contenu.',
+      'Conserve le comparatif côte à côte :\n\n• Quand tu scrolles dans l’éditeur, l’aperçu suit (et inversement)\n• Quand tu cliques ou déplaces le curseur dans l’éditeur, l’aperçu se place sur la zone correspondante pour suivre tes modifications en direct',
     defaultEnabled: true,
   },
   {
