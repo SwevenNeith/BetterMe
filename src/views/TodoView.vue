@@ -27,6 +27,17 @@ import {
   syncNoteStatusFromTodoCompletion,
 } from '../services/noteTodoSync.js'
 import {
+  applyMorningSnoozeSelection,
+  canSnoozeTodo,
+  getForwardSnoozeTargetDate,
+  getSnoozeConfirmMessage,
+  getSnoozeConfirmTitle,
+  listMorningSnoozeCandidates,
+  markMorningSnoozePromptShown,
+  snoozeTodoItem,
+  wasMorningSnoozePromptShown,
+} from '../services/todoSnooze.js'
+import {
   TODO_VIEW_MODE,
   buildCompletionProgressMap,
   hasTodoQuantiteCible,
@@ -56,6 +67,8 @@ import {
   toISODate,
 } from '../utils/habitCalendar.js'
 import TodoItemCard from '../components/TodoItemCard.vue'
+import TodoSnoozePromptModal from '../components/TodoSnoozePromptModal.vue'
+import AppConfirmDialog from '../components/AppConfirmDialog.vue'
 import TodoEncouragementMessage from '../components/TodoEncouragementMessage.vue'
 import TimetablePlanningSubForm from '../components/TimetablePlanningSubForm.vue'
 import { loadUserCategories } from '../services/timetableCategories.js'
@@ -102,6 +115,12 @@ const items = ref([])
 const completionProgress = ref(new Map())
 const draggingItemId = ref(null)
 const pendingDeleteItem = ref(null)
+const pendingSnoozeItem = ref(null)
+const isSnoozing = ref(false)
+const morningSnoozeOpen = ref(false)
+const morningSnoozeCandidates = ref([])
+const morningSnoozeSaving = ref(false)
+const morningSnoozeError = ref('')
 const promesseLimits = ref({ perDay: 3, perWeek: 3 })
 const addToPlanning = ref(false)
 const planningCategories = ref([])
@@ -613,6 +632,7 @@ async function loadData() {
     items.value = await sanitizeLoadedTodoPlanningLinks(itemsData)
     completionProgress.value = buildCompletionProgressMap(completionsData)
     promesseLimits.value = limits
+    void maybeOpenMorningSnoozePrompt()
   } catch (err) {
     console.error(err)
     loadError.value = err.message || 'Impossible de charger la liste.'
@@ -621,6 +641,116 @@ async function loadData() {
   } finally {
     isLoading.value = false
   }
+}
+
+async function maybeOpenMorningSnoozePrompt() {
+  if (!userId.value) return
+  if (morningSnoozeOpen.value) return
+  const today = getLocalTodayISO()
+  if (anchorDate.value !== today) return
+  if (wasMorningSnoozePromptShown(userId.value, today)) return
+
+  try {
+    const candidates = await listMorningSnoozeCandidates(supabase, userId.value, today)
+    if (!candidates.length) {
+      markMorningSnoozePromptShown(userId.value, today)
+      return
+    }
+    morningSnoozeCandidates.value = candidates
+    morningSnoozeError.value = ''
+    morningSnoozeOpen.value = true
+  } catch (err) {
+    console.error('morning snooze prompt:', err)
+  }
+}
+
+function requestSnooze(item) {
+  if (!canSnoozeTodo(item)) return
+  pendingSnoozeItem.value = item
+}
+
+function cancelSnooze() {
+  pendingSnoozeItem.value = null
+}
+
+const pendingSnoozeTarget = computed(() => {
+  const item = pendingSnoozeItem.value
+  if (!item) return null
+  const from =
+    item.frequence === TODO_FREQUENCY.WEEK_GOAL
+      ? anchorDate.value
+      : item.occurrenceDate || item.date_echeance || anchorDate.value
+  return getForwardSnoozeTargetDate(item, from)
+})
+
+const pendingSnoozeTitle = computed(() =>
+  pendingSnoozeItem.value ? getSnoozeConfirmTitle(pendingSnoozeItem.value) : '',
+)
+
+const pendingSnoozeMessage = computed(() => {
+  if (!pendingSnoozeItem.value || !pendingSnoozeTarget.value) return ''
+  return getSnoozeConfirmMessage(pendingSnoozeItem.value, pendingSnoozeTarget.value)
+})
+
+async function confirmSnooze() {
+  const item = pendingSnoozeItem.value
+  const target = pendingSnoozeTarget.value
+  if (!userId.value || !item || !target || isSnoozing.value) return
+
+  isSnoozing.value = true
+  loadError.value = ''
+  try {
+    await snoozeTodoItem(
+      supabase,
+      userId.value,
+      item,
+      target,
+      items.value,
+      promesseLimits.value,
+    )
+    pendingSnoozeItem.value = null
+    await loadData()
+  } catch (err) {
+    console.error(err)
+    loadError.value = err.message || 'Impossible de reporter cette tâche.'
+    pendingSnoozeItem.value = null
+  } finally {
+    isSnoozing.value = false
+  }
+}
+
+async function onMorningSnoozeConfirm(selected) {
+  if (!userId.value || morningSnoozeSaving.value) return
+  morningSnoozeSaving.value = true
+  morningSnoozeError.value = ''
+  try {
+    const result = await applyMorningSnoozeSelection(
+      supabase,
+      userId.value,
+      selected,
+      promesseLimits.value,
+    )
+    markMorningSnoozePromptShown(userId.value, getLocalTodayISO())
+    morningSnoozeOpen.value = false
+    morningSnoozeCandidates.value = []
+    await loadData()
+    if (result.errors.length) {
+      loadError.value = result.errors
+        .map((entry) => `${entry.item?.nom || 'Tâche'} : ${entry.message}`)
+        .join(' · ')
+    }  } catch (err) {
+    console.error(err)
+    morningSnoozeError.value = err.message || 'Impossible de reporter la sélection.'
+  } finally {
+    morningSnoozeSaving.value = false
+  }
+}
+
+function onMorningSnoozeSkip() {
+  markMorningSnoozePromptShown(userId.value, getLocalTodayISO())
+  morningSnoozeOpen.value = false
+  morningSnoozeCandidates.value = []
+  morningSnoozeError.value = ''
 }
 
 async function submitForm() {
@@ -1415,6 +1545,27 @@ watch(userId, (id) => {
 
     <p v-if="loadError" class="todo-error todo-error--global" role="alert">{{ loadError }}</p>
 
+    <AppConfirmDialog
+      :open="Boolean(pendingSnoozeItem)"
+      :title="pendingSnoozeTitle"
+      :message="pendingSnoozeMessage"
+      confirm-label="Reporter"
+      cancel-label="Annuler"
+      @confirm="confirmSnooze"
+      @cancel="cancelSnooze"
+    />
+
+    <TodoSnoozePromptModal
+      :open="morningSnoozeOpen"
+      :candidates="morningSnoozeCandidates"
+      :saving="morningSnoozeSaving"
+      @confirm="onMorningSnoozeConfirm"
+      @skip="onMorningSnoozeSkip"
+    />
+    <p v-if="morningSnoozeError" class="todo-error todo-error--global" role="alert">
+      {{ morningSnoozeError }}
+    </p>
+
     <section class="todo-card" aria-label="Calendrier des tâches">
       <p v-if="isLoading" class="todo-loading">Chargement…</p>
 
@@ -1434,6 +1585,7 @@ watch(userId, (id) => {
               @decrement="adjustItemQuantite(item, -1)"
               @edit="openEditForm(item)"
               @delete="removeItem(item)"
+              @snooze="requestSnooze(item)"
               @dragstart="onDragStart(item.id, $event)"
               @dragover="onDragOver(item.id, $event)"
               @drop="onItemDrop(item.id, $event)"
@@ -1457,6 +1609,7 @@ watch(userId, (id) => {
             @decrement="adjustItemQuantite(item, -1)"
             @edit="openEditForm(item)"
             @delete="removeItem(item)"
+            @snooze="requestSnooze(item)"
           />
         </div>
 

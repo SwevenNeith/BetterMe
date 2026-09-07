@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { getTodoItemColorClass } from '../constants/todoOptions.js'
+import { TODO_FREQUENCY, getTodoItemColorClass } from '../constants/todoOptions.js'
 import '../styles/todo-frequency.css'
 
 const props = defineProps({
@@ -22,12 +22,29 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['toggle', 'increment', 'decrement', 'edit', 'delete', 'dragstart', 'dragover', 'drop', 'dragend'])
+const emit = defineEmits([
+  'toggle',
+  'increment',
+  'decrement',
+  'edit',
+  'delete',
+  'snooze',
+  'dragstart',
+  'dragover',
+  'drop',
+  'dragend',
+])
 
 const hasQuantite = computed(
   () =>
     props.item.occurrenceQuantiteCible != null && Number(props.item.occurrenceQuantiteCible) >= 1,
 )
+
+const showSnooze = computed(() => {
+  if (props.item.occurrenceDone) return false
+  const freq = props.item.frequence
+  return freq === TODO_FREQUENCY.ONE_OFF || freq === TODO_FREQUENCY.WEEK_GOAL
+})
 
 const quantiteLabel = computed(() => {
   if (!hasQuantite.value) return ''
@@ -124,6 +141,40 @@ function onCardDragEnd(event) {
       </div>
 
       <div class="todo-item-actions">
+        <button
+          v-if="showSnooze"
+          type="button"
+          class="todo-item-action"
+          :title="
+            item.frequence === TODO_FREQUENCY.WEEK_GOAL
+              ? 'Reporter à la semaine suivante'
+              : 'Reporter à demain'
+          "
+          :aria-label="
+            item.frequence === TODO_FREQUENCY.WEEK_GOAL
+              ? `Reporter « ${item.nom} » à la semaine suivante`
+              : `Reporter « ${item.nom} » à demain`
+          "
+          @click.stop="emit('snooze')"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="13" r="8" />
+            <path d="M12 9v4l2 2" />
+            <path d="M5 3 2 6" />
+            <path d="m22 6-3-3" />
+            <path d="M6.38 18.7 4 21" />
+            <path d="M17.64 18.67 20 21" />
+          </svg>
+        </button>
         <button
           type="button"
           class="todo-item-action"
