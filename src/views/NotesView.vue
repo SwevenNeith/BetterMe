@@ -20,7 +20,7 @@ import {
 } from '../services/noteFolders.js'
 import { buildNotesTree, flattenFolderOptions } from '../utils/notesTree.js'
 import { parseNoteWikiHref, renderMarkdownToSafeHtml } from '../utils/renderMarkdown.js'
-import { mountNoteWidgets } from '../utils/noteWidgets.js'
+import { mountNoteWidgets, NOTE_WIDGET_INDEX_ATTR, NOTE_WIDGET_PLACEHOLDER_CLASS } from '../utils/noteWidgets.js'
 import { scrollPreviewToEditorCursor } from '../utils/notesSplitSync.js'
 import NotesTreeNode from '../components/NotesTreeNode.vue'
 import AppConfirmDialog from '../components/AppConfirmDialog.vue'
@@ -61,6 +61,14 @@ import {
   formatDictionaryTooltip,
   lookupDictionarySelection,
 } from '../utils/dictionaryLookup.js'
+import {
+  derivePinnedNotePartTitle,
+} from '../constants/dashboardPinnedNotes.js'
+import {
+  addDashboardPinnedNote,
+  loadDashboardVisibility,
+  saveDashboardVisibility,
+} from '../services/dashboardVisibility.js'
 
 const GRAPH_TAB = { type: 'graph', id: 'graph' }
 
@@ -104,6 +112,8 @@ const dictionaryModalWord = ref('')
 const dictionaryEditEntry = ref(null)
 /** @type {import('vue').Ref<{ x: number, y: number, word: string } | null>} */
 const editorContextMenu = ref(null)
+const dashboardPinMessage = ref('')
+let dashboardPinMessageTimer = null
 /** @type {import('vue').Ref<{ x: number, y: number, text: string } | null>} */
 const dictionaryTooltip = ref(null)
 const extensionsOpen = ref(false)
@@ -1229,31 +1239,199 @@ function isValidDictionarySelection(value) {
   return Boolean(trimmed) && trimmed.length <= 120
 }
 
-function openEditorContextMenu(event, word) {
-  if (!isValidDictionarySelection(word)) return
+/**
+ * Étend la sélection éditeur pour englober les fences widget intersectées.
+ * @param {string} text
+ * @param {number} start
+ * @param {number} end
+ */
+function expandEditorSelectionToWidgetFences(text, start, end) {
+  if (start === end) return ''
+  const fenceRe = /^```(?:widget|interactive|html-run)[ \t]*\r?\n[\s\S]*?```/gm
+  let from = start
+  let to = end
+  let match
+  while ((match = fenceRe.exec(text))) {
+    const fenceStart = match.index
+    const fenceEnd = match.index + match[0].length
+    if (fenceEnd > start && fenceStart < end) {
+      from = Math.min(from, fenceStart)
+      to = Math.max(to, fenceEnd)
+    }
+  }
+  return text.slice(from, to)
+}
+
+/**
+ * @param {MouseEvent} event
+ * @param {Selection | null} selection
+ */
+function collectPreviewWidgetMarkdown(event, selection) {
+  const root = previewEl.value
+  if (!root) return ''
+
+  /** @type {Set<number>} */
+  const indices = new Set()
+  const target = event.target
+  if (target instanceof Element) {
+    const host = target.closest(`.${NOTE_WIDGET_PLACEHOLDER_CLASS}`)
+    if (host instanceof HTMLElement && root.contains(host)) {
+      const index = Number(host.getAttribute(NOTE_WIDGET_INDEX_ATTR))
+      if (Number.isFinite(index) && index >= 0) indices.add(index)
+    }
+  }
+
+  if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
+    const range = selection.getRangeAt(0)
+    root.querySelectorAll(`.${NOTE_WIDGET_PLACEHOLDER_CLASS}`).forEach((host) => {
+      if (!(host instanceof HTMLElement)) return
+      try {
+        if (!range.intersectsNode(host)) return
+      } catch {
+        return
+      }
+      const index = Number(host.getAttribute(NOTE_WIDGET_INDEX_ATTR))
+      if (Number.isFinite(index) && index >= 0) indices.add(index)
+    })
+  }
+
+  return [...indices]
+    .sort((a, b) => a - b)
+    .map((index) => previewWidgets.value[index])
+    .filter((source) => typeof source === 'string' && source.length)
+    .map((source) => `\`\`\`widget\n${source}\n\`\`\``)
+    .join('\n\n')
+}
+
+function openNoteContextMenu(event, selectedText = '', extras = {}) {
+  if (!selectedNoteId.value && !extras.noteId) return
   event.preventDefault()
-  editorContextMenu.value = { x: event.clientX, y: event.clientY, word: word.trim() }
+  const trimmed = String(selectedText ?? '').trim()
+  editorContextMenu.value = {
+    x: event.clientX,
+    y: event.clientY,
+    word: isValidDictionarySelection(trimmed) ? trimmed : '',
+    selectedText: trimmed,
+    noteId: extras.noteId || selectedNoteId.value,
+    noteTitle: extras.noteTitle || '',
+    vaultId: extras.vaultId ?? activeVaultId.value,
+    contentMd: extras.contentMd ?? null,
+    source: extras.source || 'editor',
+  }
 }
 
 function onEditorContextMenu(event) {
   const el = editorEl.value
-  if (!el) return
+  if (!el || !selectedNoteId.value) return
   const start = el.selectionStart ?? 0
   const end = el.selectionEnd ?? 0
-  if (start === end) return
-  openEditorContextMenu(event, el.value.slice(start, end))
+  const selected =
+    start !== end ? expandEditorSelectionToWidgetFences(el.value, start, end) : ''
+  openNoteContextMenu(event, selected, { source: 'editor' })
 }
 
 function onPreviewContextMenu(event) {
+  if (!selectedNoteId.value) return
   const selection = window.getSelection()
-  const selected = selection?.toString().trim()
-  if (!selected) return
-  if (!previewEl.value?.contains(selection?.anchorNode ?? null)) return
-  openEditorContextMenu(event, selected)
+  const selected = selection?.toString() ?? ''
+  if (selected && !previewEl.value?.contains(selection?.anchorNode ?? null)) return
+  const widgetMd = collectPreviewWidgetMarkdown(event, selection)
+  const payload = widgetMd
+    ? selected.trim()
+      ? `${selected.trim()}\n\n${widgetMd}`
+      : widgetMd
+    : selected
+  openNoteContextMenu(event, payload, { source: 'preview' })
+}
+
+function onTreeNoteContextMenu({ noteId, event }) {
+  if (!noteId || !event) return
+  const note = notes.value.find((item) => item.id === noteId)
+  if (!note) return
+  const isCurrent =
+    noteId === selectedNoteId.value && !isGraphView.value
+  openNoteContextMenu(event, '', {
+    source: 'sidebar',
+    noteId: note.id,
+    noteTitle: isCurrent
+      ? String(draftTitle.value ?? '').trim() || note.title
+      : note.title,
+    vaultId: note.vault_id ?? activeVaultId.value,
+    contentMd: isCurrent ? draftContent.value : note.content_md ?? '',
+  })
 }
 
 function closeEditorContextMenu() {
   editorContextMenu.value = null
+}
+
+function showDashboardPinMessage(message) {
+  dashboardPinMessage.value = message
+  if (dashboardPinMessageTimer) clearTimeout(dashboardPinMessageTimer)
+  dashboardPinMessageTimer = setTimeout(() => {
+    dashboardPinMessage.value = ''
+    dashboardPinMessageTimer = null
+  }, 2800)
+}
+
+async function pinNoteToDashboard() {
+  if (!userId.value || !editorContextMenu.value) return
+  const menu = editorContextMenu.value
+  const noteId = menu.noteId || selectedNoteId.value
+  if (!noteId) return
+
+  const selectedText = String(menu.selectedText ?? '').trim()
+  const isSidebar = menu.source === 'sidebar'
+  const isCurrentNote = noteId === selectedNoteId.value && !isGraphView.value
+
+  let contentMd = selectedText
+  let noteTitle = String(draftTitle.value ?? '').trim() || 'Sans titre'
+  let vaultId = activeVaultId.value
+  let partTitle = selectedText ? derivePinnedNotePartTitle(selectedText) : ''
+
+  if (isSidebar || !selectedText) {
+    partTitle = ''
+    if (isCurrentNote) {
+      contentMd = draftContent.value
+      noteTitle = String(draftTitle.value ?? '').trim() || 'Sans titre'
+      vaultId = activeVaultId.value
+    } else if (isSidebar) {
+      contentMd = String(menu.contentMd ?? '')
+      noteTitle = String(menu.noteTitle ?? '').trim() || 'Sans titre'
+      vaultId = menu.vaultId ?? activeVaultId.value
+      if (!contentMd) {
+        try {
+          const note = await getNote(supabase, userId.value, noteId)
+          contentMd = note?.content_md ?? ''
+          noteTitle = String(note?.title ?? noteTitle).trim() || 'Sans titre'
+          vaultId = note?.vault_id ?? vaultId
+        } catch (err) {
+          console.error(err)
+        }
+      }
+    } else {
+      contentMd = draftContent.value
+    }
+  }
+
+  closeEditorContextMenu()
+  try {
+    const current = await loadDashboardVisibility(supabase, userId.value)
+    const { visibility } = addDashboardPinnedNote(current, {
+      noteId,
+      vaultId,
+      noteTitle,
+      partTitle,
+      contentMd,
+    })
+    await saveDashboardVisibility(supabase, userId.value, visibility)
+    showDashboardPinMessage(
+      partTitle ? 'Extrait ajouté au Dashboard.' : 'Note ajoutée au Dashboard.',
+    )
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible d’ajouter cette note au Dashboard.'
+  }
 }
 
 function openDictionaryEntryModal(word) {
@@ -1483,6 +1661,10 @@ onUnmounted(() => {
   if (cursorPreviewSyncTimer) {
     window.clearTimeout(cursorPreviewSyncTimer)
     cursorPreviewSyncTimer = 0
+  }
+  if (dashboardPinMessageTimer) {
+    clearTimeout(dashboardPinMessageTimer)
+    dashboardPinMessageTimer = null
   }
   if (mobileNotesMql) {
     mobileNotesMql.removeEventListener('change', syncMobileNotesLayout)
@@ -1839,6 +2021,7 @@ watch(draftFolderId, (value) => {
             @rename-note="onTreeRenameNote"
             @delete-note="onDeleteNote"
             @delete-folder="onDeleteFolder"
+            @note-context-menu="onTreeNoteContextMenu"
           />
           <p v-if="!filteredTree.length" class="notes-page__tree-empty">
             {{ activeVault ? 'Ce coffre est vide.' : 'Aucun élément hors coffre.' }}
@@ -2082,23 +2265,41 @@ watch(draftFolderId, (value) => {
       <p v-if="editorContextSelectionHit" class="notes-dict-context__hint">
         Déjà connu : {{ editorContextSelectionHit.word }}
       </p>
+      <template v-if="editorContextMenu.word">
+        <button
+          type="button"
+          class="notes-dict-context__item"
+          role="menuitem"
+          @click="openDictionaryEntryModal(editorContextMenu.word)"
+        >
+          Ajouter au dictionnaire
+        </button>
+        <button
+          type="button"
+          class="notes-dict-context__item"
+          role="menuitem"
+          @click="openDictionaryLinkModal(editorContextMenu.word)"
+        >
+          Lier à une définition existante
+        </button>
+      </template>
       <button
         type="button"
         class="notes-dict-context__item"
         role="menuitem"
-        @click="openDictionaryEntryModal(editorContextMenu.word)"
+        @click="pinNoteToDashboard"
       >
-        Ajouter au dictionnaire
-      </button>
-      <button
-        type="button"
-        class="notes-dict-context__item"
-        role="menuitem"
-        @click="openDictionaryLinkModal(editorContextMenu.word)"
-      >
-        Lier à une définition existante
+        {{
+          editorContextMenu.selectedText
+            ? 'Mettre la sélection sur le Dashboard'
+            : 'Mettre sur le Dashboard'
+        }}
       </button>
     </div>
+
+    <p v-if="dashboardPinMessage" class="notes-page__dashboard-pin-toast" role="status">
+      {{ dashboardPinMessage }}
+    </p>
 
     <div
       v-if="dictionaryTooltip"
@@ -3030,6 +3231,22 @@ watch(draftFolderId, (value) => {
   background: #fff;
   border: 1px solid #e6ddf2;
   box-shadow: 0 12px 32px rgba(58, 34, 86, 0.16);
+}
+
+.notes-page__dashboard-pin-toast {
+  position: fixed;
+  z-index: 1200;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.55rem 0.95rem;
+  border-radius: 999px;
+  background: #3b2a4a;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  box-shadow: 0 10px 28px rgba(58, 34, 86, 0.28);
 }
 
 .notes-dict-context__hint {

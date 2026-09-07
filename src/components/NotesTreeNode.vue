@@ -15,6 +15,7 @@ defineEmits([
   'rename-note',
   'delete-note',
   'delete-folder',
+  'note-context-menu',
 ])
 </script>
 
@@ -112,6 +113,7 @@ defineEmits([
           @rename-note="$emit('rename-note', $event)"
           @delete-note="$emit('delete-note', $event)"
           @delete-folder="$emit('delete-folder', $event)"
+          @note-context-menu="$emit('note-context-menu', $event)"
         />
       </div>
     </template>
@@ -120,6 +122,7 @@ defineEmits([
       <div
         class="notes-tree-node__row notes-tree-node__row--note"
         :class="{ 'notes-tree-node__row--active': selectedNoteId === node.id }"
+        @contextmenu.prevent.stop="$emit('note-context-menu', { noteId: node.id, event: $event })"
       >
         <button type="button" class="notes-tree-node__main" @click="$emit('select-note', node.id)">
           <span class="notes-tree-node__chevron notes-tree-node__chevron--spacer" />

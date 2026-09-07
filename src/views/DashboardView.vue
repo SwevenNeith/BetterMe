@@ -38,9 +38,20 @@ const desktopBottomWidgets = computed(() =>
   visibleWidgetIds(dashboardLayout.value.desktop.bottom),
 )
 const mobileWidgets = computed(() => visibleWidgetIds(dashboardLayout.value.mobile))
-const mobileSlides = computed(() =>
-  buildMobileCarouselSlides(mobileWidgets.value, dashboardLayout.value.mobileGroups),
+const pinnedNoteExtraIds = computed(
+  () => new Set(Object.keys(dashboardVisibility.value?.pins || {})),
 )
+const mobileSlides = computed(() =>
+  buildMobileCarouselSlides(
+    mobileWidgets.value,
+    dashboardLayout.value.mobileGroups,
+    pinnedNoteExtraIds.value,
+  ),
+)
+
+function pinForWidget(widgetId) {
+  return dashboardVisibility.value?.pins?.[widgetId] ?? null
+}
 
 const showLeftGroup = computed(() => desktopLeftWidgets.value.length > 0)
 const showRightGroup = computed(() => desktopRightWidgets.value.length > 0)
@@ -499,6 +510,7 @@ const onCancelEmotionalCheckin = () => {
                 v-for="widgetId in slide"
                 :key="`mobile-${slideIndex}-${widgetId}`"
                 :widget-id="widgetId"
+                :pin="pinForWidget(widgetId)"
                 :as-column="false"
                 :user-id="userId"
                 :date-iso="todayStr"
@@ -535,6 +547,7 @@ const onCancelEmotionalCheckin = () => {
                 v-for="widgetId in desktopTopWidgets"
                 :key="`top-${widgetId}`"
                 :widget-id="widgetId"
+                :pin="pinForWidget(widgetId)"
                 :user-id="userId"
                 :date-iso="todayStr"
                 :formatted-today="formattedToday"
@@ -569,6 +582,7 @@ const onCancelEmotionalCheckin = () => {
                   v-for="widgetId in desktopLeftWidgets"
                   :key="`left-${widgetId}`"
                   :widget-id="widgetId"
+                  :pin="pinForWidget(widgetId)"
                   :user-id="userId"
                   :date-iso="todayStr"
                   :formatted-today="formattedToday"
@@ -596,6 +610,7 @@ const onCancelEmotionalCheckin = () => {
                   v-for="widgetId in desktopRightWidgets"
                   :key="`right-${widgetId}`"
                   :widget-id="widgetId"
+                  :pin="pinForWidget(widgetId)"
                   :user-id="userId"
                   :date-iso="todayStr"
                   :formatted-today="formattedToday"
@@ -628,6 +643,7 @@ const onCancelEmotionalCheckin = () => {
                 v-for="widgetId in desktopBottomWidgets"
                 :key="`bottom-${widgetId}`"
                 :widget-id="widgetId"
+                :pin="pinForWidget(widgetId)"
                 :user-id="userId"
                 :date-iso="todayStr"
                 :formatted-today="formattedToday"

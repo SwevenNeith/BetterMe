@@ -8,9 +8,11 @@ import DashboardTodayTodos from './DashboardTodayTodos.vue'
 import DashboardHabitsAnnual from './DashboardHabitsAnnual.vue'
 import DashboardNotesGraph from './DashboardNotesGraph.vue'
 import DashboardDailyNote from './DashboardDailyNote.vue'
+import DashboardPinnedNote from './DashboardPinnedNote.vue'
 import DashboardReadingInProgress from './DashboardReadingInProgress.vue'
 import DashboardActiveProjects from './DashboardActiveProjects.vue'
 import { DASHBOARD_WIDGET_IDS } from '../constants/dashboardWidgets.js'
+import { isPinnedNoteWidgetId } from '../constants/dashboardPinnedNotes.js'
 
 defineProps({
   widgetId: {
@@ -19,6 +21,10 @@ defineProps({
   },
   userId: {
     type: String,
+    default: null,
+  },
+  pin: {
+    type: Object,
     default: null,
   },
   dateIso: {
@@ -115,13 +121,23 @@ const COLUMN_CLASS_BY_ID = {
 
 function rootClass(widgetId, asColumn) {
   if (!asColumn) return 'dashboard-widget-inner'
+  if (isPinnedNoteWidgetId(widgetId)) {
+    return ['dashboard-column', 'pinned-note-column']
+  }
   return ['dashboard-column', COLUMN_CLASS_BY_ID[widgetId] || `${widgetId}-column`]
 }
 </script>
 
 <template>
   <div :class="rootClass(widgetId, asColumn)">
-    <DashboardComfortImages v-if="widgetId === IDS.COMFORT" :user-id="userId" />
+    <DashboardPinnedNote
+      v-if="isPinnedNoteWidgetId(widgetId)"
+      :user-id="userId"
+      :widget-id="widgetId"
+      :pin="pin"
+    />
+
+    <DashboardComfortImages v-else-if="widgetId === IDS.COMFORT" :user-id="userId" />
 
     <DashboardWordOfTheDay
       v-else-if="widgetId === IDS.DICTIONARY_WORD"
@@ -261,6 +277,7 @@ function rootClass(widgetId, asColumn) {
 .todo-column,
 .comfort-column,
 .daily-note-column,
+.pinned-note-column,
 .checkin-column {
   gap: 1rem;
 }

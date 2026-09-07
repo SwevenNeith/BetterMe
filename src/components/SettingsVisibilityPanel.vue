@@ -7,6 +7,7 @@ import {
   DASHBOARD_WIDGET_IDS,
   DASHBOARD_DESKTOP_ZONES,
 } from '../constants/dashboardWidgets.js'
+import { formatPinnedNoteWidgetLabel } from '../constants/dashboardPinnedNotes.js'
 import DashboardVisibilityWidgetRow from './DashboardVisibilityWidgetRow.vue'
 import {
   loadPageVisibility,
@@ -91,8 +92,8 @@ const pagesForList = computed(() =>
   })),
 )
 
-const dashboardWidgetsForList = computed(() =>
-  DASHBOARD_WIDGETS.map((widget) => {
+const dashboardWidgetsForList = computed(() => {
+  const base = DASHBOARD_WIDGETS.map((widget) => {
     const pageId = DASHBOARD_WIDGET_PAGE_IDS[widget.id]
     return {
       ...widget,
@@ -101,8 +102,22 @@ const dashboardWidgetsForList = computed(() =>
         ? getPageDisplayLabel(pageId, pageVisibility.value, widget.defaultLabel)
         : widget.defaultLabel,
     }
-  }),
-)
+  })
+
+  const pins = dashboardVisibility.value?.pins || {}
+  const pinWidgets = Object.entries(pins).map(([id, pin]) => {
+    const label = formatPinnedNoteWidgetLabel(pin)
+    return {
+      id,
+      defaultLabel: label,
+      visible: dashboardVisibility.value[id]?.visible !== false,
+      displayLabel: label,
+      isPinnedNote: true,
+    }
+  })
+
+  return [...base, ...pinWidgets]
+})
 
 const dashboardWidgetMap = computed(() =>
   Object.fromEntries(dashboardWidgetsForList.value.map((widget) => [widget.id, widget])),
