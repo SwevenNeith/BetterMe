@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import JournalEntryBook from '../components/JournalEntryBook.vue'
 import JournalPromptPickerModal from '../components/JournalPromptPickerModal.vue'
@@ -22,6 +22,8 @@ import {
 
 usePageDisplayLabel(APP_PAGE_IDS.JOURNAL, undefined, { setDocumentTitle: true })
 
+const AUTOSAVE_DELAY_MS = 700
+
 const route = useRoute()
 const router = useRouter()
 
@@ -32,12 +34,19 @@ const isLoading = ref(true)
 const isSaving = ref(false)
 const isDeleting = ref(false)
 const errorMessage = ref('')
+const saveStatus = ref('')
 const promptPickerOpen = ref(false)
 const promptsLoading = ref(false)
 const promptsError = ref('')
 const prompts = ref([])
 const deleteConfirmOpen = ref(false)
 const isEditing = ref(false)
+const dirty = ref(false)
+const stayEditingAfterLoad = ref(false)
+
+/** @type {ReturnType<typeof setTimeout> | null} */
+let saveTimer = null
+let suppressDirty = false
 
 const form = reactive({
   title: '',
@@ -70,27 +79,73 @@ const { clearDraft: clearJournalDraft, restoreDraft: restoreJournalDraft } = use
       promptId: form.promptId,
     }),
     setState: (state) => {
+      suppressDirty = true
       form.title = state?.title ?? ''
       form.contentHtml = state?.contentHtml ?? ''
       form.promptId = state?.promptId ?? null
+      nextTick(() => {
+        suppressDirty = false
+      })
     },
   },
 )
 
 function resetFormFromEntry(entry) {
+  suppressDirty = true
   form.title = entry?.title ?? ''
   form.contentHtml = entry?.content_html ?? ''
   form.promptId = entry?.prompt_id ?? null
+  dirty.value = false
+  saveStatus.value = ''
+  nextTick(() => {
+    suppressDirty = false
+  })
+}
+
+function clearSaveTimer() {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+}
+
+function hasSaveableContent() {
+  const title = String(form.title ?? '').trim()
+  const text = String(form.contentHtml ?? '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .trim()
+  return Boolean(title || text || form.promptId)
+}
+
+function markDirty() {
+  if (suppressDirty || !isEditing.value || isLoading.value) return
+  dirty.value = true
+  saveStatus.value = 'Modifications non enregistrées…'
+  scheduleSave()
+}
+
+function scheduleSave() {
+  if (!isEditing.value || !userId.value) return
+  clearSaveTimer()
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    void flushSave({ exitEditing: false })
+  }, AUTOSAVE_DELAY_MS)
 }
 
 function returnToJournal() {
-  router.push({ name: 'journal' })
+  void flushSave({ exitEditing: false }).finally(() => {
+    router.push({ name: 'journal' })
+  })
 }
 
 function openEntryByIndex(index) {
   const target = entries.value[index]
   if (!target?.id) return
-  router.push({ name: 'journal-entree', params: { entryId: target.id } })
+  void flushSave({ exitEditing: false }).finally(() => {
+    router.push({ name: 'journal-entree', params: { entryId: target.id } })
+  })
 }
 
 function goPrevEntry() {
@@ -111,6 +166,7 @@ async function loadEntries() {
 async function loadCurrentEntry() {
   if (!userId.value) return
 
+  clearSaveTimer()
   isLoading.value = true
   errorMessage.value = ''
 
@@ -133,7 +189,8 @@ async function loadCurrentEntry() {
     }
 
     resetFormFromEntry(currentEntry.value)
-    isEditing.value = false
+    isEditing.value = stayEditingAfterLoad.value
+    stayEditingAfterLoad.value = false
   } catch (err) {
     console.error(err)
     currentEntry.value = null
@@ -163,6 +220,7 @@ function applyPrompt(prompt) {
   form.title = prompt?.prompt_text ?? ''
   form.promptId = prompt?.id ?? null
   promptPickerOpen.value = false
+  markDirty()
 }
 
 async function pickRandomPrompt() {
@@ -187,36 +245,72 @@ async function openPromptPicker() {
   await ensurePromptsLoaded()
 }
 
-async function saveEntry() {
+/**
+ * @param {{ exitEditing?: boolean }} [options]
+ */
+async function flushSave(options = {}) {
+  const exitEditing = options.exitEditing === true
+  clearSaveTimer()
   if (!userId.value || isSaving.value) return
+  if (!isEditing.value && !exitEditing) return
+
+  if (isCreateMode.value && !hasSaveableContent()) {
+    return
+  }
+
+  if (!dirty.value && !exitEditing && !isCreateMode.value) return
+
+  if (!dirty.value && exitEditing && !isCreateMode.value) {
+    isEditing.value = false
+    return
+  }
 
   isSaving.value = true
   errorMessage.value = ''
+  saveStatus.value = 'Enregistrement…'
   try {
     if (isCreateMode.value) {
       const created = await createJournalEntry(supabase, userId.value, form)
       clearJournalDraft()
+      dirty.value = false
+      saveStatus.value = 'Enregistré'
+      stayEditingAfterLoad.value = !exitEditing
       await loadEntries()
-      router.replace({ name: 'journal-entree', params: { entryId: created.id } })
+      await router.replace({ name: 'journal-entree', params: { entryId: created.id } })
+      if (exitEditing) {
+        isEditing.value = false
+      }
       return
     }
 
     currentEntry.value = await updateJournalEntry(supabase, userId.value, entryId.value, form)
     clearJournalDraft()
+    dirty.value = false
+    saveStatus.value = 'Enregistré'
     await loadEntries()
-    isEditing.value = false
+    if (exitEditing) {
+      isEditing.value = false
+    }
   } catch (err) {
     console.error(err)
     errorMessage.value = err.message || 'Impossible d’enregistrer cette entrée.'
+    saveStatus.value = ''
   } finally {
     isSaving.value = false
   }
 }
 
+async function saveEntry() {
+  await flushSave({ exitEditing: true })
+}
+
 function cancelEdit() {
+  clearSaveTimer()
   clearJournalDraft()
+  dirty.value = false
+  saveStatus.value = ''
   if (isCreateMode.value) {
-    returnToJournal()
+    router.push({ name: 'journal' })
     return
   }
   resetFormFromEntry(currentEntry.value)
@@ -248,18 +342,20 @@ async function confirmDeleteEntry() {
   const fallbackIndex =
     currentEntryIndex.value > 0 ? currentEntryIndex.value - 1 : currentEntryIndex.value + 1 < entries.value.length ? currentEntryIndex.value + 1 : -1
 
+  clearSaveTimer()
   isDeleting.value = true
   errorMessage.value = ''
   try {
     await deleteJournalEntry(supabase, userId.value, currentEntry.value.id)
     clearJournalDraft()
+    dirty.value = false
     await loadEntries()
     deleteConfirmOpen.value = false
 
     if (fallbackIndex >= 0 && entries.value[fallbackIndex]?.id) {
       router.replace({ name: 'journal-entree', params: { entryId: entries.value[fallbackIndex].id } })
     } else {
-      returnToJournal()
+      router.push({ name: 'journal' })
     }
   } catch (err) {
     console.error(err)
@@ -277,9 +373,28 @@ onMounted(async () => {
   if (user) userId.value = user.id
 })
 
+onUnmounted(() => {
+  clearSaveTimer()
+  if (dirty.value && userId.value && isEditing.value && !isCreateMode.value && entryId.value) {
+    void updateJournalEntry(supabase, userId.value, entryId.value, {
+      title: form.title,
+      contentHtml: form.contentHtml,
+      promptId: form.promptId,
+    }).catch((err) => console.error('journal autosave on leave:', err))
+  }
+})
+
 watch([userId, entryId, isCreateMode], () => {
   if (userId.value) void loadCurrentEntry()
 })
+
+watch(
+  () => [form.title, form.contentHtml, form.promptId],
+  () => {
+    markDirty()
+  },
+)
+
 </script>
 
 <template>
@@ -328,12 +443,13 @@ watch([userId, entryId, isCreateMode], () => {
 
       <div class="journal-editor__footer">
         <button type="button" class="journal-editor__primary" :disabled="isSaving" @click="saveEntry">
-          {{ isSaving ? 'Enregistrement…' : isCreateMode ? 'Créer l’entrée' : 'Enregistrer' }}
+          {{ isCreateMode ? 'Créer l’entrée' : 'Enregistrer' }}
         </button>
         <button type="button" class="journal-editor__secondary" :disabled="isSaving" @click="cancelEdit">
           Annuler
         </button>
       </div>
+      <p v-if="saveStatus" class="journal-editor__save-msg" aria-live="polite">{{ saveStatus }}</p>
     </div>
 
     <JournalEntryBook
@@ -479,6 +595,12 @@ watch([userId, entryId, isCreateMode], () => {
   display: flex;
   gap: 0.7rem;
   flex-wrap: wrap;
+}
+
+.journal-editor__save-msg {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: #6d5a7e;
 }
 
 .journal-editor__primary,
