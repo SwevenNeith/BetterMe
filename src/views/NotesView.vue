@@ -62,7 +62,13 @@ import {
   lookupDictionarySelection,
 } from '../utils/dictionaryLookup.js'
 import {
+  createDashboardExcerptId,
   derivePinnedNotePartTitle,
+  findAndWrapDashboardExcerpt,
+  notifyNoteUpdated,
+  stripUnreferencedDashboardPinMarkers,
+  wrapDashboardExcerptAtRange,
+  wrapDashboardExcerptAtWidgetIndex,
 } from '../constants/dashboardPinnedNotes.js'
 import {
   NOTE_STATUS_OPTIONS,
@@ -989,8 +995,34 @@ async function selectNote(noteId, { syncRoute = true, openTab = true } = {}) {
   }
 
   try {
-    const note = await getNote(supabase, userId.value, noteId)
+    let note = await getNote(supabase, userId.value, noteId)
     if (!note) return
+
+    try {
+      const visibility = await loadDashboardVisibility(supabase, userId.value)
+      const keepExcerptIds = Object.values(visibility?.pins || {})
+        .filter((pin) => pin?.noteId === note.id)
+        .map((pin) => pin?.excerptId)
+        .filter(Boolean)
+      const original = String(note.content_md ?? '')
+      const cleaned = stripUnreferencedDashboardPinMarkers(original, keepExcerptIds)
+      if (cleaned !== original) {
+        note = await updateNote(supabase, userId.value, note.id, {
+          contentMd: cleaned,
+        })
+        notes.value = notes.value.map((n) =>
+          n.id === note.id ? { ...n, ...note } : n,
+        )
+        notifyNoteUpdated({
+          noteId: note.id,
+          title: note.title,
+          contentMd: cleaned,
+        })
+      }
+    } catch (healErr) {
+      console.warn('heal dashboard pin markers:', healErr)
+    }
+
     switchingTabs = true
     applyNoteToEditor(note)
     await nextTick()
@@ -1104,6 +1136,11 @@ async function flushSave() {
         console.error(syncErr)
       }
     }
+    notifyNoteUpdated({
+      noteId: updated.id,
+      title,
+      contentMd: draftContent.value,
+    })
   } catch (err) {
     console.error(err)
     saveError.value = err.message || 'Échec de l’enregistrement.'
@@ -1314,7 +1351,7 @@ function isValidDictionarySelection(value) {
  * @param {number} end
  */
 function expandEditorSelectionToWidgetFences(text, start, end) {
-  if (start === end) return ''
+  if (start === end) return { text: '', start, end }
   const fenceRe = /^```(?:widget|interactive|html-run)[ \t]*\r?\n[\s\S]*?```/gm
   let from = start
   let to = end
@@ -1327,16 +1364,17 @@ function expandEditorSelectionToWidgetFences(text, start, end) {
       to = Math.max(to, fenceEnd)
     }
   }
-  return text.slice(from, to)
+  return { text: text.slice(from, to), start: from, end: to }
 }
 
 /**
  * @param {MouseEvent} event
  * @param {Selection | null} selection
+ * @returns {{ markdown: string, widgetIndices: number[] }}
  */
 function collectPreviewWidgetMarkdown(event, selection) {
   const root = previewEl.value
-  if (!root) return ''
+  if (!root) return { markdown: '', widgetIndices: [] }
 
   /** @type {Set<number>} */
   const indices = new Set()
@@ -1363,23 +1401,32 @@ function collectPreviewWidgetMarkdown(event, selection) {
     })
   }
 
-  return [...indices]
-    .sort((a, b) => a - b)
+  const widgetIndices = [...indices].sort((a, b) => a - b)
+  const markdown = widgetIndices
     .map((index) => previewWidgets.value[index])
     .filter((source) => typeof source === 'string' && source.length)
     .map((source) => `\`\`\`widget\n${source}\n\`\`\``)
     .join('\n\n')
+
+  return { markdown, widgetIndices }
 }
 
 function openNoteContextMenu(event, selectedText = '', extras = {}) {
   if (!selectedNoteId.value && !extras.noteId) return
   event.preventDefault()
   const trimmed = String(selectedText ?? '').trim()
+  const widgetIndices = Array.isArray(extras.widgetIndices)
+    ? extras.widgetIndices.filter((n) => Number.isFinite(n) && n >= 0)
+    : []
   editorContextMenu.value = {
     x: event.clientX,
     y: event.clientY,
     word: isValidDictionarySelection(trimmed) ? trimmed : '',
     selectedText: trimmed,
+    selectionStart:
+      Number.isFinite(extras.selectionStart) ? extras.selectionStart : null,
+    selectionEnd: Number.isFinite(extras.selectionEnd) ? extras.selectionEnd : null,
+    widgetIndices,
     noteId: extras.noteId || selectedNoteId.value,
     noteTitle: extras.noteTitle || '',
     vaultId: extras.vaultId ?? activeVaultId.value,
@@ -1393,9 +1440,15 @@ function onEditorContextMenu(event) {
   if (!el || !selectedNoteId.value) return
   const start = el.selectionStart ?? 0
   const end = el.selectionEnd ?? 0
-  const selected =
-    start !== end ? expandEditorSelectionToWidgetFences(el.value, start, end) : ''
-  openNoteContextMenu(event, selected, { source: 'editor' })
+  const expanded =
+    start !== end
+      ? expandEditorSelectionToWidgetFences(el.value, start, end)
+      : { text: '', start, end }
+  openNoteContextMenu(event, expanded.text, {
+    source: 'editor',
+    selectionStart: expanded.start,
+    selectionEnd: expanded.end,
+  })
 }
 
 function onPreviewContextMenu(event) {
@@ -1403,13 +1456,19 @@ function onPreviewContextMenu(event) {
   const selection = window.getSelection()
   const selected = selection?.toString() ?? ''
   if (selected && !previewEl.value?.contains(selection?.anchorNode ?? null)) return
-  const widgetMd = collectPreviewWidgetMarkdown(event, selection)
+  const { markdown: widgetMd, widgetIndices } = collectPreviewWidgetMarkdown(
+    event,
+    selection,
+  )
   const payload = widgetMd
     ? selected.trim()
       ? `${selected.trim()}\n\n${widgetMd}`
       : widgetMd
     : selected
-  openNoteContextMenu(event, payload, { source: 'preview' })
+  openNoteContextMenu(event, payload, {
+    source: 'preview',
+    widgetIndices,
+  })
 }
 
 function onTreeNoteContextMenu({ noteId, event }) {
@@ -1456,21 +1515,30 @@ async function pinNoteToDashboard() {
   let noteTitle = String(draftTitle.value ?? '').trim() || 'Sans titre'
   let vaultId = activeVaultId.value
   let partTitle = selectedText ? derivePinnedNotePartTitle(selectedText) : ''
+  let excerptId = ''
+  let widgetIndex = null
+  let fullNoteContent = isCurrentNote ? draftContent.value : String(menu.contentMd ?? '')
+  const menuWidgetIndices = Array.isArray(menu.widgetIndices) ? menu.widgetIndices : []
 
   if (isSidebar || !selectedText) {
     partTitle = ''
+    excerptId = ''
+    widgetIndex = null
     if (isCurrentNote) {
       contentMd = draftContent.value
+      fullNoteContent = draftContent.value
       noteTitle = String(draftTitle.value ?? '').trim() || 'Sans titre'
       vaultId = activeVaultId.value
     } else if (isSidebar) {
       contentMd = String(menu.contentMd ?? '')
+      fullNoteContent = contentMd
       noteTitle = String(menu.noteTitle ?? '').trim() || 'Sans titre'
       vaultId = menu.vaultId ?? activeVaultId.value
       if (!contentMd) {
         try {
           const note = await getNote(supabase, userId.value, noteId)
           contentMd = note?.content_md ?? ''
+          fullNoteContent = contentMd
           noteTitle = String(note?.title ?? noteTitle).trim() || 'Sans titre'
           vaultId = note?.vault_id ?? vaultId
         } catch (err) {
@@ -1479,6 +1547,97 @@ async function pinNoteToDashboard() {
       }
     } else {
       contentMd = draftContent.value
+      fullNoteContent = draftContent.value
+    }
+  } else {
+    // Extrait : balises dans la note pour rester lié au contenu live.
+    excerptId = createDashboardExcerptId()
+    if (!fullNoteContent && !isCurrentNote) {
+      try {
+        const note = await getNote(supabase, userId.value, noteId)
+        fullNoteContent = note?.content_md ?? ''
+        noteTitle = String(note?.title ?? noteTitle).trim() || 'Sans titre'
+        vaultId = note?.vault_id ?? vaultId
+      } catch (err) {
+        console.error(err)
+      }
+    }
+
+    const selStart = menu.selectionStart
+    const selEnd = menu.selectionEnd
+    let wrapped = null
+
+    if (menuWidgetIndices.length === 1) {
+      wrapped = wrapDashboardExcerptAtWidgetIndex(
+        fullNoteContent,
+        menuWidgetIndices[0],
+        excerptId,
+      )
+      if (wrapped) widgetIndex = wrapped.widgetIndex
+    }
+
+    if (
+      !wrapped &&
+      isCurrentNote &&
+      Number.isFinite(selStart) &&
+      Number.isFinite(selEnd) &&
+      selStart !== selEnd
+    ) {
+      wrapped = wrapDashboardExcerptAtRange(
+        fullNoteContent,
+        selStart,
+        selEnd,
+        excerptId,
+      )
+    }
+
+    if (!wrapped) {
+      wrapped = findAndWrapDashboardExcerpt(fullNoteContent, selectedText, excerptId)
+    }
+
+    if (wrapped) {
+      fullNoteContent = wrapped.contentMd
+      contentMd = wrapped.excerptMd
+      partTitle = derivePinnedNotePartTitle(contentMd) || partTitle
+      if (Number.isFinite(wrapped.widgetIndex)) {
+        widgetIndex = wrapped.widgetIndex
+      } else if (menuWidgetIndices.length === 1) {
+        widgetIndex = menuWidgetIndices[0]
+      }
+
+      try {
+        const updated = await updateNote(supabase, userId.value, noteId, {
+          contentMd: fullNoteContent,
+        })
+        if (isCurrentNote) {
+          draftContent.value = fullNoteContent
+          selectedNote.value = updated
+          notes.value = notes.value.map((n) =>
+            n.id === updated.id ? { ...n, ...updated } : n,
+          )
+          dirty.value = false
+        } else {
+          notes.value = notes.value.map((n) =>
+            n.id === updated.id ? { ...n, ...updated } : n,
+          )
+        }
+        notifyNoteUpdated({
+          noteId,
+          title: noteTitle,
+          contentMd: fullNoteContent,
+        })
+      } catch (err) {
+        console.error(err)
+        errorMessage.value =
+          err.message || 'Impossible de lier l’extrait dans la note.'
+        closeEditorContextMenu()
+        return
+      }
+    } else {
+      // Impossible de localiser l’extrait : snapshot + index widget si possible.
+      excerptId = ''
+      contentMd = selectedText
+      widgetIndex = menuWidgetIndices.length === 1 ? menuWidgetIndices[0] : null
     }
   }
 
@@ -1490,11 +1649,17 @@ async function pinNoteToDashboard() {
       vaultId,
       noteTitle,
       partTitle,
+      excerptId,
+      widgetIndex,
       contentMd,
     })
     await saveDashboardVisibility(supabase, userId.value, visibility)
     showDashboardPinMessage(
-      partTitle ? 'Extrait ajouté au Dashboard.' : 'Note ajoutée au Dashboard.',
+      partTitle
+        ? excerptId || widgetIndex != null
+          ? 'Extrait lié au Dashboard (mis à jour avec la note).'
+          : 'Extrait ajouté au Dashboard (copie figée).'
+        : 'Note ajoutée au Dashboard.',
     )
   } catch (err) {
     console.error(err)

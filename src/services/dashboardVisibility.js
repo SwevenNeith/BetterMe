@@ -790,6 +790,8 @@ export function addEmptyMobileGroup(layout) {
  *   vaultId?: string | null,
  *   noteTitle?: string,
  *   partTitle?: string,
+ *   excerptId?: string,
+ *   widgetIndex?: number | null,
  *   contentMd?: string,
  * }} pinInput
  * @returns {{ visibility: DashboardVisibilityMap, widgetId: string }}
@@ -800,11 +802,18 @@ export function addDashboardPinnedNote(visibility, pinInput) {
 
   const base = mergeDashboardVisibility(visibility)
   const widgetId = createPinnedNoteWidgetId()
+  const rawIndex = pinInput?.widgetIndex
+  const widgetIndex =
+    typeof rawIndex === 'number' && Number.isFinite(rawIndex) && rawIndex >= 0
+      ? Math.floor(rawIndex)
+      : null
   const pin = {
     noteId,
     vaultId: typeof pinInput.vaultId === 'string' && pinInput.vaultId ? pinInput.vaultId : null,
     noteTitle: String(pinInput.noteTitle ?? '').trim() || 'Sans titre',
     partTitle: String(pinInput.partTitle ?? '').trim(),
+    excerptId: String(pinInput.excerptId ?? '').trim(),
+    widgetIndex,
     contentMd: String(pinInput.contentMd ?? ''),
     createdAt: new Date().toISOString(),
   }

@@ -15,6 +15,79 @@ const MAX_WIDGET_CHARS = 80_000
 const HEIGHT_BUFFER_PX = 20
 
 /**
+ * @param {string} lang
+ */
+export function isNoteWidgetLang(lang) {
+  return WIDGET_LANGS.has(
+    String(lang ?? '')
+      .trim()
+      .toLowerCase(),
+  )
+}
+
+/**
+ * Liste les fences widget dans l’ordre d’apparition (même index que le rendu).
+ * @param {string} markdown
+ * @returns {{ start: number, end: number, lang: string, body: string, fence: string }[]}
+ */
+export function listNoteWidgetFences(markdown) {
+  const source = String(markdown ?? '')
+  /** @type {{ start: number, end: number, lang: string, body: string, fence: string }[]} */
+  const fences = []
+  const re = new RegExp(WIDGET_FENCE_RE.source, 'gm')
+  let match
+  while ((match = re.exec(source))) {
+    const lang = String(match[1] ?? '')
+      .trim()
+      .toLowerCase()
+    if (!WIDGET_LANGS.has(lang)) continue
+    let body = String(match[2] ?? '')
+    if (body.endsWith('\n')) body = body.slice(0, -1)
+    fences.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      lang,
+      body,
+      fence: match[0],
+    })
+  }
+  return fences
+}
+
+/**
+ * Retrouve une fence widget par index de rendu et/ou contenu interne.
+ * @param {string} markdown
+ * @param {{ index?: number | null, inner?: string | null, fenceText?: string | null }} [opts]
+ */
+export function findNoteWidgetFence(markdown, opts = {}) {
+  const fences = listNoteWidgetFences(markdown)
+  const index = opts.index
+  if (Number.isFinite(index) && index >= 0 && index < fences.length) {
+    return fences[index]
+  }
+
+  let needle = String(opts.inner ?? '')
+  const fenceText = String(opts.fenceText ?? '').trim()
+  if (fenceText) {
+    const m = fenceText.match(
+      /^```(?:widget|interactive|html-run)[ \t]*\r?\n([\s\S]*?)```$/i,
+    )
+    if (m) {
+      needle = m[1]
+      if (needle.endsWith('\n')) needle = needle.slice(0, -1)
+    }
+  }
+  if (needle.endsWith('\n')) needle = needle.slice(0, -1)
+  const trimmed = needle.trim()
+  if (!trimmed && !needle) return null
+
+  return (
+    fences.find((entry) => entry.body === needle || entry.body.trim() === trimmed) ||
+    null
+  )
+}
+
+/**
  * Remplace les fences ```widget / ```interactive / ```html-run par des placeholders HTML.
  * @param {string} markdown
  * @returns {{ text: string, widgets: string[] }}
@@ -228,14 +301,25 @@ export function mountNoteWidgets(container, widgets = []) {
   const hosts = container.querySelectorAll(`.${NOTE_WIDGET_PLACEHOLDER_CLASS}`)
   hosts.forEach((host) => {
     if (!(host instanceof HTMLElement)) return
-    if (host.querySelector('iframe.notes-html-widget__frame')) {
-      hostObserver?.observe(host)
-      return
-    }
 
     const index = Number(host.getAttribute(NOTE_WIDGET_INDEX_ATTR))
     if (!Number.isFinite(index) || index < 0 || index >= widgets.length) {
       host.textContent = 'Widget introuvable.'
+      return
+    }
+
+    const source = widgets[index]
+    const srcdoc = buildWidgetSrcdoc(source, { widgetId: String(index) })
+    const existing = host.querySelector('iframe.notes-html-widget__frame')
+
+    // Même placeholder HTML (v-html inchangé) mais source widget modifiée :
+    // il faut rafraîchir srcdoc, sinon la vue Dashboard reste figée.
+    if (existing instanceof HTMLIFrameElement) {
+      if (existing.dataset.bmWidgetSource !== source) {
+        existing.dataset.bmWidgetSource = source
+        existing.srcdoc = srcdoc
+      }
+      hostObserver?.observe(host)
       return
     }
 
@@ -251,7 +335,8 @@ export function mountNoteWidgets(container, widgets = []) {
     iframe.style.display = 'block'
     iframe.style.minHeight = '80px'
     iframe.style.height = '120px'
-    iframe.srcdoc = buildWidgetSrcdoc(widgets[index], { widgetId: String(index) })
+    iframe.dataset.bmWidgetSource = source
+    iframe.srcdoc = srcdoc
     host.replaceChildren(iframe)
     hostObserver?.observe(host)
   })

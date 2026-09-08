@@ -1,11 +1,17 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { formatPinnedNoteWidgetLabel } from '../constants/dashboardPinnedNotes.js'
+import {
+  NOTE_UPDATED_EVENT,
+  formatPinnedNoteWidgetLabel,
+  notifyNoteUpdated,
+  resolveLivePinnedContent,
+  stripUnreferencedDashboardPinMarkers,
+} from '../constants/dashboardPinnedNotes.js'
 import { renderMarkdownToSafeHtml } from '../utils/renderMarkdown.js'
-import { extractNoteWidgets, mountNoteWidgets } from '../utils/noteWidgets.js'
+import { mountNoteWidgets } from '../utils/noteWidgets.js'
 import { supabase } from '../lib/supabase.js'
-import { getNote } from '../services/notes.js'
+import { getNote, updateNote } from '../services/notes.js'
 import {
   loadDashboardVisibility,
   removeDashboardPinnedNote,
@@ -38,38 +44,12 @@ const liveTitle = ref('')
 /** @type {null | (() => void)} */
 let unmountWidgets = null
 
-const isExcerptPin = computed(() => Boolean(String(props.pin?.partTitle ?? '').trim()))
-
 /**
- * Contenu à afficher : extrait stocké, ou note live.
- * Si l’extrait ne contient pas de fence widget exploitable alors que la note oui
- * (cas fréquent après une sélection partielle), on retombe sur la note live.
+ * Contenu affiché : note live entière, extrait balisé, ou widget live.
  */
-const resolvedContentMd = computed(() => {
-  const stored = String(props.pin?.contentMd ?? '')
-  const live = liveContentMd.value
-
-  if (!isExcerptPin.value) {
-    return live != null ? live : stored
-  }
-
-  const storedWidgets = extractNoteWidgets(stored).widgets.filter((w) => String(w).trim())
-  if (storedWidgets.length) return stored
-
-  if (typeof live === 'string') {
-    const liveWidgets = extractNoteWidgets(live).widgets.filter((w) => String(w).trim())
-    if (liveWidgets.length) {
-      const part = String(props.pin?.partTitle ?? '')
-      const looksLikeWidgetIntent =
-        /widget|interactive|html-run/i.test(part) ||
-        /```\s*(widget|interactive|html-run)/i.test(stored) ||
-        !stored.trim()
-      if (looksLikeWidgetIntent) return live
-    }
-  }
-
-  return stored
-})
+const resolvedContentMd = computed(() =>
+  resolveLivePinnedContent(liveContentMd.value, props.pin),
+)
 
 const displayPin = computed(() => {
   const base = props.pin || {}
@@ -109,7 +89,6 @@ function remountWidgets() {
 async function scheduleRemount() {
   await nextTick()
   remountWidgets()
-  // Second pass : le ref peut arriver après le v-if / v-html.
   await nextTick()
   remountWidgets()
 }
@@ -123,14 +102,52 @@ async function loadLiveNote() {
   isLoading.value = true
   try {
     const note = await getNote(supabase, props.userId, props.pin.noteId)
-    liveContentMd.value = note?.content_md ?? ''
+    let content = note?.content_md ?? ''
     liveTitle.value = String(note?.title ?? '').trim()
+
+    // Nettoie les balises pin orphelines / cassées encore présentes dans la note.
+    try {
+      const visibility = await loadDashboardVisibility(supabase, props.userId)
+      const keepExcerptIds = Object.values(visibility?.pins || {})
+        .filter((pin) => pin?.noteId === props.pin.noteId)
+        .map((pin) => pin?.excerptId)
+        .filter(Boolean)
+      const cleaned = stripUnreferencedDashboardPinMarkers(content, keepExcerptIds)
+      if (cleaned !== content) {
+        await updateNote(supabase, props.userId, props.pin.noteId, {
+          contentMd: cleaned,
+        })
+        notifyNoteUpdated({
+          noteId: props.pin.noteId,
+          title: note?.title,
+          contentMd: cleaned,
+        })
+        content = cleaned
+      }
+    } catch (healErr) {
+      console.warn('heal dashboard pin markers:', healErr)
+    }
+
+    liveContentMd.value = content
   } catch (err) {
     console.error(err)
     liveContentMd.value = null
     liveTitle.value = ''
   } finally {
     isLoading.value = false
+  }
+}
+
+function onNoteUpdated(event) {
+  const noteId = event?.detail?.noteId
+  if (!noteId || noteId !== props.pin?.noteId) return
+  if (typeof event.detail.contentMd === 'string') {
+    liveContentMd.value = event.detail.contentMd
+  }
+  if (typeof event.detail.title === 'string' && event.detail.title.trim()) {
+    liveTitle.value = event.detail.title.trim()
+  } else {
+    void loadLiveNote()
   }
 }
 
@@ -150,9 +167,32 @@ async function removeFromDashboard() {
   isRemoving.value = true
   actionError.value = ''
   try {
+    const noteId = props.pin?.noteId
     const current = await loadDashboardVisibility(supabase, props.userId)
     const next = removeDashboardPinnedNote(current, props.widgetId)
     await saveDashboardVisibility(supabase, props.userId, next)
+
+    if (noteId) {
+      const keepExcerptIds = Object.values(next.pins || {})
+        .filter((pin) => pin?.noteId === noteId)
+        .map((pin) => pin?.excerptId)
+        .filter(Boolean)
+      try {
+        const note = await getNote(supabase, props.userId, noteId)
+        const original = String(note?.content_md ?? '')
+        const cleaned = stripUnreferencedDashboardPinMarkers(original, keepExcerptIds)
+        if (cleaned !== original) {
+          await updateNote(supabase, props.userId, noteId, { contentMd: cleaned })
+          notifyNoteUpdated({
+            noteId,
+            title: note?.title,
+            contentMd: cleaned,
+          })
+        }
+      } catch (stripErr) {
+        console.error('strip dashboard pin markers:', stripErr)
+      }
+    }
   } catch (err) {
     console.error(err)
     actionError.value = err.message || 'Impossible de retirer cette note.'
@@ -162,10 +202,12 @@ async function removeFromDashboard() {
 }
 
 onMounted(() => {
+  window.addEventListener(NOTE_UPDATED_EVENT, onNoteUpdated)
   void loadLiveNote().then(() => scheduleRemount())
 })
 
 onUnmounted(() => {
+  window.removeEventListener(NOTE_UPDATED_EVENT, onNoteUpdated)
   if (unmountWidgets) {
     unmountWidgets()
     unmountWidgets = null
@@ -173,15 +215,19 @@ onUnmounted(() => {
 })
 
 watch(
-  () => [props.userId, props.pin?.noteId, props.pin?.partTitle, props.pin?.contentMd],
+  () => [props.userId, props.pin?.noteId, props.pin?.partTitle, props.pin?.excerptId],
   () => {
     void loadLiveNote()
   },
 )
 
-watch([previewHtml, previewWidgets, isLoading], () => {
-  void scheduleRemount()
-}, { flush: 'post', immediate: true })
+watch(
+  () => [previewHtml.value, previewWidgets.value.join('\0'), isLoading.value],
+  () => {
+    void scheduleRemount()
+  },
+  { flush: 'post', immediate: true },
+)
 </script>
 
 <template>
