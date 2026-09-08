@@ -25,7 +25,8 @@ watch(
   () => [props.open, props.candidates],
   () => {
     if (!props.open) return
-    selectedIds.value = new Set(props.candidates.map((item) => item.id))
+    // Aucune sélection par défaut : « Ignorer » ne reporte rien.
+    selectedIds.value = new Set()
   },
   { immediate: true, deep: true },
 )
@@ -85,8 +86,8 @@ watch(
           Tâches non terminées
         </h2>
         <p class="todo-snooze-prompt__message">
-          Tu as des tâches reportables. Sélectionne celles que tu veux décaler sur
-          aujourd’hui / cette semaine.
+          Tu as des tâches non terminées. Coche celles à reporter sur aujourd’hui /
+          cette semaine. « Ignorer » les laisse non faites et ne les reproposera plus.
         </p>
 
         <div class="todo-snooze-prompt__toolbar">

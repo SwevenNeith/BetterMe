@@ -4,12 +4,21 @@ import { RouterView } from 'vue-router'
 import AppSidebar from '../components/Sidebar.vue'
 import NotificationPrompt from '../components/NotificationPrompt.vue'
 import VisibilityOnboardingModal from '../components/VisibilityOnboardingModal.vue'
+import TodoSnoozePromptModal from '../components/TodoSnoozePromptModal.vue'
 import { supabase } from '../lib/supabase.js'
 import {
   declencherCronNotifications,
   notificationsActives,
 } from '../services/notifications.js'
 import { hasCompletedVisibilityOnboarding } from '../services/visibilityOnboarding.js'
+import {
+  applyMorningSnoozeSelection,
+  dismissMorningSnoozeCandidates,
+  loadPromesseLimitsForSnooze,
+  markMorningSnoozePromptShown,
+  prepareMorningSnoozePrompt,
+} from '../services/todoSnooze.js'
+import { getLocalTodayISO } from '../services/scheduledReminders.js'
 
 /** Secours si pg_cron Supabase indisponible — le verrou serveur évite le double envoi avec pg_cron */
 const CRON_INTERVAL_MS = 60_000
@@ -17,6 +26,10 @@ let cronIntervalId = null
 
 const userId = ref(null)
 const showVisibilityOnboarding = ref(false)
+const morningSnoozeOpen = ref(false)
+const morningSnoozeCandidates = ref([])
+const morningSnoozeSaving = ref(false)
+const morningSnoozeError = ref('')
 
 const startNotificationCron = () => {
   if (!notificationsActives() || cronIntervalId) return
@@ -31,8 +44,76 @@ const stopNotificationCron = () => {
   }
 }
 
+function notifyTodosChanged() {
+  window.dispatchEvent(new CustomEvent('betterme-todos-changed'))
+}
+
+async function maybeShowMorningSnoozePrompt() {
+  if (!userId.value || showVisibilityOnboarding.value || morningSnoozeOpen.value) return
+
+  try {
+    const { shouldShow, candidates } = await prepareMorningSnoozePrompt(
+      supabase,
+      userId.value,
+    )
+    if (!shouldShow) return
+    morningSnoozeCandidates.value = candidates
+    morningSnoozeError.value = ''
+    morningSnoozeOpen.value = true
+  } catch (err) {
+    console.error('morning snooze prompt:', err)
+  }
+}
+
 function onVisibilityOnboardingCompleted() {
   showVisibilityOnboarding.value = false
+  void maybeShowMorningSnoozePrompt()
+}
+
+async function onMorningSnoozeConfirm(selected) {
+  if (!userId.value || morningSnoozeSaving.value) return
+  morningSnoozeSaving.value = true
+  morningSnoozeError.value = ''
+  try {
+    const limits = await loadPromesseLimitsForSnooze(supabase, userId.value)
+    const allCandidates = morningSnoozeCandidates.value
+    const result = await applyMorningSnoozeSelection(
+      supabase,
+      userId.value,
+      selected,
+      allCandidates,
+      limits,
+    )
+    await markMorningSnoozePromptShown(supabase, userId.value, getLocalTodayISO())
+    morningSnoozeOpen.value = false
+    morningSnoozeCandidates.value = []
+    notifyTodosChanged()
+    if (result.errors.length) {
+      morningSnoozeError.value = result.errors
+        .map((entry) => `${entry.item?.nom || 'Tâche'} : ${entry.message}`)
+        .join(' · ')
+    }
+  } catch (err) {
+    console.error(err)
+    morningSnoozeError.value = err.message || 'Impossible de reporter la sélection.'
+  } finally {
+    morningSnoozeSaving.value = false
+  }
+}
+
+async function onMorningSnoozeSkip() {
+  // Ignorer = ne rien reporter ; mémorise les candidats pour ne plus les reproposer.
+  if (userId.value) {
+    await dismissMorningSnoozeCandidates(
+      supabase,
+      userId.value,
+      morningSnoozeCandidates.value,
+    )
+    await markMorningSnoozePromptShown(supabase, userId.value, getLocalTodayISO())
+  }
+  morningSnoozeOpen.value = false
+  morningSnoozeCandidates.value = []
+  morningSnoozeError.value = ''
 }
 
 onMounted(() => {
@@ -68,6 +149,10 @@ onMounted(() => {
         purgeStaleMenstruationNotificationsOnStartup(user.id),
         rescheduleAllTodoItemReminders(user.id),
       ])
+
+      if (!showVisibilityOnboarding.value) {
+        await maybeShowMorningSnoozePrompt()
+      }
     } catch (err) {
       console.error(
         'rescheduleTodoPromesseReminder / syncMenstruationNotifications / todoReminders:',
@@ -97,6 +182,20 @@ onUnmounted(() => {
       :user-id="userId"
       @completed="onVisibilityOnboardingCompleted"
     />
+    <TodoSnoozePromptModal
+      :open="morningSnoozeOpen"
+      :candidates="morningSnoozeCandidates"
+      :saving="morningSnoozeSaving"
+      @confirm="onMorningSnoozeConfirm"
+      @skip="onMorningSnoozeSkip"
+    />
+    <p
+      v-if="morningSnoozeError"
+      class="app-layout__snooze-error"
+      role="alert"
+    >
+      {{ morningSnoozeError }}
+    </p>
   </div>
 </template>
 
@@ -147,6 +246,24 @@ onUnmounted(() => {
   min-width: 0;
   min-height: 100vh;
   transition: margin-left 0.3s ease;
+}
+
+.app-layout__snooze-error {
+  position: fixed;
+  z-index: 110;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  margin: 0;
+  max-width: min(420px, calc(100vw - 2rem));
+  padding: 0.65rem 0.9rem;
+  border-radius: 10px;
+  background: #fff5f5;
+  color: #9b2c2c;
+  border: 1px solid rgba(197, 48, 48, 0.25);
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 /* On mobile, sidebar is overlaid — no margin needed */
