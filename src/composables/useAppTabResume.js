@@ -26,8 +26,17 @@ let resumeTimer = null
 let filePickerActive = false
 let fileUploadInProgress = false
 
+/** Focus dans une iframe (widgets notes) : le parent reçoit blur sans quitter l’onglet. */
+function isFocusInEmbeddedFrame() {
+  try {
+    return document.activeElement?.tagName === 'IFRAME'
+  } catch {
+    return false
+  }
+}
+
 function shouldSuppressTabReload() {
-  return filePickerActive || fileUploadInProgress
+  return filePickerActive || fileUploadInProgress || isFocusInEmbeddedFrame()
 }
 
 export function isTabReloadSuppressed() {
@@ -103,10 +112,23 @@ function onVisibilityChange() {
 }
 
 function onWindowBlur() {
-  markTabHidden()
+  // Clic dans un widget iframe : activeElement devient l’iframe juste après le blur.
+  const settle = () => {
+    if (isFocusInEmbeddedFrame()) {
+      hiddenSince = 0
+      return
+    }
+    markTabHidden()
+  }
+  if (isFocusInEmbeddedFrame()) return
+  queueMicrotask(settle)
 }
 
 function onWindowFocus() {
+  if (isFocusInEmbeddedFrame()) {
+    hiddenSince = 0
+    return
+  }
   scheduleReloadCheck()
 }
 
