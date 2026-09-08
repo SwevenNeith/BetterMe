@@ -174,6 +174,8 @@ function getTodoPageLabel(pageVisibility: unknown): string {
 const TODO_PROMESSE_KIND = 'todo_promesse_reminder'
 const TODO_PROMESSE_BODY =
   'Tu n’as pas encore de promesse pour demain. Penses à en ajouter une 💜'
+/** Au-delà de cette latence, on annule l’envoi (pas de rattrapage). */
+const SCHEDULED_SEND_GRACE_MS = 5 * 60 * 1000
 
 async function ensureTodoPromesseReminders(parisNow: { dateISO: string; timeHHmm: string }) {
   const { data: settingsRows, error: settingsError } = await supabase
@@ -252,8 +254,11 @@ async function ensureTodoPromesseReminders(parisNow: { dateISO: string; timeHHmm
     }
     if (pendingRows?.length) continue
 
-    const whenISO =
-      scheduledMs > nowMs ? scheduledAtISO : new Date().toISOString()
+    // Pas de rattrapage : si l’heure du jour est déjà passée, on attend demain
+    // (le cron / l’ouverture de l’app replanifiera pour le prochain créneau).
+    if (scheduledMs <= nowMs) continue
+
+    const whenISO = scheduledAtISO
     const pageLabel = getTodoPageLabel(row.page_visibility)
 
     const { error: insertError } = await supabase.from('scheduled_notifications').insert({
@@ -448,6 +453,19 @@ Deno.serve(async (req) => {
         }
         if (!claimed) continue
 
+        const scheduledMs = new Date(notif.scheduled_at).getTime()
+        if (
+          Number.isFinite(scheduledMs) &&
+          Date.now() - scheduledMs > SCHEDULED_SEND_GRACE_MS
+        ) {
+          console.log(
+            'Notification expirée (pas de rattrapage) :',
+            notif.id,
+            notif.scheduled_at,
+          )
+          continue
+        }
+
         const targets = uniqueSubscriptionsByEndpoint(
           subscriptionsForUser(subscriptions ?? [], notif.user_id),
         )
@@ -518,19 +536,23 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Vérifie les rappels quotidiens
-      const heureActuelle = new Date().toTimeString().slice(0, 5)
-      console.log('Heure actuelle pour rappels :', heureActuelle)
+      // Vérifie les rappels quotidiens (heure Europe/Paris, pas UTC —
+      // sinon un rappel 08:00 partait vers 10:00 en CEST).
+      const heureActuelle = parisNow.timeHHmm
+      console.log('Heure actuelle pour rappels (Paris) :', heureActuelle)
 
-      const { data: rappels, error: rappelError } = await supabase
+      const { data: rappelsBruts, error: rappelError } = await supabase
         .from('daily_reminders')
         .select('*')
-        .eq('reminder_time', heureActuelle)
+
+      const rappels = (rappelsBruts ?? []).filter(
+        (rappel) => normalizeTimeHHmm(rappel.reminder_time) === heureActuelle,
+      )
 
       if (rappelError) {
         console.error('Erreur récupération rappels :', rappelError)
       } else {
-        console.log('Rappels quotidiens trouvés :', rappels?.length ?? 0)
+        console.log('Rappels quotidiens trouvés :', rappels.length)
       }
 
       for (const rappel of rappels ?? []) {

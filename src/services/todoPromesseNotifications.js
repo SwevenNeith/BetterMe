@@ -70,7 +70,8 @@ async function hasTodoPromesseReminderSentToday(userId, todayParis) {
 function getTodoPromesseScheduledAt(todayParis, hhmm) {
   const scheduledAt = dateTimeParisToUtc(todayParis, hhmm)
   if (scheduledAt.getTime() <= Date.now()) {
-    return new Date()
+    // Pas de rattrapage : prochain créneau = demain à la même heure.
+    return dateTimeParisToUtc(addDaysISO(todayParis, 1), hhmm)
   }
   return scheduledAt
 }
