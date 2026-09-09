@@ -17,57 +17,17 @@ const VAPID_PUBLIC_KEY =
   'BKvZPw-S8r8BlluoH1wV3Q_YqIFBk-eBQ3TBjdAGlYMq5A5jn38Cg-Rxi7Hz0nHYJBlzdZXV5HYJUVyBWYH9j14'
 
 const EDGE_FUNCTION_URL = `${supabaseUrl}/functions/v1/send-notification`
-const APP_TIMEZONE = 'Europe/Paris'
 
 // ============================================
 // HELPERS
 // ============================================
 
-/** Composantes calendrier/heure pour un instant donné à Paris */
-function getParisDateTimeParts(ms) {
-  const formatter = new Intl.DateTimeFormat('en-GB', {
-    timeZone: APP_TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-  const parts = Object.fromEntries(
-    formatter.formatToParts(new Date(ms)).map((p) => [p.type, p.value]),
-  )
-  return {
-    year: Number(parts.year),
-    month: Number(parts.month),
-    day: Number(parts.day),
-    hour: Number(parts.hour),
-    minute: Number(parts.minute),
-  }
-}
-
 /**
- * Date YYYY-MM-DD + heure HH:mm interprétées en Europe/Paris → Date UTC.
- * Aligné sur le cron serveur (fuseau Paris).
+ * Date YYYY-MM-DD + heure HH:mm interprétées en heure locale appareil → Date (UTC absolu).
+ * @deprecated Préférer dateTimeLocalToDate (même comportement).
  */
 export function dateTimeParisToUtc(dateStr, timeStr) {
-  const [targetYear, targetMonth, targetDay] = dateStr.split('-').map(Number)
-  const [targetHour, targetMinute] = String(timeStr || '00:00')
-    .slice(0, 5)
-    .split(':')
-    .map(Number)
-
-  let utcMs = Date.UTC(targetYear, targetMonth - 1, targetDay, targetHour, targetMinute)
-
-  for (let i = 0; i < 8; i++) {
-    const p = getParisDateTimeParts(utcMs)
-    const dayDiff = (targetYear - p.year) * 372 + (targetMonth - p.month) * 31 + (targetDay - p.day)
-    const minuteDiff = dayDiff * 24 * 60 + (targetHour - p.hour) * 60 + (targetMinute - p.minute)
-    if (minuteDiff === 0) break
-    utcMs += minuteDiff * 60 * 1000
-  }
-
-  return new Date(utcMs)
+  return dateTimeLocalToDate(dateStr, timeStr)
 }
 
 function urlBase64ToUint8Array(base64String) {
@@ -201,6 +161,13 @@ async function enregistrerSubscription(supabase, userId) {
         console.error('Mise à jour subscription:', error)
         return false
       }
+      // Supprime les autres lignes avec le même endpoint (doublons → notifs x2)
+      const dupIds = (rows ?? [])
+        .filter((row) => row.id !== existing.id && row.subscription?.endpoint === endpoint)
+        .map((row) => row.id)
+      if (dupIds.length) {
+        await supabase.from('push_subscriptions').delete().in('id', dupIds)
+      }
     } else {
       const { error } = await supabase.from('push_subscriptions').insert({
         user_id: userId,
@@ -312,7 +279,7 @@ export function formatDelaiDepuisMinutes(totalMinutes) {
 
 /**
  * Rappel avant une activité EDT.
- * - dateStart + timeStart : heure de début en Europe/Paris
+ * - dateStart + timeStart : heure de début (heure locale appareil)
  * - minutesAvant : délai total (heures×60 + minutes) stocké dans reminder_time
  */
 export async function planifierNotificationActivite(userId, activite) {
@@ -329,7 +296,7 @@ export async function planifierNotificationActivite(userId, activite) {
 
   const heureActivite =
     activite.dateStart && activite.timeStart
-      ? dateTimeParisToUtc(activite.dateStart, activite.timeStart)
+      ? dateTimeLocalToDate(activite.dateStart, activite.timeStart)
       : new Date(activite.heure)
 
   const heureNotification = new Date(heureActivite.getTime() - minutesAvant * 60 * 1000)
@@ -382,7 +349,7 @@ export async function supprimerRappelsEvenement(eventId) {
 
 /**
  * Notification push au début d'un événement avec timer.
- * - dateStart + timeStart : heure de début en Europe/Paris
+ * - dateStart + timeStart : heure de début (heure locale appareil)
  * - durationMinutes : durée totale du timer, pour l'afficher dans le corps du message
  */
 export async function planifierNotificationDebutEvenement(
@@ -498,6 +465,21 @@ export async function lancerTimer(userId, dureeEnMinutes, label) {
 
 /** Déclenche l'envoi des rappels dus (quotidiens + planifiés). À appeler chaque minute (cron serveur ou app ouverte). */
 export async function declencherCronNotifications() {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (user?.id) {
+      const { sendDueDailyRemindersLocally } = await import('./dailyReminders.js')
+      // Horloge locale appareil + verrou last_sent_on → 1 seule notif, puis retire la file cron
+      await sendDueDailyRemindersLocally(supabase, user.id, (payload) =>
+        callEdgeFunction(payload),
+      )
+    }
+  } catch (err) {
+    console.error('sendDueDailyRemindersLocally:', err)
+  }
+
   const result = await callEdgeFunction({ type: 'cron' })
   try {
     const {

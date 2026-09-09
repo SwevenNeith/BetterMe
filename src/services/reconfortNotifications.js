@@ -11,17 +11,22 @@ export const MAX_RECONFORT_NOTIFICATIONS_PER_DAY = 1
 /** Évite de renvoyer un message déjà utilisé sur les N derniers jours (si d'autres existent). */
 export const RECENT_RECONFORT_LOOKBACK_DAYS = 7
 
-const RECONFORT_WINDOW_START = '09:00'
+const RECONFORT_WINDOW_START = '08:30'
 const RECONFORT_WINDOW_END = '23:30'
-const APP_TIMEZONE = 'Europe/Paris'
 
 function normalizeReconfortText(value) {
   return (value || '').trim().replace(/\s+/g, ' ')
 }
 
-function localDateParisFromIso(iso) {
+/** Date calendaire locale appareil pour un instant ISO. */
+function localDateFromIso(iso) {
   if (!iso) return null
-  return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE }).format(new Date(iso))
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return null
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 function getDayBoundsIso(dateISO) {
@@ -84,7 +89,7 @@ export async function syncReconfortLastSentFromSentNotifications(supabase, userI
   const latestSentByMessageId = new Map()
 
   for (const row of notifResult.data) {
-    const sentDate = localDateParisFromIso(row.scheduled_at)
+    const sentDate = localDateFromIso(row.scheduled_at)
     if (!sentDate) continue
 
     let messageId = row.reconfort_id ?? null
@@ -356,7 +361,7 @@ export function pickReconfortMessagesForScheduling({
 }
 
 /**
- * Instants aléatoires répartis entre 9h00 et 23h30 (heure locale), pas avant maintenant.
+ * Instants aléatoires répartis entre 8h30 et 23h30 (heure locale appareil), pas avant maintenant.
  * @param {string} dateISO
  * @param {number} count
  * @returns {Date[]}

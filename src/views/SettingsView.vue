@@ -519,7 +519,9 @@ const onSave = async () => {
   try {
     const saved = await saveDailyReminders(supabase, userId.value, reminders.value)
     reminders.value = saved.map((r) => ({ ...r }))
-    saveMessage.value = 'Rappels enregistrés.'
+    const { realignAllDeviceLocalNotifications } = await import('../services/notificationRealign.js')
+    await realignAllDeviceLocalNotifications(supabase, userId.value)
+    saveMessage.value = 'Rappels enregistrés (horaires appareil).'
     setTimeout(() => {
       saveMessage.value = ''
     }, 3000)

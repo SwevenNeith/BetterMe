@@ -2,13 +2,17 @@ import { TODO_FREQUENCY } from '../constants/todoOptions.js'
 import { addDaysISO, isTodoDueOnDate, normalizeDateISO } from '../utils/todoCalendar.js'
 import { getDurationMinutes } from './durationUtils.js'
 import {
-  dateTimeParisToUtc,
   decomposerDelaiEnMinutes,
   formatDelaiDepuisMinutes,
   formatRappelNotificationBody,
   notificationsActives,
 } from './notifications.js'
-import { SCHEDULED_KIND, deletePendingScheduledDuplicate, getLocalTodayISO } from './scheduledReminders.js'
+import {
+  SCHEDULED_KIND,
+  dateTimeLocalToDate,
+  deletePendingScheduledDuplicate,
+  getLocalTodayISO,
+} from './scheduledReminders.js'
 import { supabase } from '../lib/supabase.js'
 
 const KIND = SCHEDULED_KIND.TODO_ITEM_REMINDER
@@ -65,7 +69,7 @@ export function getNextTodoReminderSlot(item, now = new Date()) {
     const dateStart = findNextTodoDueDate(item, fromISO)
     if (!dateStart) return null
 
-    const dueAt = dateTimeParisToUtc(dateStart, timeStart)
+    const dueAt = dateTimeLocalToDate(dateStart, timeStart)
     const fireAt = new Date(dueAt.getTime() - minutesAvant * 60 * 1000)
     if (fireAt.getTime() > now.getTime()) {
       return { dateStart, timeStart, minutesAvant }
@@ -140,7 +144,7 @@ export async function rescheduleTodoItemReminder(userId, item, supabaseClient = 
     const slot = getNextTodoReminderSlot(item)
     if (!slot) return
 
-    const dueAt = dateTimeParisToUtc(slot.dateStart, slot.timeStart)
+    const dueAt = dateTimeLocalToDate(slot.dateStart, slot.timeStart)
     const fireAt = new Date(dueAt.getTime() - slot.minutesAvant * 60 * 1000)
     if (slot.minutesAvant > 0 && fireAt.getTime() >= dueAt.getTime()) return
 

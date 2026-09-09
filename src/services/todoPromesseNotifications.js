@@ -3,17 +3,17 @@ import { APP_PAGE_IDS, APP_MAIN_PAGES } from '../constants/appPages.js'
 import { ensureUserSettings } from './menstruationNotifications.js'
 import { getPageDisplayLabel, loadPageVisibility } from './pageVisibility.js'
 import { normalizeReminderTime } from './dailyReminders.js'
-import { dateTimeParisToUtc } from './notifications.js'
 import { listTodoItems } from './todoItems.js'
 import {
   SCHEDULED_KIND,
+  dateTimeLocalToDate,
   deletePendingByKinds,
+  getLocalTodayISO,
   insertPendingNotifications,
 } from './scheduledReminders.js'
 import { addDaysISO, countDayScopedPromessesForDate } from '../utils/todoCalendar.js'
 
 const SETTINGS_TABLE = 'settings'
-const APP_TIMEZONE = 'Europe/Paris'
 const TODO_PROMESSE_BODY =
   'Tu n’as pas encore de promesse pour demain. Penses à en ajouter une 💜'
 
@@ -36,19 +36,15 @@ function isMissingColumnError(error) {
   )
 }
 
-function getParisTodayISO() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE }).format(new Date())
-}
-
-function getParisDayBoundsUtc(todayParis) {
+function getLocalDayBoundsIso(todayISO) {
   return {
-    dayStart: dateTimeParisToUtc(todayParis, '00:00').toISOString(),
-    dayEnd: dateTimeParisToUtc(todayParis, '23:59').toISOString(),
+    dayStart: dateTimeLocalToDate(todayISO, '00:00').toISOString(),
+    dayEnd: dateTimeLocalToDate(todayISO, '23:59').toISOString(),
   }
 }
 
-async function hasTodoPromesseReminderSentToday(userId, todayParis) {
-  const { dayStart, dayEnd } = getParisDayBoundsUtc(todayParis)
+async function hasTodoPromesseReminderSentToday(userId, todayISO) {
+  const { dayStart, dayEnd } = getLocalDayBoundsIso(todayISO)
   const { data, error } = await supabase
     .from('scheduled_notifications')
     .select('id')
@@ -67,11 +63,11 @@ async function hasTodoPromesseReminderSentToday(userId, todayParis) {
   return Boolean(data?.length)
 }
 
-function getTodoPromesseScheduledAt(todayParis, hhmm) {
-  const scheduledAt = dateTimeParisToUtc(todayParis, hhmm)
+function getTodoPromesseScheduledAt(todayISO, hhmm) {
+  const scheduledAt = dateTimeLocalToDate(todayISO, hhmm)
   if (scheduledAt.getTime() <= Date.now()) {
     // Pas de rattrapage : prochain créneau = demain à la même heure.
-    return dateTimeParisToUtc(addDaysISO(todayParis, 1), hhmm)
+    return dateTimeLocalToDate(addDaysISO(todayISO, 1), hhmm)
   }
   return scheduledAt
 }
@@ -150,15 +146,15 @@ export async function rescheduleTodoPromesseReminder(userId, options = {}) {
   const settings = options.settings ?? (await loadTodoPromesseReminderSettings(userId))
   if (!settings.todo_promesse_reminder_enabled) return
 
-  const todayParis = getParisTodayISO()
-  if (await hasTodoPromesseReminderSentToday(userId, todayParis)) return
+  const todayISO = getLocalTodayISO()
+  if (await hasTodoPromesseReminderSentToday(userId, todayISO)) return
 
   const items = options.items ?? (await listTodoItems(supabase, userId))
-  const tomorrowParis = addDaysISO(todayParis, 1)
-  if (countDayScopedPromessesForDate(items, tomorrowParis) > 0) return
+  const tomorrowISO = addDaysISO(todayISO, 1)
+  if (countDayScopedPromessesForDate(items, tomorrowISO) > 0) return
 
   const hhmm = settings.todo_promesse_reminder_time
-  const scheduledAt = getTodoPromesseScheduledAt(todayParis, hhmm)
+  const scheduledAt = getTodoPromesseScheduledAt(todayISO, hhmm)
 
   const title = await getTodoPageLabelForUser(supabase, userId)
 

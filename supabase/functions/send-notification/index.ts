@@ -98,9 +98,45 @@ function countDayScopedPromessesForDate(
   ).length
 }
 
-function getParisNow() {
+const DEFAULT_NOTIFICATION_TIMEZONE = 'Europe/Paris'
+
+function normalizeTimeZone(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return DEFAULT_NOTIFICATION_TIMEZONE
+  try {
+    // Valide le fuseau ; lève si invalide
+    Intl.DateTimeFormat('en-GB', { timeZone: raw }).format(new Date())
+    return raw
+  } catch {
+    return DEFAULT_NOTIFICATION_TIMEZONE
+  }
+}
+
+/** Heure locale via offset minutes (fiable même si Intl TZ est cassé dans Deno). */
+function getNowFromUtcOffsetMinutes(offsetMinutes: unknown) {
+  const offset = Number(offsetMinutes)
+  if (!Number.isFinite(offset)) return null
+  const shifted = new Date(Date.now() + offset * 60 * 1000)
+  const y = shifted.getUTCFullYear()
+  const m = String(shifted.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(shifted.getUTCDate()).padStart(2, '0')
+  const h = String(shifted.getUTCHours()).padStart(2, '0')
+  const min = String(shifted.getUTCMinutes()).padStart(2, '0')
+  return {
+    timeZone: `offset:${offset}`,
+    dateISO: `${y}-${m}-${d}`,
+    timeHHmm: `${h}:${min}`,
+    utcOffsetMinutes: offset,
+  }
+}
+
+function getNowInTimeZone(timeZoneInput: unknown, utcOffsetMinutes?: unknown) {
+  const fromOffset = getNowFromUtcOffsetMinutes(utcOffsetMinutes)
+  if (fromOffset) return fromOffset
+
+  const timeZone = normalizeTimeZone(timeZoneInput)
   const formatter = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Paris',
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -112,19 +148,45 @@ function getParisNow() {
     formatter.formatToParts(new Date()).map((part) => [part.type, part.value]),
   )
   return {
+    timeZone,
     dateISO: `${parts.year}-${parts.month}-${parts.day}`,
     timeHHmm: normalizeTimeHHmm(`${parts.hour}:${parts.minute}`),
+    utcOffsetMinutes: null as number | null,
   }
 }
 
-function parisDateTimeToUtcISO(dateISO: string, timeHHmm: string): string {
+/** Wall-clock locale → UTC ISO (offset = minutes à ajouter à UTC pour obtenir le local). */
+function localDateTimeToUtcISO(
+  dateISO: string,
+  timeHHmm: string,
+  utcOffsetMinutes: number,
+): string {
+  const [year, month, day] = dateISO.split('-').map(Number)
+  const [hour, minute] = normalizeTimeHHmm(timeHHmm).split(':').map(Number)
+  const utcMs =
+    Date.UTC(year, month - 1, day, hour, minute, 0, 0) - utcOffsetMinutes * 60 * 1000
+  return new Date(utcMs).toISOString()
+}
+
+function zonedDateTimeToUtcISO(
+  dateISO: string,
+  timeHHmm: string,
+  timeZoneInput: unknown,
+  utcOffsetMinutes?: unknown,
+): string {
+  const offset = Number(utcOffsetMinutes)
+  if (Number.isFinite(offset)) {
+    return localDateTimeToUtcISO(dateISO, timeHHmm, offset)
+  }
+
+  const timeZone = normalizeTimeZone(timeZoneInput)
   const [targetYear, targetMonth, targetDay] = dateISO.split('-').map(Number)
   const [targetHour, targetMinute] = normalizeTimeHHmm(timeHHmm).split(':').map(Number)
 
   let utcMs = Date.UTC(targetYear, targetMonth - 1, targetDay, targetHour, targetMinute)
 
   const formatter = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Paris',
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -154,12 +216,18 @@ function parisDateTimeToUtcISO(dateISO: string, timeHHmm: string): string {
 
 function addDaysISO(dateISO: string, delta: number): string {
   const [year, month, day] = dateISO.split('-').map(Number)
-  const date = new Date(year, month - 1, day)
-  date.setDate(date.getDate() + delta)
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
+  const date = new Date(Date.UTC(year, month - 1, day))
+  date.setUTCDate(date.getUTCDate() + delta)
+  const y = date.getUTCFullYear()
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(date.getUTCDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
+}
+
+function formatDateInTimeZone(iso: string | null | undefined, timeZoneInput: unknown): string {
+  if (!iso) return new Date().toISOString().slice(0, 10)
+  const timeZone = normalizeTimeZone(timeZoneInput)
+  return new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(iso))
 }
 
 function getTodoPageLabel(pageVisibility: unknown): string {
@@ -177,28 +245,66 @@ const TODO_PROMESSE_BODY =
 /** Au-delà de cette latence, on annule l’envoi (pas de rattrapage). */
 const SCHEDULED_SEND_GRACE_MS = 5 * 60 * 1000
 
-async function ensureTodoPromesseReminders(parisNow: { dateISO: string; timeHHmm: string }) {
-  const { data: settingsRows, error: settingsError } = await supabase
+async function ensureTodoPromesseReminders() {
+  let settingsRows = null
+  let settingsError = null
+
+  ;({ data: settingsRows, error: settingsError } = await supabase
     .from('settings')
-    .select('user_id, todo_promesse_reminder_enabled, todo_promesse_reminder_time, page_visibility')
-    .eq('todo_promesse_reminder_enabled', true)
+    .select(
+      'user_id, todo_promesse_reminder_enabled, todo_promesse_reminder_time, page_visibility, notification_timezone, notification_utc_offset_minutes',
+    )
+    .eq('todo_promesse_reminder_enabled', true))
+
+  if (
+    settingsError &&
+    (String(settingsError.message || '').includes('notification_timezone') ||
+      String(settingsError.message || '').includes('notification_utc_offset_minutes'))
+  ) {
+    ;({ data: settingsRows, error: settingsError } = await supabase
+      .from('settings')
+      .select(
+        'user_id, todo_promesse_reminder_enabled, todo_promesse_reminder_time, page_visibility',
+      )
+      .eq('todo_promesse_reminder_enabled', true))
+  }
 
   if (settingsError) {
     console.error('Erreur récupération réglages promesses TODO :', settingsError)
     return
   }
 
-  const tomorrowISO = addDaysISO(parisNow.dateISO, 1)
-  const dayStartISO = parisDateTimeToUtcISO(parisNow.dateISO, '00:00')
-  const dayEndISO = parisDateTimeToUtcISO(parisNow.dateISO, '23:59')
   const nowMs = Date.now()
 
   for (const row of settingsRows ?? []) {
     const userId = row.user_id
     if (!userId) continue
 
+    const userNow = getNowInTimeZone(
+      row.notification_timezone,
+      row.notification_utc_offset_minutes,
+    )
+    const tomorrowISO = addDaysISO(userNow.dateISO, 1)
+    const dayStartISO = zonedDateTimeToUtcISO(
+      userNow.dateISO,
+      '00:00',
+      userNow.timeZone,
+      userNow.utcOffsetMinutes,
+    )
+    const dayEndISO = zonedDateTimeToUtcISO(
+      userNow.dateISO,
+      '23:59',
+      userNow.timeZone,
+      userNow.utcOffsetMinutes,
+    )
+
     const reminderTime = normalizeTimeHHmm(row.todo_promesse_reminder_time)
-    const scheduledAtISO = parisDateTimeToUtcISO(parisNow.dateISO, reminderTime)
+    const scheduledAtISO = zonedDateTimeToUtcISO(
+      userNow.dateISO,
+      reminderTime,
+      userNow.timeZone,
+      userNow.utcOffsetMinutes,
+    )
     const scheduledMs = new Date(scheduledAtISO).getTime()
 
     const { data: items, error: itemsError } = await supabase
@@ -274,9 +380,28 @@ async function ensureTodoPromesseReminders(parisNow: { dateISO: string; timeHHmm
     if (insertError) {
       console.error('Planification rappel promesses TODO :', insertError)
     } else {
-      console.log('Rappel promesses TODO planifié pour', userId, whenISO)
+      console.log('Rappel promesses TODO planifié pour', userId, whenISO, userNow.timeZone)
     }
   }
+}
+
+function parseSubscriptionObject(subscription: unknown): Record<string, unknown> | null {
+  if (!subscription) return null
+  if (typeof subscription === 'string') {
+    try {
+      const parsed = JSON.parse(subscription)
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null
+    } catch {
+      return null
+    }
+  }
+  if (typeof subscription === 'object') return subscription as Record<string, unknown>
+  return null
+}
+
+function subscriptionEndpoint(subscription: unknown): string {
+  const obj = parseSubscriptionObject(subscription)
+  return obj?.endpoint != null ? String(obj.endpoint) : ''
 }
 
 function subscriptionsForUser(
@@ -287,33 +412,55 @@ function subscriptionsForUser(
   return subscriptions.filter((row) => row.user_id === userId)
 }
 
+/** Une seule entrée par endpoint (évite les doublons push_subscriptions). */
 function uniqueSubscriptionsByEndpoint(
   rows: Array<{ user_id?: string | null; subscription: unknown }>,
 ) {
   const seen = new Set<string>()
   const unique: Array<{ user_id?: string | null; subscription: unknown }> = []
   for (const row of rows) {
-    const endpoint =
-      row?.subscription &&
-      typeof row.subscription === 'object' &&
-      row.subscription !== null &&
-      'endpoint' in row.subscription
-        ? String((row.subscription as { endpoint?: string }).endpoint ?? '')
-        : ''
-    if (endpoint) {
-      if (seen.has(endpoint)) continue
-      seen.add(endpoint)
-    }
-    unique.push(row)
+    const endpoint = subscriptionEndpoint(row.subscription)
+    const key = endpoint || JSON.stringify(parseSubscriptionObject(row.subscription) ?? row)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const parsed = parseSubscriptionObject(row.subscription)
+    unique.push(parsed ? { ...row, subscription: parsed } : row)
   }
   return unique
+}
+
+const DAILY_REMINDER_KIND_PREFIX = 'daily_reminder:'
+
+function parseDailyReminderIdFromKind(kind: unknown): string | null {
+  const raw = String(kind ?? '')
+  if (raw.startsWith(DAILY_REMINDER_KIND_PREFIX)) {
+    const id = raw.slice(DAILY_REMINDER_KIND_PREFIX.length).trim()
+    return id || null
+  }
+  return null
+}
+
+function isDailyReminderKind(kind: unknown): boolean {
+  const raw = String(kind ?? '')
+  return raw === 'daily_reminder' || raw.startsWith(DAILY_REMINDER_KIND_PREFIX)
+}
+
+function dailyReminderScheduledKind(reminderId: string): string {
+  return `${DAILY_REMINDER_KIND_PREFIX}${reminderId}`
 }
 
 function notificationPushTag(notif: {
   id?: string | number
   kind?: string | null
   event_id?: string | null
+  scheduled_at?: string | null
 }) {
+  const dailyId = parseDailyReminderIdFromKind(notif.kind)
+  if (dailyId) {
+    // Tag stable dans la journée → le navigateur regroupe les doublons
+    const day = String(notif.scheduled_at || new Date().toISOString()).slice(0, 10)
+    return `betterme-daily_reminder-${dailyId}-${day}`
+  }
   if (notif.event_id && notif.kind) return `betterme-${notif.kind}-${notif.event_id}`
   if (notif.kind) return `betterme-${notif.kind}-${notif.id ?? 'x'}`
   return `betterme-${notif.id ?? 'default'}`
@@ -338,6 +485,9 @@ Deno.serve(async (req) => {
       userId,
       eventId,
       kind,
+      tag,
+      reminderId,
+      dayISO,
     } = body
 
     const { data: subscriptions, error } = await supabase
@@ -354,13 +504,45 @@ Deno.serve(async (req) => {
 
     console.log('Subscriptions trouvées :', subscriptions?.length ?? 0)
 
-    const payload = JSON.stringify({ title, body: msgBody })
+    const payload = JSON.stringify({
+      title,
+      body: msgBody,
+      ...(tag ? { tag: String(tag) } : {}),
+    })
 
-    if (type === 'manuel') {
-      // Envoie immédiatement à tous les appareils
-      for (const row of subscriptions) {
+    if (type === 'manuel' || type === 'daily_push') {
+      // Envoi immédiat — toujours limité au user (obligatoire pour daily_push)
+      if (type === 'daily_push' && !userId) {
+        return new Response(JSON.stringify({ error: 'userId requis' }), {
+          status: 400,
+          headers: corsHeaders,
+        })
+      }
+
+      const targets = uniqueSubscriptionsByEndpoint(
+        userId
+          ? subscriptionsForUser(subscriptions ?? [], userId)
+          : type === 'daily_push'
+            ? []
+            : (subscriptions ?? []),
+      )
+
+      // daily_push : 1 seul appareil max si plusieurs endpoints (anti-doublon agressif)
+      // → non : multi-appareil voulu, mais endpoints dédupliqués ci-dessus
+      for (const row of targets) {
         try {
-          await webpush.sendNotification(row.subscription, payload)
+          await webpush.sendNotification(
+            row.subscription,
+            type === 'daily_push'
+              ? JSON.stringify({
+                  title,
+                  body: msgBody,
+                  tag:
+                    tag ||
+                    `betterme-daily_reminder-${reminderId || 'x'}-${String(dayISO || '').slice(0, 10) || 'day'}`,
+                })
+              : payload,
+          )
           console.log('Notification envoyée avec succès')
         } catch (e) {
           console.error('Erreur envoi notification :', e)
@@ -420,9 +602,7 @@ Deno.serve(async (req) => {
       const maintenant = new Date().toISOString()
       console.log('Cron exécuté à :', maintenant)
 
-      const parisNow = getParisNow()
-      console.log('Heure Paris :', parisNow.timeHHmm)
-      await ensureTodoPromesseReminders(parisNow)
+      await ensureTodoPromesseReminders()
 
       // Vérifie les notifications planifiées à envoyer
       const { data: notificationsAEnvoyer, error: fetchError } = await supabase
@@ -435,6 +615,59 @@ Deno.serve(async (req) => {
         console.error('Erreur récupération notifications planifiées :', fetchError)
       } else {
         console.log('Notifications à envoyer :', notificationsAEnvoyer?.length ?? 0)
+      }
+
+      /** Cache fuseau / offset par user_id */
+      const timeContextByUser = new Map<
+        string,
+        { timeZone: string; utcOffsetMinutes: number | null }
+      >()
+
+      async function getUserTimeContext(userId: string | null | undefined) {
+        if (!userId) {
+          return { timeZone: DEFAULT_NOTIFICATION_TIMEZONE, utcOffsetMinutes: null as number | null }
+        }
+        if (timeContextByUser.has(userId)) return timeContextByUser.get(userId)!
+
+        let data: {
+          notification_timezone?: string | null
+          notification_utc_offset_minutes?: number | null
+        } | null = null
+        let error = null
+        ;({ data, error } = await supabase
+          .from('settings')
+          .select('notification_timezone, notification_utc_offset_minutes')
+          .eq('user_id', userId)
+          .maybeSingle())
+
+        if (
+          error &&
+          (String(error.message || '').includes('notification_timezone') ||
+            String(error.message || '').includes('notification_utc_offset_minutes'))
+        ) {
+          ;({ data, error } = await supabase
+            .from('settings')
+            .select('notification_timezone')
+            .eq('user_id', userId)
+            .maybeSingle())
+        }
+
+        if (error) {
+          console.error('Lecture timezone utilisateur :', error)
+        }
+
+        const offsetRaw = data?.notification_utc_offset_minutes
+        const offset = offsetRaw == null ? null : Number(offsetRaw)
+        const ctx = {
+          timeZone: normalizeTimeZone(data?.notification_timezone),
+          utcOffsetMinutes: Number.isFinite(offset as number) ? (offset as number) : null,
+        }
+        timeContextByUser.set(userId, ctx)
+        return ctx
+      }
+
+      async function getUserTimezone(userId: string | null | undefined): Promise<string> {
+        return (await getUserTimeContext(userId)).timeZone
       }
 
       for (const notif of notificationsAEnvoyer ?? []) {
@@ -466,35 +699,125 @@ Deno.serve(async (req) => {
           continue
         }
 
-        const targets = uniqueSubscriptionsByEndpoint(
-          subscriptionsForUser(subscriptions ?? [], notif.user_id),
-        )
-        if (!targets.length) {
-          console.log('Aucune subscription pour', notif.user_id ?? 'inconnu')
+        const dailyReminderId =
+          parseDailyReminderIdFromKind(notif.kind) ||
+          (notif.kind === 'daily_reminder' ? notif.event_id : null)
+
+        let skipDailyPush = false
+        if (isDailyReminderKind(notif.kind) && notif.user_id && dailyReminderId) {
+          const ctxEarly = await getUserTimeContext(notif.user_id)
+          const userNowEarly = getNowInTimeZone(ctxEarly.timeZone, ctxEarly.utcOffsetMinutes)
+
+          const { data: currentRow } = await supabase
+            .from('daily_reminders')
+            .select('last_sent_on')
+            .eq('id', dailyReminderId)
+            .eq('user_id', notif.user_id)
+            .maybeSingle()
+
+          const already = String(currentRow?.last_sent_on ?? '').slice(0, 10)
+          if (already === userNowEarly.dateISO) {
+            console.log('Rappel quotidien déjà envoyé aujourd’hui, skip :', dailyReminderId)
+            skipDailyPush = true
+          } else {
+            const prev = currentRow?.last_sent_on
+            let dayQuery = supabase
+              .from('daily_reminders')
+              .update({ last_sent_on: userNowEarly.dateISO })
+              .eq('id', dailyReminderId)
+              .eq('user_id', notif.user_id)
+            if (prev == null || prev === '') {
+              dayQuery = dayQuery.is('last_sent_on', null)
+            } else {
+              dayQuery = dayQuery.eq('last_sent_on', prev)
+            }
+            const { data: claimedDay } = await dayQuery.select('id').maybeSingle()
+            if (!claimedDay) {
+              skipDailyPush = true
+            }
+          }
         }
 
-        const pushPayload = JSON.stringify({
-          title: notif.title,
-          body: notif.body,
-          tag: notificationPushTag(notif),
-        })
+        if (!skipDailyPush) {
+          const targets = uniqueSubscriptionsByEndpoint(
+            subscriptionsForUser(subscriptions ?? [], notif.user_id),
+          )
+          if (!targets.length) {
+            console.log('Aucune subscription pour', notif.user_id ?? 'inconnu')
+          }
 
-        for (const row of targets) {
-          try {
-            await webpush.sendNotification(row.subscription, pushPayload)
-            console.log('Notification planifiée envoyée :', notif.id)
-          } catch (e) {
-            console.error('Erreur envoi notification planifiée :', e)
+          const pushPayload = JSON.stringify({
+            title: notif.title,
+            body: notif.body,
+            tag: notificationPushTag(notif),
+          })
+
+          for (const row of targets) {
+            try {
+              await webpush.sendNotification(row.subscription, pushPayload)
+              console.log('Notification planifiée envoyée :', notif.id)
+            } catch (e) {
+              console.error('Erreur envoi notification planifiée :', e)
+            }
+          }
+        }
+
+        if (isDailyReminderKind(notif.kind) && notif.user_id && dailyReminderId) {
+          const ctx = await getUserTimeContext(notif.user_id)
+          const userNow = getNowInTimeZone(ctx.timeZone, ctx.utcOffsetMinutes)
+
+          // Sans offset fiable, ne pas écraser la prochaine occurrence calculée par le client
+          if (ctx.utcOffsetMinutes == null) {
+            continue
+          }
+
+          const { data: rappelRow } = await supabase
+            .from('daily_reminders')
+            .select('reminder_time, title, body')
+            .eq('id', dailyReminderId)
+            .eq('user_id', notif.user_id)
+            .maybeSingle()
+
+          const reminderTime = normalizeTimeHHmm(rappelRow?.reminder_time)
+          const nextAt = zonedDateTimeToUtcISO(
+            addDaysISO(userNow.dateISO, 1),
+            reminderTime,
+            ctx.timeZone,
+            ctx.utcOffsetMinutes,
+          )
+          const nextKind = dailyReminderScheduledKind(dailyReminderId)
+
+          await supabase
+            .from('scheduled_notifications')
+            .delete()
+            .eq('user_id', notif.user_id)
+            .eq('kind', nextKind)
+            .eq('sent', false)
+
+          const { error: nextInsertError } = await supabase
+            .from('scheduled_notifications')
+            .insert({
+              user_id: notif.user_id,
+              event_id: null,
+              kind: nextKind,
+              title: (rappelRow?.title || notif.title || 'BetterMe').trim() || 'BetterMe',
+              body: (rappelRow?.body ?? notif.body ?? '').trim() || null,
+              scheduled_at: nextAt,
+              sent: false,
+            })
+
+          if (nextInsertError) {
+            console.error('Replanification daily_reminder :', nextInsertError)
           }
         }
 
         if (notif.kind === 'reconfort' && notif.user_id) {
-          const sentDate =
-            notif.scheduled_at != null
-              ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(
-                  new Date(notif.scheduled_at),
-                )
-              : maintenant.slice(0, 10)
+          const userTz = await getUserTimezone(notif.user_id)
+          const ctx = await getUserTimeContext(notif.user_id)
+          const sentDate = ctx.utcOffsetMinutes != null
+            ? getNowFromUtcOffsetMinutes(ctx.utcOffsetMinutes)?.dateISO ??
+              formatDateInTimeZone(notif.scheduled_at, userTz)
+            : formatDateInTimeZone(notif.scheduled_at, userTz)
 
           if (notif.reconfort_id) {
             const { error: reconfortError } = await supabase
@@ -536,41 +859,9 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Vérifie les rappels quotidiens (heure Europe/Paris, pas UTC —
-      // sinon un rappel 08:00 partait vers 10:00 en CEST).
-      const heureActuelle = parisNow.timeHHmm
-      console.log('Heure actuelle pour rappels (Paris) :', heureActuelle)
-
-      const { data: rappelsBruts, error: rappelError } = await supabase
-        .from('daily_reminders')
-        .select('*')
-
-      const rappels = (rappelsBruts ?? []).filter(
-        (rappel) => normalizeTimeHHmm(rappel.reminder_time) === heureActuelle,
-      )
-
-      if (rappelError) {
-        console.error('Erreur récupération rappels :', rappelError)
-      } else {
-        console.log('Rappels quotidiens trouvés :', rappels.length)
-      }
-
-      for (const rappel of rappels ?? []) {
-        for (const row of subscriptions) {
-          try {
-            await webpush.sendNotification(
-              row.subscription,
-              JSON.stringify({
-                title: rappel.title,
-                body: rappel.body,
-              }),
-            )
-            console.log('Rappel quotidien envoyé')
-          } catch (e) {
-            console.error('Erreur envoi rappel :', e)
-          }
-        }
-      }
+      // Les rappels quotidiens partent UNIQUEMENT via scheduled_notifications
+      // (heure locale appareil matérialisée en UTC). Pas de fallback HH:mm
+      // (celui-ci comparait encore à l’UTC et renvoyait aussi le rappel « 08h » à 10h).
     }
 
     return new Response(JSON.stringify({ success: true }), {

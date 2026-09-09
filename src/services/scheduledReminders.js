@@ -11,6 +11,11 @@ export const SCHEDULED_KIND = {
   RECONFORT: 'reconfort',
   TODO_PROMESSE_REMINDER: 'todo_promesse_reminder',
   TODO_ITEM_REMINDER: 'todo_item_reminder',
+  /**
+   * Préfixe : daily_reminder:<uuid>
+   * (event_id ne peut pas stocker l’id — FK vers events EDT)
+   */
+  DAILY_REMINDER_PREFIX: 'daily_reminder:',
 }
 
 export function isStandaloneTimer(row) {
@@ -102,6 +107,62 @@ export function getDeviceTimeZone() {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
   } catch {
     return undefined
+  }
+}
+
+/**
+ * Enregistre le fuseau + décalage UTC de l’appareil pour le cron serveur.
+ * L’offset (minutes à ajouter à UTC pour obtenir l’heure locale) est fiable
+ * même si Intl/timeZone est incomplet côté Deno.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ */
+export async function syncNotificationTimezone(supabase, userId) {
+  if (!userId) return
+  const timeZone = getDeviceTimeZone()
+  const utcOffsetMinutes = -new Date().getTimezoneOffset()
+
+  try {
+    const { ensureUserSettings } = await import('./menstruationNotifications.js')
+    await ensureUserSettings(userId)
+
+    const fullPayload = {
+      notification_utc_offset_minutes: utcOffsetMinutes,
+      ...(timeZone ? { notification_timezone: timeZone } : {}),
+    }
+
+    let { error } = await supabase.from('settings').update(fullPayload).eq('user_id', userId)
+
+    if (error?.code === 'PGRST204') {
+      const msg = String(error.message || '')
+      if (msg.includes('notification_utc_offset_minutes') && timeZone) {
+        ;({ error } = await supabase
+          .from('settings')
+          .update({ notification_timezone: timeZone })
+          .eq('user_id', userId))
+      } else if (msg.includes('notification_timezone')) {
+        ;({ error } = await supabase
+          .from('settings')
+          .update({ notification_utc_offset_minutes: utcOffsetMinutes })
+          .eq('user_id', userId))
+      }
+    }
+
+    if (error) {
+      const msg = String(error.message || '')
+      if (
+        error?.code === 'PGRST204' &&
+        (msg.includes('notification_timezone') || msg.includes('notification_utc_offset_minutes'))
+      ) {
+        console.warn(
+          'Colonnes timezone absentes. Exécute scripts/migrate-settings-notification-timezone.sql',
+        )
+        return
+      }
+      throw error
+    }
+  } catch (err) {
+    console.error('syncNotificationTimezone:', err)
   }
 }
 
@@ -292,6 +353,12 @@ export async function loadStandaloneScheduledGrouped(supabase, userId) {
       continue
     }
     if (row?.kind === SCHEDULED_KIND.TODO_PROMESSE_REMINDER) {
+      continue
+    }
+    if (
+      row?.kind === 'daily_reminder' ||
+      String(row?.kind || '').startsWith(SCHEDULED_KIND.DAILY_REMINDER_PREFIX)
+    ) {
       continue
     }
     if (isStandaloneTimer(row)) {

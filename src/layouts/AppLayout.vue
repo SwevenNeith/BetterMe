@@ -33,7 +33,7 @@ const morningSnoozeError = ref('')
 
 const startNotificationCron = () => {
   if (!notificationsActives() || cronIntervalId) return
-  // Pas d'appel immédiat : évite 2 déclenchements la même seconde que pg_cron au chargement
+  // Un seul intervalle (pas d’appel immédiat en parallèle → évite doublons)
   cronIntervalId = window.setInterval(declencherCronNotifications, CRON_INTERVAL_MS)
 }
 
@@ -136,19 +136,14 @@ onMounted(() => {
       }
 
       const [
-        { rescheduleTodoPromesseReminder },
         { purgeStaleMenstruationNotificationsOnStartup },
-        { rescheduleAllTodoItemReminders },
+        { realignAllDeviceLocalNotifications },
       ] = await Promise.all([
-        import('../services/todoPromesseNotifications.js'),
         import('../services/menstruationNotificationSync.js'),
-        import('../services/todoItemReminders.js'),
+        import('../services/notificationRealign.js'),
       ])
-      await Promise.all([
-        rescheduleTodoPromesseReminder(user.id),
-        purgeStaleMenstruationNotificationsOnStartup(user.id),
-        rescheduleAllTodoItemReminders(user.id),
-      ])
+      await realignAllDeviceLocalNotifications(supabase, user.id)
+      await purgeStaleMenstruationNotificationsOnStartup(user.id)
 
       if (!showVisibilityOnboarding.value) {
         await maybeShowMorningSnoozePrompt()
