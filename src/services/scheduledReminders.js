@@ -1,4 +1,5 @@
 import { getDurationMinutes } from './durationUtils.js'
+import { ensureUserSettings } from './menstruationNotifications.js'
 
 /** Ancien marqueur (lignes créées avant la colonne kind) */
 const LEGACY_TIMER_BODY_MARKER = '__betterme_kind:timer__'
@@ -123,7 +124,6 @@ export async function syncNotificationTimezone(supabase, userId) {
   const utcOffsetMinutes = -new Date().getTimezoneOffset()
 
   try {
-    const { ensureUserSettings } = await import('./menstruationNotifications.js')
     await ensureUserSettings(userId)
 
     const fullPayload = {

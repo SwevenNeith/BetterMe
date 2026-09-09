@@ -1,4 +1,8 @@
-import { ensureUserSettings } from './menstruationNotifications.js'
+import {
+  clearNaturalMenstruationNotifications,
+  clearPiluleMenstruationNotifications,
+  ensureUserSettings,
+} from './menstruationNotifications.js'
 
 const SETTINGS_TABLE = 'settings'
 const MODE_COLUMN = 'menstruation_cycle_mode'
@@ -76,10 +80,8 @@ export async function saveMenstruationCycleModePreference(supabase, userId, mode
   if (previousMode === mode) return
 
   if (mode === 'naturel') {
-    const { clearPiluleMenstruationNotifications } = await import('./menstruationNotifications.js')
     await clearPiluleMenstruationNotifications(userId)
   } else if (mode === 'pilule') {
-    const { clearNaturalMenstruationNotifications } = await import('./menstruationNotifications.js')
     await clearNaturalMenstruationNotifications(userId)
   }
 }
