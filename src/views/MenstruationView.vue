@@ -16,16 +16,18 @@ import {
   createEmptyOnboardingForm,
   createMenstruationCyclePilule,
   listCyclesPilule,
-  refreshAllCyclesSpmDatesEstimees,
   saveMenstruationRulesDates,
 } from '../services/menstruationCycles.js'
 import {
   countMenstruationCyclesNaturel,
   createMenstruationCycleNaturel,
   listCyclesNaturel,
-  syncForecastCyclesNaturel,
   saveMenstruationRulesDatesNaturel,
 } from '../services/menstruationCyclesNaturel.js'
+import {
+  switchMenstruationCycleMode,
+  syncForecastForActiveCycleMode,
+} from '../services/menstruationCycleModeSwitch.js'
 import { APP_PAGE_IDS } from '../constants/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import {
@@ -176,14 +178,17 @@ async function runMenstruationBackgroundSync(gen) {
 
   backgroundSyncInFlight = true
   try {
+    await syncForecastForActiveCycleMode(supabase, userId.value)
+    if (gen !== pageLoadGen) return
+
     if (cycleMode.value === 'pilule') {
-      await refreshAllCyclesSpmDatesEstimees(supabase, userId.value)
-      if (gen !== pageLoadGen) return
       cycles.value = await listCyclesPilule(supabase, userId.value)
       if (gen !== pageLoadGen) return
+      cyclesNaturel.value = await listCyclesNaturel(supabase, userId.value)
     } else if (cycleMode.value === 'naturel') {
-      cyclesNaturel.value = await syncForecastCyclesNaturel(supabase, userId.value)
+      cyclesNaturel.value = await listCyclesNaturel(supabase, userId.value)
       if (gen !== pageLoadGen) return
+      cycles.value = await listCyclesPilule(supabase, userId.value)
     }
 
     if (gen !== pageLoadGen) return

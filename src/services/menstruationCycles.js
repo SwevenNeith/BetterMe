@@ -29,7 +29,10 @@ const JOURS_FIN_REGLES_ESTIMEE = 5
 const JOURS_FIN_SPM_APRES_DEBUT_REGLES = 2
 const DUREE_REGLES_DEFAUT = 5
 const DUREE_SPM_DEFAUT = 7
-const FORECAST_CYCLES_AHEAD = 5
+/** Nombre de cycles futurs à maintenir après le cycle courant (n → n+1…n+FORECAST). */
+export const FORECAST_CYCLES_AHEAD = 3
+
+const SYMPTOMS_TABLE = 'menstruation_symptomes'
 
 export function addDaysToISODate(isoDate, days) {
   const [y, m, d] = isoDate.split('-').map(Number)
@@ -63,6 +66,67 @@ export function pickDate(reelle, estimee) {
 
 export function getEffectiveDebutRegles(row) {
   return pickDate(row[COL.dateDebutReglesReelle], row[COL.dateDebutReglesEstimee])
+}
+
+/**
+ * Numéro du cycle courant (n) servant d’ancre aux prédictions n+1…n+FORECAST.
+ * Aligné sur getCurrentCycle : dernier cycle avec début réel ≤ aujourd’hui, sinon début effectif.
+ * @param {object[]} cycles
+ * @param {string} [todayISO]
+ */
+export function getForecastAnchorNumeroPilule(cycles, todayISO = getLocalTodayISO()) {
+  if (!cycles?.length) return 1
+  const sorted = [...cycles].sort(
+    (a, b) => (a[COL.numeroCycle] ?? 0) - (b[COL.numeroCycle] ?? 0),
+  )
+  let current = null
+  for (const c of sorted) {
+    const real = c[COL.dateDebutReglesReelle]
+    if (real && real <= todayISO) current = c
+  }
+  if (current) return Number(current[COL.numeroCycle]) || 1
+
+  for (const c of sorted) {
+    const start = getEffectiveDebutRegles(c) ?? c[COL.dateDebutPlaquette]
+    if (start && start <= todayISO) return Number(c[COL.numeroCycle]) || 1
+  }
+
+  return Number(sorted[0]?.[COL.numeroCycle]) || 1
+}
+
+async function deleteCyclesPiluleBeyond(supabase, userId, maxNumeroInclusive) {
+  const cycles = await listCyclesPilule(supabase, userId)
+  const toDelete = cycles.filter((c) => (c[COL.numeroCycle] ?? 0) > maxNumeroInclusive)
+  if (!toDelete.length) return
+
+  const ids = toDelete.map((c) => c.id).filter(Boolean)
+  if (ids.length) {
+    const { error: symErr } = await supabase
+      .from(SYMPTOMS_TABLE)
+      .delete()
+      .eq('user_id', userId)
+      .eq('type_cycle', 'pilule')
+      .in('cycle_id', ids)
+    if (symErr) throw symErr
+  }
+
+  const { error } = await supabase
+    .from(TABLE)
+    .delete()
+    .eq('user_id', userId)
+    .gt(COL.numeroCycle, maxNumeroInclusive)
+  if (error) throw error
+}
+
+/**
+ * Supprime les prévisions pilule (garde seulement ≤ cycle courant).
+ * À utiliser quand le mode actif est naturel.
+ */
+export async function pruneForecastCyclesPilule(supabase, userId) {
+  const cycles = await listCyclesPilule(supabase, userId)
+  if (!cycles.length) return
+  const currentN = getForecastAnchorNumeroPilule(cycles)
+  await deleteCyclesPiluleBeyond(supabase, userId, currentN)
 }
 
 export function getEffectiveFinRegles(row) {
@@ -401,10 +465,10 @@ export async function syncForecastCyclesPilule(supabase, userId) {
   await refreshAllCyclesSpmDatesEstimees(supabase, userId)
   cycles = await listCyclesPilule(supabase, userId)
 
-  const maxN = Math.max(...cycles.map((c) => c[COL.numeroCycle]))
-  const targetMax = maxN + FORECAST_CYCLES_AHEAD
+  const currentN = getForecastAnchorNumeroPilule(cycles)
+  const targetMax = currentN + FORECAST_CYCLES_AHEAD
 
-  await supabase.from(TABLE).delete().eq('user_id', userId).gt(COL.numeroCycle, targetMax)
+  await deleteCyclesPiluleBeyond(supabase, userId, targetMax)
 
   cycles = await listCyclesPilule(supabase, userId)
   const byNum = new Map(cycles.map((c) => [c[COL.numeroCycle], c]))
@@ -547,8 +611,6 @@ export async function saveMenstruationRulesDates(supabase, userId, payload) {
     dateDebutRegles: next[COL.dateDebutReglesReelle],
     dateFinReglesReelle: next[COL.dateFinReglesReelle],
   })
-
-  await syncForecastCyclesPilule(supabase, userId)
 }
 
 export async function createMenstruationCyclePilule(supabase, userId, payload, options = {}) {

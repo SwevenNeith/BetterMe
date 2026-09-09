@@ -27,7 +27,8 @@ import {
   declencherCronNotifications,
 } from '../services/notifications.js'
 import { listCyclesPilule } from '../services/menstruationCycles.js'
-import { countMenstruationCyclesNaturel, syncForecastCyclesNaturel } from '../services/menstruationCyclesNaturel.js'
+import { listCyclesNaturel } from '../services/menstruationCyclesNaturel.js'
+import { syncForecastForActiveCycleMode } from '../services/menstruationCycleModeSwitch.js'
 import {
   createDefaultMenstruationNotifSettings,
   loadMenstruationNotifSettings,
@@ -853,18 +854,17 @@ const onSaveMenstruationSettings = async () => {
   menstruationNotifMessage.value = ''
   try {
     await saveMenstruationNotifSettings(userId.value, menstruationNotifSettings.value)
-    const cyclesPilule = await listCyclesPilule(supabase, userId.value)
-    const countNaturel = await countMenstruationCyclesNaturel(supabase, userId.value)
+    await syncForecastForActiveCycleMode(supabase, userId.value)
+    const [cyclesPilule, cyclesNaturel] = await Promise.all([
+      listCyclesPilule(supabase, userId.value),
+      listCyclesNaturel(supabase, userId.value),
+    ])
     const cycleMode = await resolveMenstruationCycleMode(
       supabase,
       userId.value,
       cyclesPilule.length,
-      countNaturel,
+      cyclesNaturel.length,
     )
-    const cyclesNaturel =
-      cycleMode === 'naturel' && countNaturel > 0
-        ? await syncForecastCyclesNaturel(supabase, userId.value)
-        : []
     await rescheduleMenstruationNotificationsByMode(userId.value, cycleMode, {
       cyclesPilule,
       cyclesNaturel,

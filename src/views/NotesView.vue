@@ -13,6 +13,10 @@ import {
   updateNote,
 } from '../services/notes.js'
 import {
+  extractImageFilesFromDataTransfer,
+  uploadNoteImage,
+} from '../services/noteImages.js'
+import {
   createNoteFolder,
   deleteNoteFolder,
   listNoteFolders,
@@ -112,6 +116,7 @@ const draftFolderId = ref(null)
 const draftStatus = ref('')
 const viewMode = ref('split') // edit | preview | split
 const isSaving = ref(false)
+const isPastingImage = ref(false)
 const saveError = ref('')
 const saveStatus = ref('')
 const dirty = ref(false)
@@ -1844,6 +1849,97 @@ function onEditorInput() {
   schedulePreviewCursorSync()
 }
 
+/**
+ * Insère du Markdown à la position du curseur dans l’éditeur.
+ * @param {string} markdown
+ */
+function insertMarkdownAtCursor(markdown) {
+  const el = editorEl.value
+  const content = draftContent.value ?? ''
+  const start = el && typeof el.selectionStart === 'number' ? el.selectionStart : content.length
+  const end = el && typeof el.selectionEnd === 'number' ? el.selectionEnd : start
+  const before = content.slice(0, start)
+  const after = content.slice(end)
+  const padBefore = before && !/\n\n$/.test(before) ? (before.endsWith('\n') ? '\n' : '\n\n') : ''
+  const padAfter = after && !after.startsWith('\n') ? '\n\n' : after.startsWith('\n\n') ? '' : '\n'
+  const block = `${padBefore}${markdown}${padAfter}`
+  draftContent.value = `${before}${block}${after}`
+  markDirty()
+  const caret = before.length + block.length
+  void nextTick(() => {
+    const editor = editorEl.value
+    if (!editor) return
+    editor.focus()
+    editor.setSelectionRange(caret, caret)
+    schedulePreviewCursorSync()
+  })
+}
+
+/**
+ * @param {File[]} files
+ */
+async function insertPastedNoteImages(files) {
+  if (!files.length) return
+  if (!userId.value || !selectedNoteId.value) {
+    saveError.value = 'Ouvre une note pour coller une image.'
+    return
+  }
+  if (isPastingImage.value) return
+
+  isPastingImage.value = true
+  saveError.value = ''
+  const previousStatus = saveStatus.value
+  saveStatus.value = files.length > 1 ? 'Import des images…' : 'Import de l’image…'
+
+  try {
+    for (const file of files) {
+      const { markdown } = await uploadNoteImage(
+        supabase,
+        userId.value,
+        selectedNoteId.value,
+        file,
+      )
+      insertMarkdownAtCursor(markdown)
+    }
+    saveStatus.value = dirty.value ? 'Modifications non enregistrées…' : previousStatus || 'Image ajoutée'
+  } catch (err) {
+    console.error(err)
+    saveError.value = err.message || 'Impossible d’insérer l’image.'
+    saveStatus.value = previousStatus
+  } finally {
+    isPastingImage.value = false
+  }
+}
+
+/**
+ * @param {ClipboardEvent} event
+ */
+function onEditorPaste(event) {
+  const files = extractImageFilesFromDataTransfer(event.clipboardData)
+  if (!files.length) return
+  event.preventDefault()
+  void insertPastedNoteImages(files)
+}
+
+/**
+ * @param {DragEvent} event
+ */
+function onEditorDragOver(event) {
+  if (!extractImageFilesFromDataTransfer(event.dataTransfer).length) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+/**
+ * @param {DragEvent} event
+ */
+function onEditorDrop(event) {
+  const files = extractImageFilesFromDataTransfer(event.dataTransfer)
+  if (!files.length) return
+  event.preventDefault()
+  void insertPastedNoteImages(files)
+}
+
 function onEditorScroll() {
   syncSplitScroll(editorEl.value, previewEl.value)
 }
@@ -2395,12 +2491,15 @@ watch(draftFolderId, (value) => {
             v-model="draftContent"
             class="notes-page__editor"
             spellcheck="true"
-            placeholder="Écris en Markdown…"
+            placeholder="Écris en Markdown… (Ctrl+V pour coller une image)"
             @scroll="onEditorScroll"
             @click="onEditorCursorNavigate"
             @keyup="onEditorCursorNavigate"
             @select="onEditorCursorNavigate"
             @input="onEditorInput"
+            @paste="onEditorPaste"
+            @dragover="onEditorDragOver"
+            @drop="onEditorDrop"
             @blur="flushSave"
             @contextmenu="onEditorContextMenu"
           />

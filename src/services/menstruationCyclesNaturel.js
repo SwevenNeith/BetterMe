@@ -27,7 +27,10 @@ export const COL_NATUREL = {
 
 const DEFAULT_CYCLE_LEN = 28
 const DEFAULT_RULES_LEN = 5
-const FORECAST_CYCLES_AHEAD = 5
+/** Nombre de cycles futurs à maintenir après le cycle courant (n → n+1…n+FORECAST). */
+export const FORECAST_CYCLES_AHEAD = 3
+
+const SYMPTOMS_TABLE = 'menstruation_symptomes'
 
 // Hypothèses (constantes)
 export const DUREE_PHASE_LUTEALE = 14
@@ -47,6 +50,66 @@ export function getRealDebutReglesNaturel(row) {
 
 export function getEffectiveDebutReglesNaturel(row) {
   return pickDate(row?.[COL_NATUREL.dateDebutReglesReelle], row?.[COL_NATUREL.dateDebutReglesEstimee])
+}
+
+/**
+ * Numéro du cycle courant (n) pour les prédictions naturelles n+1…n+FORECAST.
+ * @param {object[]} cycles
+ * @param {string} [todayISO]
+ */
+export function getForecastAnchorNumeroNaturel(cycles, todayISO = getLocalTodayISO()) {
+  if (!cycles?.length) return 1
+  const sorted = [...cycles].sort(
+    (a, b) => (a[COL_NATUREL.numeroCycle] ?? 0) - (b[COL_NATUREL.numeroCycle] ?? 0),
+  )
+  let current = null
+  for (const c of sorted) {
+    const real = c[COL_NATUREL.dateDebutReglesReelle]
+    if (real && real <= todayISO) current = c
+  }
+  if (current) return Number(current[COL_NATUREL.numeroCycle]) || 1
+
+  for (const c of sorted) {
+    const start = getEffectiveDebutReglesNaturel(c)
+    if (start && start <= todayISO) return Number(c[COL_NATUREL.numeroCycle]) || 1
+  }
+
+  return Number(sorted[0]?.[COL_NATUREL.numeroCycle]) || 1
+}
+
+async function deleteCyclesNaturelBeyond(supabase, userId, maxNumeroInclusive) {
+  const cycles = await listCyclesNaturel(supabase, userId)
+  const toDelete = cycles.filter((c) => (c[COL_NATUREL.numeroCycle] ?? 0) > maxNumeroInclusive)
+  if (!toDelete.length) return
+
+  const ids = toDelete.map((c) => c.id).filter(Boolean)
+  if (ids.length) {
+    const { error: symErr } = await supabase
+      .from(SYMPTOMS_TABLE)
+      .delete()
+      .eq('user_id', userId)
+      .eq('type_cycle', 'naturel')
+      .in('cycle_id', ids)
+    if (symErr) throw symErr
+  }
+
+  const { error } = await supabase
+    .from(TABLE)
+    .delete()
+    .eq('user_id', userId)
+    .gt(COL_NATUREL.numeroCycle, maxNumeroInclusive)
+  if (error) throw error
+}
+
+/**
+ * Supprime les prévisions naturelles (garde seulement ≤ cycle courant).
+ * À utiliser quand le mode actif est pilule.
+ */
+export async function pruneForecastCyclesNaturel(supabase, userId) {
+  const cycles = await listCyclesNaturel(supabase, userId)
+  if (!cycles.length) return
+  const currentN = getForecastAnchorNumeroNaturel(cycles)
+  await deleteCyclesNaturelBeyond(supabase, userId, currentN)
 }
 
 /** Cycle projeté sans début réel : affichage prévision uniquement, pas de période active. */
@@ -284,7 +347,8 @@ function buildForecastCycleRecordNaturel(userId, numeroCycle, prev, previousCycl
 }
 
 /**
- * Maintient toujours les cycles projetés jusqu'à n+5 (ex. cycle 1 → lignes 2…6).
+ * Maintient les cycles projetés jusqu’à n+FORECAST (ex. cycle courant 4 → lignes 5…7).
+ * n = cycle actuel (début réel passé), pas le max déjà stocké.
  */
 export async function syncForecastCyclesNaturel(supabase, userId) {
   let cycles = await listCyclesNaturel(supabase, userId)
@@ -293,10 +357,10 @@ export async function syncForecastCyclesNaturel(supabase, userId) {
   await refreshAllCyclesNaturelEstimees(supabase, userId)
   cycles = await listCyclesNaturel(supabase, userId)
 
-  const maxN = Math.max(...cycles.map((c) => c[COL_NATUREL.numeroCycle]))
-  const targetMax = maxN + FORECAST_CYCLES_AHEAD
+  const currentN = getForecastAnchorNumeroNaturel(cycles)
+  const targetMax = currentN + FORECAST_CYCLES_AHEAD
 
-  await supabase.from(TABLE).delete().eq('user_id', userId).gt(COL_NATUREL.numeroCycle, targetMax)
+  await deleteCyclesNaturelBeyond(supabase, userId, targetMax)
 
   cycles = await listCyclesNaturel(supabase, userId)
   const byNum = new Map(cycles.map((c) => [c[COL_NATUREL.numeroCycle], c]))
@@ -501,7 +565,6 @@ export async function saveMenstruationRulesDatesNaturel(supabase, userId, payloa
     dateFinReglesReelle,
   })
 
-  await syncForecastCyclesNaturel(supabase, userId)
   return await listCyclesNaturel(supabase, userId)
 }
 

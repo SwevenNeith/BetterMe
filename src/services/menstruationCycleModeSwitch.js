@@ -11,17 +11,21 @@ import {
   computeDelaiRegles,
   computeDureeSpmReelle,
   buildMenstruationCyclePiluleRecord,
+  countMenstruationCyclesPilule,
   listCyclesPilule,
+  pruneForecastCyclesPilule,
   syncForecastCyclesPilule,
 } from './menstruationCycles.js'
 import {
   COL_NATUREL,
   buildMenstruationCycleNaturelRecord,
   computeNaturalCycleDerivedFields,
+  countMenstruationCyclesNaturel,
   getEffectiveDebutReglesNaturel,
   getEffectiveFinReglesNaturel,
   getRealOrOngoingDureeReglesNaturel,
   listCyclesNaturel,
+  pruneForecastCyclesNaturel,
   syncForecastCyclesNaturel,
 } from './menstruationCyclesNaturel.js'
 
@@ -277,8 +281,42 @@ async function patchNaturelCycleRealRules(
 }
 
 /**
+ * Prévisions uniquement pour le mode actif (n…n+3).
+ * L’autre mode est tronqué au cycle courant (pas de prédictions).
+ */
+export async function syncForecastForActiveCycleMode(supabase, userId) {
+  if (!userId) return null
+
+  const [countPilule, countNaturel] = await Promise.all([
+    countMenstruationCyclesPilule(supabase, userId),
+    countMenstruationCyclesNaturel(supabase, userId),
+  ])
+
+  const { resolveMenstruationCycleMode } = await import('./menstruationCycleModePreference.js')
+  const mode = await resolveMenstruationCycleMode(supabase, userId, countPilule, countNaturel)
+
+  if (mode === 'pilule') {
+    await pruneForecastCyclesNaturel(supabase, userId)
+    if (countPilule > 0) await syncForecastCyclesPilule(supabase, userId)
+    return mode
+  }
+
+  if (mode === 'naturel') {
+    await pruneForecastCyclesPilule(supabase, userId)
+    if (countNaturel > 0) await syncForecastCyclesNaturel(supabase, userId)
+    return mode
+  }
+
+  await Promise.all([
+    pruneForecastCyclesPilule(supabase, userId),
+    pruneForecastCyclesNaturel(supabase, userId),
+  ])
+  return null
+}
+
+/**
  * Aligne les dates réelles de règles entre pilule et naturel pour un même numéro de cycle,
- * puis recalcule les prévisions des deux modes.
+ * puis recalcule les prévisions du mode actif uniquement.
  */
 export async function syncRealRulesDatesBetweenModes(
   supabase,
@@ -306,10 +344,7 @@ export async function syncRealRulesDatesBetweenModes(
     }),
   ])
 
-  await Promise.all([
-    syncForecastCyclesPilule(supabase, userId),
-    syncForecastCyclesNaturel(supabase, userId),
-  ])
+  await syncForecastForActiveCycleMode(supabase, userId)
 }
 
 /**
@@ -348,8 +383,10 @@ export async function switchMenstruationCycleMode(
   })
 
   if (targetMode === 'pilule') {
+    await pruneForecastCyclesNaturel(supabase, userId)
     await syncForecastCyclesPilule(supabase, userId)
   } else {
+    await pruneForecastCyclesPilule(supabase, userId)
     await syncForecastCyclesNaturel(supabase, userId)
   }
 }

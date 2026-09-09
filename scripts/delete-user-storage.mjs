@@ -13,7 +13,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 
-const BUCKETS = ['comfort-images', 'reading-covers']
+const BUCKETS = ['comfort-images', 'reading-covers', 'note-images']
 const LIST_LIMIT = 1000
 
 const userId = process.argv[2]?.trim()

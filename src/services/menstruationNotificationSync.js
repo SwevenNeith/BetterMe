@@ -1,7 +1,8 @@
 import { supabase } from '../lib/supabase.js'
 import { countMenstruationCyclesPilule, listCyclesPilule } from './menstruationCycles.js'
-import { countMenstruationCyclesNaturel, syncForecastCyclesNaturel } from './menstruationCyclesNaturel.js'
+import { countMenstruationCyclesNaturel, listCyclesNaturel } from './menstruationCyclesNaturel.js'
 import { resolveMenstruationCycleMode } from './menstruationCycleModePreference.js'
+import { syncForecastForActiveCycleMode } from './menstruationCycleModeSwitch.js'
 import {
   loadMenstruationNotifSettings,
   rescheduleMenstruationNotificationsByMode,
@@ -93,12 +94,13 @@ export async function syncMenstruationNotificationsForUser(userId, options = {})
     }
 
     const settings = await loadMenstruationNotifSettings(userId)
+    await syncForecastForActiveCycleMode(supabase, userId)
     const [cyclesPilule, cyclesNaturel] = await Promise.all([
       cycleMode === 'pilule' && countPilule > 0
         ? listCyclesPilule(supabase, userId)
         : Promise.resolve([]),
       cycleMode === 'naturel' && countNaturel > 0
-        ? syncForecastCyclesNaturel(supabase, userId)
+        ? listCyclesNaturel(supabase, userId)
         : Promise.resolve([]),
     ])
 
