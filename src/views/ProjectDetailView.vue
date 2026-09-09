@@ -18,6 +18,7 @@ import {
   buildPausePayloadFromForm,
   formatProjectPauseBadge,
   isProjectItemPaused,
+  isProjectSubstepEffectivelyPaused,
   normalizeProjectPauseFields,
 } from '../constants/projectPause.js'
 import { supabase } from '../lib/supabase.js'
@@ -216,12 +217,20 @@ function hasDescription(text) {
   return String(text ?? '').trim().length > 0
 }
 
-function pauseBadge(item) {
-  return formatProjectPauseBadge(item)
+function pauseBadge(item, parentStep = null) {
+  return formatProjectPauseBadge(item, undefined, { parentStep })
 }
 
-function itemIsPaused(item) {
+/** Pause effective : étape = sa pause ; sous-étape = sienne ou celle de l’étape. */
+function itemIsPaused(item, parentStep = null) {
+  if (parentStep) return isProjectSubstepEffectivelyPaused(item, parentStep)
   return isProjectItemPaused(item)
+}
+
+function substepPauseTitle(substep, parentStep) {
+  if (isProjectItemPaused(substep)) return 'Modifier la pause'
+  if (isProjectItemPaused(parentStep)) return 'Pause héritée de l’étape — ajouter une pause propre'
+  return 'Mettre en pause'
 }
 
 function applyPauseToLocalItem(item, pause) {
@@ -661,9 +670,9 @@ async function toggleStepDone(step) {
 }
 
 async function toggleSubstepDone(substep) {
-  if (!userId.value || !project.value || itemUsesQuantite(substep) || itemIsPaused(substep)) return
+  if (!userId.value || !project.value || itemUsesQuantite(substep)) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
-  if (!step) return
+  if (!step || itemIsPaused(substep, step)) return
 
   const next = !substep.is_done
   substep.is_done = next
@@ -729,9 +738,9 @@ async function onStepDecrement(step) {
 }
 
 async function onSubstepIncrement(substep) {
-  if (!userId.value || !project.value || !itemUsesQuantite(substep) || itemIsPaused(substep)) return
+  if (!userId.value || !project.value || !itemUsesQuantite(substep)) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
-  if (!step) return
+  if (!step || itemIsPaused(substep, step)) return
 
   const wasDone = substep.is_done
   const previousLogs = getItemLogs(substep.id)
@@ -753,9 +762,9 @@ async function onSubstepIncrement(substep) {
 }
 
 async function onSubstepDecrement(substep) {
-  if (!userId.value || !project.value || !itemUsesQuantite(substep) || itemIsPaused(substep)) return
+  if (!userId.value || !project.value || !itemUsesQuantite(substep)) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
-  if (!step) return
+  if (!step || itemIsPaused(substep, step)) return
 
   const wasDone = substep.is_done
   const previousLogs = getItemLogs(substep.id)
@@ -1348,7 +1357,7 @@ watch(projectId, () => {
                       :class="{
                         'project-substep-item--dragging': draggingSubstepKey === substepKey(s.id, ss.id),
                         'project-substep-item--done': ss.is_done,
-                        'project-substep-item--paused': itemIsPaused(ss),
+                        'project-substep-item--paused': itemIsPaused(ss, s),
                       }"
                       @dragover="onSubstepDragOver(s.id, ss.id, $event)"
                       @drop="onSubstepDrop(s.id, ss.id, $event)"
@@ -1362,7 +1371,7 @@ watch(projectId, () => {
                           :habit-linked="isHabitLinked"
                           :habit-logs-by-date="habitLogsByDate"
                           :effective-quantite-cible="getEffectiveCible(ss)"
-                          :paused="itemIsPaused(ss)"
+                          :paused="itemIsPaused(ss, s)"
                           @toggle="toggleSubstepDone(ss)"
                           @increment="onSubstepIncrement(ss)"
                           @decrement="onSubstepDecrement(ss)"
@@ -1382,8 +1391,8 @@ watch(projectId, () => {
                         </span>
                         <ProjectPauseIconButton
                           small
-                          :active="itemIsPaused(ss)"
-                          :title="itemIsPaused(ss) ? 'Modifier la pause' : 'Mettre en pause'"
+                          :active="itemIsPaused(ss, s)"
+                          :title="substepPauseTitle(ss, s)"
                           @click="openPause('substep', ss)"
                         />
                         <button
@@ -1407,10 +1416,10 @@ watch(projectId, () => {
                       </div>
 
                       <p
-                        v-if="!(editPanel?.kind === 'substep' && editPanel.id === ss.id) && !(pausePanel?.kind === 'substep' && pausePanel.id === ss.id) && itemIsPaused(ss)"
+                        v-if="!(editPanel?.kind === 'substep' && editPanel.id === ss.id) && !(pausePanel?.kind === 'substep' && pausePanel.id === ss.id) && itemIsPaused(ss, s)"
                         class="project-pause-badge project-pause-badge--sub"
                       >
-                        {{ pauseBadge(ss) }}
+                        {{ pauseBadge(ss, s) }}
                       </p>
 
                       <p v-if="!(editPanel?.kind === 'substep' && editPanel.id === ss.id) && !(pausePanel?.kind === 'substep' && pausePanel.id === ss.id) && hasDescription(ss.description)" class="project-substep-description">

@@ -56,7 +56,7 @@ export function normalizeProjectPauseFields(item) {
 }
 
 /**
- * Pause active si aujourd’hui est entre pause_from et pause_to (inclus).
+ * Pause propre à l’item (dates inclusives).
  * @param {object|null|undefined} item
  * @param {string} [todayISO]
  */
@@ -65,6 +65,17 @@ export function isProjectItemPaused(item, todayISO = localTodayISO()) {
   if (!from || !to) return false
   const today = normalizeDateISO(todayISO) || localTodayISO()
   return today >= from && today <= to
+}
+
+/**
+ * Sous-étape en pause si elle a sa propre pause OU si l’étape parente est en pause.
+ * L’inverse n’est pas vrai : pauser une sous-étape ne pause pas l’étape ni les sœurs.
+ * @param {object|null|undefined} substep
+ * @param {object|null|undefined} parentStep
+ * @param {string} [todayISO]
+ */
+export function isProjectSubstepEffectivelyPaused(substep, parentStep, todayISO = localTodayISO()) {
+  return isProjectItemPaused(substep, todayISO) || isProjectItemPaused(parentStep, todayISO)
 }
 
 /**
@@ -97,10 +108,20 @@ export function buildPausePayloadFromForm(form) {
 /**
  * @param {object|null|undefined} item
  * @param {string} [todayISO]
+ * @param {{ parentStep?: object|null }} [options]
  */
-export function formatProjectPauseBadge(item, todayISO = localTodayISO()) {
-  if (!isProjectItemPaused(item, todayISO)) return ''
-  const { pause_from: from, pause_to: to, pause_reason: reason } = normalizeProjectPauseFields(item)
+export function formatProjectPauseBadge(item, todayISO = localTodayISO(), options = {}) {
+  const parent = options.parentStep ?? null
+  const ownPaused = isProjectItemPaused(item, todayISO)
+  const parentPaused = parent ? isProjectItemPaused(parent, todayISO) : false
+
+  if (!ownPaused && !parentPaused) return ''
+
+  const source = ownPaused ? item : parent
+  const { pause_from: from, pause_to: to, pause_reason: reason } =
+    normalizeProjectPauseFields(source)
   const range = from === to ? from : `${from} → ${to}`
-  return reason ? `En pause · ${reason} (${range})` : `En pause (${range})`
+  const inheritedOnly = !ownPaused && parentPaused
+  const prefix = inheritedOnly ? 'En pause (étape)' : 'En pause'
+  return reason ? `${prefix} · ${reason} (${range})` : `${prefix} (${range})`
 }
