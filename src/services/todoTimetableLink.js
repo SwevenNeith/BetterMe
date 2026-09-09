@@ -1,8 +1,26 @@
 import { createTimetableEvent } from './timetableEvents.js'
 import { supprimerRappelsEvenement } from './notifications.js'
+import { deletePendingTodoItemReminders } from './todoItemReminders.js'
 import { getLocalTodayISO } from './scheduledReminders.js'
 import { normalizeDateISO } from '../utils/habitCalendar.js'
 import { getTodoPlanningOccurrenceDates, isRecurringTodoFrequency } from '../utils/todoPlanningDates.js'
+
+/**
+ * Annule tous les rappels pending liés à une paire TODO ↔ événements EDT.
+ * (activite/timer sur eventIds + todo_item_reminder sur todoItemId)
+ */
+export async function cancelLinkedTodoAndTimetableReminders(
+  supabase,
+  { todoItemId = null, eventIds = [] } = {},
+) {
+  const uniqueEventIds = [...new Set((eventIds ?? []).filter(Boolean))]
+  for (const eventId of uniqueEventIds) {
+    await supprimerRappelsEvenement(eventId)
+  }
+  if (todoItemId) {
+    await deletePendingTodoItemReminders(supabase, todoItemId)
+  }
+}
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
@@ -101,7 +119,12 @@ export async function linkTodoAndTimetable(supabase, userId, todoItemId, eventId
 
   const { error: todoError } = await supabase
     .from('todo_items')
-    .update({ timetable_event_id: eventId })
+    .update({
+      timetable_event_id: eventId,
+      // Source unique de rappel = EDT
+      reminder: false,
+      reminder_time: null,
+    })
     .eq('id', todoItemId)
     .eq('user_id', userId)
 
@@ -114,6 +137,8 @@ export async function linkTodoAndTimetable(supabase, userId, todoItemId, eventId
     .eq('user_id', userId)
 
   if (eventError) throw eventError
+
+  await deletePendingTodoItemReminders(supabase, todoItemId)
 }
 
 /**
@@ -245,11 +270,38 @@ export async function deleteTimetableEvent(supabase, userId, eventId) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {string} todoItemId
+ * @param {{ clearTodoReminders?: boolean }} [options]
  */
-export async function deleteAllTimetableEventsForTodo(supabase, userId, todoItemId) {
+export async function deleteAllTimetableEventsForTodo(
+  supabase,
+  userId,
+  todoItemId,
+  options = {},
+) {
   if (!userId || !todoItemId) return
 
-  const events = await listTimetableEventsForTodo(supabase, userId, todoItemId)
+  const { data: todoRow, error: todoError } = await supabase
+    .from('todo_items')
+    .select('timetable_event_id')
+    .eq('id', todoItemId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (todoError) throw todoError
+
+  const events = await collectTodoPlanningEvents(
+    supabase,
+    userId,
+    todoItemId,
+    todoRow?.timetable_event_id ?? null,
+  )
+  const eventIds = events.map((event) => event.id)
+
+  await cancelLinkedTodoAndTimetableReminders(supabase, {
+    todoItemId: options.clearTodoReminders === false ? null : todoItemId,
+    eventIds,
+  })
+
   for (const event of events) {
     await deleteTimetableEventRow(supabase, userId, event.id)
   }
@@ -306,6 +358,8 @@ export async function createTimetableEventsForTodo(
     throw new Error('Aucune date de planning trouvée pour cette tâche.')
   }
 
+  const useRollingReminderWindow = isRecurringTodoFrequency(todoItem.frequence)
+
   const events = []
   let categories = userCategories
 
@@ -318,6 +372,7 @@ export async function createTimetableEventsForTodo(
         dateStart,
         dateEnd: '',
         todoItemId: todoItem.id,
+        useRollingReminderWindow,
       },
       categories,
     )

@@ -602,6 +602,20 @@ Deno.serve(async (req) => {
       const maintenant = new Date().toISOString()
       console.log('Cron exécuté à :', maintenant)
 
+      // Purge des notifications déjà envoyées (> 30 jours)
+      const purgeBefore = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+      const { error: purgeError, count: purgeCount } = await supabase
+        .from('scheduled_notifications')
+        .delete({ count: 'exact' })
+        .eq('sent', true)
+        .lt('scheduled_at', purgeBefore)
+
+      if (purgeError) {
+        console.error('Purge scheduled_notifications (>30j) :', purgeError)
+      } else if (purgeCount) {
+        console.log('Notifications envoyées purgées (>30j) :', purgeCount)
+      }
+
       await ensureTodoPromesseReminders()
 
       // Vérifie les notifications planifiées à envoyer

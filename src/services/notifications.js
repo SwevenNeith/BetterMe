@@ -281,18 +281,12 @@ export function formatDelaiDepuisMinutes(totalMinutes) {
  * Rappel avant une activité EDT.
  * - dateStart + timeStart : heure de début (heure locale appareil)
  * - minutesAvant : délai total (heures×60 + minutes) stocké dans reminder_time
+ * Une seule ligne pending par event_id (kind activite). Pas de dédup par body
+ * (casse avec apostrophes / multi-occurrences).
  */
 export async function planifierNotificationActivite(userId, activite) {
   const minutesAvant = activite.minutesAvant ?? 15
   if (minutesAvant < 0) return false
-
-  if (activite.eventId) {
-    await supprimerRappelsEvenement(activite.eventId)
-    await deletePendingActiviteNotifications(supabase, {
-      eventId: activite.eventId,
-      userId,
-    })
-  }
 
   const heureActivite =
     activite.dateStart && activite.timeStart
@@ -310,6 +304,30 @@ export async function planifierNotificationActivite(userId, activite) {
   const scheduledAtIso = heureNotification.toISOString()
   const title = 'BetterMe - Rappel'
   const body = formatRappelNotificationBody(activite.nom, minutesAvant, delaiLabel)
+
+  let todoItemId = activite.todoItemId || null
+  if (!todoItemId && activite.eventId) {
+    const { data: eventRow } = await supabase
+      .from('timetable_events')
+      .select('todo_item_id')
+      .eq('id', activite.eventId)
+      .maybeSingle()
+    todoItemId = eventRow?.todo_item_id ?? null
+  }
+
+  // Remplace toute notif pending de cet événement (évite doublons à 1 min d’écart)
+  if (activite.eventId) {
+    await supprimerRappelsEvenement(activite.eventId)
+    await deletePendingActiviteNotifications(supabase, {
+      eventId: activite.eventId,
+      userId,
+    })
+  }
+  // Si lié à une TODO : jamais de second rappel todo_item_reminder
+  if (todoItemId) {
+    const { deletePendingTodoItemReminders } = await import('./todoItemReminders.js')
+    await deletePendingTodoItemReminders(supabase, todoItemId)
+  }
 
   await deletePendingScheduledDuplicate(supabase, userId, {
     scheduledAt: scheduledAtIso,
@@ -336,6 +354,8 @@ export async function planifierNotificationActivite(userId, activite) {
 
 /** Supprime les rappels planifiés non envoyés liés à un événement */
 export async function supprimerRappelsEvenement(eventId) {
+  if (!eventId) return
+
   const { error } = await supabase
     .from('scheduled_notifications')
     .delete()
@@ -344,6 +364,7 @@ export async function supprimerRappelsEvenement(eventId) {
 
   if (error) {
     console.error('supprimerRappelsEvenement:', error)
+    throw error
   }
 }
 

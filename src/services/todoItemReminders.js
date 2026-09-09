@@ -121,16 +121,21 @@ export function reminderFormFromItem(item) {
 export async function deletePendingTodoItemReminders(supabaseClient, todoItemId) {
   if (!todoItemId) return
   const client = supabaseClient ?? supabase
-  await client
+  const { error } = await client
     .from('scheduled_notifications')
     .delete()
     .eq('event_id', todoItemId)
     .eq('sent', false)
     .eq('kind', KIND)
+
+  if (error) {
+    console.error('deletePendingTodoItemReminders:', error)
+  }
 }
 
 /**
  * Planifie (ou annule) le prochain rappel pour une tâche.
+ * Si la tâche est liée au planning, le rappel EDT (activite) est la source unique.
  * @param {import('@supabase/supabase-js').SupabaseClient} [supabaseClient]
  */
 export async function rescheduleTodoItemReminder(userId, item, supabaseClient = supabase) {
@@ -138,6 +143,21 @@ export async function rescheduleTodoItemReminder(userId, item, supabaseClient = 
 
   try {
     await deletePendingTodoItemReminders(supabaseClient, item.id)
+
+    let linkedEventId = item.timetable_event_id ?? null
+    if (!linkedEventId) {
+      const { data: linkedEvent } = await supabaseClient
+        .from('timetable_events')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('todo_item_id', item.id)
+        .limit(1)
+        .maybeSingle()
+      linkedEventId = linkedEvent?.id ?? null
+    }
+
+    // Lié au planning → pas de second rappel TODO (évite le doublon activite / todo_item_reminder)
+    if (linkedEventId) return
 
     if (!item.reminder || !notificationsActives()) return
 
@@ -188,7 +208,9 @@ export async function rescheduleAllTodoItemReminders(userId, supabaseClient = su
   try {
     const { data, error } = await supabaseClient
       .from('todo_items')
-      .select('id, nom, frequence, jour_semaine, heure, date_echeance, is_done, reminder, reminder_time')
+      .select(
+        'id, nom, frequence, jour_semaine, heure, date_echeance, is_done, reminder, reminder_time, timetable_event_id',
+      )
       .eq('user_id', userId)
       .eq('reminder', true)
 

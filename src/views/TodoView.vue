@@ -602,6 +602,15 @@ async function onAddToPlanningChange(event) {
 
   Object.assign(planningForm, createDefaultPlanningForm(todoForm))
   syncPlanningFormFromTodo()
+
+  // Une seule source de rappel : basculer le rappel TODO vers le sous-formulaire planning.
+  if (todoForm.reminderEnabled && todoForm.heure) {
+    planningForm.reminderEnabled = true
+    planningForm.reminderHours = Number(todoForm.reminderHours) || 0
+    planningForm.reminderMinutes = Number(todoForm.reminderMinutes) || 0
+    todoForm.reminderEnabled = false
+  }
+
   await loadPlanningCategories()
 }
 
@@ -749,31 +758,51 @@ async function submitForm() {
         )
       : todoForm.date_echeance
 
-  const reminderError = validateTodoReminderInput({
-    reminderEnabled: todoForm.reminderEnabled,
-    reminderHours: todoForm.reminderHours,
-    reminderMinutes: todoForm.reminderMinutes,
-    heure: todoForm.heure,
-  })
+  const reminderError =
+    addToPlanning.value && !editingItemHasPlanningLink.value
+      ? null
+      : validateTodoReminderInput({
+          reminderEnabled: todoForm.reminderEnabled,
+          reminderHours: todoForm.reminderHours,
+          reminderMinutes: todoForm.reminderMinutes,
+          heure: todoForm.heure,
+        })
   if (reminderError) {
     formError.value = reminderError
     isSaving.value = false
     return
   }
 
-  const reminderFields = reminderFieldsFromForm({
-    reminderEnabled: todoForm.reminderEnabled,
-    reminderHours: todoForm.reminderHours,
-    reminderMinutes: todoForm.reminderMinutes,
-    heure: todoForm.heure,
-  })
+  // Si on ajoute au planning OU déjà lié : le rappel est porté par l’EDT (pas par la TODO).
+  const linkingToPlanning =
+    (addToPlanning.value && !editingItemHasPlanningLink.value) || editingItemHasPlanningLink.value
+
+  const reminderFields = linkingToPlanning
+    ? { reminder: false, reminder_time: null }
+    : reminderFieldsFromForm({
+        reminderEnabled: todoForm.reminderEnabled,
+        reminderHours: todoForm.reminderHours,
+        reminderMinutes: todoForm.reminderMinutes,
+        heure: todoForm.heure,
+      })
+
+  // Une seule horloge : aligner l’horaire TODO sur le planning pour éviter un décalage d’1 min
+  if (addToPlanning.value && !editingItemHasPlanningLink.value && !planningForm.allDay) {
+    const planningStart = String(planningForm.startTime || '').slice(0, 5)
+    if (planningStart) {
+      todoForm.heure = planningStart
+    }
+  }
 
   const payload = {
     nom: todoForm.nom,
     description: todoForm.description,
     frequence: todoForm.frequence,
     jour_semaine: todoForm.jour_semaine,
-    heure: todoForm.heure || null,
+    heure:
+      addToPlanning.value && !planningForm.allDay && planningForm.startTime
+        ? String(planningForm.startTime).slice(0, 5)
+        : todoForm.heure || null,
     date_echeance: dateEcheance,
     is_promesse: todoForm.is_promesse,
     quantite_cible:
@@ -827,10 +856,21 @@ async function submitForm() {
 
   try {
     let savedTodo
+    const skipReminderSchedule = Boolean(
+      linkingToPlanning || (addToPlanning.value && !editingItemHasPlanningLink.value),
+    )
     if (editingItemId.value) {
-      savedTodo = await replaceTodoItem(supabase, userId.value, editingItemId.value, payload)
+      savedTodo = await replaceTodoItem(
+        supabase,
+        userId.value,
+        editingItemId.value,
+        payload,
+        { skipReminderSchedule },
+      )
     } else {
-      savedTodo = await createTodoItem(supabase, userId.value, payload)
+      savedTodo = await createTodoItem(supabase, userId.value, payload, {
+        skipReminderSchedule,
+      })
     }
 
     if (addToPlanning.value && !editingItemHasPlanningLink.value) {
@@ -934,7 +974,9 @@ async function confirmDelete(alsoDeleteLinked = false) {
         item.timetable_event_id ||
         (await hasTodoTimetableLink(supabase, userId.value, item.id))
       if (linkedOnPlanning) {
-        await deleteAllTimetableEventsForTodo(supabase, userId.value, item.id)
+        await deleteAllTimetableEventsForTodo(supabase, userId.value, item.id, {
+          clearTodoReminders: true,
+        })
         useTimetableCacheStore().$patch({ isValid: false })
       }
     }
@@ -1442,17 +1484,20 @@ watch(userId, (id) => {
         <input v-model="todoForm.heure" type="time" class="todo-form-input todo-form-input--time" />
       </label>
 
-      <div class="todo-form-field todo-form-reminder">
+      <div v-if="!addToPlanning" class="todo-form-field todo-form-reminder">
         <label class="todo-form-promesse">
           <input
             v-model="todoForm.reminderEnabled"
             type="checkbox"
-            :disabled="!todoForm.heure"
+            :disabled="!todoForm.heure || editingItemHasPlanningLink"
             @change="formError = ''"
           />
           <span>Rappel 🔔</span>
         </label>
-        <p v-if="!todoForm.heure" class="todo-form-hint">
+        <p v-if="editingItemHasPlanningLink" class="todo-form-hint">
+          Rappel géré via l’emploi du temps (évite un doublon de notification).
+        </p>
+        <p v-else-if="!todoForm.heure" class="todo-form-hint">
           Ajoute un horaire pour activer un rappel.
         </p>
         <div v-else-if="todoForm.reminderEnabled" class="todo-form-reminder__offset">
@@ -1487,6 +1532,9 @@ watch(userId, (id) => {
           </p>
         </div>
       </div>
+      <p v-else class="todo-form-hint">
+        Le rappel se configure dans la section planning ci-dessous (un seul rappel pour éviter les doublons).
+      </p>
 
       <label
         class="todo-form-promesse choice-check"

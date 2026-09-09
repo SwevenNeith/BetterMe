@@ -64,6 +64,7 @@ const newEventTimerEnabled = ref(false)
 const newEventTimerHours = ref(0)
 const newEventTimerMinutes = ref(30)
 const addToTodo = ref(false)
+const isSavingEvent = ref(false)
 const todoLinkedForm = reactive(createDefaultTodoLinkedForm())
 const todoPromesseLimits = ref({ perDay: 3, perWeek: 3 })
 const userId = ref(null)
@@ -780,7 +781,7 @@ const getAllDayEventsForDay = (dayIdx) => {
 
 // Add event handler to Supabase (with auto-creating missing categories)
 const handleAddEvent = async () => {
-  if (!newEventTitle.value.trim()) return
+  if (!newEventTitle.value.trim() || isSavingEvent.value) return
 
   // Validate dates
   const startDStr = newEventDay.value
@@ -873,6 +874,7 @@ const handleAddEvent = async () => {
   }
 
   try {
+    isSavingEvent.value = true
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -961,7 +963,9 @@ const handleAddEvent = async () => {
       )
 
       if (isRecurringTodoFrequency(todoPayload.frequence)) {
-        const todo = await createTodoItem(supabase, user.id, todoPayload)
+        const todo = await createTodoItem(supabase, user.id, todoPayload, {
+          skipReminderSchedule: true,
+        })
         const { categories } = await createTimetableEventsForTodo(
           supabase,
           user.id,
@@ -1044,6 +1048,27 @@ const handleAddEvent = async () => {
       await fetchEvents()
     }
 
+    // Lien TODO d’abord : une seule source de rappel (EDT), jamais de rappel TODO en parallèle
+    if (addToTodo.value && !editingEventHasTodoLink.value) {
+      const todoPayload = buildTodoPayloadFromTimetable(
+        {
+          title: newEventTitle.value,
+          detail: newEventDetail.value,
+          dateStart: startDStr,
+          allDay: newEventAllDay.value,
+          startTime: newEventStartTime.value,
+        },
+        todoLinkedForm,
+      )
+      const todo = await createTodoItem(supabase, user.id, todoPayload, {
+        skipReminderSchedule: true,
+      })
+      if (savedEvent?.id && todo?.id) {
+        await linkTodoAndTimetable(supabase, user.id, todo.id, savedEvent.id)
+        savedEvent.todo_item_id = todo.id
+      }
+    }
+
     if (notificationsActives() && reminderActive && savedEvent) {
       const delaiLabel = formatDelaiAvantEvenement(
         newEventReminderHours.value,
@@ -1056,6 +1081,7 @@ const handleAddEvent = async () => {
         minutesAvant: reminderMinutes,
         delaiLabel,
         eventId: savedEvent.id,
+        todoItemId: savedEvent.todo_item_id || null,
       })
     }
 
@@ -1084,24 +1110,6 @@ const handleAddEvent = async () => {
     })
     await fetchEvents({ silent: true })
 
-    if (addToTodo.value && !editingEventHasTodoLink.value) {
-      const todoPayload = buildTodoPayloadFromTimetable(
-        {
-          title: newEventTitle.value,
-          detail: newEventDetail.value,
-          dateStart: startDStr,
-          allDay: newEventAllDay.value,
-          startTime: newEventStartTime.value,
-        },
-        todoLinkedForm,
-      )
-      const todo = await createTodoItem(supabase, user.id, todoPayload)
-      if (savedEvent?.id && todo?.id) {
-        await linkTodoAndTimetable(supabase, user.id, todo.id, savedEvent.id)
-        savedEvent.todo_item_id = todo.id
-      }
-    }
-
     clearEventDraft()
     closeEventModal()
   } catch (err) {
@@ -1118,6 +1126,8 @@ const handleAddEvent = async () => {
           : "Erreur lors de l'ajout de l'activité.",
       )
     }
+  } finally {
+    isSavingEvent.value = false
   }
 }
 
@@ -1148,12 +1158,17 @@ async function confirmEventDelete(alsoDeleteLinked = false) {
 
     if (alsoDeleteLinked && event.todo_item_id) {
       const todoId = event.todo_item_id
-      await deleteAllTimetableEventsForTodo(supabase, user.id, todoId)
+      await deleteAllTimetableEventsForTodo(supabase, user.id, todoId, {
+        clearTodoReminders: true,
+      })
       await deleteTodoItem(supabase, user.id, todoId)
       userEvents.value = userEvents.value.filter((entry) => entry.todo_item_id !== todoId)
     } else if (event.todo_item_id) {
       const todoId = event.todo_item_id
-      await deleteAllTimetableEventsForTodo(supabase, user.id, todoId)
+      // Planning seul : on retire les rappels EDT, on conserve le rappel TODO s’il existe.
+      await deleteAllTimetableEventsForTodo(supabase, user.id, todoId, {
+        clearTodoReminders: false,
+      })
       userEvents.value = userEvents.value.filter((entry) => entry.todo_item_id !== todoId)
       timetableCache.$patch({ isValid: false })
     } else {
@@ -1883,8 +1898,14 @@ const getPositionedEventsForDay = (dayIdx) => {
             :promesse-limit-hint="todoPromesseLimitHint"
           />
 
-          <button type="submit" class="modal-submit-btn">
-            {{ editingEventId ? 'Enregistrer les modifications' : 'Ajouter à mon planning' }}
+          <button type="submit" class="modal-submit-btn" :disabled="isSavingEvent">
+            {{
+              isSavingEvent
+                ? 'Enregistrement…'
+                : editingEventId
+                  ? 'Enregistrer les modifications'
+                  : 'Ajouter à mon planning'
+            }}
           </button>
         </form>
       </div>

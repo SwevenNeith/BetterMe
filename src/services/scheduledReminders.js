@@ -201,6 +201,31 @@ const MENSTRUATION_KIND_PREFIX = 'menstruation_'
 /** Marge après l’heure prévue pour laisser le cron envoyer avant d’afficher l’échec */
 const OVERDUE_GRACE_MS = 90 * 1000
 
+/** Notifications envoyées plus anciennes que ce délai sont purgées. */
+export const SENT_SCHEDULED_NOTIFICATION_RETENTION_DAYS = 30
+
+/**
+ * Supprime les scheduled_notifications déjà envoyées depuis plus de 30 jours.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} [userId] si omis : toutes celles accessibles (RLS)
+ */
+export async function purgeOldSentScheduledNotifications(supabase, userId = null) {
+  const cutoff = new Date(
+    Date.now() - SENT_SCHEDULED_NOTIFICATION_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString()
+
+  let query = supabase
+    .from('scheduled_notifications')
+    .delete()
+    .eq('sent', true)
+    .lt('scheduled_at', cutoff)
+
+  if (userId) query = query.eq('user_id', userId)
+
+  const { error } = await query
+  if (error) throw error
+}
+
 /** Supprime les planifications en attente identiques (évite doublons en base) */
 export async function deletePendingScheduledDuplicate(
   supabase,
@@ -294,17 +319,31 @@ export async function insertPendingNotifications(
   }
 
   const { error } = await supabase.from('scheduled_notifications').insert(unique)
-  if (error) throw error
+  if (!error) return
+
+  // Fallback : insertion une par une si le batch échoue (contrainte / payload)
+  console.warn('insertPendingNotifications batch failed, fallback row-by-row:', error.message)
+  for (const row of unique) {
+    const { error: rowError } = await supabase.from('scheduled_notifications').insert(row)
+    if (rowError) {
+      console.error('insertPendingNotifications row failed:', rowError, row)
+    }
+  }
 }
 
-/** Supprime les rappels ponctuels déjà envoyés (nettoyage) */
+/** Supprime les rappels ponctuels envoyés depuis plus de 30 jours (même rétention globale). */
 export async function purgeSentOneTimeReminders(supabase, userId) {
+  const cutoff = new Date(
+    Date.now() - SENT_SCHEDULED_NOTIFICATION_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString()
+
   const { error } = await supabase
     .from('scheduled_notifications')
     .delete()
     .eq('user_id', userId)
-    .is('event_id', null)
+    .eq('kind', SCHEDULED_KIND.PONCTUEL)
     .eq('sent', true)
+    .lt('scheduled_at', cutoff)
 
   if (error) throw error
 }

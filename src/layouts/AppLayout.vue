@@ -138,12 +138,19 @@ onMounted(() => {
       const [
         { purgeStaleMenstruationNotificationsOnStartup },
         { realignAllDeviceLocalNotifications },
+        { purgeOldSentScheduledNotifications },
       ] = await Promise.all([
         import('../services/menstruationNotificationSync.js'),
         import('../services/notificationRealign.js'),
+        import('../services/scheduledReminders.js'),
       ])
       await realignAllDeviceLocalNotifications(supabase, user.id)
       await purgeStaleMenstruationNotificationsOnStartup(user.id)
+      try {
+        await purgeOldSentScheduledNotifications(supabase, user.id)
+      } catch (purgeErr) {
+        console.error('purgeOldSentScheduledNotifications:', purgeErr)
+      }
 
       if (!showVisibilityOnboarding.value) {
         await maybeShowMorningSnoozePrompt()

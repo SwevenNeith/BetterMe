@@ -7,6 +7,7 @@ import {
   planifierNotificationFinTimer,
   formatDelaiAvantEvenement,
 } from './notifications.js'
+import { isDateWithinRollingReminderWindow } from './rollingReminderWindow.js'
 
 const DEFAULT_EMOJIS = [
   '📌',
@@ -165,6 +166,12 @@ export async function scheduleTimetableEventNotifications(userId, savedEvent, in
   const title = String(input.title ?? '').trim()
   const dateStart = String(input.dateStart ?? '').slice(0, 10)
 
+  // Séries récurrentes : ne planifier que dans la fenêtre glissante [aujourd’hui, +15j]
+  if (input.useRollingReminderWindow && !isDateWithinRollingReminderWindow(dateStart)) {
+    return
+  }
+
+
   if (input.reminderEnabled) {
     const reminderMinutes = getDurationMinutes(input.reminderHours, input.reminderMinutes)
     if (reminderMinutes >= 0) {
@@ -176,6 +183,7 @@ export async function scheduleTimetableEventNotifications(userId, savedEvent, in
         minutesAvant: reminderMinutes,
         delaiLabel,
         eventId: savedEvent.id,
+        todoItemId: input.todoItemId || savedEvent.todo_item_id || null,
       })
     }
   }

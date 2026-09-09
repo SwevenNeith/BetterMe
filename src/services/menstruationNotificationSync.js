@@ -38,8 +38,32 @@ async function resolveCycleModeForUser(userId) {
   return { cycleMode, countPilule, countNaturel }
 }
 
+const FORECAST_KINDS = [
+  'menstruation_spm_estimee',
+  'menstruation_regles_estimees',
+  'menstruation_phase_folliculaire',
+  'menstruation_phase_ovulatoire',
+  'menstruation_phase_luteale',
+]
+
+async function countPendingForecastNotifications(userId) {
+  const { count, error } = await supabase
+    .from('scheduled_notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('sent', false)
+    .in('kind', FORECAST_KINDS)
+
+  if (error) {
+    console.error('countPendingForecastNotifications:', error)
+    return 0
+  }
+  return count ?? 0
+}
+
 /**
- * Au démarrage : supprime uniquement les notifs du mauvais mode (léger, sans replanifier).
+ * Au démarrage : purge le mauvais mode, puis replanifie si aucune prévision n’est en file
+ * (ex. après un DELETE SQL, ou settings NULL qui avaient tout désactivé).
  */
 export async function purgeStaleMenstruationNotificationsOnStartup(userId) {
   if (!userId) return
@@ -61,6 +85,11 @@ export async function purgeStaleMenstruationNotificationsOnStartup(userId) {
       } else {
         await clearPiluleMenstruationNotifications(userId)
         await clearNaturalMenstruationNotifications(userId)
+      }
+
+      const pendingCount = await countPendingForecastNotifications(userId)
+      if (cycleMode && pendingCount === 0) {
+        await syncMenstruationNotificationsForUser(userId, { force: true })
       }
 
       startupPurgeDoneForUser = userId

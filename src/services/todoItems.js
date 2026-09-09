@@ -182,8 +182,9 @@ export async function listTodoItems(supabase, userId) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {object} payload
+ * @param {{ skipReminderSchedule?: boolean }} [options]
  */
-export async function createTodoItem(supabase, userId, payload) {
+export async function createTodoItem(supabase, userId, payload, options = {}) {
   if (!userId) throw new Error('Utilisateur non connecté.')
 
   const row = normalizeTodoPayload(payload)
@@ -244,13 +245,21 @@ export async function createTodoItem(supabase, userId, payload) {
         .single()
       if (retry.error) throw retry.error
       await refreshTodoPromesseReminder(userId)
-      await refreshTodoItemReminder(userId, retry.data)
+      if (!options.skipReminderSchedule) {
+        await refreshTodoItemReminder(userId, retry.data)
+      } else {
+        await clearTodoItemReminder(retry.data?.id)
+      }
       return { ...retry.data, note_id: null }
     }
     throw error
   }
   await refreshTodoPromesseReminder(userId)
-  await refreshTodoItemReminder(userId, data)
+  if (!options.skipReminderSchedule) {
+    await refreshTodoItemReminder(userId, data)
+  } else {
+    await clearTodoItemReminder(data?.id)
+  }
   return data
 }
 
@@ -259,8 +268,9 @@ export async function createTodoItem(supabase, userId, payload) {
  * @param {string} userId
  * @param {string} itemId
  * @param {object} payload
+ * @param {{ skipReminderSchedule?: boolean }} [options]
  */
-export async function replaceTodoItem(supabase, userId, itemId, payload) {
+export async function replaceTodoItem(supabase, userId, itemId, payload, options = {}) {
   if (!userId || !itemId) throw new Error('Élément introuvable.')
 
   const row = normalizeTodoPayload(payload)
@@ -296,13 +306,21 @@ export async function replaceTodoItem(supabase, userId, itemId, payload) {
         .single()
       if (retry.error) throw retry.error
       await refreshTodoPromesseReminder(userId)
-      await refreshTodoItemReminder(userId, retry.data)
+      if (!options.skipReminderSchedule) {
+        await refreshTodoItemReminder(userId, retry.data)
+      } else {
+        await clearTodoItemReminder(retry.data?.id)
+      }
       return { ...retry.data, note_id: null }
     }
     throw error
   }
   await refreshTodoPromesseReminder(userId)
-  await refreshTodoItemReminder(userId, data)
+  if (!options.skipReminderSchedule) {
+    await refreshTodoItemReminder(userId, data)
+  } else {
+    await clearTodoItemReminder(data?.id)
+  }
   return data
 }
 

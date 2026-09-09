@@ -20,6 +20,61 @@ export const MENSTRUATION_KIND = {
 
 const SETTINGS_TABLE = 'settings'
 
+/** Normalise une date cycle (date / timestamptz) → YYYY-MM-DD */
+function toDateKey(value) {
+  if (value == null || value === '') return null
+  const raw = String(value).trim()
+  const key = raw.slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key : null
+}
+
+/**
+ * Fusionne les réglages en ignorant les `null`/`undefined` de la DB
+ * (sinon un NULL écrase le défaut `true` et aucune notif n’est replanifiée).
+ */
+function resolveNotifSettings(settings) {
+  const defaults = createDefaultMenstruationNotifSettings()
+  const raw = settings && typeof settings === 'object' ? settings : {}
+  const resolved = { ...defaults }
+
+  for (const key of Object.keys(defaults)) {
+    const value = raw[key]
+    if (value == null) continue
+    if (typeof defaults[key] === 'boolean') {
+      resolved[key] = Boolean(value)
+    } else {
+      resolved[key] = value
+    }
+  }
+
+  resolved.menstruation_notification_time = String(
+    resolved.menstruation_notification_time || defaults.menstruation_notification_time,
+  ).slice(0, 5)
+  resolved.menstruation_pattern_notification_time = String(
+    resolved.menstruation_pattern_notification_time ||
+      defaults.menstruation_pattern_notification_time,
+  ).slice(0, 5)
+
+  return resolved
+}
+
+function buildFutureNotifRow(userId, { kind, title, body, dateKey, hhmm, nowMs }) {
+  const day = toDateKey(dateKey)
+  if (!day) return null
+  const when = dateTimeLocalToDate(day, hhmm)
+  const ms = when.getTime()
+  if (!Number.isFinite(ms) || ms <= nowMs) return null
+  return {
+    user_id: userId,
+    event_id: null,
+    kind,
+    title,
+    body,
+    scheduled_at: when.toISOString(),
+    sent: false,
+  }
+}
+
 export function createDefaultMenstruationNotifSettings() {
   return {
     menstruation_notify_spm_estimee: true,
@@ -103,7 +158,7 @@ export async function loadMenstruationNotifSettings(userId) {
     .eq('user_id', userId)
     .maybeSingle()
   if (error) throw error
-  return { ...createDefaultMenstruationNotifSettings(), ...(data || {}) }
+  return resolveNotifSettings(data || {})
 }
 
 export async function saveMenstruationNotifSettings(userId, settings) {
@@ -133,7 +188,14 @@ export async function saveMenstruationNotifSettings(userId, settings) {
 async function syncMenstruationKindNotifications(userId, kind, enabled, buildRows) {
   await deletePendingByKinds(supabase, userId, [kind])
   if (!enabled) return
-  await insertPendingNotifications(supabase, userId, buildRows(), { skipPerRowDedupe: true })
+  const rows = buildRows()
+  if (!rows.length) {
+    console.warn(
+      `menstruationNotifications: aucune date future pour ${kind} (cycles/dates manquants ou déjà passés)`,
+    )
+    return
+  }
+  await insertPendingNotifications(supabase, userId, rows, { skipPerRowDedupe: true })
 }
 
 export const PILULE_MENSTRUATION_KINDS = [
@@ -169,18 +231,20 @@ export async function clearNaturalMenstruationNotifications(userId) {
 export async function rescheduleMenstruationNotificationsByMode(
   userId,
   cycleMode,
-  { cyclesPilule = [], cyclesNaturel = [], settings },
+  { cyclesPilule = [], cyclesNaturel = [], settings } = {},
 ) {
+  const resolvedSettings = resolveNotifSettings(settings)
+
   if (cycleMode === 'naturel') {
     // Ne pas effacer REGLES_ESTIMEES ici : replanifié juste après pour le mode naturel
     await clearPiluleSpmNotifications(userId)
-    await rescheduleMenstruationNaturalPhaseNotifications(userId, cyclesNaturel, settings)
+    await rescheduleMenstruationNaturalPhaseNotifications(userId, cyclesNaturel, resolvedSettings)
     return
   }
 
   if (cycleMode === 'pilule') {
     await clearNaturalMenstruationNotifications(userId)
-    await rescheduleMenstruationEstimatedNotifications(userId, cyclesPilule, settings)
+    await rescheduleMenstruationEstimatedNotifications(userId, cyclesPilule, resolvedSettings)
     return
   }
 
@@ -189,27 +253,26 @@ export async function rescheduleMenstruationNotificationsByMode(
 }
 
 export async function rescheduleMenstruationEstimatedNotifications(userId, cycles, settings) {
-  const now = Date.now()
-  const hhmm = String(settings.menstruation_notification_time || '09:00').slice(0, 5)
+  const resolved = resolveNotifSettings(settings)
+  const nowMs = Date.now()
+  const hhmm = String(resolved.menstruation_notification_time || '09:00').slice(0, 5)
 
   await syncMenstruationKindNotifications(
     userId,
     MENSTRUATION_KIND.SPM_ESTIMEE,
-    settings.menstruation_notify_spm_estimee,
+    resolved.menstruation_notify_spm_estimee,
     () => {
       const rows = []
       for (const cycle of cycles || []) {
-        if (!cycle[COL.dateDebutSpmEstimee]) continue
-        const when = dateTimeLocalToDate(cycle[COL.dateDebutSpmEstimee], hhmm)
-        if (when.getTime() <= now) continue
-        rows.push({
-          user_id: userId,
-          event_id: null,
+        const row = buildFutureNotifRow(userId, {
           kind: MENSTRUATION_KIND.SPM_ESTIMEE,
           title: 'BetterMe - SPM',
           body: '⚠️ Tu devrais entrer en période SPM aujourd’hui.',
-          scheduled_at: when.toISOString(),
+          dateKey: cycle[COL.dateDebutSpmEstimee],
+          hhmm,
+          nowMs,
         })
+        if (row) rows.push(row)
       }
       return rows
     },
@@ -218,21 +281,19 @@ export async function rescheduleMenstruationEstimatedNotifications(userId, cycle
   await syncMenstruationKindNotifications(
     userId,
     MENSTRUATION_KIND.REGLES_ESTIMEES,
-    settings.menstruation_notify_regles_estimees,
+    resolved.menstruation_notify_regles_estimees,
     () => {
       const rows = []
       for (const cycle of cycles || []) {
-        if (!cycle[COL.dateDebutReglesEstimee]) continue
-        const when = dateTimeLocalToDate(cycle[COL.dateDebutReglesEstimee], hhmm)
-        if (when.getTime() <= now) continue
-        rows.push({
-          user_id: userId,
-          event_id: null,
+        const row = buildFutureNotifRow(userId, {
           kind: MENSTRUATION_KIND.REGLES_ESTIMEES,
           title: 'BetterMe - Règles',
           body: '🩸 Tes règles devraient commencer aujourd’hui.',
-          scheduled_at: when.toISOString(),
+          dateKey: cycle[COL.dateDebutReglesEstimee],
+          hhmm,
+          nowMs,
         })
+        if (row) rows.push(row)
       }
       return rows
     },
@@ -240,28 +301,27 @@ export async function rescheduleMenstruationEstimatedNotifications(userId, cycle
 }
 
 export async function rescheduleMenstruationNaturalPhaseNotifications(userId, naturalCycles, settings) {
-  const now = Date.now()
-  const hhmm = String(settings.menstruation_notification_time || '09:00').slice(0, 5)
+  const resolved = resolveNotifSettings(settings)
+  const nowMs = Date.now()
+  const hhmm = String(resolved.menstruation_notification_time || '09:00').slice(0, 5)
 
   await syncMenstruationKindNotifications(
     userId,
     MENSTRUATION_KIND.PHASE_FOLLICULAIRE,
-    settings.menstruation_notify_phase_folliculaire,
+    resolved.menstruation_notify_phase_folliculaire,
     () => {
       const rows = []
       for (const cycle of naturalCycles || []) {
         const starts = computeNaturalPhaseStartDates(cycle)
-        if (!starts.folliculaire) continue
-        const when = dateTimeLocalToDate(starts.folliculaire, hhmm)
-        if (when.getTime() <= now) continue
-        rows.push({
-          user_id: userId,
-          event_id: null,
+        const row = buildFutureNotifRow(userId, {
           kind: MENSTRUATION_KIND.PHASE_FOLLICULAIRE,
           title: 'BetterMe - Phase folliculaire',
           body: '🌿 Tu entres en phase folliculaire aujourd’hui.',
-          scheduled_at: when.toISOString(),
+          dateKey: starts.folliculaire,
+          hhmm,
+          nowMs,
         })
+        if (row) rows.push(row)
       }
       return rows
     },
@@ -270,22 +330,20 @@ export async function rescheduleMenstruationNaturalPhaseNotifications(userId, na
   await syncMenstruationKindNotifications(
     userId,
     MENSTRUATION_KIND.PHASE_OVULATOIRE,
-    settings.menstruation_notify_phase_ovulatoire,
+    resolved.menstruation_notify_phase_ovulatoire,
     () => {
       const rows = []
       for (const cycle of naturalCycles || []) {
         const starts = computeNaturalPhaseStartDates(cycle)
-        if (!starts.ovulatoire) continue
-        const when = dateTimeLocalToDate(starts.ovulatoire, hhmm)
-        if (when.getTime() <= now) continue
-        rows.push({
-          user_id: userId,
-          event_id: null,
+        const row = buildFutureNotifRow(userId, {
           kind: MENSTRUATION_KIND.PHASE_OVULATOIRE,
           title: 'BetterMe - Phase ovulatoire',
           body: '🥚 Tu entres en phase ovulatoire aujourd’hui.',
-          scheduled_at: when.toISOString(),
+          dateKey: starts.ovulatoire,
+          hhmm,
+          nowMs,
         })
+        if (row) rows.push(row)
       }
       return rows
     },
@@ -294,22 +352,20 @@ export async function rescheduleMenstruationNaturalPhaseNotifications(userId, na
   await syncMenstruationKindNotifications(
     userId,
     MENSTRUATION_KIND.PHASE_LUTEALE,
-    settings.menstruation_notify_phase_luteale,
+    resolved.menstruation_notify_phase_luteale,
     () => {
       const rows = []
       for (const cycle of naturalCycles || []) {
         const starts = computeNaturalPhaseStartDates(cycle)
-        if (!starts.luteale) continue
-        const when = dateTimeLocalToDate(starts.luteale, hhmm)
-        if (when.getTime() <= now) continue
-        rows.push({
-          user_id: userId,
-          event_id: null,
+        const row = buildFutureNotifRow(userId, {
           kind: MENSTRUATION_KIND.PHASE_LUTEALE,
           title: 'BetterMe - Phase lutéale',
           body: '🌙 Tu entres en phase lutéale aujourd’hui.',
-          scheduled_at: when.toISOString(),
+          dateKey: starts.luteale,
+          hhmm,
+          nowMs,
         })
+        if (row) rows.push(row)
       }
       return rows
     },
@@ -318,7 +374,7 @@ export async function rescheduleMenstruationNaturalPhaseNotifications(userId, na
   await syncMenstruationKindNotifications(
     userId,
     MENSTRUATION_KIND.REGLES_ESTIMEES,
-    settings.menstruation_notify_regles_estimees,
+    resolved.menstruation_notify_regles_estimees,
     () => {
       const rows = []
       const seenDates = new Set()
@@ -326,20 +382,18 @@ export async function rescheduleMenstruationNaturalPhaseNotifications(userId, na
         const dateEstimee =
           cycle[COL_NATUREL.dateDebutReglesEstimee] ||
           cycle[COL_NATUREL.dateProchainesReglesEstimee]
-        if (!dateEstimee) continue
-        const dateKey = String(dateEstimee).slice(0, 10)
-        if (seenDates.has(dateKey)) continue
+        const dateKey = toDateKey(dateEstimee)
+        if (!dateKey || seenDates.has(dateKey)) continue
         seenDates.add(dateKey)
-        const when = dateTimeLocalToDate(dateKey, hhmm)
-        if (when.getTime() <= now) continue
-        rows.push({
-          user_id: userId,
-          event_id: null,
+        const row = buildFutureNotifRow(userId, {
           kind: MENSTRUATION_KIND.REGLES_ESTIMEES,
           title: 'BetterMe - Règles',
           body: '🩸 Tes règles devraient commencer aujourd’hui.',
-          scheduled_at: when.toISOString(),
+          dateKey,
+          hhmm,
+          nowMs,
         })
+        if (row) rows.push(row)
       }
       return rows
     },

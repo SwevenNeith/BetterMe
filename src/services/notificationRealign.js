@@ -2,6 +2,7 @@ import { syncNotificationTimezone } from './scheduledReminders.js'
 import { rescheduleDailyReminderPushes } from './dailyReminders.js'
 import { rescheduleTodoPromesseReminder } from './todoPromesseNotifications.js'
 import { rescheduleAllTodoItemReminders } from './todoItemReminders.js'
+import { maintainRollingTimetableReminders } from './rollingTimetableReminders.js'
 
 /**
  * Réaligne toutes les notifications horaires sur l’heure locale de l’appareil
@@ -18,6 +19,7 @@ export async function realignAllDeviceLocalNotifications(supabase, userId) {
     rescheduleDailyReminderPushes(supabase, userId),
     rescheduleTodoPromesseReminder(userId),
     rescheduleAllTodoItemReminders(userId),
+    maintainRollingTimetableReminders(supabase, userId),
   ])
 
   for (const result of results) {

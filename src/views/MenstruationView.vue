@@ -192,10 +192,15 @@ async function runMenstruationBackgroundSync(gen) {
     }
 
     if (gen !== pageLoadGen) return
+
+    // Toujours recharger les settings (évite NULL DB qui désactivaient toutes les notifs)
+    const notifSettings = await loadMenstruationNotifSettings(userId.value)
+    menstruationNotifSettings.value = notifSettings
+
     await rescheduleMenstruationNotificationsByMode(userId.value, cycleMode.value, {
       cyclesPilule: cycles.value,
       cyclesNaturel: cyclesNaturel.value,
-      settings: menstruationNotifSettings.value,
+      settings: notifSettings,
     })
 
     if (gen === pageLoadGen) {
