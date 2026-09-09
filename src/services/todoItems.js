@@ -1,5 +1,14 @@
 import { TODO_FREQUENCY } from '../constants/todoOptions.js'
-import { assertPromesseLimits, getTodoOccurrenceKeyDate, getWeekStartISO, normalizeDateISO } from '../utils/todoCalendar.js'
+import {
+  addDaysISO,
+  assertPromesseLimits,
+  getIsoWeekdayFromISO,
+  getTodoOccurrenceKeyDate,
+  getWeekStartISO,
+  hasTodoQuantiteCible,
+  isTodoCompletedOnDate,
+  normalizeDateISO,
+} from '../utils/todoCalendar.js'
 import { loadTodoPromesseLimits } from './todoPromesseSettings.js'
 
 const TABLE = 'todo_items'
@@ -117,6 +126,7 @@ function normalizeTodoPayload(payload) {
     quantite_cible,
     reminder,
     reminder_time,
+    ...(payload.is_done !== undefined ? { is_done: Boolean(payload.is_done) } : {}),
   }
 }
 
@@ -365,7 +375,9 @@ export async function setTodoCompletionForDate(supabase, userId, item, dateISO, 
   if (!userId || !item?.id) return
 
   const date = getTodoOccurrenceKeyDate(item, dateISO)
-  if (!date) return
+  if (!date) {
+    throw new Error('Date d’occurrence invalide pour cette tâche.')
+  }
 
   if (item.quantite_cible != null && Number(item.quantite_cible) >= 1) {
     const cible = Number(item.quantite_cible)
@@ -373,11 +385,8 @@ export async function setTodoCompletionForDate(supabase, userId, item, dateISO, 
     return
   }
 
-  if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
-    await updateTodoItem(supabase, userId, item.id, { is_done: done })
-    await refreshTodoItemReminder(userId, { ...item, is_done: done })
-    return
-  }
+  // is_done d’abord (source de vérité affichage / table), puis completions
+  await updateTodoItem(supabase, userId, item.id, { is_done: done })
 
   if (done) {
     const { error } = await supabase.from(COMPLETIONS_TABLE).upsert(
@@ -389,20 +398,18 @@ export async function setTodoCompletionForDate(supabase, userId, item, dateISO, 
       },
       { onConflict: 'todo_item_id,completion_date' },
     )
-    if (error) throw error
-    await refreshTodoItemReminder(userId, item)
-    return
+    if (error && !String(error.message || '').includes('todo_item_completions')) throw error
+  } else {
+    const { error } = await supabase
+      .from(COMPLETIONS_TABLE)
+      .delete()
+      .eq('user_id', userId)
+      .eq('todo_item_id', item.id)
+      .eq('completion_date', date)
+    if (error && !String(error.message || '').includes('todo_item_completions')) throw error
   }
 
-  const { error } = await supabase
-    .from(COMPLETIONS_TABLE)
-    .delete()
-    .eq('user_id', userId)
-    .eq('todo_item_id', item.id)
-    .eq('completion_date', date)
-
-  if (error) throw error
-  await refreshTodoItemReminder(userId, item)
+  await refreshTodoItemReminder(userId, { ...item, is_done: done })
 }
 
 /**
@@ -413,14 +420,15 @@ export async function setTodoQuantiteForDate(supabase, userId, item, dateISO, qu
 
   const date = getTodoOccurrenceKeyDate(item, dateISO)
   const cible = Number(item.quantite_cible)
-  if (!date || !Number.isInteger(cible) || cible < 1) return
+  if (!date || !Number.isInteger(cible) || cible < 1) {
+    throw new Error('Progression quantitative invalide pour cette tâche.')
+  }
 
   const qty = Math.max(0, Math.round(Number(quantiteActuelle) || 0))
+  // Atteint ou dépassé → is_done true ; en dessous → false
   const done = qty >= cible
 
-  if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
-    await updateTodoItem(supabase, userId, item.id, { is_done: done })
-  }
+  await updateTodoItem(supabase, userId, item.id, { is_done: done })
 
   if (qty === 0) {
     const { error } = await supabase
@@ -430,27 +438,114 @@ export async function setTodoQuantiteForDate(supabase, userId, item, dateISO, qu
       .eq('todo_item_id', item.id)
       .eq('completion_date', date)
     if (error) throw error
-    await refreshTodoItemReminder(userId, {
-      ...item,
-      is_done: item.frequence === TODO_FREQUENCY.ONE_OFF ? false : item.is_done,
-    })
-    return
+  } else {
+    const { error } = await supabase.from(COMPLETIONS_TABLE).upsert(
+      {
+        user_id: userId,
+        todo_item_id: item.id,
+        completion_date: date,
+        quantite_actuelle: qty,
+      },
+      { onConflict: 'todo_item_id,completion_date' },
+    )
+    if (error) throw error
   }
 
-  const { error } = await supabase.from(COMPLETIONS_TABLE).upsert(
-    {
-      user_id: userId,
-      todo_item_id: item.id,
-      completion_date: date,
-      quantite_actuelle: qty,
-    },
-    { onConflict: 'todo_item_id,completion_date' },
+  await refreshTodoItemReminder(userId, { ...item, is_done: done })
+  return done
+}
+
+/**
+ * Date de référence pour savoir si is_done doit être true (occurrence concernée).
+ * @param {object} item
+ * @param {string} referenceDateISO
+ */
+export function getTodoIsDoneCheckDate(item, referenceDateISO) {
+  const ref = normalizeDateISO(referenceDateISO)
+  if (!ref) return null
+  if (
+    item.frequence === TODO_FREQUENCY.ONE_OFF ||
+    item.frequence === TODO_FREQUENCY.WEEK_GOAL
+  ) {
+    return normalizeDateISO(item.date_echeance) || ref
+  }
+  if (item.frequence === TODO_FREQUENCY.WEEKLY) {
+    const weekday = Number(item.jour_semaine)
+    if (!Number.isInteger(weekday) || weekday < 1 || weekday > 7) return ref
+    const currentWd = getIsoWeekdayFromISO(ref)
+    const delta = currentWd >= weekday ? currentWd - weekday : currentWd - weekday + 7
+    return addDaysISO(ref, -delta)
+  }
+  return ref
+}
+
+/**
+ * Aligne is_done sur l’état coché réel (completions) pour tous les types de TODO.
+ * Quantité : is_done = quantite_actuelle >= quantite_cible (atteint ou dépassé).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {object[]} items
+ * @param {Map<string, { quantite_actuelle?: number, binaryDone?: boolean }>} progressMap
+ * @param {string} referenceDateISO date « courante » (aujourd’hui / jour affiché)
+ */
+export async function syncTodoIsDoneFlags(
+  supabase,
+  userId,
+  items,
+  progressMap,
+  referenceDateISO,
+) {
+  if (!userId || !items?.length) return
+
+  const ref = normalizeDateISO(referenceDateISO)
+  if (!ref) return
+
+  for (const item of items) {
+    if (!item?.id) continue
+    const checkDate = getTodoIsDoneCheckDate(item, ref)
+    if (!checkDate) continue
+
+    const keyDate = getTodoOccurrenceKeyDate(item, checkDate)
+    const mapKey = keyDate ? `${item.id}:${keyDate}` : null
+    const entry = mapKey ? progressMap?.get(mapKey) : null
+
+    let done = isTodoCompletedOnDate(item, checkDate, progressMap)
+    if (hasTodoQuantiteCible(item) && entry) {
+      const qty = Number(entry.quantite_actuelle) || 0
+      done = qty >= Number(item.quantite_cible)
+    }
+
+    // Sans ligne de completion chargée : ne pas rétrograder (sauf quotidien = nouveau jour)
+    if (
+      !done &&
+      Boolean(item.is_done) &&
+      !entry &&
+      item.frequence !== TODO_FREQUENCY.DAILY
+    ) {
+      continue
+    }
+
+    if (Boolean(item.is_done) === done) continue
+
+    try {
+      await updateTodoItem(supabase, userId, item.id, { is_done: done })
+      item.is_done = done
+    } catch (err) {
+      console.error('syncTodoIsDoneFlags:', item.id, err)
+    }
+  }
+}
+
+/** @deprecated Utiliser syncTodoIsDoneFlags */
+export async function healOneOffDoneFlags(supabase, userId, items, progressMap) {
+  return syncTodoIsDoneFlags(
+    supabase,
+    userId,
+    items,
+    progressMap,
+    normalizeDateISO(items.find((i) => i.frequence === TODO_FREQUENCY.ONE_OFF)?.date_echeance) ||
+      new Date().toISOString().slice(0, 10),
   )
-  if (error) throw error
-  await refreshTodoItemReminder(userId, {
-    ...item,
-    is_done: item.frequence === TODO_FREQUENCY.ONE_OFF ? done : item.is_done,
-  })
 }
 
 /**

@@ -20,6 +20,7 @@ import {
   listTodoCompletionsInRange,
   setTodoCompletionForDate,
   setTodoQuantiteForDate,
+  syncTodoIsDoneFlags,
 } from '../services/todoItems.js'
 import { loadTodoPromesseLimits } from '../services/todoPromesseSettings.js'
 import {
@@ -616,13 +617,35 @@ async function loadData() {
       console.error('note todo rollover:', rolloverErr)
     }
     const { start, end } = getTodoCompletionsFetchRange(anchorDate.value, viewMode.value)
-    const [itemsData, completionsData, limits] = await Promise.all([
+    const todayISO = getLocalTodayISO()
+    const [itemsData, limits] = await Promise.all([
       listTodoItems(supabase, userId.value),
-      listTodoCompletionsInRange(supabase, userId.value, start, end),
       loadTodoPromesseLimits(userId.value),
     ])
+    // Élargir la fenêtre pour inclure les échéances (sync is_done / quantités atteintes)
+    let fetchStart = start < todayISO ? start : todayISO
+    let fetchEnd = end > todayISO ? end : todayISO
+    for (const row of itemsData ?? []) {
+      const due = normalizeDateISO(row.date_echeance)
+      if (!due) continue
+      if (due < fetchStart) fetchStart = due
+      if (due > fetchEnd) fetchEnd = due
+    }
+    const completionsData = await listTodoCompletionsInRange(
+      supabase,
+      userId.value,
+      fetchStart,
+      fetchEnd,
+    )
     items.value = await sanitizeLoadedTodoPlanningLinks(itemsData)
     completionProgress.value = buildCompletionProgressMap(completionsData)
+    await syncTodoIsDoneFlags(
+      supabase,
+      userId.value,
+      items.value,
+      completionProgress.value,
+      todayISO,
+    )
     promesseLimits.value = limits
   } catch (err) {
     console.error(err)
@@ -937,14 +960,22 @@ function confirmDeleteWithLinked() {
   void confirmDelete(true)
 }
 
+function syncSourceItemDone(itemId, done) {
+  const index = items.value.findIndex((row) => row.id === itemId)
+  if (index < 0) return
+  items.value[index] = {
+    ...items.value[index],
+    is_done: done,
+  }
+}
+
 function applyOccurrenceProgress(item, quantiteActuelle) {
   const cible = Number(item.quantite_cible)
   item.occurrenceQuantiteActuelle = quantiteActuelle
   item.occurrenceQuantiteCible = cible
   item.occurrenceDone = quantiteActuelle >= cible
-  if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
-    item.is_done = item.occurrenceDone
-  }
+  item.is_done = item.occurrenceDone
+  syncSourceItemDone(item.id, item.occurrenceDone)
 }
 
 async function adjustItemQuantite(item, delta) {
@@ -1004,9 +1035,8 @@ async function toggleItem(item) {
   }
   completionProgress.value = new Map(completionProgress.value)
 
-  if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
-    item.is_done = next
-  }
+  item.is_done = next
+  syncSourceItemDone(item.id, next)
   item.occurrenceDone = next
 
   try {
@@ -1027,9 +1057,8 @@ async function toggleItem(item) {
     }
     completionProgress.value = new Map(completionProgress.value)
     item.occurrenceDone = !next
-    if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
-      item.is_done = !next
-    }
+    item.is_done = !next
+    syncSourceItemDone(item.id, !next)
     loadError.value = err.message || 'Impossible de mettre à jour l’élément.'
   }
 }

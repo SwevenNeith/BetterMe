@@ -228,7 +228,10 @@ export function isTodoCompletedOnDate(item, dateISO, progressMap) {
 
   if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
     if (target !== normalizeDateISO(item.date_echeance)) return false
-    return Boolean(item.is_done)
+    if (Boolean(item.is_done)) return true
+    // Repli : une ligne dans todo_item_completions (ex. sync partielle / ancien bug)
+    const key = completionMapKey(item.id, target)
+    return Boolean(key && progressMap?.get(key)?.binaryDone)
   }
 
   const key = completionMapKey(item.id, getTodoOccurrenceKeyDate(item, target))

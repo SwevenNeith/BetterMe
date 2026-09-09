@@ -4,6 +4,7 @@ import {
   assertPromesseLimits,
   buildCompletionProgressMap,
   getOccurrenceQuantiteActuelle,
+  getTodoOccurrenceKeyDate,
   getWeekStartISO,
   hasTodoQuantiteCible,
   isTodoCompletedOnDate,
@@ -11,7 +12,12 @@ import {
 } from '../utils/todoCalendar.js'
 import { getLocalTodayISO } from './scheduledReminders.js'
 import { ensureUserSettings } from './menstruationNotifications.js'
-import { listTodoCompletionsInRange, listTodoItems, replaceTodoItem } from './todoItems.js'
+import {
+  listTodoCompletionsInRange,
+  listTodoItems,
+  replaceTodoItem,
+  syncTodoIsDoneFlags,
+} from './todoItems.js'
 import { loadTodoPromesseLimits } from './todoPromesseSettings.js'
 
 const SETTINGS_TABLE = 'settings'
@@ -161,6 +167,8 @@ export function buildSnoozeReplacePayload(item, dateEcheance, overrides = {}) {
     jour_semaine: item.jour_semaine,
     heure: item.heure,
     is_promesse: Boolean(item.is_promesse),
+    // Nouvelle occurrence = pas encore faite
+    is_done: false,
     quantite_cible:
       overrides.quantite_cible !== undefined ? overrides.quantite_cible : item.quantite_cible,
     reminder: Boolean(item.reminder),
@@ -236,6 +244,24 @@ export async function snoozeTodoItem(
   const payload = buildSnoozeReplacePayload(item, target, overrides)
   assertPromesseLimits(items, payload, item.id, limits)
 
+  const source =
+    normalizeDateISO(options.sourceDateISO) ||
+    normalizeDateISO(item.date_echeance) ||
+    getLocalTodayISO()
+  const sourceKey = getTodoOccurrenceKeyDate(item, source) || source
+
+  // Efface l’ancienne occurrence pour ne pas polluer is_done / le snooze
+  try {
+    await supabase
+      .from('todo_item_completions')
+      .delete()
+      .eq('user_id', userId)
+      .eq('todo_item_id', item.id)
+      .eq('completion_date', sourceKey)
+  } catch (err) {
+    console.error('snooze clear source completion:', err)
+  }
+
   return await replaceTodoItem(supabase, userId, item.id, payload)
 }
 
@@ -258,9 +284,24 @@ export async function listMorningSnoozeCandidates(
   const dismissedSet = new Set(dismissed.map(dismissedKey))
 
   const items = await listTodoItems(supabase, userId)
-  const rangeStart = addDaysISO(currentWeekStart, -28)
+
+  // Inclure toutes les dates sources des candidats potentiels (pas seulement 28 jours)
+  let rangeStart = addDaysISO(currentWeekStart, -28)
+  for (const item of items) {
+    const due = normalizeDateISO(item.date_echeance)
+    if (!due) continue
+    if (
+      (item.frequence === TODO_FREQUENCY.WEEK_GOAL || item.frequence === TODO_FREQUENCY.ONE_OFF) &&
+      due < rangeStart
+    ) {
+      rangeStart = due
+    }
+  }
+
   const completions = await listTodoCompletionsInRange(supabase, userId, rangeStart, today)
   const progressMap = buildCompletionProgressMap(completions)
+
+  await syncTodoIsDoneFlags(supabase, userId, items, progressMap, today)
 
   /** @type {object[]} */
   const candidates = []

@@ -11,7 +11,7 @@ import {
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
 } from '../services/pageVisibility.js'
-import { listTodoCompletionsInRange, listTodoItems, setTodoCompletionForDate, setTodoQuantiteForDate } from '../services/todoItems.js'
+import { listTodoCompletionsInRange, listTodoItems, setTodoCompletionForDate, setTodoQuantiteForDate, syncTodoIsDoneFlags } from '../services/todoItems.js'
 import {
   buildCompletionProgressMap,
   getTodosForDate,
@@ -95,6 +95,13 @@ async function loadTodos() {
     ])
     items.value = todoRows
     completionProgress.value = buildCompletionProgressMap(completions)
+    await syncTodoIsDoneFlags(
+      supabase,
+      props.userId,
+      items.value,
+      completionProgress.value,
+      dateISO,
+    )
   } catch (err) {
     console.error('dashboard todos:', err)
     loadError.value = err.message || 'Impossible de charger les tâches du jour.'
@@ -128,8 +135,10 @@ async function adjustItemQuantite(item, delta) {
   completionProgress.value = new Map(completionProgress.value)
   item.occurrenceQuantiteActuelle = next
   item.occurrenceDone = next >= cible
-  if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
-    item.is_done = item.occurrenceDone
+  item.is_done = item.occurrenceDone
+  const qtyIndex = items.value.findIndex((row) => row.id === item.id)
+  if (qtyIndex >= 0) {
+    items.value[qtyIndex] = { ...items.value[qtyIndex], is_done: item.occurrenceDone }
   }
 
   try {
@@ -141,8 +150,9 @@ async function adjustItemQuantite(item, delta) {
     completionProgress.value = new Map(completionProgress.value)
     item.occurrenceQuantiteActuelle = current
     item.occurrenceDone = current >= cible
-    if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
-      item.is_done = item.occurrenceDone
+    item.is_done = item.occurrenceDone
+    if (qtyIndex >= 0) {
+      items.value[qtyIndex] = { ...items.value[qtyIndex], is_done: item.occurrenceDone }
     }
     loadError.value = err.message || 'Impossible de mettre à jour la tâche.'
   }
@@ -165,10 +175,12 @@ async function toggleItem(item) {
   else completionProgress.value.delete(key)
   completionProgress.value = new Map(completionProgress.value)
 
-  if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
-    item.is_done = next
-  }
+  item.is_done = next
   item.occurrenceDone = next
+  const index = items.value.findIndex((row) => row.id === item.id)
+  if (index >= 0) {
+    items.value[index] = { ...items.value[index], is_done: next }
+  }
 
   try {
     await setTodoCompletionForDate(supabase, props.userId, item, dateISO, next)
@@ -178,8 +190,9 @@ async function toggleItem(item) {
     else completionProgress.value.set(key, { quantite_actuelle: 1, binaryDone: true })
     completionProgress.value = new Map(completionProgress.value)
     item.occurrenceDone = !next
-    if (item.frequence === TODO_FREQUENCY.ONE_OFF) {
-      item.is_done = !next
+    item.is_done = !next
+    if (index >= 0) {
+      items.value[index] = { ...items.value[index], is_done: !next }
     }
     loadError.value = err.message || 'Impossible de mettre à jour la tâche.'
   }
