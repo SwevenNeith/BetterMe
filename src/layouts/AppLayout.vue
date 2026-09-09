@@ -18,7 +18,10 @@ import {
   markMorningSnoozePromptShown,
   prepareMorningSnoozePrompt,
 } from '../services/todoSnooze.js'
-import { getLocalTodayISO } from '../services/scheduledReminders.js'
+import {
+  getLocalTodayISO,
+  purgeOldSentScheduledNotifications,
+} from '../services/scheduledReminders.js'
 
 /** Secours si pg_cron Supabase indisponible — le verrou serveur évite le double envoi avec pg_cron */
 const CRON_INTERVAL_MS = 60_000
@@ -138,11 +141,9 @@ onMounted(() => {
       const [
         { purgeStaleMenstruationNotificationsOnStartup },
         { realignAllDeviceLocalNotifications },
-        { purgeOldSentScheduledNotifications },
       ] = await Promise.all([
         import('../services/menstruationNotificationSync.js'),
         import('../services/notificationRealign.js'),
-        import('../services/scheduledReminders.js'),
       ])
       await realignAllDeviceLocalNotifications(supabase, user.id)
       await purgeStaleMenstruationNotificationsOnStartup(user.id)
