@@ -4,12 +4,61 @@ import {
   normalizeQuantiteCible,
   normalizeResetPeriode,
 } from '../constants/projectProgress.js'
+import { normalizeProjectPauseFields } from '../constants/projectPause.js'
 
 const PROJECTS_TABLE = 'projects'
 const STEPS_TABLE = 'project_steps'
 const SUBSTEPS_TABLE = 'project_substeps'
 const DEFAULT_PROJECT_COLOR = '#ad81be'
 const PROJECTS_CUSTOM_ORDER_KEY = 'betterme:projects-custom-order'
+
+const STEP_SELECT_WITH_PAUSE =
+  'id, project_id, title, description, step_order, is_done, quantite_cible, reset_periode, pause_from, pause_to, pause_reason, created_at'
+const STEP_SELECT_WITH_PROGRESS =
+  'id, project_id, title, description, step_order, is_done, quantite_cible, reset_periode, created_at'
+const SUBSTEP_SELECT_WITH_PAUSE =
+  'id, step_id, title, description, substep_order, is_done, quantite_cible, reset_periode, pause_from, pause_to, pause_reason, created_at'
+const SUBSTEP_SELECT_WITH_PROGRESS =
+  'id, step_id, title, description, substep_order, is_done, quantite_cible, reset_periode, created_at'
+
+function isMissingPauseColumnError(error) {
+  const msg = String(error?.message || '')
+  return (
+    msg.includes('pause_from') ||
+    msg.includes('pause_to') ||
+    msg.includes('pause_reason')
+  )
+}
+
+function mapStepRow(s) {
+  const pause = normalizeProjectPauseFields(s)
+  return {
+    id: s.id,
+    project_id: s.project_id,
+    title: s.title,
+    description: s.description ?? '',
+    step_order: s.step_order ?? 1,
+    is_done: Boolean(s.is_done),
+    quantite_cible: normalizeQuantiteCible(s.quantite_cible),
+    reset_periode: normalizeResetPeriode(s.reset_periode),
+    ...pause,
+    substeps: [],
+  }
+}
+
+function mapSubstepRow(sub) {
+  const pause = normalizeProjectPauseFields(sub)
+  return {
+    id: sub.id,
+    title: sub.title,
+    description: sub.description ?? '',
+    substep_order: sub.substep_order ?? 1,
+    is_done: Boolean(sub.is_done),
+    quantite_cible: normalizeQuantiteCible(sub.quantite_cible),
+    reset_periode: normalizeResetPeriode(sub.reset_periode),
+    ...pause,
+  }
+}
 
 export function compareProjectsByTitle(a, b) {
   return a.title.localeCompare(b.title, 'fr', { sensitivity: 'base' })
@@ -114,10 +163,19 @@ export async function fetchProjectsTree(supabase, userId) {
 
   ;({ data: stepRows, error: stepsError } = await supabase
     .from(STEPS_TABLE)
-    .select('id, project_id, title, description, step_order, is_done, quantite_cible, reset_periode, created_at')
+    .select(STEP_SELECT_WITH_PAUSE)
     .eq('user_id', userId)
     .in('project_id', projectIds)
     .order('step_order', { ascending: true }))
+
+  if (isMissingPauseColumnError(stepsError)) {
+    ;({ data: stepRows, error: stepsError } = await supabase
+      .from(STEPS_TABLE)
+      .select(STEP_SELECT_WITH_PROGRESS)
+      .eq('user_id', userId)
+      .in('project_id', projectIds)
+      .order('step_order', { ascending: true }))
+  }
 
   if (
     stepsError?.message?.includes('quantite_cible')
@@ -143,17 +201,7 @@ export async function fetchProjectsTree(supabase, userId) {
   if (stepsError) throw stepsError
 
   const stepsByProject = new Map(projectIds.map((id) => [id, []]))
-  const allSteps = (stepRows ?? []).map((s) => ({
-    id: s.id,
-    project_id: s.project_id,
-    title: s.title,
-    description: s.description ?? '',
-    step_order: s.step_order ?? 1,
-    is_done: Boolean(s.is_done),
-    quantite_cible: normalizeQuantiteCible(s.quantite_cible),
-    reset_periode: normalizeResetPeriode(s.reset_periode),
-    substeps: [],
-  }))
+  const allSteps = (stepRows ?? []).map((s) => mapStepRow(s))
 
   for (const step of allSteps) {
     stepsByProject.get(step.project_id)?.push(step)
@@ -166,10 +214,19 @@ export async function fetchProjectsTree(supabase, userId) {
 
     ;({ data: subRows, error: subsError } = await supabase
       .from(SUBSTEPS_TABLE)
-      .select('id, step_id, title, description, substep_order, is_done, quantite_cible, reset_periode, created_at')
+      .select(SUBSTEP_SELECT_WITH_PAUSE)
       .eq('user_id', userId)
       .in('step_id', stepIds)
       .order('substep_order', { ascending: true }))
+
+    if (isMissingPauseColumnError(subsError)) {
+      ;({ data: subRows, error: subsError } = await supabase
+        .from(SUBSTEPS_TABLE)
+        .select(SUBSTEP_SELECT_WITH_PROGRESS)
+        .eq('user_id', userId)
+        .in('step_id', stepIds)
+        .order('substep_order', { ascending: true }))
+    }
 
     if (
       subsError?.message?.includes('quantite_cible')
@@ -196,15 +253,7 @@ export async function fetchProjectsTree(supabase, userId) {
 
     const subsByStep = new Map(stepIds.map((id) => [id, []]))
     for (const sub of subRows ?? []) {
-      subsByStep.get(sub.step_id)?.push({
-        id: sub.id,
-        title: sub.title,
-        description: sub.description ?? '',
-        substep_order: sub.substep_order ?? 1,
-        is_done: Boolean(sub.is_done),
-        quantite_cible: normalizeQuantiteCible(sub.quantite_cible),
-        reset_periode: normalizeResetPeriode(sub.reset_periode),
-      })
+      subsByStep.get(sub.step_id)?.push(mapSubstepRow(sub))
     }
 
     for (const step of allSteps) {
@@ -410,6 +459,27 @@ export async function updateStepProgressSettings(
   if (error) throw error
 }
 
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} stepId
+ * @param {{ pause_from: string|null, pause_to: string|null, pause_reason: string|null }} pause
+ */
+export async function updateStepPause(supabase, userId, stepId, pause) {
+  const payload = normalizeProjectPauseFields(pause)
+  const { error } = await supabase
+    .from(STEPS_TABLE)
+    .update(payload)
+    .eq('id', stepId)
+    .eq('user_id', userId)
+  if (isMissingPauseColumnError(error)) {
+    throw new Error(
+      'Colonnes de pause absentes. Exécute scripts/migrate-project-steps-pause.sql dans Supabase.',
+    )
+  }
+  if (error) throw error
+}
+
 export async function updateStepDone(supabase, userId, stepId, isDone) {
   const payload = {
     is_done: isDone,
@@ -514,6 +584,27 @@ export async function updateSubstepProgressSettings(
     .eq('id', substepId)
     .eq('user_id', userId)
   if (error?.message?.includes('quantite_cible') || error?.message?.includes('reset_periode')) return
+  if (error) throw error
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} substepId
+ * @param {{ pause_from: string|null, pause_to: string|null, pause_reason: string|null }} pause
+ */
+export async function updateSubstepPause(supabase, userId, substepId, pause) {
+  const payload = normalizeProjectPauseFields(pause)
+  const { error } = await supabase
+    .from(SUBSTEPS_TABLE)
+    .update(payload)
+    .eq('id', substepId)
+    .eq('user_id', userId)
+  if (isMissingPauseColumnError(error)) {
+    throw new Error(
+      'Colonnes de pause absentes. Exécute scripts/migrate-project-steps-pause.sql dans Supabase.',
+    )
+  }
   if (error) throw error
 }
 

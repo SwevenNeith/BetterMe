@@ -43,6 +43,11 @@ const props = defineProps({
     type: Number,
     default: null,
   },
+  /** Étape en pause : interactions de progression désactivées. */
+  paused: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['increment', 'decrement', 'toggle'])
@@ -485,18 +490,29 @@ function goToHistoryPage(page) {
   <div
     v-if="!usesQuantiteTracking"
     class="project-progress project-progress--checkbox"
-    :class="{ 'project-progress--compact': compact, 'project-progress--done': item.is_done }"
+    :class="{
+      'project-progress--compact': compact,
+      'project-progress--done': item.is_done,
+      'project-progress--paused': paused,
+    }"
     :style="accentStyle"
   >
     <label
       class="project-progress__check"
       :class="{ 'project-progress__check--small': compact }"
-      :title="item.is_done ? 'Marquer comme à faire' : 'Marquer comme terminée'"
+      :title="
+        paused
+          ? 'Étape en pause'
+          : item.is_done
+            ? 'Marquer comme à faire'
+            : 'Marquer comme terminée'
+      "
     >
       <input
         type="checkbox"
         class="project-progress__check-input"
         :checked="item.is_done"
+        :disabled="paused"
         @change.stop="emit('toggle')"
       />
       <span class="project-progress__check-box" aria-hidden="true" />
@@ -506,7 +522,11 @@ function goToHistoryPage(page) {
   <div
     v-else
     class="project-progress"
-    :class="{ 'project-progress--compact': compact, 'project-progress--done': item.is_done }"
+    :class="{
+      'project-progress--compact': compact,
+      'project-progress--done': item.is_done,
+      'project-progress--paused': paused,
+    }"
     :style="accentStyle"
   >
     <div
@@ -519,7 +539,7 @@ function goToHistoryPage(page) {
         class="project-progress__quantite-btn"
         title="Diminuer"
         aria-label="Diminuer la quantité"
-        :disabled="currentCount <= 0"
+        :disabled="paused || currentCount <= 0"
         @click.stop="emit('decrement')"
       >
         −
@@ -530,6 +550,7 @@ function goToHistoryPage(page) {
         class="project-progress__quantite-btn"
         title="Augmenter"
         aria-label="Augmenter la quantité"
+        :disabled="paused"
         @click.stop="emit('increment')"
       >
         +
@@ -846,6 +867,19 @@ function goToHistoryPage(page) {
 .project-progress--checkbox {
   align-items: center;
   align-self: auto;
+}
+
+.project-progress--paused {
+  opacity: 0.55;
+}
+
+.project-progress__check-input:disabled {
+  cursor: not-allowed;
+}
+
+.project-progress__check-input:disabled + .project-progress__check-box {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .project-progress__check {

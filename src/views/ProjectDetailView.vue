@@ -4,6 +4,8 @@ import { useRoute } from 'vue-router'
 import ColorPickerField from '../components/ColorPickerField.vue'
 import EmojiPickerField from '../components/EmojiPickerField.vue'
 import ProjectItemProgress from '../components/ProjectItemProgress.vue'
+import ProjectPauseEditFields from '../components/ProjectPauseEditFields.vue'
+import ProjectPauseIconButton from '../components/ProjectPauseIconButton.vue'
 import {
   DEFAULT_QUANTITE_CIBLE,
   DEFAULT_RESET_PERIODE,
@@ -12,10 +14,20 @@ import {
   normalizeResetPeriode,
   PROJECT_RESET_PERIODE_OPTIONS,
 } from '../constants/projectProgress.js'
+import {
+  buildPausePayloadFromForm,
+  formatProjectPauseBadge,
+  isProjectItemPaused,
+  normalizeProjectPauseFields,
+} from '../constants/projectPause.js'
 import { supabase } from '../lib/supabase.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import { listHabits } from '../services/habits.js'
 import { listHabitLogsForRange } from '../services/habitLogs.js'
+import {
+  loadProjectPauseReasons,
+  rememberProjectPauseReason,
+} from '../services/projectPauseReasons.js'
 import {
   addProgressLog,
   fetchProgressLogsForProject,
@@ -37,10 +49,12 @@ import {
   updateProjectTitle,
   updateStepDescription,
   updateStepDone,
+  updateStepPause,
   updateStepProgressSettings,
   updateStepTitle,
   updateSubstepDescription,
   updateSubstepDone,
+  updateSubstepPause,
   updateSubstepProgressSettings,
   updateSubstepTitle,
 } from '../services/projects.js'
@@ -81,6 +95,7 @@ const substepForm = reactive({
 const progressLogsByItemId = ref({})
 
 const editPanel = ref(null)
+const pausePanel = ref(null)
 const habitPickerOpen = ref(false)
 const activeHabits = ref([])
 const linkedHabit = ref(null)
@@ -88,6 +103,7 @@ const habitLogsByDate = ref({})
 
 const draggingStepKey = ref(null)
 const draggingSubstepKey = ref(null)
+const pauseReasons = ref([])
 
 const projectId = computed(() => route.params.projectId)
 
@@ -200,6 +216,80 @@ function hasDescription(text) {
   return String(text ?? '').trim().length > 0
 }
 
+function pauseBadge(item) {
+  return formatProjectPauseBadge(item)
+}
+
+function itemIsPaused(item) {
+  return isProjectItemPaused(item)
+}
+
+function applyPauseToLocalItem(item, pause) {
+  item.pause_from = pause.pause_from
+  item.pause_to = pause.pause_to
+  item.pause_reason = pause.pause_reason
+}
+
+async function persistPauseForItem(kind, id, form) {
+  const pause = buildPausePayloadFromForm(form)
+  if (kind === 'step') {
+    await updateStepPause(supabase, userId.value, id, pause)
+  } else if (kind === 'substep') {
+    await updateSubstepPause(supabase, userId.value, id, pause)
+  }
+  if (pause.pause_reason) {
+    pauseReasons.value = await rememberProjectPauseReason(
+      supabase,
+      userId.value,
+      pause.pause_reason,
+    )
+  }
+  return pause
+}
+
+function findPauseTarget(kind, id) {
+  if (!project.value) return null
+  if (kind === 'step') return project.value.steps.find((s) => s.id === id) ?? null
+  if (kind === 'substep') {
+    return project.value.steps.flatMap((s) => s.substeps).find((ss) => ss.id === id) ?? null
+  }
+  return null
+}
+
+async function openPause(kind, item) {
+  closeEdit()
+  const pause = normalizeProjectPauseFields(item)
+  const alreadyPaused = Boolean(pause.pause_from && pause.pause_to)
+  pausePanel.value = {
+    kind,
+    id: item.id,
+    title: item.title,
+    pause_enabled: true,
+    pause_from: pause.pause_from || '',
+    pause_to: pause.pause_to || '',
+    pause_reason: pause.pause_reason || '',
+    hadPause: alreadyPaused,
+  }
+}
+
+function closePause() {
+  pausePanel.value = null
+}
+
+async function savePausePanel() {
+  if (!userId.value || !project.value || !pausePanel.value) return
+  const { kind, id } = pausePanel.value
+  try {
+    const pause = await persistPauseForItem(kind, id, pausePanel.value)
+    const item = findPauseTarget(kind, id)
+    if (item) applyPauseToLocalItem(item, pause)
+    closePause()
+  } catch (err) {
+    console.error(err)
+    loadError.value = err.message || 'Impossible d’enregistrer la pause.'
+  }
+}
+
 function stepKey(stepId) {
   return stepId
 }
@@ -262,6 +352,7 @@ function editPanelTitle(kind) {
 }
 
 async function openEdit(kind, item) {
+  closePause()
   editPanel.value = {
     kind,
     id: item.id,
@@ -431,7 +522,13 @@ async function loadProject() {
       return
     }
     project.value = found
-    await Promise.all([loadProgressLogs(found), loadLinkedHabitData(found)])
+    await Promise.all([
+      loadProgressLogs(found),
+      loadLinkedHabitData(found),
+      loadProjectPauseReasons(supabase, userId.value).then((reasons) => {
+        pauseReasons.value = reasons
+      }),
+    ])
     await reconcileProjectDoneStates(supabase, userId.value, project.value, {
       logsByItemId: progressLogsByItemId.value,
       habitLinked: Boolean(project.value.habit_id),
@@ -547,7 +644,7 @@ async function applyItemDoneReorder(item, list, wasDone) {
 }
 
 async function toggleStepDone(step) {
-  if (!userId.value || !project.value || itemUsesQuantite(step)) return
+  if (!userId.value || !project.value || itemUsesQuantite(step) || itemIsPaused(step)) return
   const next = !step.is_done
   step.is_done = next
   if (next) moveItemDoneLast(project.value.steps, step.id)
@@ -564,7 +661,7 @@ async function toggleStepDone(step) {
 }
 
 async function toggleSubstepDone(substep) {
-  if (!userId.value || !project.value || itemUsesQuantite(substep)) return
+  if (!userId.value || !project.value || itemUsesQuantite(substep) || itemIsPaused(substep)) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
   if (!step) return
 
@@ -584,7 +681,7 @@ async function toggleSubstepDone(substep) {
 }
 
 async function onStepIncrement(step) {
-  if (!userId.value || !project.value || !itemUsesQuantite(step)) return
+  if (!userId.value || !project.value || !itemUsesQuantite(step) || itemIsPaused(step)) return
   const wasDone = step.is_done
   const previousLogs = getItemLogs(step.id)
   try {
@@ -606,7 +703,7 @@ async function onStepIncrement(step) {
 }
 
 async function onStepDecrement(step) {
-  if (!userId.value || !project.value || !itemUsesQuantite(step)) return
+  if (!userId.value || !project.value || !itemUsesQuantite(step) || itemIsPaused(step)) return
   const wasDone = step.is_done
   const previousLogs = getItemLogs(step.id)
   try {
@@ -632,7 +729,7 @@ async function onStepDecrement(step) {
 }
 
 async function onSubstepIncrement(substep) {
-  if (!userId.value || !project.value || !itemUsesQuantite(substep)) return
+  if (!userId.value || !project.value || !itemUsesQuantite(substep) || itemIsPaused(substep)) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
   if (!step) return
 
@@ -656,7 +753,7 @@ async function onSubstepIncrement(substep) {
 }
 
 async function onSubstepDecrement(substep) {
-  if (!userId.value || !project.value || !itemUsesQuantite(substep)) return
+  if (!userId.value || !project.value || !itemUsesQuantite(substep) || itemIsPaused(substep)) return
   const step = project.value.steps.find((s) => s.substeps.some((ss) => ss.id === substep.id))
   if (!step) return
 
@@ -716,6 +813,7 @@ async function removeStep(stepId) {
   try {
     await deleteStep(supabase, userId.value, stepId)
     if (editPanel.value?.kind === 'step' && editPanel.value.id === stepId) closeEdit()
+    if (pausePanel.value?.kind === 'step' && pausePanel.value.id === stepId) closePause()
     if (substepFormStepId.value === stepId) closeSubstepForm()
     await loadProject()
   } catch (err) {
@@ -758,6 +856,7 @@ async function removeSubstep(substepId) {
   try {
     await deleteSubstep(supabase, userId.value, substepId)
     if (editPanel.value?.kind === 'substep' && editPanel.value.id === substepId) closeEdit()
+    if (pausePanel.value?.kind === 'substep' && pausePanel.value.id === substepId) closePause()
     await loadProject()
   } catch (err) {
     console.error(err)
@@ -1052,6 +1151,7 @@ watch(projectId, () => {
             :class="{
               'project-step--dragging': draggingStepKey === stepKey(s.id),
               'project-step--done': s.is_done,
+              'project-step--paused': itemIsPaused(s),
             }"
             @dragover="onStepDragOver(s.id, $event)"
             @drop="onStepDrop(s.id, $event)"
@@ -1064,6 +1164,7 @@ watch(projectId, () => {
                 :habit-linked="isHabitLinked"
                 :habit-logs-by-date="habitLogsByDate"
                 :effective-quantite-cible="getEffectiveCible(s)"
+                :paused="itemIsPaused(s)"
                 @toggle="toggleStepDone(s)"
                 @increment="onStepIncrement(s)"
                 @decrement="onStepDecrement(s)"
@@ -1079,10 +1180,15 @@ watch(projectId, () => {
               >⋮⋮</span>
 
               <div class="project-step-main">
-                <div v-if="!(editPanel?.kind === 'step' && editPanel.id === s.id)" class="project-step-title-row">
+                <div v-if="!(editPanel?.kind === 'step' && editPanel.id === s.id) && !(pausePanel?.kind === 'step' && pausePanel.id === s.id)" class="project-step-title-row">
                   <h2 class="project-step-title" :class="{ 'project-step-title--done': s.is_done }">
                     {{ s.title }}
                   </h2>
+                  <ProjectPauseIconButton
+                    :active="itemIsPaused(s)"
+                    :title="itemIsPaused(s) ? 'Modifier la pause' : 'Mettre en pause'"
+                    @click="openPause('step', s)"
+                  />
                   <button
                     type="button"
                     class="project-icon-btn"
@@ -1103,9 +1209,35 @@ watch(projectId, () => {
                   </button>
                 </div>
 
-                <p v-if="!(editPanel?.kind === 'step' && editPanel.id === s.id) && hasDescription(s.description)" class="project-step-description">
+                <p
+                  v-if="!(editPanel?.kind === 'step' && editPanel.id === s.id) && !(pausePanel?.kind === 'step' && pausePanel.id === s.id) && itemIsPaused(s)"
+                  class="project-pause-badge"
+                >
+                  {{ pauseBadge(s) }}
+                </p>
+
+                <p v-if="!(editPanel?.kind === 'step' && editPanel.id === s.id) && !(pausePanel?.kind === 'step' && pausePanel.id === s.id) && hasDescription(s.description)" class="project-step-description">
                   {{ s.description }}
                 </p>
+
+                <form
+                  v-if="pausePanel?.kind === 'step' && pausePanel.id === s.id"
+                  class="project-form-card project-form-card--nested"
+                  @submit.prevent="savePausePanel"
+                >
+                  <h3 class="project-form-title">Pause · {{ pausePanel.title }}</h3>
+                  <ProjectPauseEditFields
+                    v-model:pause-enabled="pausePanel.pause_enabled"
+                    v-model:pause-from="pausePanel.pause_from"
+                    v-model:pause-to="pausePanel.pause_to"
+                    v-model:pause-reason="pausePanel.pause_reason"
+                    :reasons="pauseReasons"
+                  />
+                  <div class="project-form-actions">
+                    <button type="submit" class="project-action-btn project-action-btn--small">Enregistrer</button>
+                    <button type="button" class="project-cancel-btn" @click="closePause">Annuler</button>
+                  </div>
+                </form>
 
                 <form
                   v-if="editPanel?.kind === 'step' && editPanel.id === s.id"
@@ -1216,11 +1348,12 @@ watch(projectId, () => {
                       :class="{
                         'project-substep-item--dragging': draggingSubstepKey === substepKey(s.id, ss.id),
                         'project-substep-item--done': ss.is_done,
+                        'project-substep-item--paused': itemIsPaused(ss),
                       }"
                       @dragover="onSubstepDragOver(s.id, ss.id, $event)"
                       @drop="onSubstepDrop(s.id, ss.id, $event)"
                     >
-                      <div v-if="!(editPanel?.kind === 'substep' && editPanel.id === ss.id)" class="project-substep-row">
+                      <div v-if="!(editPanel?.kind === 'substep' && editPanel.id === ss.id) && !(pausePanel?.kind === 'substep' && pausePanel.id === ss.id)" class="project-substep-row">
                         <ProjectItemProgress
                           :item="ss"
                           :logs="getItemLogs(ss.id)"
@@ -1229,6 +1362,7 @@ watch(projectId, () => {
                           :habit-linked="isHabitLinked"
                           :habit-logs-by-date="habitLogsByDate"
                           :effective-quantite-cible="getEffectiveCible(ss)"
+                          :paused="itemIsPaused(ss)"
                           @toggle="toggleSubstepDone(ss)"
                           @increment="onSubstepIncrement(ss)"
                           @decrement="onSubstepDecrement(ss)"
@@ -1246,6 +1380,12 @@ watch(projectId, () => {
                         <span class="project-substep-title" :class="{ 'project-substep-title--done': ss.is_done }">
                           {{ ss.title }}
                         </span>
+                        <ProjectPauseIconButton
+                          small
+                          :active="itemIsPaused(ss)"
+                          :title="itemIsPaused(ss) ? 'Modifier la pause' : 'Mettre en pause'"
+                          @click="openPause('substep', ss)"
+                        />
                         <button
                           type="button"
                           class="project-icon-btn project-icon-btn--small"
@@ -1266,9 +1406,35 @@ watch(projectId, () => {
                         </button>
                       </div>
 
-                      <p v-if="!(editPanel?.kind === 'substep' && editPanel.id === ss.id) && hasDescription(ss.description)" class="project-substep-description">
+                      <p
+                        v-if="!(editPanel?.kind === 'substep' && editPanel.id === ss.id) && !(pausePanel?.kind === 'substep' && pausePanel.id === ss.id) && itemIsPaused(ss)"
+                        class="project-pause-badge project-pause-badge--sub"
+                      >
+                        {{ pauseBadge(ss) }}
+                      </p>
+
+                      <p v-if="!(editPanel?.kind === 'substep' && editPanel.id === ss.id) && !(pausePanel?.kind === 'substep' && pausePanel.id === ss.id) && hasDescription(ss.description)" class="project-substep-description">
                         {{ ss.description }}
                       </p>
+
+                      <form
+                        v-if="pausePanel?.kind === 'substep' && pausePanel.id === ss.id"
+                        class="project-form-card project-form-card--nested"
+                        @submit.prevent="savePausePanel"
+                      >
+                        <h3 class="project-form-title">Pause · {{ pausePanel.title }}</h3>
+                        <ProjectPauseEditFields
+                          v-model:pause-enabled="pausePanel.pause_enabled"
+                          v-model:pause-from="pausePanel.pause_from"
+                          v-model:pause-to="pausePanel.pause_to"
+                          v-model:pause-reason="pausePanel.pause_reason"
+                          :reasons="pauseReasons"
+                        />
+                        <div class="project-form-actions">
+                          <button type="submit" class="project-action-btn project-action-btn--small">Enregistrer</button>
+                          <button type="button" class="project-cancel-btn" @click="closePause">Annuler</button>
+                        </div>
+                      </form>
 
                       <form
                         v-if="editPanel?.kind === 'substep' && editPanel.id === ss.id"
@@ -1678,6 +1844,28 @@ watch(projectId, () => {
   background: rgba(39, 174, 96, 0.05);
 }
 
+.project-step--paused {
+  border-color: rgba(114, 160, 152, 0.45);
+  background: rgba(114, 160, 152, 0.08);
+}
+
+.project-pause-badge {
+  margin: 0.15rem 0 0.35rem;
+  padding: 0.28rem 0.55rem;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 999px;
+  background: rgba(114, 160, 152, 0.18);
+  color: #3d6b64;
+  font-size: 0.72rem;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.project-pause-badge--sub {
+  margin-left: 0.15rem;
+}
+
 .project-step--dragging,
 .project-substep-item--dragging {
   opacity: 0.55;
@@ -1772,6 +1960,11 @@ watch(projectId, () => {
 
 .project-substep-item--done {
   background: rgba(39, 174, 96, 0.06);
+}
+
+.project-substep-item--paused {
+  border-radius: 10px;
+  background: rgba(114, 160, 152, 0.08);
 }
 
 .project-substep-row {
