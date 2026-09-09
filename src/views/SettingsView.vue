@@ -7,6 +7,7 @@ import {
   listDailyReminders,
   saveDailyReminders,
   deleteDailyReminder,
+  normalizeReminderTime,
 } from '../services/dailyReminders.js'
 import {
   loadStandaloneScheduledGrouped,
@@ -101,6 +102,12 @@ const expandedSections = ref({
 
 function toggleSection(section) {
   expandedSections.value[section] = !expandedSections.value[section]
+  if (section === COLLAPSIBLE_SECTIONS.ONE_TIME && expandedSections.value[section]) {
+    oneTimeForm.value = {
+      ...oneTimeForm.value,
+      scheduled_date: clampOneTimeScheduledDate(oneTimeForm.value.scheduled_date),
+    }
+  }
 }
 
 const showReconfortForm = ref(false)
@@ -303,6 +310,9 @@ const isLoading = ref(true)
 const isSaving = ref(false)
 const userId = ref(null)
 const reminders = ref([])
+/** null | formulaire création/édition (séparé de la liste en lecture) */
+const reminderForm = ref(null)
+const deletingReminderId = ref(null)
 
 const reconfortDraftKey = computed(() => {
   if (!userId.value || !showReconfortForm.value) return null
@@ -333,7 +343,6 @@ const saveMessage = ref('')
 const saveError = ref('')
 const isTestingPush = ref(false)
 const isRunningCron = ref(false)
-const deletingIndex = ref(null)
 const menstruationNotifSettings = ref(createDefaultMenstruationNotifSettings())
 const isSavingMenstruationNotif = ref(false)
 const menstruationNotifMessage = ref('')
@@ -408,11 +417,19 @@ const standaloneTimerForm = ref({
   duration_hours: 0,
   duration_minutes: 15,
 })
-const localToday = getLocalTodayISO()
+const localToday = computed(() => getLocalTodayISO())
+
+function clampOneTimeScheduledDate(dateStr) {
+  const today = getLocalTodayISO()
+  const raw = String(dateStr || '').trim().slice(0, 10)
+  if (!raw || raw < today) return today
+  return raw
+}
+
 const oneTimeForm = ref({
   title: 'BetterMe',
   body: '',
-  scheduled_date: localToday,
+  scheduled_date: getLocalTodayISO(),
   scheduled_time: '12:00',
 })
 
@@ -431,7 +448,7 @@ const { clearDraft: clearOneTimeDraft, restoreDraft: restoreOneTimeDraft } = use
       oneTimeForm.value = {
         title: state.title ?? 'BetterMe',
         body: state.body ?? '',
-        scheduled_date: state.scheduled_date || getLocalTodayISO(),
+        scheduled_date: clampOneTimeScheduledDate(state.scheduled_date),
         scheduled_time: state.scheduled_time || '12:00',
       }
     },
@@ -467,13 +484,23 @@ function newEmptyReminder() {
   }
 }
 
+const isCreatingReminder = computed(() => Boolean(reminderForm.value && !reminderForm.value.id))
+
+function formatReminderTimeDisplay(time) {
+  return normalizeReminderTime(time)
+}
+
 const loadReminders = async () => {
   if (!userId.value) return
   isLoading.value = true
   saveError.value = ''
   try {
     const rows = await listDailyReminders(supabase, userId.value)
-    reminders.value = rows.map((r) => ({ ...r }))
+    reminders.value = rows.map((r) => ({
+      ...r,
+      reminder_time: normalizeReminderTime(r.reminder_time),
+    }))
+    reminderForm.value = null
   } catch (err) {
     console.error(err)
     saveError.value = err.message || 'Impossible de charger les rappels.'
@@ -482,23 +509,42 @@ const loadReminders = async () => {
   }
 }
 
-const addReminder = () => {
-  reminders.value.push(newEmptyReminder())
+const startCreateReminder = () => {
+  saveError.value = ''
+  saveMessage.value = ''
+  reminderForm.value = newEmptyReminder()
 }
 
-const removeReminder = async (index) => {
-  const reminder = reminders.value[index]
-  if (!reminder || !userId.value) return
+const startEditReminder = (reminder) => {
+  if (!reminder?.id) return
+  saveError.value = ''
+  saveMessage.value = ''
+  reminderForm.value = {
+    id: reminder.id,
+    reminder_time: normalizeReminderTime(reminder.reminder_time),
+    title: reminder.title || 'BetterMe',
+    body: reminder.body || '',
+  }
+}
 
-  deletingIndex.value = index
+const cancelReminderForm = () => {
+  reminderForm.value = null
+  saveError.value = ''
+}
+
+const removeReminder = async (reminder) => {
+  if (!reminder?.id || !userId.value) return
+
+  deletingReminderId.value = reminder.id
   saveError.value = ''
   saveMessage.value = ''
 
   try {
-    if (reminder.id) {
-      await deleteDailyReminder(supabase, userId.value, reminder.id)
+    await deleteDailyReminder(supabase, userId.value, reminder.id)
+    reminders.value = reminders.value.filter((r) => r.id !== reminder.id)
+    if (reminderForm.value?.id === reminder.id) {
+      reminderForm.value = null
     }
-    reminders.value.splice(index, 1)
     saveMessage.value = 'Rappel supprimé.'
     setTimeout(() => {
       saveMessage.value = ''
@@ -506,22 +552,42 @@ const removeReminder = async (index) => {
   } catch (err) {
     saveError.value = err.message || 'Impossible de supprimer ce rappel.'
   } finally {
-    deletingIndex.value = null
+    deletingReminderId.value = null
   }
 }
 
-const onSave = async () => {
-  if (!userId.value) return
+const saveReminderForm = async () => {
+  if (!userId.value || !reminderForm.value) return
   isSaving.value = true
   saveMessage.value = ''
   saveError.value = ''
 
   try {
-    const saved = await saveDailyReminders(supabase, userId.value, reminders.value)
-    reminders.value = saved.map((r) => ({ ...r }))
+    const draft = {
+      id: reminderForm.value.id || null,
+      reminder_time: normalizeReminderTime(reminderForm.value.reminder_time),
+      title: (reminderForm.value.title || 'BetterMe').trim(),
+      body: (reminderForm.value.body || '').trim(),
+    }
+
+    let nextList
+    if (draft.id) {
+      nextList = reminders.value.map((r) => (r.id === draft.id ? { ...r, ...draft } : r))
+    } else {
+      nextList = [...reminders.value, draft]
+    }
+
+    const saved = await saveDailyReminders(supabase, userId.value, nextList)
+    reminders.value = saved.map((r) => ({
+      ...r,
+      reminder_time: normalizeReminderTime(r.reminder_time),
+    }))
+    reminderForm.value = null
+
     const { realignAllDeviceLocalNotifications } = await import('../services/notificationRealign.js')
     await realignAllDeviceLocalNotifications(supabase, userId.value)
-    saveMessage.value = 'Rappels enregistrés (horaires appareil).'
+
+    saveMessage.value = draft.id ? 'Rappel modifié.' : 'Rappel créé.'
     setTimeout(() => {
       saveMessage.value = ''
     }, 3000)
@@ -595,10 +661,12 @@ const onPlanOneTimeReminder = async () => {
   oneTimeError.value = ''
 
   try {
+    const scheduledDate = clampOneTimeScheduledDate(oneTimeForm.value.scheduled_date)
+    oneTimeForm.value.scheduled_date = scheduledDate
     const created = await createOneTimeReminder(supabase, userId.value, {
       title: oneTimeForm.value.title,
       body: oneTimeForm.value.body,
-      scheduledDate: oneTimeForm.value.scheduled_date,
+      scheduledDate,
       scheduledTime: oneTimeForm.value.scheduled_time,
     })
     await loadOneTimeReminders()
@@ -841,6 +909,10 @@ onMounted(async () => {
   userId.value = user.id
   await nextTick()
   restoreOneTimeDraft()
+  oneTimeForm.value = {
+    ...oneTimeForm.value,
+    scheduled_date: clampOneTimeScheduledDate(oneTimeForm.value.scheduled_date),
+  }
   restoreStandaloneTimerDraft()
   await Promise.all([
     loadReminders(),
@@ -1038,61 +1110,154 @@ onUnmounted(() => {
 
       <div v-if="isLoading" class="settings-loading">Chargement…</div>
 
-      <p v-else-if="reminders.length === 0" class="settings-empty">
-        Aucun rappel pour l'instant. Ajoute-en avec le bouton ci-dessous, puis enregistre.
+      <p v-else-if="reminders.length === 0 && !reminderForm" class="settings-empty">
+        Aucun rappel pour l'instant. Ajoute-en avec le bouton ci-dessous.
       </p>
 
       <div v-else class="reminders-list">
         <article
-          v-for="(reminder, index) in reminders"
-          :key="reminder.id ?? `new-${index}`"
+          v-for="reminder in reminders"
+          :key="reminder.id"
           class="reminder-row"
+          :class="{
+            'reminder-row--readonly': reminderForm?.id !== reminder.id,
+            'reminder-row--form': reminderForm?.id === reminder.id,
+          }"
         >
+          <template v-if="reminderForm?.id === reminder.id">
+            <div class="reminder-fields">
+              <label class="field">
+                <span>Heure</span>
+                <input v-model="reminderForm.reminder_time" type="time" required />
+              </label>
+              <label class="field field--grow">
+                <span>Titre</span>
+                <input v-model="reminderForm.title" type="text" maxlength="80" />
+              </label>
+            </div>
+            <label class="field field--full">
+              <span>Message</span>
+              <input
+                v-model="reminderForm.body"
+                type="text"
+                maxlength="200"
+                placeholder="Texte de la notification"
+              />
+            </label>
+            <div class="reminder-form-actions">
+              <button
+                type="button"
+                class="btn btn--ghost"
+                :disabled="isSaving"
+                @click="cancelReminderForm"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                class="btn btn--primary"
+                :disabled="isSaving"
+                @click="saveReminderForm"
+              >
+                {{ isSaving ? 'Enregistrement…' : 'Valider' }}
+              </button>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="one-time-summary">
+              <time class="one-time-when">{{ formatReminderTimeDisplay(reminder.reminder_time) }}</time>
+              <strong class="one-time-title">{{ reminder.title || 'BetterMe' }}</strong>
+              <p v-if="reminder.body" class="one-time-body">{{ reminder.body }}</p>
+            </div>
+            <div class="reminder-row__actions">
+              <button
+                type="button"
+                class="btn-icon-edit"
+                title="Modifier ce rappel"
+                :disabled="Boolean(reminderForm) || isSaving"
+                @click="startEditReminder(reminder)"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
+                <span class="sr-only">Modifier</span>
+              </button>
+              <button
+                type="button"
+                class="btn-remove"
+                title="Supprimer"
+                :disabled="deletingReminderId === reminder.id || Boolean(reminderForm)"
+                @click="removeReminder(reminder)"
+              >
+                {{ deletingReminderId === reminder.id ? 'Suppression…' : 'Supprimer' }}
+              </button>
+            </div>
+          </template>
+        </article>
+
+        <article v-if="isCreatingReminder" class="reminder-row reminder-row--form">
           <div class="reminder-fields">
             <label class="field">
               <span>Heure</span>
-              <input v-model="reminder.reminder_time" type="time" required />
+              <input v-model="reminderForm.reminder_time" type="time" required />
             </label>
             <label class="field field--grow">
               <span>Titre</span>
-              <input v-model="reminder.title" type="text" maxlength="80" />
+              <input v-model="reminderForm.title" type="text" maxlength="80" />
             </label>
           </div>
           <label class="field field--full">
             <span>Message</span>
             <input
-              v-model="reminder.body"
+              v-model="reminderForm.body"
               type="text"
               maxlength="200"
               placeholder="Texte de la notification"
             />
           </label>
-          <button
-            type="button"
-            class="btn-remove"
-            title="Supprimer"
-            :disabled="deletingIndex === index"
-            @click="removeReminder(index)"
-          >
-            {{ deletingIndex === index ? 'Suppression…' : 'Supprimer' }}
-          </button>
+          <div class="reminder-form-actions">
+            <button
+              type="button"
+              class="btn btn--ghost"
+              :disabled="isSaving"
+              @click="cancelReminderForm"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              class="btn btn--primary"
+              :disabled="isSaving"
+              @click="saveReminderForm"
+            >
+              {{ isSaving ? 'Enregistrement…' : 'Enregistrer' }}
+            </button>
+          </div>
         </article>
       </div>
 
       <p v-if="saveError" class="settings-feedback settings-feedback--error">{{ saveError }}</p>
       <p v-if="saveMessage" class="settings-feedback settings-feedback--ok">{{ saveMessage }}</p>
 
-      <div class="settings-actions">
-        <button type="button" class="btn btn--ghost" :disabled="isLoading" @click="addReminder">
-          + Ajouter un rappel
-        </button>
+      <div v-if="!reminderForm" class="settings-actions settings-actions--start">
         <button
           type="button"
-          class="btn btn--primary"
-          :disabled="isLoading || isSaving"
-          @click="onSave"
+          class="btn btn--ghost"
+          :disabled="isLoading"
+          @click="startCreateReminder"
         >
-          {{ isSaving ? 'Enregistrement…' : 'Enregistrer' }}
+          + Ajouter un rappel
         </button>
       </div>
       </div>
@@ -1172,7 +1337,12 @@ onUnmounted(() => {
         <div class="reminder-fields">
           <label class="field">
             <span>Date d’envoi</span>
-            <input v-model="oneTimeForm.scheduled_date" type="date" required :min="localToday" />
+            <input
+              v-model="oneTimeForm.scheduled_date"
+              type="date"
+              required
+              :min="localToday"
+            />
           </label>
           <label class="field">
             <span>Heure</span>
@@ -2394,6 +2564,70 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
+.reminder-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.btn-icon-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: rgba(173, 129, 190, 0.12);
+  color: #8e5aa3;
+  cursor: pointer;
+}
+
+.btn-icon-edit svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.btn-icon-edit:hover:not(:disabled) {
+  background: rgba(173, 129, 190, 0.22);
+}
+
+.btn-icon-edit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.reminder-row--form {
+  border-color: rgba(173, 129, 190, 0.45);
+  background: rgba(213, 181, 234, 0.12);
+}
+
+.reminder-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+}
+
+.settings-actions--start {
+  justify-content: flex-start;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .settings-test-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2704,6 +2938,10 @@ onUnmounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem;
+}
+
+.reminder-row--readonly .btn-remove {
+  align-self: center;
 }
 
 .one-time-summary {
