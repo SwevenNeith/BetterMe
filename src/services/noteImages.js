@@ -61,9 +61,21 @@ export function extractImageFilesFromDataTransfer(dataTransfer) {
   const files = []
   const seen = new Set()
 
+  const buildFileKey = (file) => {
+    if (!file) return ''
+    return [
+      String(file.name || ''),
+      String(file.type || ''),
+      Number(file.size || 0),
+      Number(file.lastModified || 0),
+    ].join('|')
+  }
+
   const push = (file) => {
-    if (!file || !ALLOWED_MIME.has(file.type) || seen.has(file)) return
-    seen.add(file)
+    if (!file || !ALLOWED_MIME.has(file.type)) return
+    const key = buildFileKey(file)
+    if (!key || seen.has(key)) return
+    seen.add(key)
     files.push(file)
   }
 
