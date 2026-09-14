@@ -1,4 +1,4 @@
-import { DAILY_NOTES_FOLDER_SYSTEM_KEY, parseDailyNoteDateKey } from '../constants/dailyNotes.js'
+import { DAILY_NOTES_FOLDER_SYSTEM_KEY, parseDailyNoteDateKey } from '../../constants/dashboard/dailyNotes.js'
 
 /**
  * Construit une arborescence triée : dossiers (alpha) puis notes (alpha), récursif.

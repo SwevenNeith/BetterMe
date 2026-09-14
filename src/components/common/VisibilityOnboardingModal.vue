@@ -1,18 +1,18 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { APP_MAIN_PAGES, APP_PAGE_IDS } from '../constants/appPages.js'
-import { DASHBOARD_WIDGETS, DASHBOARD_WIDGET_IDS } from '../constants/dashboardWidgets.js'
+import { supabase } from '../../lib/supabase.js'
+import { APP_MAIN_PAGES, APP_PAGE_IDS } from '../../constants/common/appPages.js'
+import { DASHBOARD_WIDGETS, DASHBOARD_WIDGET_IDS } from '../../constants/dashboard/dashboardWidgets.js'
 import {
   createDefaultPageVisibility,
   savePageVisibility,
   getPageDisplayLabel,
-} from '../services/pageVisibility.js'
+} from '../../services/settings/pageVisibility.js'
 import {
   createDefaultDashboardVisibility,
   saveDashboardVisibility,
-} from '../services/dashboardVisibility.js'
-import { markVisibilityOnboardingCompleted } from '../services/visibilityOnboarding.js'
+} from '../../services/dashboard/dashboardVisibility.js'
+import { markVisibilityOnboardingCompleted } from '../../services/settings/visibilityOnboarding.js'
 
 const DASHBOARD_WIDGET_PAGE_IDS = {
   [DASHBOARD_WIDGET_IDS.TODO]: APP_PAGE_IDS.TODO,

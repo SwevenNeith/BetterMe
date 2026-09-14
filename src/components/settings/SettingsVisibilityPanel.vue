@@ -1,20 +1,20 @@
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { APP_MAIN_PAGES, APP_PAGE_IDS } from '../constants/appPages.js'
+import { supabase } from '../../lib/supabase.js'
+import { APP_MAIN_PAGES, APP_PAGE_IDS } from '../../constants/common/appPages.js'
 import {
   DASHBOARD_WIDGETS,
   DASHBOARD_WIDGET_IDS,
   DASHBOARD_DESKTOP_ZONES,
-} from '../constants/dashboardWidgets.js'
-import { formatPinnedNoteWidgetLabel } from '../constants/dashboardPinnedNotes.js'
-import DashboardVisibilityWidgetRow from './DashboardVisibilityWidgetRow.vue'
+} from '../../constants/dashboard/dashboardWidgets.js'
+import { formatPinnedNoteWidgetLabel } from '../../constants/dashboard/dashboardPinnedNotes.js'
+import DashboardVisibilityWidgetRow from '../dashboard/DashboardVisibilityWidgetRow.vue'
 import {
   loadPageVisibility,
   savePageVisibility,
   getPageDisplayLabel,
   mergePageVisibility,
-} from '../services/pageVisibility.js'
+} from '../../services/settings/pageVisibility.js'
 import {
   loadDashboardVisibility,
   saveDashboardVisibility,
@@ -23,7 +23,7 @@ import {
   moveDesktopWidget,
   moveMobileWidgetInGroups,
   extractMobileWidgetToOwnGroup,
-} from '../services/dashboardVisibility.js'
+} from '../../services/dashboard/dashboardVisibility.js'
 
 const DASHBOARD_WIDGET_PAGE_IDS = {
   [DASHBOARD_WIDGET_IDS.TODO]: APP_PAGE_IDS.TODO,

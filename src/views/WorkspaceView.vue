@@ -1,9 +1,9 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import WorkspaceLayoutPicker from '../components/WorkspaceLayoutPicker.vue'
-import WorkspacePagePicker from '../components/WorkspacePagePicker.vue'
-import WorkspacePane from '../components/WorkspacePane.vue'
+import WorkspaceLayoutPicker from '../components/workspace/WorkspaceLayoutPicker.vue'
+import WorkspacePagePicker from '../components/workspace/WorkspacePagePicker.vue'
+import WorkspacePane from '../components/workspace/WorkspacePane.vue'
 import { useWorkspace } from '../composables/useWorkspace.js'
 
 const DESKTOP_MQ = '(min-width: 769px)'

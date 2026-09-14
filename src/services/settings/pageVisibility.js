@@ -1,5 +1,5 @@
-import { APP_MAIN_PAGES } from '../constants/appPages.js'
-import { ensureUserSettings } from './menstruationNotifications.js'
+import { APP_MAIN_PAGES } from '../../constants/common/appPages.js'
+import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
 
 const SETTINGS_TABLE = 'settings'
 const COLUMN = 'page_visibility'

@@ -1,13 +1,13 @@
 import {
   hasQuantiteTracking,
   DEFAULT_RESET_PERIODE,
-} from '../constants/projectProgress.js'
+} from '../../constants/projets/projectProgress.js'
 import {
   buildHabitLogsByDate,
   getHabitLinkedCibleForPeriode,
   getHabitLogsFetchRangeForProject,
-} from '../utils/habitProjectLink.js'
-import { listHabitLogsForRange } from './habitLogs.js'
+} from '../../utils/habit/habitProjectLink.js'
+import { listHabitLogsForRange } from '../habit/habitLogs.js'
 import { updateStepDone, updateSubstepDone } from './projects.js'
 import {
   fetchProgressLogsForProject,

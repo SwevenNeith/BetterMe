@@ -1,17 +1,17 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
-import { TODO_FREQUENCY, getTodoItemColorClass } from '../constants/todoOptions.js'
-import '../styles/todo-frequency.css'
-import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { supabase } from '../../lib/supabase.js'
+import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
+import { TODO_FREQUENCY, getTodoItemColorClass } from '../../constants/todo/todoOptions.js'
+import '../../styles/todo-frequency.css'
+import { usePageDisplayLabel } from '../../composables/usePageDisplayLabel.js'
 import {
   isPageVisible,
   loadPageVisibility,
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
-} from '../services/pageVisibility.js'
-import { listTodoCompletionsInRange, listTodoItems, setTodoCompletionForDate, setTodoQuantiteForDate, syncTodoIsDoneFlags } from '../services/todoItems.js'
+} from '../../services/settings/pageVisibility.js'
+import { listTodoCompletionsInRange, listTodoItems, setTodoCompletionForDate, setTodoQuantiteForDate, syncTodoIsDoneFlags } from '../../services/todo/todoItems.js'
 import {
   buildCompletionProgressMap,
   getTodosForDate,
@@ -21,8 +21,8 @@ import {
   getWeekEndISO,
   getWeekStartISO,
   normalizeDateISO,
-} from '../utils/todoCalendar.js'
-import TodoEncouragementMessage from './TodoEncouragementMessage.vue'
+} from '../../utils/todo/todoCalendar.js'
+import TodoEncouragementMessage from '../todo/TodoEncouragementMessage.vue'
 
 const props = defineProps({
   userId: {

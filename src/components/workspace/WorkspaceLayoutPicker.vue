@@ -1,5 +1,5 @@
 <script setup>
-import { WORKSPACE_LAYOUTS, layoutFitsPaneCount } from '../constants/workspacePages.js'
+import { WORKSPACE_LAYOUTS, layoutFitsPaneCount } from '../../constants/workspace/workspacePages.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },

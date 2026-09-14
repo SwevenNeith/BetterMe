@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { buildNotesGraph } from '../utils/notesGraph.js'
+import { buildNotesGraph } from '../../utils/notes/notesGraph.js'
 
 const props = defineProps({
   active: { type: Boolean, default: false },

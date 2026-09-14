@@ -1,9 +1,9 @@
-import { NOTE_VAULT_ROOT_KEY, vaultSettingsKey } from '../constants/noteVaults.js'
-import { createDefaultNotesExtensionPrefs } from '../constants/notesExtensions.js'
-import { createDefaultNoteTemplatePrefs } from '../constants/noteTemplates.js'
+import { NOTE_VAULT_ROOT_KEY, vaultSettingsKey } from '../../constants/notes/noteVaults.js'
+import { createDefaultNotesExtensionPrefs } from '../../constants/notes/notesExtensions.js'
+import { createDefaultNoteTemplatePrefs } from '../../constants/notes/noteTemplates.js'
 import { mergeNotesExtensionPrefs } from './notesExtensions.js'
 import { mergeNoteTemplatePrefs } from './noteTemplateExtension.js'
-import { ensureUserSettings } from './menstruationNotifications.js'
+import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
 
 const SETTINGS_TABLE = 'settings'
 const COLUMN = 'notes_vault_settings'
@@ -19,7 +19,7 @@ function isMissingColumnError(error, column = COLUMN) {
 }
 
 /**
- * @returns {{ extensions: Record<string, boolean>, templatePrefs: import('../constants/noteTemplates.js').NoteTemplatePrefs }}
+ * @returns {{ extensions: Record<string, boolean>, templatePrefs: import('../../constants/notes/noteTemplates.js').NoteTemplatePrefs }}
  */
 function createDefaultVaultBundle() {
   return {
@@ -32,7 +32,7 @@ function createDefaultVaultBundle() {
  * @param {unknown} raw
  */
 function normalizeVaultSettingsStore(raw) {
-  /** @type {Record<string, { extensions: Record<string, boolean>, templatePrefs: import('../constants/noteTemplates.js').NoteTemplatePrefs }>} */
+  /** @type {Record<string, { extensions: Record<string, boolean>, templatePrefs: import('../../constants/notes/noteTemplates.js').NoteTemplatePrefs }>} */
   const store = {}
 
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -104,7 +104,7 @@ async function loadRawVaultSettings(supabase, userId) {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
- * @param {Record<string, { extensions: Record<string, boolean>, templatePrefs: import('../constants/noteTemplates.js').NoteTemplatePrefs }>} store
+ * @param {Record<string, { extensions: Record<string, boolean>, templatePrefs: import('../../constants/notes/noteTemplates.js').NoteTemplatePrefs }>} store
  */
 async function saveVaultSettingsStore(supabase, userId, store) {
   if (!userId) return store
@@ -189,7 +189,7 @@ export async function loadVaultTemplatePrefs(supabase, userId, vaultId = null) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {string | null | undefined} vaultId
- * @param {import('../constants/noteTemplates.js').NoteTemplatePrefs} prefs
+ * @param {import('../../constants/notes/noteTemplates.js').NoteTemplatePrefs} prefs
  */
 export async function saveVaultTemplatePrefs(supabase, userId, vaultId, prefs) {
   const { store } = await loadRawVaultSettings(supabase, userId)

@@ -1,4 +1,4 @@
-import { PROJECT_RESET_PERIODE } from '../constants/projectProgress.js'
+import { PROJECT_RESET_PERIODE } from '../../constants/projets/projectProgress.js'
 
 function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0)

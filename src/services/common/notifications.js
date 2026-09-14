@@ -1,5 +1,5 @@
 /* eslint-disable no-useless-assignment */
-import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase.js'
+import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase.js'
 import {
   dateTimeLocalToDate,
   deletePendingActiviteNotifications,
@@ -325,7 +325,7 @@ export async function planifierNotificationActivite(userId, activite) {
   }
   // Si lié à une TODO : jamais de second rappel todo_item_reminder
   if (todoItemId) {
-    const { deletePendingTodoItemReminders } = await import('./todoItemReminders.js')
+    const { deletePendingTodoItemReminders } = await import('../todo/todoItemReminders.js')
     await deletePendingTodoItemReminders(supabase, todoItemId)
   }
 
@@ -509,8 +509,8 @@ export async function declencherCronNotifications() {
     if (user?.id) {
       const [{ syncReconfortLastSentFromSentNotifications }, { rescheduleTodoPromesseReminder }] =
         await Promise.all([
-          import('./reconfortNotifications.js'),
-          import('./todoPromesseNotifications.js'),
+          import('../dashboard/reconfortNotifications.js'),
+          import('../todo/todoPromesseNotifications.js'),
         ])
       await syncReconfortLastSentFromSentNotifications(supabase, user.id)
       await rescheduleTodoPromesseReminder(user.id)

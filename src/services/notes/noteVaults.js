@@ -1,4 +1,4 @@
-import { normalizeVaultIcon } from '../constants/noteVaults.js'
+import { normalizeVaultIcon } from '../../constants/notes/noteVaults.js'
 
 const TABLE = 'note_vaults'
 

@@ -1,4 +1,4 @@
-import { TODO_FREQUENCY } from '../constants/todoOptions.js'
+import { TODO_FREQUENCY } from '../../constants/todo/todoOptions.js'
 import {
   addDaysISO,
   assertPromesseLimits,
@@ -9,9 +9,9 @@ import {
   hasTodoQuantiteCible,
   isTodoCompletedOnDate,
   normalizeDateISO,
-} from '../utils/todoCalendar.js'
-import { getLocalTodayISO } from './scheduledReminders.js'
-import { ensureUserSettings } from './menstruationNotifications.js'
+} from '../../utils/todo/todoCalendar.js'
+import { getLocalTodayISO } from '../common/scheduledReminders.js'
+import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
 import {
   listTodoCompletionsInRange,
   listTodoItems,

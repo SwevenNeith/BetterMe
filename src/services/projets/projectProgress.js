@@ -2,7 +2,7 @@ import {
   countLogsInPeriod,
   getPeriodBoundsForDate,
   isDateInPeriod,
-} from '../utils/projectProgressPeriods.js'
+} from '../../utils/projets/projectProgressPeriods.js'
 
 const LOGS_TABLE = 'project_progress_logs'
 

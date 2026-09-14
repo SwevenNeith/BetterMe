@@ -1,21 +1,21 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
-import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { supabase } from '../../lib/supabase.js'
+import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
+import { usePageDisplayLabel } from '../../composables/usePageDisplayLabel.js'
 import {
   isPageVisible,
   loadPageVisibility,
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
-} from '../services/pageVisibility.js'
-import { syncProjectsListDoneStates } from '../services/projectDoneSync.js'
+} from '../../services/settings/pageVisibility.js'
+import { syncProjectsListDoneStates } from '../../services/projets/projectDoneSync.js'
 import {
   applyAlphabeticalProjectOrder,
   fetchProjectsTree,
   isProjectsCustomOrder,
-} from '../services/projects.js'
+} from '../../services/projets/projects.js'
 
 const PROJECTS_PER_PAGE = 3
 

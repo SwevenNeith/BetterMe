@@ -1,18 +1,18 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
-import { dictionaryWordTypeAbbr } from '../constants/dictionaryWordTypes.js'
-import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { supabase } from '../../lib/supabase.js'
+import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
+import { dictionaryWordTypeAbbr } from '../../constants/dictionnaire/dictionaryWordTypes.js'
+import { usePageDisplayLabel } from '../../composables/usePageDisplayLabel.js'
 import {
   isPageVisible,
   loadPageVisibility,
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
-} from '../services/pageVisibility.js'
-import { listDictionaryEntries } from '../services/dictionaryEntries.js'
-import { pickWordOfTheDay } from '../utils/dashboardWordOfTheDay.js'
+} from '../../services/settings/pageVisibility.js'
+import { listDictionaryEntries } from '../../services/dictionnaire/dictionaryEntries.js'
+import { pickWordOfTheDay } from '../../utils/dashboard/dashboardWordOfTheDay.js'
 
 const props = defineProps({
   userId: {

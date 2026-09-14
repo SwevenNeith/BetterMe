@@ -4,7 +4,7 @@ import {
   getLocalTodayISO,
   insertPendingNotifications,
 } from './scheduledReminders.js'
-import { addDaysISO } from '../utils/todoCalendar.js'
+import { addDaysISO } from '../../utils/todo/todoCalendar.js'
 
 /** Prefixe kind — l’id du rappel est dans kind, pas dans event_id (FK vers events EDT). */
 export const DAILY_REMINDER_KIND_PREFIX = 'daily_reminder:'

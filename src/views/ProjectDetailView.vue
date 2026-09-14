@@ -1,11 +1,11 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import ColorPickerField from '../components/ColorPickerField.vue'
-import EmojiPickerField from '../components/EmojiPickerField.vue'
-import ProjectItemProgress from '../components/ProjectItemProgress.vue'
-import ProjectPauseEditFields from '../components/ProjectPauseEditFields.vue'
-import ProjectPauseIconButton from '../components/ProjectPauseIconButton.vue'
+import ColorPickerField from '../components/common/ColorPickerField.vue'
+import EmojiPickerField from '../components/common/EmojiPickerField.vue'
+import ProjectItemProgress from '../components/projets/ProjectItemProgress.vue'
+import ProjectPauseEditFields from '../components/projets/ProjectPauseEditFields.vue'
+import ProjectPauseIconButton from '../components/projets/ProjectPauseIconButton.vue'
 import {
   DEFAULT_QUANTITE_CIBLE,
   DEFAULT_RESET_PERIODE,
@@ -13,29 +13,29 @@ import {
   normalizeQuantiteCible,
   normalizeResetPeriode,
   PROJECT_RESET_PERIODE_OPTIONS,
-} from '../constants/projectProgress.js'
+} from '../constants/projets/projectProgress.js'
 import {
   buildPausePayloadFromForm,
   formatProjectPauseBadge,
   isProjectItemPaused,
   isProjectSubstepEffectivelyPaused,
   normalizeProjectPauseFields,
-} from '../constants/projectPause.js'
+} from '../constants/projets/projectPause.js'
 import { supabase } from '../lib/supabase.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
-import { listHabits } from '../services/habits.js'
-import { listHabitLogsForRange } from '../services/habitLogs.js'
+import { listHabits } from '../services/habit/habits.js'
+import { listHabitLogsForRange } from '../services/habit/habitLogs.js'
 import {
   loadProjectPauseReasons,
   rememberProjectPauseReason,
-} from '../services/projectPauseReasons.js'
+} from '../services/projets/projectPauseReasons.js'
 import {
   addProgressLog,
   fetchProgressLogsForProject,
   getCurrentPeriodCount,
   groupLogsByItemId,
   removeLatestLogInPeriod,
-} from '../services/projectProgress.js'
+} from '../services/projets/projectProgress.js'
 import {
   createStep,
   createSubstep,
@@ -58,14 +58,14 @@ import {
   updateSubstepPause,
   updateSubstepProgressSettings,
   updateSubstepTitle,
-} from '../services/projects.js'
-import { reconcileProjectDoneStates } from '../services/projectDoneSync.js'
+} from '../services/projets/projects.js'
+import { reconcileProjectDoneStates } from '../services/projets/projectDoneSync.js'
 import {
   buildHabitLogsByDate,
   getHabitLinkedCibleForPeriode,
   getHabitLogsFetchRangeForProject,
   HABIT_PROJECT_TARGET_RATIO,
-} from '../utils/habitProjectLink.js'
+} from '../utils/habit/habitProjectLink.js'
 
 const resetPeriodeOptions = PROJECT_RESET_PERIODE_OPTIONS
 

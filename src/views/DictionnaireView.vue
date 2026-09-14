@@ -2,8 +2,8 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
-import { DICTIONARY_WORD_TYPES, dictionaryWordTypeAbbr } from '../constants/dictionaryWordTypes.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
+import { DICTIONARY_WORD_TYPES, dictionaryWordTypeAbbr } from '../constants/dictionnaire/dictionaryWordTypes.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import {
@@ -11,7 +11,7 @@ import {
   deleteDictionaryEntry,
   listDictionaryEntries,
   updateDictionaryEntry,
-} from '../services/dictionaryEntries.js'
+} from '../services/dictionnaire/dictionaryEntries.js'
 import {
   DICTIONARY_INDEX_KEYS,
   dictionaryLetter,
@@ -21,7 +21,7 @@ import {
   firstLetterWithEntries,
   letterCounts,
   normalizeDictionaryLetter,
-} from '../utils/dictionary.js'
+} from '../utils/dictionnaire/dictionary.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.DICTIONNAIRE, undefined, {
   setDocumentTitle: true,

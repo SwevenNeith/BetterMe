@@ -2,15 +2,15 @@ import {
   NOTE_STATUS,
   NOTE_STATUS_TODOS_EXTENSION_ID,
   normalizeNoteStatus,
-} from '../constants/noteStatus.js'
-import { TODO_FREQUENCY } from '../constants/todoOptions.js'
+} from '../../constants/notes/noteStatus.js'
+import { TODO_FREQUENCY } from '../../constants/todo/todoOptions.js'
 import {
   buildCompletionProgressMap,
   getWeekStartISO,
   isTodoCompletedOnDate,
   normalizeDateISO,
-} from '../utils/todoCalendar.js'
-import { getLocalTodayISO } from './scheduledReminders.js'
+} from '../../utils/todo/todoCalendar.js'
+import { getLocalTodayISO } from '../common/scheduledReminders.js'
 import { isNotesExtensionEnabled } from './notesExtensions.js'
 import { loadVaultExtensionPrefs } from './noteVaultSettings.js'
 import {
@@ -21,7 +21,7 @@ import {
   replaceTodoItem,
   setTodoCompletionForDate,
   updateTodoItem,
-} from './todoItems.js'
+} from '../todo/todoItems.js'
 import { getNote, listNotes, updateNote } from './notes.js'
 
 function isMissingLinkColumnError(error) {

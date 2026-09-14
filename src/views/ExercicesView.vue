@@ -1,5 +1,5 @@
 <script setup>
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.EXERCICES_GROUP, undefined, {

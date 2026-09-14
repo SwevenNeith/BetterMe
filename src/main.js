@@ -14,7 +14,7 @@ app.use(router)
 
 app.mount('#app')
 
-import { ensureServiceWorker } from './services/notifications.js'
+import { ensureServiceWorker } from './services/common/notifications.js'
 
 if ('serviceWorker' in navigator) {
   ensureServiceWorker().catch((err) => console.warn('Service Worker:', err))

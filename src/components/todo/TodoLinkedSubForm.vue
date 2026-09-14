@@ -5,9 +5,9 @@ import {
   TODO_FREQUENCY_OPTIONS,
   TODO_WEEKDAYS,
   getTodoFrequencyClass,
-} from '../constants/todoOptions.js'
-import { formatWeekRangeLabelFr } from '../utils/todoCalendar.js'
-import '../styles/todo-frequency.css'
+} from '../../constants/todo/todoOptions.js'
+import { formatWeekRangeLabelFr } from '../../utils/todo/todoCalendar.js'
+import '../../styles/todo-frequency.css'
 
 const props = defineProps({
   modelValue: {

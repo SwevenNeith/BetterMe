@@ -1,10 +1,10 @@
-import { supabase } from '../lib/supabase.js'
+import { supabase } from '../../lib/supabase.js'
 import { COL } from './menstruationCycles.js'
 import {
   dateTimeLocalToDate,
   deletePendingByKinds,
   insertPendingNotifications,
-} from './scheduledReminders.js'
+} from '../common/scheduledReminders.js'
 import {
   COL_NATUREL,
   computeNaturalPhaseStartDates,

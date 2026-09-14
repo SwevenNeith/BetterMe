@@ -2,7 +2,7 @@
 import {
   CHECKIN_REASSURING_NOTE,
   useDashboardEmotionalCheckin,
-} from '../composables/useDashboardEmotionalCheckin.js'
+} from '../../composables/useDashboardEmotionalCheckin.js'
 
 const emit = defineEmits(['save', 'cancel'])
 

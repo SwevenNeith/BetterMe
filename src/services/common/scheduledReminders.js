@@ -1,5 +1,5 @@
 import { getDurationMinutes } from './durationUtils.js'
-import { ensureUserSettings } from './menstruationNotifications.js'
+import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
 
 /** Ancien marqueur (lignes créées avant la colonne kind) */
 const LEGACY_TIMER_BODY_MARKER = '__betterme_kind:timer__'

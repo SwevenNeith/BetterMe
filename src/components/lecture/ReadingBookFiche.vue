@@ -14,7 +14,7 @@ import {
   formatFrenchDate,
   formatRatingLabel,
   getBookGenre,
-} from '../utils/readingBookForm.js'
+} from '../../utils/lecture/readingBookForm.js'
 
 const props = defineProps({
   /** 'create' = formulaire d'ajout ; 'sheet' = fiche popup avec édition inline */

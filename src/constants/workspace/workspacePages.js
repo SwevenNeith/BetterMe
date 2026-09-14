@@ -1,4 +1,4 @@
-import { APP_PAGE_IDS } from './appPages.js'
+import { APP_PAGE_IDS } from '../common/appPages.js'
 
 /**
  * Pages sélectionnables dans le Plan de Travail.

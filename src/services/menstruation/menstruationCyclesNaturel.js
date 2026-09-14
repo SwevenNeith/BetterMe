@@ -1,5 +1,5 @@
 import { addDaysToISODate, daysBetweenISO, pickDate } from './menstruationCycles.js'
-import { getLocalTodayISO } from './scheduledReminders.js'
+import { getLocalTodayISO } from '../common/scheduledReminders.js'
 
 const TABLE = 'menstruation_cycles_naturel'
 

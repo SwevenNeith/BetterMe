@@ -1,10 +1,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
-import ReadingSpoilChapterForm from '../components/ReadingSpoilChapterForm.vue'
+import ReadingSpoilChapterForm from '../components/lecture/ReadingSpoilChapterForm.vue'
 import { supabase } from '../lib/supabase.js'
-import { getReadingBookWithCover } from '../services/readingBooks.js'
-import { createSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/readingSpoilChapters.js'
+import { getReadingBookWithCover } from '../services/lecture/readingBooks.js'
+import { createSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/lecture/readingSpoilChapters.js'
 
 const AUTO_SAVE_DELAY_MS = 2000
 

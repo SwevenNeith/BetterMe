@@ -1,4 +1,4 @@
-import { ensureUserSettings } from './menstruationNotifications.js'
+import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
 
 const SETTINGS_TABLE = 'settings'
 const COLUMN = 'visibility_onboarding_completed'

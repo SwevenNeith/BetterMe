@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import {
   createNote,
@@ -11,34 +11,34 @@ import {
   getNote,
   listNotes,
   updateNote,
-} from '../services/notes.js'
+} from '../services/notes/notes.js'
 import {
   extractImageFilesFromDataTransfer,
   uploadNoteImage,
-} from '../services/noteImages.js'
+} from '../services/notes/noteImages.js'
 import {
   createNoteFolder,
   deleteNoteFolder,
   listNoteFolders,
   updateNoteFolder,
-} from '../services/noteFolders.js'
-import { buildNotesTree, flattenFolderOptions } from '../utils/notesTree.js'
-import { parseNoteWikiHref, renderMarkdownToSafeHtml } from '../utils/renderMarkdown.js'
-import { mountNoteWidgets, NOTE_WIDGET_INDEX_ATTR, NOTE_WIDGET_PLACEHOLDER_CLASS } from '../utils/noteWidgets.js'
-import { scrollPreviewToEditorCursor } from '../utils/notesSplitSync.js'
-import NotesTreeNode from '../components/NotesTreeNode.vue'
-import AppConfirmDialog from '../components/AppConfirmDialog.vue'
-import NotesExtensionsModal from '../components/NotesExtensionsModal.vue'
-import NotesTemplateSettingsModal from '../components/NotesTemplateSettingsModal.vue'
-import NotesGraphView from '../components/NotesGraphView.vue'
-import NotesTabsBar from '../components/NotesTabsBar.vue'
+} from '../services/notes/noteFolders.js'
+import { buildNotesTree, flattenFolderOptions } from '../utils/notes/notesTree.js'
+import { parseNoteWikiHref, renderMarkdownToSafeHtml } from '../utils/common/renderMarkdown.js'
+import { mountNoteWidgets, NOTE_WIDGET_INDEX_ATTR, NOTE_WIDGET_PLACEHOLDER_CLASS } from '../utils/notes/noteWidgets.js'
+import { scrollPreviewToEditorCursor } from '../utils/notes/notesSplitSync.js'
+import NotesTreeNode from '../components/notes/NotesTreeNode.vue'
+import AppConfirmDialog from '../components/common/AppConfirmDialog.vue'
+import NotesExtensionsModal from '../components/notes/NotesExtensionsModal.vue'
+import NotesTemplateSettingsModal from '../components/notes/NotesTemplateSettingsModal.vue'
+import NotesGraphView from '../components/notes/NotesGraphView.vue'
+import NotesTabsBar from '../components/notes/NotesTabsBar.vue'
 import {
   isNotesExtensionEnabled,
   mergeNotesExtensionPrefs,
-} from '../services/notesExtensions.js'
-import { createDefaultNotesExtensionPrefs } from '../constants/notesExtensions.js'
-import { createDefaultNoteTemplatePrefs } from '../constants/noteTemplates.js'
-import { resolveTemplateContent } from '../services/noteTemplateExtension.js'
+} from '../services/notes/notesExtensions.js'
+import { createDefaultNotesExtensionPrefs } from '../constants/notes/notesExtensions.js'
+import { createDefaultNoteTemplatePrefs } from '../constants/notes/noteTemplates.js'
+import { resolveTemplateContent } from '../services/notes/noteTemplateExtension.js'
 import {
   loadVaultExtensionPrefs,
   loadVaultTemplatePrefs,
@@ -46,25 +46,25 @@ import {
   saveVaultTemplatePrefs,
   ensureVaultSettings,
   removeVaultSettings,
-} from '../services/noteVaultSettings.js'
+} from '../services/notes/noteVaultSettings.js'
 import {
   createNoteVault,
   deleteNoteVault,
   listNoteVaults,
   updateNoteVault,
-} from '../services/noteVaults.js'
-import { vaultThemeStyle, normalizeVaultIcon } from '../constants/noteVaults.js'
-import NotesVaultThemeModal from '../components/NotesVaultThemeModal.vue'
-import DictionaryEntryModal from '../components/DictionaryEntryModal.vue'
-import DictionaryLinkEntryModal from '../components/DictionaryLinkEntryModal.vue'
-import { listDictionaryEntries } from '../services/dictionaryEntries.js'
-import { listDictionaryAliases } from '../services/dictionaryAliases.js'
+} from '../services/notes/noteVaults.js'
+import { vaultThemeStyle, normalizeVaultIcon } from '../constants/notes/noteVaults.js'
+import NotesVaultThemeModal from '../components/notes/NotesVaultThemeModal.vue'
+import DictionaryEntryModal from '../components/dictionnaire/DictionaryEntryModal.vue'
+import DictionaryLinkEntryModal from '../components/dictionnaire/DictionaryLinkEntryModal.vue'
+import { listDictionaryEntries } from '../services/dictionnaire/dictionaryEntries.js'
+import { listDictionaryAliases } from '../services/dictionnaire/dictionaryAliases.js'
 import {
   annotateHtmlWithDictionary,
   buildDictionaryLookup,
   formatDictionaryTooltip,
   lookupDictionarySelection,
-} from '../utils/dictionaryLookup.js'
+} from '../utils/dictionnaire/dictionaryLookup.js'
 import {
   createDashboardExcerptId,
   derivePinnedNotePartTitle,
@@ -73,21 +73,21 @@ import {
   stripUnreferencedDashboardPinMarkers,
   wrapDashboardExcerptAtRange,
   wrapDashboardExcerptAtWidgetIndex,
-} from '../constants/dashboardPinnedNotes.js'
+} from '../constants/dashboard/dashboardPinnedNotes.js'
 import {
   NOTE_STATUS_OPTIONS,
   NOTE_STATUS_TODOS_EXTENSION_ID,
-} from '../constants/noteStatus.js'
+} from '../constants/notes/noteStatus.js'
 import {
   addDashboardPinnedNote,
   loadDashboardVisibility,
   saveDashboardVisibility,
-} from '../services/dashboardVisibility.js'
+} from '../services/dashboard/dashboardVisibility.js'
 import {
   applyNoteStatusChange,
   rolloverOverdueNoteTodos,
   syncLinkedTodoTitle,
-} from '../services/noteTodoSync.js'
+} from '../services/notes/noteTodoSync.js'
 
 const GRAPH_TAB = { type: 'graph', id: 'graph' }
 

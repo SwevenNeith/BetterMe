@@ -4,7 +4,7 @@ import {
   configureEmojiPickerElement,
   FRENCH_EMOJI_DATA,
   loadEmojiPickerElement,
-} from '../composables/useEmojiPickerElement.js'
+} from '../../composables/useEmojiPickerElement.js'
 
 const props = defineProps({
   modelValue: {

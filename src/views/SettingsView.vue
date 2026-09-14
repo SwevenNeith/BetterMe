@@ -8,7 +8,7 @@ import {
   saveDailyReminders,
   deleteDailyReminder,
   normalizeReminderTime,
-} from '../services/dailyReminders.js'
+} from '../services/common/dailyReminders.js'
 import {
   loadStandaloneScheduledGrouped,
   createOneTimeReminder,
@@ -17,56 +17,56 @@ import {
   getLocalTodayISO,
   formatScheduledAtLocal,
   getScheduledDisplayBody,
-} from '../services/scheduledReminders.js'
-import { formatDelaiAvantEvenement } from '../services/notifications.js'
+} from '../services/common/scheduledReminders.js'
+import { formatDelaiAvantEvenement } from '../services/common/notifications.js'
 import {
   notificationsActives,
   notificationsSupportees,
   activerNotificationsUtilisateur,
   testerNotificationPush,
   declencherCronNotifications,
-} from '../services/notifications.js'
-import { listCyclesPilule } from '../services/menstruationCycles.js'
-import { listCyclesNaturel } from '../services/menstruationCyclesNaturel.js'
-import { syncForecastForActiveCycleMode } from '../services/menstruationCycleModeSwitch.js'
+} from '../services/common/notifications.js'
+import { listCyclesPilule } from '../services/menstruation/menstruationCycles.js'
+import { listCyclesNaturel } from '../services/menstruation/menstruationCyclesNaturel.js'
+import { syncForecastForActiveCycleMode } from '../services/menstruation/menstruationCycleModeSwitch.js'
 import {
   createDefaultMenstruationNotifSettings,
   loadMenstruationNotifSettings,
   saveMenstruationNotifSettings,
   rescheduleMenstruationNotificationsByMode,
-} from '../services/menstruationNotifications.js'
-import { rescheduleMenstruationPatternNotifications } from '../services/menstruationPatternNotifications.js'
-import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
-import { listMenstruationPatterns } from '../services/menstruationPatterns.js'
-import { resolveMenstruationCycleMode } from '../services/menstruationCycleModePreference.js'
+} from '../services/menstruation/menstruationNotifications.js'
+import { rescheduleMenstruationPatternNotifications } from '../services/menstruation/menstruationPatternNotifications.js'
+import { TYPE_CYCLE } from '../services/menstruation/menstruationSymptoms.js'
+import { listMenstruationPatterns } from '../services/menstruation/menstruationPatterns.js'
+import { resolveMenstruationCycleMode } from '../services/menstruation/menstruationCycleModePreference.js'
 import {
   createReconfortMessage,
   updateReconfortMessage,
   deleteReconfortMessage,
   listReconfortMessages,
-} from '../services/reconfortMessages.js'
-import { sendRandomReconfortNotificationNow, syncReconfortLastSentFromSentNotifications } from '../services/reconfortNotifications.js'
-import SettingsVisibilityPanel from '../components/SettingsVisibilityPanel.vue'
-import { APP_PAGE_IDS, APP_MAIN_PAGES } from '../constants/appPages.js'
+} from '../services/dashboard/reconfortMessages.js'
+import { sendRandomReconfortNotificationNow, syncReconfortLastSentFromSentNotifications } from '../services/dashboard/reconfortNotifications.js'
+import SettingsVisibilityPanel from '../components/settings/SettingsVisibilityPanel.vue'
+import { APP_PAGE_IDS, APP_MAIN_PAGES } from '../constants/common/appPages.js'
 import {
   createDefaultPageVisibility,
   getPageDisplayLabel,
   loadPageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
-} from '../services/pageVisibility.js'
+} from '../services/settings/pageVisibility.js'
 import {
   createDefaultTodoPromesseReminderSettings,
   loadTodoPromesseReminderSettings,
   rescheduleTodoPromesseReminder,
   saveTodoPromesseReminderSettings,
-} from '../services/todoPromesseNotifications.js'
+} from '../services/todo/todoPromesseNotifications.js'
 import {
   createDefaultTodoPromesseLimitSettings,
   loadTodoPromesseLimitSettings,
   saveTodoPromesseLimitSettings,
-} from '../services/todoPromesseSettings.js'
+} from '../services/todo/todoPromesseSettings.js'
 const EmojiTextField = defineAsyncComponent(
-  () => import('../components/EmojiTextField.vue'),
+  () => import('../components/common/EmojiTextField.vue'),
 )
 
 const router = useRouter()
@@ -585,7 +585,7 @@ const saveReminderForm = async () => {
     }))
     reminderForm.value = null
 
-    const { realignAllDeviceLocalNotifications } = await import('../services/notificationRealign.js')
+    const { realignAllDeviceLocalNotifications } = await import('../services/common/notificationRealign.js')
     await realignAllDeviceLocalNotifications(supabase, userId.value)
 
     saveMessage.value = draft.id ? 'Rappel modifié.' : 'Rappel créé.'

@@ -1,6 +1,6 @@
 <script setup>
-import MenstruationCycleCalendar from './MenstruationCycleCalendar.vue'
-import MenstruationNaturalCycleCalendar from './MenstruationNaturalCycleCalendar.vue'
+import MenstruationCycleCalendar from '../menstruation/MenstruationCycleCalendar.vue'
+import MenstruationNaturalCycleCalendar from '../menstruation/MenstruationNaturalCycleCalendar.vue'
 import DashboardEmotionalCheckin from './DashboardEmotionalCheckin.vue'
 import DashboardComfortImages from './DashboardComfortImages.vue'
 import DashboardWordOfTheDay from './DashboardWordOfTheDay.vue'
@@ -11,8 +11,8 @@ import DashboardDailyNote from './DashboardDailyNote.vue'
 import DashboardPinnedNote from './DashboardPinnedNote.vue'
 import DashboardReadingInProgress from './DashboardReadingInProgress.vue'
 import DashboardActiveProjects from './DashboardActiveProjects.vue'
-import { DASHBOARD_WIDGET_IDS } from '../constants/dashboardWidgets.js'
-import { isPinnedNoteWidgetId } from '../constants/dashboardPinnedNotes.js'
+import { DASHBOARD_WIDGET_IDS } from '../../constants/dashboard/dashboardWidgets.js'
+import { isPinnedNoteWidgetId } from '../../constants/dashboard/dashboardPinnedNotes.js'
 
 defineProps({
   widgetId: {

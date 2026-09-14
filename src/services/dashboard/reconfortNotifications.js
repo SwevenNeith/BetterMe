@@ -1,11 +1,11 @@
 import { listReconfortMessages, markReconfortMessageSent } from './reconfortMessages.js'
-import { envoyerNotificationManuelle } from './notifications.js'
-import { addDaysToISODate, daysBetweenISO } from './menstruationCycles.js'
+import { envoyerNotificationManuelle } from '../common/notifications.js'
+import { addDaysToISODate, daysBetweenISO } from '../menstruation/menstruationCycles.js'
 import {
   SCHEDULED_KIND,
   dateTimeLocalToDate,
   getLocalTodayISO,
-} from './scheduledReminders.js'
+} from '../common/scheduledReminders.js'
 
 export const MAX_RECONFORT_NOTIFICATIONS_PER_DAY = 1
 /** Évite de renvoyer un message déjà utilisé sur les N derniers jours (si d'autres existent). */

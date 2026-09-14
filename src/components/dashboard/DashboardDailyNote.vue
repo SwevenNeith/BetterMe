@@ -1,15 +1,15 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
-import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { supabase } from '../../lib/supabase.js'
+import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
+import { usePageDisplayLabel } from '../../composables/usePageDisplayLabel.js'
 import {
   isPageVisible,
   loadPageVisibility,
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
-} from '../services/pageVisibility.js'
-import { getTodayDailyNote, saveTodayDailyNote } from '../services/dailyNotes.js'
+} from '../../services/settings/pageVisibility.js'
+import { getTodayDailyNote, saveTodayDailyNote } from '../../services/dashboard/dailyNotes.js'
 
 const AUTO_SAVE_DELAY_MS = 2000
 

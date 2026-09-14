@@ -1,6 +1,6 @@
 <script setup>
 import { computed, watch } from 'vue'
-import { useMenstruationAccordions } from '../composables/useMenstruationAccordions.js'
+import { useMenstruationAccordions } from '../../composables/useMenstruationAccordions.js'
 
 const props = defineProps({
   sections: {

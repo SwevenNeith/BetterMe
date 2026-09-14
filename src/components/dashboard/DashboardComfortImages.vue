@@ -1,13 +1,13 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { setFilePickerActive, setFileUploadInProgress } from '../composables/useAppTabResume.js'
+import { supabase } from '../../lib/supabase.js'
+import { setFilePickerActive, setFileUploadInProgress } from '../../composables/useAppTabResume.js'
 import {
   listComfortImagesWithUrls,
   uploadComfortImage,
   deleteComfortImage,
   shuffleComfortImages,
-} from '../services/comfortImages.js'
+} from '../../services/dashboard/comfortImages.js'
 
 const props = defineProps({
   userId: {

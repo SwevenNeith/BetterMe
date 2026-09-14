@@ -1,21 +1,21 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import ReadingBookFiche from '../components/ReadingBookFiche.vue'
-import ReadingBooksFilterPopover from '../components/ReadingBooksFilterPopover.vue'
-import ReadingPickModal from '../components/ReadingPickModal.vue'
+import ReadingBookFiche from '../components/lecture/ReadingBookFiche.vue'
+import ReadingBooksFilterPopover from '../components/lecture/ReadingBooksFilterPopover.vue'
+import ReadingPickModal from '../components/lecture/ReadingPickModal.vue'
 import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { setFilePickerActive, setFileUploadInProgress } from '../composables/useAppTabResume.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
-import { emptyBookForm } from '../utils/readingBookForm.js'
-import { createReadingBook, listReadingBooksWithCovers } from '../services/readingBooks.js'
+import { emptyBookForm } from '../utils/lecture/readingBookForm.js'
+import { createReadingBook, listReadingBooksWithCovers } from '../services/lecture/readingBooks.js'
 import {
   listReadingCollections,
   READING_COLLECTION_EN_COURS,
-} from '../services/readingCollections.js'
-import { applyReadingBookFilters, formatReadingFilterLabel } from '../utils/readingBookFilters.js'
+} from '../services/lecture/readingCollections.js'
+import { applyReadingBookFilters, formatReadingFilterLabel } from '../utils/lecture/readingBookFilters.js'
 
 /** Nombre de lignes toujours remplies dans la grille bibliothèque. */
 const GRID_ROWS = 5

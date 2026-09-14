@@ -2,7 +2,7 @@ import { getBookExtraTags } from './readingBookForm.js'
 import {
   READING_COLLECTION_EN_COURS,
   READING_COLLECTION_TERMINE,
-} from '../services/readingCollections.js'
+} from '../../services/lecture/readingCollections.js'
 
 const BLOCKED_COLLECTIONS = new Set([
   READING_COLLECTION_EN_COURS.toLowerCase(),

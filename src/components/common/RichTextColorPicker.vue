@@ -6,7 +6,7 @@ import {
   TEXT_COLOR_PRESETS,
   loadRecentTextColors,
   normalizeHex,
-} from '../utils/richNoteTextColors.js'
+} from '../../utils/common/richNoteTextColors.js'
 
 const props = defineProps({
   currentColor: {

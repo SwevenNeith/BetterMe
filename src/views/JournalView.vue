@@ -2,11 +2,11 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
-import { listJournalEntries } from '../services/journalEntries.js'
-import { createJournalPrompt } from '../services/journalPrompts.js'
+import { listJournalEntries } from '../services/journal/journalEntries.js'
+import { createJournalPrompt } from '../services/journal/journalPrompts.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.JOURNAL, undefined, { setDocumentTitle: true })
 

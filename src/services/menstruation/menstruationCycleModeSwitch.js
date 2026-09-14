@@ -1,4 +1,4 @@
-import { getLocalTodayISO } from './scheduledReminders.js'
+import { getLocalTodayISO } from '../common/scheduledReminders.js'
 import { getCurrentCycle } from './menstruationSymptomEnrichment.js'
 import { TYPE_CYCLE } from './menstruationSymptoms.js'
 import {

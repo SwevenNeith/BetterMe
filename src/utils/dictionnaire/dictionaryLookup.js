@@ -1,4 +1,4 @@
-import { dictionaryWordTypeAbbr } from '../constants/dictionaryWordTypes.js'
+import { dictionaryWordTypeAbbr } from '../../constants/dictionnaire/dictionaryWordTypes.js'
 
 /** @typedef {{ entryId: string, word: string, definition: string, wordType: string, surface: string, isAlias: boolean }} DictionaryLookupHit */
 

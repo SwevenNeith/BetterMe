@@ -1,12 +1,12 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { hasQuantiteTracking, PROJECT_RESET_PERIODE } from '../constants/projectProgress.js'
-import { getCurrentPeriodCount } from '../services/projectProgress.js'
-import { buildHistoryEntries } from '../utils/projectProgressPeriods.js'
+import { hasQuantiteTracking, PROJECT_RESET_PERIODE } from '../../constants/projets/projectProgress.js'
+import { getCurrentPeriodCount } from '../../services/projets/projectProgress.js'
+import { buildHistoryEntries } from '../../utils/projets/projectProgressPeriods.js'
 import {
   formatHabitLinkedCountLabel,
   getHabitLinkedCibleForRange,
-} from '../utils/habitProjectLink.js'
+} from '../../utils/habit/habitProjectLink.js'
 
 const HISTORY_PAGE_SIZE = 10
 const FILTER_YEAR_SPAN = 6

@@ -4,7 +4,7 @@ import {
   HABIT_STATUS,
   HABIT_VALUE_TYPE,
   normalizeHabitValueType,
-} from '../constants/habitOptions.js'
+} from '../../constants/habit/habitOptions.js'
 
 const TABLE = 'habits'
 

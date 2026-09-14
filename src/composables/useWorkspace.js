@@ -6,7 +6,7 @@ import {
   getWorkspaceLayout,
   getWorkspaceSplitters,
   layoutFitsPaneCount,
-} from '../constants/workspacePages.js'
+} from '../constants/workspace/workspacePages.js'
 
 const STORAGE_KEY = 'betterme-workspace-v2'
 

@@ -1,4 +1,4 @@
-import { TODO_FREQUENCY } from '../constants/todoOptions.js'
+import { TODO_FREQUENCY } from '../../constants/todo/todoOptions.js'
 import {
   addDaysISO,
   assertPromesseLimits,
@@ -8,7 +8,7 @@ import {
   hasTodoQuantiteCible,
   isTodoCompletedOnDate,
   normalizeDateISO,
-} from '../utils/todoCalendar.js'
+} from '../../utils/todo/todoCalendar.js'
 import { loadTodoPromesseLimits } from './todoPromesseSettings.js'
 
 const TABLE = 'todo_items'

@@ -8,7 +8,7 @@ import {
   normalizeNoteHighlightsInHtml,
   rememberRecentTextColor,
   rgbToHex,
-} from '../utils/richNoteTextColors.js'
+} from '../../utils/common/richNoteTextColors.js'
 
 const INLINE_FORMAT_CONFIG = {
   bold: { cmd: 'bold', tags: ['B', 'STRONG'] },

@@ -3,7 +3,7 @@ const BUCKET = 'reading-covers'
 const SIGNED_URL_TTL_SEC = 3600
 const MAX_FILE_BYTES = 8 * 1024 * 1024
 
-import { buildTagsFromGenreAndExtra, formToBookPayload } from '../utils/readingBookForm.js'
+import { buildTagsFromGenreAndExtra, formToBookPayload } from '../../utils/lecture/readingBookForm.js'
 import { ensureReadingCollection } from './readingCollections.js'
 
 const ALLOWED_MIME = new Set([

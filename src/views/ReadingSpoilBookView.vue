@@ -1,10 +1,10 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import ReadingSpoilBook from '../components/ReadingSpoilBook.vue'
+import ReadingSpoilBook from '../components/lecture/ReadingSpoilBook.vue'
 import { supabase } from '../lib/supabase.js'
-import { getReadingBookWithCover } from '../services/readingBooks.js'
-import { deleteSpoilChapter, listSpoilChapters } from '../services/readingSpoilChapters.js'
+import { getReadingBookWithCover } from '../services/lecture/readingBooks.js'
+import { deleteSpoilChapter, listSpoilChapters } from '../services/lecture/readingSpoilChapters.js'
 
 const route = useRoute()
 const router = useRouter()

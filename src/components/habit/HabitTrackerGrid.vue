@@ -1,9 +1,9 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { getLocalTodayISO } from '../services/scheduledReminders.js'
-import { HABIT_VALUE_TYPE, normalizeHabitValueType } from '../constants/habitOptions.js'
-import { listHabitLogsForRange } from '../services/habitLogs.js'
+import { supabase } from '../../lib/supabase.js'
+import { getLocalTodayISO } from '../../services/common/scheduledReminders.js'
+import { HABIT_VALUE_TYPE, normalizeHabitValueType } from '../../constants/habit/habitOptions.js'
+import { listHabitLogsForRange } from '../../services/habit/habitLogs.js'
 import {
   HABIT_VIEW_MODE,
   addDaysISO,
@@ -17,14 +17,14 @@ import {
   isHabitScheduledOnDate,
   normalizeDateISO,
   parseISODate,
-} from '../utils/habitCalendar.js'
+} from '../../utils/habit/habitCalendar.js'
 import {
   formatStatNumber,
   getDayIntensity,
   getEffectiveValeur,
   getIntensityTier,
   isHabitDayDone,
-} from '../utils/habitStats.js'
+} from '../../utils/habit/habitStats.js'
 
 const props = defineProps({
   habit: {

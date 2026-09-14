@@ -1,10 +1,10 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import JournalEntryBook from '../components/JournalEntryBook.vue'
-import JournalPromptPickerModal from '../components/JournalPromptPickerModal.vue'
-import RichTextNoteEditor from '../components/RichTextNoteEditor.vue'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+import JournalEntryBook from '../components/journal/JournalEntryBook.vue'
+import JournalPromptPickerModal from '../components/journal/JournalPromptPickerModal.vue'
+import RichTextNoteEditor from '../components/common/RichTextNoteEditor.vue'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import { supabase } from '../lib/supabase.js'
@@ -14,11 +14,11 @@ import {
   getJournalEntry,
   listJournalEntries,
   updateJournalEntry,
-} from '../services/journalEntries.js'
+} from '../services/journal/journalEntries.js'
 import {
   getRandomPendingJournalPrompt,
   listJournalPromptsWithUsage,
-} from '../services/journalPrompts.js'
+} from '../services/journal/journalPrompts.js'
 
 usePageDisplayLabel(APP_PAGE_IDS.JOURNAL, undefined, { setDocumentTitle: true })
 

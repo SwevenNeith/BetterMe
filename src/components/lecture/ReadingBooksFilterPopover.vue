@@ -8,7 +8,7 @@ import {
   getOperatorsForField,
   resetFilterForFieldChange,
   resetFilterForOperatorChange,
-} from '../utils/readingBookFilters.js'
+} from '../../utils/lecture/readingBookFilters.js'
 
 const props = defineProps({
   open: {

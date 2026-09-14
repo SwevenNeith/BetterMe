@@ -1,5 +1,5 @@
-import { TYPE_CYCLE } from './menstruationSymptoms.js'
-import { computeJourRelatif, getCycleForDate } from './menstruationSymptomEnrichment.js'
+import { TYPE_CYCLE } from '../menstruation/menstruationSymptoms.js'
+import { computeJourRelatif, getCycleForDate } from '../menstruation/menstruationSymptomEnrichment.js'
 
 const TABLE = 'emotion_logs'
 

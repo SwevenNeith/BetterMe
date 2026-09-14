@@ -1,5 +1,5 @@
 import { marked } from 'marked'
-import { extractNoteWidgets } from './noteWidgets.js'
+import { extractNoteWidgets } from '../notes/noteWidgets.js'
 
 marked.setOptions({
   gfm: true,

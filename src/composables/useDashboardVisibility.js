@@ -6,7 +6,7 @@ import {
   getDashboardLayout,
   DASHBOARD_VISIBILITY_UPDATED_EVENT,
   mergeDashboardVisibility,
-} from '../services/dashboardVisibility.js'
+} from '../services/dashboard/dashboardVisibility.js'
 
 /**
  * Visibilité des blocs du Dashboard (Réglages → Visibilité → Dashboard).

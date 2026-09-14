@@ -1,17 +1,17 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { getLocalTodayISO } from '../services/scheduledReminders.js'
-import { determinePhaseNaturel, COL_NATUREL, getReglesPeriodEndNaturel } from '../services/menstruationCyclesNaturel.js'
-import { addDaysToISODate } from '../services/menstruationCycles.js'
-import { getCurrentCycle, getCycleForDate } from '../services/menstruationSymptomEnrichment.js'
-import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
+import { getLocalTodayISO } from '../../services/common/scheduledReminders.js'
+import { determinePhaseNaturel, COL_NATUREL, getReglesPeriodEndNaturel } from '../../services/menstruation/menstruationCyclesNaturel.js'
+import { addDaysToISODate } from '../../services/menstruation/menstruationCycles.js'
+import { getCurrentCycle, getCycleForDate } from '../../services/menstruation/menstruationSymptomEnrichment.js'
+import { TYPE_CYCLE } from '../../services/menstruation/menstruationSymptoms.js'
 import {
   buildCalendarDataFromNaturalCycles,
   buildDayIndex,
   getMonthGrid,
   legendForNatural,
   legendSwatchClassesNatural,
-} from '../services/menstruationCalendarNaturel.js'
+} from '../../services/menstruation/menstruationCalendarNaturel.js'
 
 const props = defineProps({
   cycles: {

@@ -1,8 +1,8 @@
-import { addMinutesToTimeString } from '../services/durationUtils.js'
-import { TODO_FREQUENCY } from '../constants/todoOptions.js'
+import { addMinutesToTimeString } from '../../services/common/durationUtils.js'
+import { TODO_FREQUENCY } from '../../constants/todo/todoOptions.js'
 import { getWeekStartISO } from './todoCalendar.js'
 import { clampPlanningStartDate } from './todoPlanningDates.js'
-import { getLocalTodayISO } from '../services/scheduledReminders.js'
+import { getLocalTodayISO } from '../../services/common/scheduledReminders.js'
 
 export function todoTimeToInput(value) {
   if (value == null || value === '') return ''

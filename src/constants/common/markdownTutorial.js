@@ -1,4 +1,4 @@
-import { NOTE_TEMPLATE_VARIABLES } from './noteTemplates.js'
+import { NOTE_TEMPLATE_VARIABLES } from '../notes/noteTemplates.js'
 
 /** Clé système du tutoriel Markdown (une note max par utilisateur). */
 export const MARKDOWN_TUTORIAL_SYSTEM_KEY = 'markdown-tutorial'

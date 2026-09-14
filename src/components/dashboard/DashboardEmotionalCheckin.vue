@@ -3,7 +3,7 @@ import {
   CHECKIN_REASSURING_NOTE,
   CHECKIN_SENTIMENTS,
   useDashboardEmotionalCheckin,
-} from '../composables/useDashboardEmotionalCheckin.js'
+} from '../../composables/useDashboardEmotionalCheckin.js'
 import { computed } from 'vue'
 
 const props = defineProps({

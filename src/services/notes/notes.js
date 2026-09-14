@@ -3,8 +3,8 @@ import {
   MARKDOWN_TUTORIAL_SYSTEM_KEY,
   MARKDOWN_TUTORIAL_TITLE,
   needsMarkdownTutorialUpgrade,
-} from '../constants/markdownTutorial.js'
-import { normalizeNoteStatus } from '../constants/noteStatus.js'
+} from '../../constants/common/markdownTutorial.js'
+import { normalizeNoteStatus } from '../../constants/notes/noteStatus.js'
 
 const TABLE = 'notes'
 const SEED_TABLE = 'notes_seed_state'

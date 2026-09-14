@@ -7,9 +7,9 @@ import {
   getAllNaturelSymptomDefs,
   NATUREL_PHASE_LABELS,
   NATUREL_PHASE_EMOJI,
-} from '../services/menstruationSymptomsNaturel.js'
-import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
-import { useMenstruationSymptomPersistence } from '../composables/useMenstruationSymptomPersistence.js'
+} from '../../services/menstruation/menstruationSymptomsNaturel.js'
+import { TYPE_CYCLE } from '../../services/menstruation/menstruationSymptoms.js'
+import { useMenstruationSymptomPersistence } from '../../composables/useMenstruationSymptomPersistence.js'
 import MenstruationSymptomSections from './MenstruationSymptomSections.vue'
 
 const props = defineProps({

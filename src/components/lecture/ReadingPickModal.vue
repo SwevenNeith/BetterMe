@@ -1,10 +1,10 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { accumulateSeenTags, pickNextReadingSuggestion } from '../utils/readingPick.js'
-import { bookToEditForm } from '../utils/readingBookForm.js'
-import { updateReadingBook } from '../services/readingBooks.js'
-import { READING_COLLECTION_EN_COURS } from '../services/readingCollections.js'
-import { supabase } from '../lib/supabase.js'
+import { accumulateSeenTags, pickNextReadingSuggestion } from '../../utils/lecture/readingPick.js'
+import { bookToEditForm } from '../../utils/lecture/readingBookForm.js'
+import { updateReadingBook } from '../../services/lecture/readingBooks.js'
+import { READING_COLLECTION_EN_COURS } from '../../services/lecture/readingCollections.js'
+import { supabase } from '../../lib/supabase.js'
 
 const props = defineProps({
   open: {

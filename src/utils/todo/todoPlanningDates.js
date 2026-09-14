@@ -1,11 +1,11 @@
-import { TODO_FREQUENCY } from '../constants/todoOptions.js'
+import { TODO_FREQUENCY } from '../../constants/todo/todoOptions.js'
 import {
   addDaysISO,
   iterateISODateRange,
   normalizeDateISO,
-} from './habitCalendar.js'
+} from '../habit/habitCalendar.js'
 import { getWeekStartISO, isTodoDueOnDate } from './todoCalendar.js'
-import { getLocalTodayISO } from '../services/scheduledReminders.js'
+import { getLocalTodayISO } from '../../services/common/scheduledReminders.js'
 
 export const DEFAULT_PLANNING_HORIZON_DAYS = 366
 export const MAX_PLANNING_OCCURRENCES = 400

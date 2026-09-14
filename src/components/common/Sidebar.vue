@@ -2,15 +2,15 @@
 <script setup>
 import { nextTick, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { supabase } from '../../lib/supabase.js'
+import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
 import {
   loadPageVisibility,
   getPageDisplayLabel,
   isPageVisible,
   PAGE_VISIBILITY_UPDATED_EVENT,
   mergePageVisibility,
-} from '../services/pageVisibility.js'
+} from '../../services/settings/pageVisibility.js'
 
 const router = useRouter()
 const route = useRoute()

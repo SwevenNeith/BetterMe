@@ -1,10 +1,10 @@
 <script setup>
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { DICTIONARY_WORD_TYPES } from '../constants/dictionaryWordTypes.js'
-import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
-import { createDictionaryEntry, updateDictionaryEntry } from '../services/dictionaryEntries.js'
-import { emptyDictionaryForm, entryToForm } from '../utils/dictionary.js'
+import { supabase } from '../../lib/supabase.js'
+import { DICTIONARY_WORD_TYPES } from '../../constants/dictionnaire/dictionaryWordTypes.js'
+import { formDraftKey, useFormDraft } from '../../composables/useFormDraft.js'
+import { createDictionaryEntry, updateDictionaryEntry } from '../../services/dictionnaire/dictionaryEntries.js'
+import { emptyDictionaryForm, entryToForm } from '../../utils/dictionnaire/dictionary.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },

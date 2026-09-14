@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { HABIT_FREQUENCY_LABELS } from '../constants/habitOptions.js'
+import { HABIT_FREQUENCY_LABELS } from '../../constants/habit/habitOptions.js'
 
 const props = defineProps({
   habits: {

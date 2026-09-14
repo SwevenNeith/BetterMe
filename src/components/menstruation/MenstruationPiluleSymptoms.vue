@@ -7,9 +7,9 @@ import {
   getOrderedPilulePeriods,
   getAllPiluleSymptomDefs,
   PILULE_SYMPTOM_PERIOD_ACCORDION,
-} from '../services/menstruationSymptomsPilule.js'
-import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
-import { useMenstruationSymptomPersistence } from '../composables/useMenstruationSymptomPersistence.js'
+} from '../../services/menstruation/menstruationSymptomsPilule.js'
+import { TYPE_CYCLE } from '../../services/menstruation/menstruationSymptoms.js'
+import { useMenstruationSymptomPersistence } from '../../composables/useMenstruationSymptomPersistence.js'
 import MenstruationSymptomSections from './MenstruationSymptomSections.vue'
 
 const props = defineProps({

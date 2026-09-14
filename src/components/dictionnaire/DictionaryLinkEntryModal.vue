@@ -1,9 +1,9 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { dictionaryWordTypeAbbr } from '../constants/dictionaryWordTypes.js'
-import { createDictionaryAlias } from '../services/dictionaryAliases.js'
-import { compareDictionaryWords } from '../utils/dictionary.js'
+import { supabase } from '../../lib/supabase.js'
+import { dictionaryWordTypeAbbr } from '../../constants/dictionnaire/dictionaryWordTypes.js'
+import { createDictionaryAlias } from '../../services/dictionnaire/dictionaryAliases.js'
+import { compareDictionaryWords } from '../../utils/dictionnaire/dictionary.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },

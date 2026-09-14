@@ -1,12 +1,12 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { supabase } from '../lib/supabase.js'
-import { APP_MAIN_PAGES } from '../constants/appPages.js'
+import { APP_MAIN_PAGES } from '../constants/common/appPages.js'
 import {
   loadPageVisibility,
   getPageDisplayLabel,
   PAGE_VISIBILITY_UPDATED_EVENT,
   mergePageVisibility,
-} from '../services/pageVisibility.js'
+} from '../services/settings/pageVisibility.js'
 
 /**
  * Libellé affiché d'une page (personnalisable dans Réglages → Visibilité).

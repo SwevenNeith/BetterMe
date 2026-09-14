@@ -1,12 +1,12 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { supabase } from '../lib/supabase.js'
+import { supabase } from '../../lib/supabase.js'
 import {
   notificationsSupportees,
   obtenirEtatNotifications,
   activerNotificationsUtilisateur,
   synchroniserNotificationsAccordees,
-} from '../services/notifications.js'
+} from '../../services/common/notifications.js'
 
 const visible = ref(false)
 const denied = ref(false)

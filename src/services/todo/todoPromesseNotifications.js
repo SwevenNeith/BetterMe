@@ -1,8 +1,8 @@
-import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS, APP_MAIN_PAGES } from '../constants/appPages.js'
-import { ensureUserSettings } from './menstruationNotifications.js'
-import { getPageDisplayLabel, loadPageVisibility } from './pageVisibility.js'
-import { normalizeReminderTime } from './dailyReminders.js'
+import { supabase } from '../../lib/supabase.js'
+import { APP_PAGE_IDS, APP_MAIN_PAGES } from '../../constants/common/appPages.js'
+import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
+import { getPageDisplayLabel, loadPageVisibility } from '../settings/pageVisibility.js'
+import { normalizeReminderTime } from '../common/dailyReminders.js'
 import { listTodoItems } from './todoItems.js'
 import {
   SCHEDULED_KIND,
@@ -10,8 +10,8 @@ import {
   deletePendingByKinds,
   getLocalTodayISO,
   insertPendingNotifications,
-} from './scheduledReminders.js'
-import { addDaysISO, countDayScopedPromessesForDate } from '../utils/todoCalendar.js'
+} from '../common/scheduledReminders.js'
+import { addDaysISO, countDayScopedPromessesForDate } from '../../utils/todo/todoCalendar.js'
 
 const SETTINGS_TABLE = 'settings'
 const TODO_PROMESSE_BODY =

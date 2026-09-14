@@ -4,7 +4,7 @@ import {
   MAX_TODO_PROMESSES_PER_WEEK,
   getTodoPromesseDayLimitMessage,
   getTodoPromesseWeekLimitMessage,
-} from '../constants/todoOptions.js'
+} from '../../constants/todo/todoOptions.js'
 import {
   addDaysISO,
   getIsoWeekdayFromDate,
@@ -13,7 +13,7 @@ import {
   normalizeDateISO,
   parseISODate,
   toISODate,
-} from './habitCalendar.js'
+} from '../habit/habitCalendar.js'
 
 export const TODO_VIEW_MODE = {
   DAY: 'day',

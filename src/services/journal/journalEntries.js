@@ -1,4 +1,4 @@
-import { sanitizeRichNoteHtml } from '../utils/sanitizeHtml.js'
+import { sanitizeRichNoteHtml } from '../../utils/common/sanitizeHtml.js'
 
 const TABLE = 'journal_entries'
 const ENTRY_SELECT = 'id, user_id, prompt_id, title, content_html, created_at, updated_at'

@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
-import { TODO_FREQUENCY, getTodoItemColorClass } from '../constants/todoOptions.js'
-import '../styles/todo-frequency.css'
+import { TODO_FREQUENCY, getTodoItemColorClass } from '../../constants/todo/todoOptions.js'
+import '../../styles/todo-frequency.css'
 
 const props = defineProps({
   item: {

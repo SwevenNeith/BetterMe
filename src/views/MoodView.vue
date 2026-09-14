@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
-import MoodScale from '../components/MoodScale.vue'
-import MoodDetailsModal from '../components/MoodDetailsModal.vue'
+import MoodScale from '../components/mood/MoodScale.vue'
+import MoodDetailsModal from '../components/mood/MoodDetailsModal.vue'
 import { useMoodSelection } from '../composables/useMoodSelection.js'
 
 const { selectedMood, resetMood } = useMoodSelection()

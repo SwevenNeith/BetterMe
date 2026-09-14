@@ -1,4 +1,4 @@
-import { isDictionaryWordType } from '../constants/dictionaryWordTypes.js'
+import { isDictionaryWordType } from '../../constants/dictionnaire/dictionaryWordTypes.js'
 
 export const DICTIONARY_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']
 export const DICTIONARY_INDEX_KEYS = [...DICTIONARY_LETTERS, '#']

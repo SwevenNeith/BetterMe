@@ -1,5 +1,5 @@
 import { COL_NATUREL, determinePhaseNaturel } from './menstruationCyclesNaturel.js'
-import { getLocalTodayISO } from './scheduledReminders.js'
+import { getLocalTodayISO } from '../common/scheduledReminders.js'
 import { getCycleForDate } from './menstruationSymptomEnrichment.js'
 import { TYPE_CYCLE } from './menstruationSymptoms.js'
 

@@ -4,7 +4,7 @@ import {
   getReglesPeriodEnd,
   applySpmDatesEstimees,
 } from './menstruationCycles.js'
-import { getLocalTodayISO } from './scheduledReminders.js'
+import { getLocalTodayISO } from '../common/scheduledReminders.js'
 
 export const PILULE_SYMPTOM_PERIOD = {
   ACTIVE: 'active',

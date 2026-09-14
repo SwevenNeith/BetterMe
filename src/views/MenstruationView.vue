@@ -3,51 +3,51 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
 import { useMenstruationCacheStore } from '../stores/menstruationCache.js'
-import { withTimeout } from '../utils/asyncTimeout.js'
+import { withTimeout } from '../utils/common/asyncTimeout.js'
 import { supabase } from '../lib/supabase.js'
-import { getLocalTodayISO } from '../services/scheduledReminders.js'
+import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
-import MenstruationCycleCalendar from '../components/MenstruationCycleCalendar.vue'
-import MenstruationNaturalCycleCalendar from '../components/MenstruationNaturalCycleCalendar.vue'
-import MenstruationPiluleSymptoms from '../components/MenstruationPiluleSymptoms.vue'
-import MenstruationNaturelSymptoms from '../components/MenstruationNaturelSymptoms.vue'
+import MenstruationCycleCalendar from '../components/menstruation/MenstruationCycleCalendar.vue'
+import MenstruationNaturalCycleCalendar from '../components/menstruation/MenstruationNaturalCycleCalendar.vue'
+import MenstruationPiluleSymptoms from '../components/menstruation/MenstruationPiluleSymptoms.vue'
+import MenstruationNaturelSymptoms from '../components/menstruation/MenstruationNaturelSymptoms.vue'
 import {
   countMenstruationCyclesPilule,
   createEmptyOnboardingForm,
   createMenstruationCyclePilule,
   listCyclesPilule,
   saveMenstruationRulesDates,
-} from '../services/menstruationCycles.js'
+} from '../services/menstruation/menstruationCycles.js'
 import {
   countMenstruationCyclesNaturel,
   createMenstruationCycleNaturel,
   listCyclesNaturel,
   saveMenstruationRulesDatesNaturel,
-} from '../services/menstruationCyclesNaturel.js'
+} from '../services/menstruation/menstruationCyclesNaturel.js'
 import {
   switchMenstruationCycleMode,
   syncForecastForActiveCycleMode,
-} from '../services/menstruationCycleModeSwitch.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+} from '../services/menstruation/menstruationCycleModeSwitch.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import {
   createDefaultMenstruationNotifSettings,
   loadMenstruationNotifSettings,
   rescheduleMenstruationNotificationsByMode,
-} from '../services/menstruationNotifications.js'
-import { rescheduleMenstruationPatternNotifications } from '../services/menstruationPatternNotifications.js'
-import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
+} from '../services/menstruation/menstruationNotifications.js'
+import { rescheduleMenstruationPatternNotifications } from '../services/menstruation/menstruationPatternNotifications.js'
+import { TYPE_CYCLE } from '../services/menstruation/menstruationSymptoms.js'
 import {
   listMenstruationPatterns,
   maybeRecalculateMenstruationPatterns,
   recalculateMenstruationPatterns,
-} from '../services/menstruationPatterns.js'
-import MenstruationPatternsPanel from '../components/MenstruationPatternsPanel.vue'
+} from '../services/menstruation/menstruationPatterns.js'
+import MenstruationPatternsPanel from '../components/menstruation/MenstruationPatternsPanel.vue'
 import { useMenstruationAccordions } from '../composables/useMenstruationAccordions.js'
 import {
   resolveMenstruationCycleMode,
   saveMenstruationCycleModePreference,
-} from '../services/menstruationCycleModePreference.js'
+} from '../services/menstruation/menstruationCycleModePreference.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.MENSTRUATION, undefined, {
   setDocumentTitle: true,

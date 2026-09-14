@@ -12,30 +12,30 @@ import {
   planifierNotificationFinTimer,
   formatDelaiAvantEvenement,
   supprimerRappelsEvenement,
-} from '../services/notifications.js'
-import { getDurationMinutes, addMinutesToTimeString } from '../services/durationUtils.js'
+} from '../services/common/notifications.js'
+import { getDurationMinutes, addMinutesToTimeString } from '../services/common/durationUtils.js'
 import {
   loadTimetableMeta,
   loadUserCategories,
   normalizeCategory,
-} from '../services/timetableCategories.js'
-import { createTodoItem, listTodoItems, deleteTodoItem } from '../services/todoItems.js'
-import { loadTodoPromesseLimits } from '../services/todoPromesseSettings.js'
-import { TODO_FREQUENCY } from '../constants/todoOptions.js'
-import { assertPromesseLimits } from '../utils/todoCalendar.js'
-import TodoLinkedSubForm from '../components/TodoLinkedSubForm.vue'
+} from '../services/timetable/timetableCategories.js'
+import { createTodoItem, listTodoItems, deleteTodoItem } from '../services/todo/todoItems.js'
+import { loadTodoPromesseLimits } from '../services/todo/todoPromesseSettings.js'
+import { TODO_FREQUENCY } from '../constants/todo/todoOptions.js'
+import { assertPromesseLimits } from '../utils/todo/todoCalendar.js'
+import TodoLinkedSubForm from '../components/todo/TodoLinkedSubForm.vue'
 import {
   buildTodoPayloadFromTimetable,
   createDefaultTodoLinkedForm,
-} from '../utils/todoTimetableBridge.js'
+} from '../utils/todo/todoTimetableBridge.js'
 import {
   linkTodoAndTimetable,
   deleteTimetableEvent,
   deleteAllTimetableEventsForTodo,
   createTimetableEventsForTodo,
-} from '../services/todoTimetableLink.js'
-import { isRecurringTodoFrequency } from '../utils/todoPlanningDates.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+} from '../services/todo/todoTimetableLink.js'
+import { isRecurringTodoFrequency } from '../utils/todo/todoPlanningDates.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.TIMETABLE, undefined, {

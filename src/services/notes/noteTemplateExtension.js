@@ -2,8 +2,8 @@ import {
   NOTE_TEMPLATE_RULE_TYPES,
   NOTE_TEMPLATE_VARIABLES,
   createDefaultNoteTemplatePrefs,
-} from '../constants/noteTemplates.js'
-import { ensureUserSettings } from './menstruationNotifications.js'
+} from '../../constants/notes/noteTemplates.js'
+import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
 
 const SETTINGS_TABLE = 'settings'
 const COLUMN = 'notes_template_prefs'
@@ -20,7 +20,7 @@ function isMissingColumnError(error) {
 
 /**
  * @param {unknown} raw
- * @returns {import('../constants/noteTemplates.js').NoteTemplatePrefs}
+ * @returns {import('../../constants/notes/noteTemplates.js').NoteTemplatePrefs}
  */
 export function mergeNoteTemplatePrefs(raw) {
   const defaults = createDefaultNoteTemplatePrefs()
@@ -44,12 +44,12 @@ export function mergeNoteTemplatePrefs(raw) {
 
 /**
  * @param {unknown} rules
- * @returns {import('../constants/noteTemplates.js').NoteTemplateRule[]}
+ * @returns {import('../../constants/notes/noteTemplates.js').NoteTemplateRule[]}
  */
 function normalizeTemplateRules(rules) {
   if (!Array.isArray(rules)) return []
 
-  /** @type {import('../constants/noteTemplates.js').NoteTemplateRule[]} */
+  /** @type {import('../../constants/notes/noteTemplates.js').NoteTemplateRule[]} */
   const normalized = []
 
   for (const raw of rules) {
@@ -116,7 +116,7 @@ export async function loadNoteTemplatePrefs(supabase, userId) {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
- * @param {import('../constants/noteTemplates.js').NoteTemplatePrefs} prefs
+ * @param {import('../../constants/notes/noteTemplates.js').NoteTemplatePrefs} prefs
  */
 export async function saveNoteTemplatePrefs(supabase, userId, prefs) {
   const payload = mergeNoteTemplatePrefs(prefs)
@@ -245,7 +245,7 @@ export function applyTemplateVariables(content, vars = {}) {
 
 /**
  * Détermine le contenu initial d’une nouvelle note selon les règles configurées.
- * @param {import('../constants/noteTemplates.js').NoteTemplatePrefs} prefs
+ * @param {import('../../constants/notes/noteTemplates.js').NoteTemplatePrefs} prefs
  * @param {Array<{ id: string, folder_id?: string | null, content_md?: string, contentMd?: string }>} notes
  * @param {{ folderId?: string | null, title?: string }} context
  */
@@ -286,7 +286,7 @@ export function resolveTemplateContent(prefs, notes, context = {}) {
 }
 
 /**
- * @param {import('../constants/noteTemplates.js').NoteTemplateRuleType} type
+ * @param {import('../../constants/notes/noteTemplates.js').NoteTemplateRuleType} type
  */
 export function labelForTemplateRuleType(type) {
   return NOTE_TEMPLATE_RULE_TYPES.find((item) => item.type === type)?.label ?? type

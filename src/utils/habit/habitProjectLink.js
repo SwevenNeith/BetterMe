@@ -1,6 +1,6 @@
 import { getEffectiveValeur } from './habitStats.js'
 import { addDaysISO, iterateISODateRange, normalizeDateISO, toISODate } from './habitCalendar.js'
-import { getPeriodBoundsForDate } from './projectProgressPeriods.js'
+import { getPeriodBoundsForDate } from '../projets/projectProgressPeriods.js'
 
 /** Objectif projet = 80 % de l’habitude sur la période. */
 export const HABIT_PROJECT_TARGET_RATIO = 0.8

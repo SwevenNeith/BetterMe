@@ -1,4 +1,4 @@
-import { READING_COLLECTION_EN_COURS } from '../services/readingCollections.js'
+import { READING_COLLECTION_EN_COURS } from '../../services/lecture/readingCollections.js'
 
 const READING_HABIT_KEYWORDS = [
   'lecture',

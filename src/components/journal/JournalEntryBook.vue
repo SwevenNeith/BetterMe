@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import RichSpoilHtmlContent from './RichSpoilHtmlContent.vue'
+import RichSpoilHtmlContent from '../common/RichSpoilHtmlContent.vue'
 
 const COLUMN_GAP_PX = 32
 

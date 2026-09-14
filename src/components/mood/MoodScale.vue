@@ -1,5 +1,5 @@
 <script setup>
-import { useMoodSelection } from '../composables/useMoodSelection.js'
+import { useMoodSelection } from '../../composables/useMoodSelection.js'
 
 const props = defineProps({
   compact: {

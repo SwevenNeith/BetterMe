@@ -1,17 +1,17 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
-import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { supabase } from '../../lib/supabase.js'
+import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
+import { usePageDisplayLabel } from '../../composables/usePageDisplayLabel.js'
 import {
   isPageVisible,
   loadPageVisibility,
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
-} from '../services/pageVisibility.js'
-import { READING_COLLECTION_EN_COURS } from '../services/readingCollections.js'
-import { listReadingBooksWithCovers } from '../services/readingBooks.js'
+} from '../../services/settings/pageVisibility.js'
+import { READING_COLLECTION_EN_COURS } from '../../services/lecture/readingCollections.js'
+import { listReadingBooksWithCovers } from '../../services/lecture/readingBooks.js'
 
 const BOOKS_PER_PAGE = 3
 

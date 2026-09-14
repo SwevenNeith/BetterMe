@@ -1,4 +1,4 @@
-import { HABIT_VALUE_TYPE } from '../constants/habitOptions.js'
+import { HABIT_VALUE_TYPE } from '../../constants/habit/habitOptions.js'
 
 const TABLE = 'habit_logs'
 

@@ -1,9 +1,9 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
-import ColorPickerField from '../components/ColorPickerField.vue'
-import EmojiPickerField from '../components/EmojiPickerField.vue'
+import ColorPickerField from '../components/common/ColorPickerField.vue'
+import EmojiPickerField from '../components/common/EmojiPickerField.vue'
 import { supabase } from '../lib/supabase.js'
-import { listHabits } from '../services/habits.js'
+import { listHabits } from '../services/habit/habits.js'
 import {
   applyAlphabeticalProjectOrder,
   createProject,
@@ -12,10 +12,10 @@ import {
   isProjectsCustomOrder,
   markProjectsCustomOrder,
   persistProjectOrders,
-} from '../services/projects.js'
-import { syncProjectsListDoneStates } from '../services/projectDoneSync.js'
-import { purgeStaleCompletedProjectItems } from '../services/projectCleanup.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+} from '../services/projets/projects.js'
+import { syncProjectsListDoneStates } from '../services/projets/projectDoneSync.js'
+import { purgeStaleCompletedProjectItems } from '../services/projets/projectCleanup.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 

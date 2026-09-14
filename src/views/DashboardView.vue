@@ -5,19 +5,19 @@ import { supabase } from '../lib/supabase.js'
 import { useRouter } from 'vue-router'
 import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
 import { useDashboardCacheStore } from '../stores/dashboardCache.js'
-import { listCyclesPilule, countMenstruationCyclesPilule } from '../services/menstruationCycles.js'
+import { listCyclesPilule, countMenstruationCyclesPilule } from '../services/menstruation/menstruationCycles.js'
 import {
   countMenstruationCyclesNaturel,
   listCyclesNaturel,
-} from '../services/menstruationCyclesNaturel.js'
-import { resolveMenstruationCycleMode } from '../services/menstruationCycleModePreference.js'
-import DashboardWidgetBlock from '../components/DashboardWidgetBlock.vue'
+} from '../services/menstruation/menstruationCyclesNaturel.js'
+import { resolveMenstruationCycleMode } from '../services/menstruation/menstruationCycleModePreference.js'
+import DashboardWidgetBlock from '../components/dashboard/DashboardWidgetBlock.vue'
 import { useDashboardEmotionalCheckin } from '../composables/useDashboardEmotionalCheckin.js'
 import { useEmotionalCheckinPersistence } from '../composables/useEmotionalCheckinPersistence.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { useDashboardVisibility } from '../composables/useDashboardVisibility.js'
-import { buildMobileCarouselSlides } from '../services/dashboardVisibility.js'
+import { buildMobileCarouselSlides } from '../services/dashboard/dashboardVisibility.js'
 
 usePageDisplayLabel(APP_PAGE_IDS.DASHBOARD, undefined, { setDocumentTitle: true })
 

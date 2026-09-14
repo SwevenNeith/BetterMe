@@ -1,6 +1,6 @@
 import { READING_COLLECTION_EN_COURS, READING_COLLECTION_TERMINE } from './readingCollections.js'
 import { updateReadingBook } from './readingBooks.js'
-import { bookToEditForm } from '../utils/readingBookForm.js'
+import { bookToEditForm } from '../../utils/lecture/readingBookForm.js'
 
 const TABLE = 'reading_rereadings'
 

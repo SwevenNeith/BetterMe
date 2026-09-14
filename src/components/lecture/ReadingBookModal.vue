@@ -1,11 +1,11 @@
 <script setup>
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import ReadingBookFiche from './ReadingBookFiche.vue'
-import { setFilePickerActive, setFileUploadInProgress } from '../composables/useAppTabResume.js'
-import { bookToEditForm, getBookGenre, formatExtraTagsInput } from '../utils/readingBookForm.js'
-import { deleteReadingBook, updateReadingBook } from '../services/readingBooks.js'
-import { deleteSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/readingSpoilChapters.js'
-import { supabase } from '../lib/supabase.js'
+import { setFilePickerActive, setFileUploadInProgress } from '../../composables/useAppTabResume.js'
+import { bookToEditForm, getBookGenre, formatExtraTagsInput } from '../../utils/lecture/readingBookForm.js'
+import { deleteReadingBook, updateReadingBook } from '../../services/lecture/readingBooks.js'
+import { deleteSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../../services/lecture/readingSpoilChapters.js'
+import { supabase } from '../../lib/supabase.js'
 
 const props = defineProps({
   book: {

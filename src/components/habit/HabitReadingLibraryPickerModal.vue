@@ -1,9 +1,9 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { createReadingBook } from '../services/readingBooks.js'
-import { READING_COLLECTION_EN_COURS } from '../services/readingCollections.js'
-import { isBookInProgress } from '../utils/habitReadingLink.js'
+import { supabase } from '../../lib/supabase.js'
+import { createReadingBook } from '../../services/lecture/readingBooks.js'
+import { READING_COLLECTION_EN_COURS } from '../../services/lecture/readingCollections.js'
+import { isBookInProgress } from '../../utils/habit/habitReadingLink.js'
 
 const props = defineProps({
   open: {

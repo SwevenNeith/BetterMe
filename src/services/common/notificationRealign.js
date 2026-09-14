@@ -1,7 +1,7 @@
 import { syncNotificationTimezone } from './scheduledReminders.js'
 import { rescheduleDailyReminderPushes } from './dailyReminders.js'
-import { rescheduleTodoPromesseReminder } from './todoPromesseNotifications.js'
-import { rescheduleAllTodoItemReminders } from './todoItemReminders.js'
+import { rescheduleTodoPromesseReminder } from '../todo/todoPromesseNotifications.js'
+import { rescheduleAllTodoItemReminders } from '../todo/todoItemReminders.js'
 import { maintainRollingTimetableReminders } from './rollingTimetableReminders.js'
 
 /**

@@ -2,7 +2,7 @@ import {
   extractNoteWidgets,
   findNoteWidgetFence,
   listNoteWidgetFences,
-} from '../utils/noteWidgets.js'
+} from '../../utils/notes/noteWidgets.js'
 
 /** Préfixe des widgets Dashboard « note épinglée ». */
 export const PINNED_NOTE_WIDGET_PREFIX = 'pinned-note:'

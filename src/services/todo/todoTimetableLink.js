@@ -1,9 +1,9 @@
-import { createTimetableEvent } from './timetableEvents.js'
-import { supprimerRappelsEvenement } from './notifications.js'
+import { createTimetableEvent } from '../timetable/timetableEvents.js'
+import { supprimerRappelsEvenement } from '../common/notifications.js'
 import { deletePendingTodoItemReminders } from './todoItemReminders.js'
-import { getLocalTodayISO } from './scheduledReminders.js'
-import { normalizeDateISO } from '../utils/habitCalendar.js'
-import { getTodoPlanningOccurrenceDates, isRecurringTodoFrequency } from '../utils/todoPlanningDates.js'
+import { getLocalTodayISO } from '../common/scheduledReminders.js'
+import { normalizeDateISO } from '../../utils/habit/habitCalendar.js'
+import { getTodoPlanningOccurrenceDates, isRecurringTodoFrequency } from '../../utils/todo/todoPlanningDates.js'
 
 /**
  * Annule tous les rappels pending liés à une paire TODO ↔ événements EDT.

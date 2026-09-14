@@ -1,4 +1,4 @@
-import { hasQuantiteTracking } from '../constants/projectProgress.js'
+import { hasQuantiteTracking } from '../../constants/projets/projectProgress.js'
 import { deleteStep, deleteSubstep } from './projects.js'
 
 const DEFAULT_STALE_DAYS = 30

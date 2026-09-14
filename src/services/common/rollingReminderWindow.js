@@ -1,6 +1,6 @@
-import { addDaysISO, normalizeDateISO } from '../utils/habitCalendar.js'
+import { addDaysISO, normalizeDateISO } from '../../utils/habit/habitCalendar.js'
 import { getLocalTodayISO } from './scheduledReminders.js'
-import { isRecurringTodoFrequency } from '../utils/todoPlanningDates.js'
+import { isRecurringTodoFrequency } from '../../utils/todo/todoPlanningDates.js'
 
 /** Fenêtre de planification des rappels récurrents (jours). */
 export const ROLLING_REMINDER_WINDOW_DAYS = 15

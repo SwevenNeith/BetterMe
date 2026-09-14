@@ -1,13 +1,13 @@
 <script setup>
 import { computed, watch } from 'vue'
-import { useMenstruationAccordions } from '../composables/useMenstruationAccordions.js'
+import { useMenstruationAccordions } from '../../composables/useMenstruationAccordions.js'
 import {
   PATTERN_TYPE,
   SYMPTOM_LABELS,
   CLUSTER_LABELS,
   SYMPTOM_THRESHOLDS,
-} from '../services/menstruationPatternThresholds.js'
-import { getSymptomScale } from '../services/reconfortMatching.js'
+} from '../../services/menstruation/menstruationPatternThresholds.js'
+import { getSymptomScale } from '../../services/dashboard/reconfortMatching.js'
 
 const props = defineProps({
   patterns: {

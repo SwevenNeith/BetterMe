@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { NOTES_EXTENSIONS } from '../constants/notesExtensions.js'
+import { NOTES_EXTENSIONS } from '../../constants/notes/notesExtensions.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },

@@ -1,16 +1,16 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
-import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { supabase } from '../../lib/supabase.js'
+import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
+import { usePageDisplayLabel } from '../../composables/usePageDisplayLabel.js'
 import {
   isPageVisible,
   loadPageVisibility,
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
-} from '../services/pageVisibility.js'
-import { listHabits } from '../services/habits.js'
-import HabitTrackerGrid from './HabitTrackerGrid.vue'
+} from '../../services/settings/pageVisibility.js'
+import { listHabits } from '../../services/habit/habits.js'
+import HabitTrackerGrid from '../habit/HabitTrackerGrid.vue'
 
 const props = defineProps({
   userId: {

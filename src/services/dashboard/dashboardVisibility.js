@@ -9,13 +9,13 @@ import {
   createDefaultMobileGroups,
   defaultDesktopZoneForWidget,
   preferredOrderForDesktopZone,
-} from '../constants/dashboardWidgets.js'
+} from '../../constants/dashboard/dashboardWidgets.js'
 import {
   createPinnedNoteWidgetId,
   isPinnedNoteWidgetId,
   normalizeDashboardPins,
-} from '../constants/dashboardPinnedNotes.js'
-import { ensureUserSettings } from './menstruationNotifications.js'
+} from '../../constants/dashboard/dashboardPinnedNotes.js'
+import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
 
 const SETTINGS_TABLE = 'settings'
 const COLUMN = 'dashboard_visibility'
@@ -30,7 +30,7 @@ export const DASHBOARD_VISIBILITY_UPDATED_EVENT = 'betterme-dashboard-visibility
  * }} DashboardLayout
  * @typedef {Record<string, DashboardVisibilityEntry> & {
  *   layout?: DashboardLayout,
- *   pins?: Record<string, import('../constants/dashboardPinnedNotes.js').normalizeDashboardPins extends Function ? any : never>,
+ *   pins?: Record<string, import('../../constants/dashboard/dashboardPinnedNotes.js').normalizeDashboardPins extends Function ? any : never>,
  * }} DashboardVisibilityMap
  */
 

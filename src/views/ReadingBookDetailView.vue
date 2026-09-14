@@ -1,10 +1,10 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import ReadingBookFiche from '../components/ReadingBookFiche.vue'
+import ReadingBookFiche from '../components/lecture/ReadingBookFiche.vue'
 import { setFilePickerActive, setFileUploadInProgress } from '../composables/useAppTabResume.js'
-import { bookToEditForm, getBookGenre, formatExtraTagsInput } from '../utils/readingBookForm.js'
-import { deleteReadingBook, getReadingBookWithCover, updateReadingBook } from '../services/readingBooks.js'
+import { bookToEditForm, getBookGenre, formatExtraTagsInput } from '../utils/lecture/readingBookForm.js'
+import { deleteReadingBook, getReadingBookWithCover, updateReadingBook } from '../services/lecture/readingBooks.js'
 import {
   listReadingRereadings,
   startReadingRereading,
@@ -12,9 +12,9 @@ import {
   cancelReadingRereading,
   resolveRereadUndo,
   canStartReadingRereading,
-} from '../services/readingRereadings.js'
-import { listReadingCollections } from '../services/readingCollections.js'
-import { deleteSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/readingSpoilChapters.js'
+} from '../services/lecture/readingRereadings.js'
+import { listReadingCollections } from '../services/lecture/readingCollections.js'
+import { deleteSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/lecture/readingSpoilChapters.js'
 import { supabase } from '../lib/supabase.js'
 
 const route = useRoute()

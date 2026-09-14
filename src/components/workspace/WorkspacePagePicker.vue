@@ -1,13 +1,13 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { WORKSPACE_PAGE_OPTIONS } from '../constants/workspacePages.js'
+import { supabase } from '../../lib/supabase.js'
+import { WORKSPACE_PAGE_OPTIONS } from '../../constants/workspace/workspacePages.js'
 import {
   loadPageVisibility,
   getPageDisplayLabel,
   isPageVisible,
   mergePageVisibility,
-} from '../services/pageVisibility.js'
+} from '../../services/settings/pageVisibility.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },

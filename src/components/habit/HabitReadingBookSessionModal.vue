@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import {
   computeEndPageFromPagesRead,
   computePagesReadFromEndPage,
-} from '../utils/habitReadingLink.js'
+} from '../../utils/habit/habitReadingLink.js'
 
 const props = defineProps({
   open: {

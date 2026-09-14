@@ -1,15 +1,15 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
-import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
-import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import { supabase } from '../../lib/supabase.js'
+import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
+import { usePageDisplayLabel } from '../../composables/usePageDisplayLabel.js'
 import {
   isPageVisible,
   loadPageVisibility,
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
-} from '../services/pageVisibility.js'
+} from '../../services/settings/pageVisibility.js'
 import {
   DASHBOARD_VISIBILITY_UPDATED_EVENT,
   getDashboardNotesGraphVaultId,
@@ -17,11 +17,11 @@ import {
   mergeDashboardVisibility,
   patchDashboardNotesGraphVaultId,
   saveDashboardVisibility,
-} from '../services/dashboardVisibility.js'
-import { listNotes } from '../services/notes.js'
-import { listNoteVaults } from '../services/noteVaults.js'
-import { normalizeVaultIcon, vaultThemeStyle } from '../constants/noteVaults.js'
-import NotesGraphView from './NotesGraphView.vue'
+} from '../../services/dashboard/dashboardVisibility.js'
+import { listNotes } from '../../services/notes/notes.js'
+import { listNoteVaults } from '../../services/notes/noteVaults.js'
+import { normalizeVaultIcon, vaultThemeStyle } from '../../constants/notes/noteVaults.js'
+import NotesGraphView from '../notes/NotesGraphView.vue'
 
 const props = defineProps({
   userId: {

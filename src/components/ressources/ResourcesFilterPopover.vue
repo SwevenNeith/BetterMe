@@ -4,7 +4,7 @@ import {
   RESOURCE_NO_CATEGORY,
   RESOURCE_NO_TAG,
   RESOURCE_SORT_MODES,
-} from '../utils/resourceForm.js'
+} from '../../utils/ressources/resourceForm.js'
 
 const props = defineProps({
   open: {

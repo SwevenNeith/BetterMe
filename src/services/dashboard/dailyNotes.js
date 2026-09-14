@@ -1,14 +1,14 @@
 import {
   dailyNoteSystemKeyForDate,
   formatDailyNoteTitle,
-} from '../constants/dailyNotes.js'
-import { NOTE_STATUS } from '../constants/noteStatus.js'
-import { ensureDailyNotesFolder } from './noteFolders.js'
-import { createNote, updateNote } from './notes.js'
+} from '../../constants/dashboard/dailyNotes.js'
+import { NOTE_STATUS } from '../../constants/notes/noteStatus.js'
+import { ensureDailyNotesFolder } from '../notes/noteFolders.js'
+import { createNote, updateNote } from '../notes/notes.js'
 import {
   applyNoteStatusChange,
   isNoteStatusTodosEnabled,
-} from './noteTodoSync.js'
+} from '../notes/noteTodoSync.js'
 
 const TABLE = 'notes'
 const SELECT =

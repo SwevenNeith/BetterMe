@@ -1,11 +1,11 @@
-import { supabase } from '../lib/supabase.js'
+import { supabase } from '../../lib/supabase.js'
 import { addDaysToISODate, daysBetweenISO } from './menstruationCycles.js'
 import {
   dateTimeLocalToDate,
   deletePendingByKindPrefix,
   getLocalTodayISO,
   insertPendingNotifications,
-} from './scheduledReminders.js'
+} from '../common/scheduledReminders.js'
 import { TYPE_CYCLE } from './menstruationSymptoms.js'
 import {
   ANALYZED_SYMPTOM_KEYS,

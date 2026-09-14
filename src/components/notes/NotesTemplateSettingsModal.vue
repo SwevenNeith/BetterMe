@@ -1,10 +1,10 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { NOTE_TEMPLATE_FOLDER_SOURCES, NOTE_TEMPLATE_RULE_TYPES } from '../constants/noteTemplates.js'
-import { ensureNoteTemplatesFolder } from '../services/noteFolders.js'
-import { labelForTemplateRuleType } from '../services/noteTemplateExtension.js'
-import { flattenFolderOptions } from '../utils/notesTree.js'
+import { supabase } from '../../lib/supabase.js'
+import { NOTE_TEMPLATE_FOLDER_SOURCES, NOTE_TEMPLATE_RULE_TYPES } from '../../constants/notes/noteTemplates.js'
+import { ensureNoteTemplatesFolder } from '../../services/notes/noteFolders.js'
+import { labelForTemplateRuleType } from '../../services/notes/noteTemplateExtension.js'
+import { flattenFolderOptions } from '../../utils/notes/notesTree.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },

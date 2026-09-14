@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import RichTextNoteEditor from './RichTextNoteEditor.vue'
+import RichTextNoteEditor from '../common/RichTextNoteEditor.vue'
 
 const props = defineProps({
   chapter: {

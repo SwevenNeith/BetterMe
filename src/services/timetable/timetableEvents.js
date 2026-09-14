@@ -1,13 +1,13 @@
 import { normalizeCategory } from './timetableCategories.js'
-import { getDurationMinutes, addMinutesToTimeString } from './durationUtils.js'
+import { getDurationMinutes, addMinutesToTimeString } from '../common/durationUtils.js'
 import {
   notificationsActives,
   planifierNotificationActivite,
   planifierNotificationDebutEvenement,
   planifierNotificationFinTimer,
   formatDelaiAvantEvenement,
-} from './notifications.js'
-import { isDateWithinRollingReminderWindow } from './rollingReminderWindow.js'
+} from '../common/notifications.js'
+import { isDateWithinRollingReminderWindow } from '../common/rollingReminderWindow.js'
 
 const DEFAULT_EMOJIS = [
   '📌',

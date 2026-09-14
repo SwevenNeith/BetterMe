@@ -1,30 +1,30 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import { supabase } from '../lib/supabase.js'
-import { getLocalTodayISO } from '../services/scheduledReminders.js'
-import { listHabitLogsForRange, updateHabitLogDetails, upsertHabitLog } from '../services/habitLogs.js'
-import RichTextNoteEditor from './RichTextNoteEditor.vue'
+import { supabase } from '../../lib/supabase.js'
+import { getLocalTodayISO } from '../../services/common/scheduledReminders.js'
+import { listHabitLogsForRange, updateHabitLogDetails, upsertHabitLog } from '../../services/habit/habitLogs.js'
+import RichTextNoteEditor from '../common/RichTextNoteEditor.vue'
 import HabitReadingDetailsPanel from './HabitReadingDetailsPanel.vue'
-import { listReadingBooksWithCovers } from '../services/readingBooks.js'
-import { listReadingBookAliases } from '../services/readingBookAliases.js'
-import { isRichNoteEmpty, sanitizeRichNoteHtml } from '../utils/sanitizeHtml.js'
-import { isReadingHabit } from '../utils/habitReadingLink.js'
-import { HABIT_VALUE_TYPE } from '../constants/habitOptions.js'
-import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
+import { listReadingBooksWithCovers } from '../../services/lecture/readingBooks.js'
+import { listReadingBookAliases } from '../../services/lecture/readingBookAliases.js'
+import { isRichNoteEmpty, sanitizeRichNoteHtml } from '../../utils/common/sanitizeHtml.js'
+import { isReadingHabit } from '../../utils/habit/habitReadingLink.js'
+import { HABIT_VALUE_TYPE } from '../../constants/habit/habitOptions.js'
+import { formDraftKey, useFormDraft } from '../../composables/useFormDraft.js'
 import {
   addDaysISO,
   iterateISODateRange,
   normalizeDateISO,
   parseISODate,
   toISODate,
-} from '../utils/habitCalendar.js'
+} from '../../utils/habit/habitCalendar.js'
 import {
   buildLogPayload,
   computeHabitStats,
   formatStatNumber,
   getEffectiveValeur,
   isHabitDayDone,
-} from '../utils/habitStats.js'
+} from '../../utils/habit/habitStats.js'
 
 const props = defineProps({
   habit: {

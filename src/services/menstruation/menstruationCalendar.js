@@ -5,7 +5,7 @@ import {
   getReglesPeriodEnd,
   isOngoingRealReglesPeriod,
 } from './menstruationCycles.js'
-import { getLocalTodayISO } from './scheduledReminders.js'
+import { getLocalTodayISO } from '../common/scheduledReminders.js'
 
 /** Types affichés dans le calendrier (classe CSS + légende) */
 export const CALENDAR_SEGMENT_KIND = {

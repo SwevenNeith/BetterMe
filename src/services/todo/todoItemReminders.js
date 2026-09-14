@@ -1,19 +1,19 @@
-import { TODO_FREQUENCY } from '../constants/todoOptions.js'
-import { addDaysISO, isTodoDueOnDate, normalizeDateISO } from '../utils/todoCalendar.js'
-import { getDurationMinutes } from './durationUtils.js'
+import { TODO_FREQUENCY } from '../../constants/todo/todoOptions.js'
+import { addDaysISO, isTodoDueOnDate, normalizeDateISO } from '../../utils/todo/todoCalendar.js'
+import { getDurationMinutes } from '../common/durationUtils.js'
 import {
   decomposerDelaiEnMinutes,
   formatDelaiDepuisMinutes,
   formatRappelNotificationBody,
   notificationsActives,
-} from './notifications.js'
+} from '../common/notifications.js'
 import {
   SCHEDULED_KIND,
   dateTimeLocalToDate,
   deletePendingScheduledDuplicate,
   getLocalTodayISO,
-} from './scheduledReminders.js'
-import { supabase } from '../lib/supabase.js'
+} from '../common/scheduledReminders.js'
+import { supabase } from '../../lib/supabase.js'
 
 const KIND = SCHEDULED_KIND.TODO_ITEM_REMINDER
 const LOOKAHEAD_DAYS = 400

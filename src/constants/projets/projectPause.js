@@ -1,4 +1,4 @@
-import { normalizeDateISO } from '../utils/habitCalendar.js'
+import { normalizeDateISO } from '../../utils/habit/habitCalendar.js'
 
 /** Motifs proposés par défaut (toujours visibles dans le dropdown). */
 export const DEFAULT_PROJECT_PAUSE_REASONS = [

@@ -7,16 +7,16 @@ import {
   notifyNoteUpdated,
   resolveLivePinnedContent,
   stripUnreferencedDashboardPinMarkers,
-} from '../constants/dashboardPinnedNotes.js'
-import { renderMarkdownToSafeHtml } from '../utils/renderMarkdown.js'
-import { mountNoteWidgets } from '../utils/noteWidgets.js'
-import { supabase } from '../lib/supabase.js'
-import { getNote, updateNote } from '../services/notes.js'
+} from '../../constants/dashboard/dashboardPinnedNotes.js'
+import { renderMarkdownToSafeHtml } from '../../utils/common/renderMarkdown.js'
+import { mountNoteWidgets } from '../../utils/notes/noteWidgets.js'
+import { supabase } from '../../lib/supabase.js'
+import { getNote, updateNote } from '../../services/notes/notes.js'
 import {
   loadDashboardVisibility,
   removeDashboardPinnedNote,
   saveDashboardVisibility,
-} from '../services/dashboardVisibility.js'
+} from '../../services/dashboard/dashboardVisibility.js'
 
 const props = defineProps({
   userId: {

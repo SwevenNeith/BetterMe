@@ -3,8 +3,8 @@ import {
   DEFAULT_RESET_PERIODE,
   normalizeQuantiteCible,
   normalizeResetPeriode,
-} from '../constants/projectProgress.js'
-import { normalizeProjectPauseFields } from '../constants/projectPause.js'
+} from '../../constants/projets/projectProgress.js'
+import { normalizeProjectPauseFields } from '../../constants/projets/projectPause.js'
 
 const PROJECTS_TABLE = 'projects'
 const STEPS_TABLE = 'project_steps'

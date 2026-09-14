@@ -1,5 +1,5 @@
-import { PILULE_SYMPTOMS_BY_PERIOD } from './menstruationSymptomsPilule.js'
-import { NATUREL_SYMPTOMS_BY_PHASE } from './menstruationSymptomsNaturel.js'
+import { PILULE_SYMPTOMS_BY_PERIOD } from '../menstruation/menstruationSymptomsPilule.js'
+import { NATUREL_SYMPTOMS_BY_PHASE } from '../menstruation/menstruationSymptomsNaturel.js'
 
 /** @typedef {{ min: number, max: number }} ScaleDefinition */
 

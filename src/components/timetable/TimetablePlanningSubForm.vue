@@ -1,7 +1,7 @@
 <script setup>
 import { computed, watch } from 'vue'
-import { addMinutesToTimeString, getDurationMinutes } from '../services/durationUtils.js'
-import { notificationsActives } from '../services/notifications.js'
+import { addMinutesToTimeString, getDurationMinutes } from '../../services/common/durationUtils.js'
+import { notificationsActives } from '../../services/common/notifications.js'
 
 const model = defineModel({ type: Object, required: true })
 

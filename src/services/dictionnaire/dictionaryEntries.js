@@ -1,4 +1,4 @@
-import { isDictionaryWordType } from '../constants/dictionaryWordTypes.js'
+import { isDictionaryWordType } from '../../constants/dictionnaire/dictionaryWordTypes.js'
 
 const TABLE = 'dictionary_entries'
 const SELECT = 'id, user_id, word, definition, word_type, created_at, updated_at'

@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { getTodoEncouragementCategory, getTodoEncouragementMessage } from '../utils/todoEncouragement.js'
+import { getTodoEncouragementCategory, getTodoEncouragementMessage } from '../../utils/todo/todoEncouragement.js'
 
 const props = defineProps({
   stats: {

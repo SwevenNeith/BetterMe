@@ -1,19 +1,19 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import ReadingCollectionCombobox from '../components/ReadingCollectionCombobox.vue'
-import ResourcesFilterPopover from '../components/ResourcesFilterPopover.vue'
+import ReadingCollectionCombobox from '../components/lecture/ReadingCollectionCombobox.vue'
+import ResourcesFilterPopover from '../components/ressources/ResourcesFilterPopover.vue'
 import { supabase } from '../lib/supabase.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
-import { listResourceCategories } from '../services/resourceCategories.js'
+import { listResourceCategories } from '../services/ressources/resourceCategories.js'
 import {
   createResourceItem,
   deleteResourceItem,
   listResourceItems,
   updateResourceItem,
-} from '../services/resourceItems.js'
+} from '../services/ressources/resourceItems.js'
 import {
   applyResourceDisplayFilters,
   collectResourceFilterOptions,
@@ -24,7 +24,7 @@ import {
   resourceLinkHref,
   resourceToForm,
   sortResourcesAlphabetically,
-} from '../utils/resourceForm.js'
+} from '../utils/ressources/resourceForm.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.RESSOURCES, undefined, { setDocumentTitle: true })
 

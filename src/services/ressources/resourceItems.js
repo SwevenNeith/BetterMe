@@ -1,4 +1,4 @@
-import { parseResourceTags, normalizeResourceLink } from '../utils/resourceForm.js'
+import { parseResourceTags, normalizeResourceLink } from '../../utils/ressources/resourceForm.js'
 import { ensureResourceCategory } from './resourceCategories.js'
 
 const TABLE = 'resource_items'

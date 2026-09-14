@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { MOODS } from '../constants/moods.js'
+import { MOODS } from '../constants/mood/moods.js'
 
 const selectedMoodId = ref(null)
 

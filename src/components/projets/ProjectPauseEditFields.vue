@@ -1,5 +1,5 @@
 <script setup>
-import ReadingCollectionCombobox from './ReadingCollectionCombobox.vue'
+import ReadingCollectionCombobox from '../lecture/ReadingCollectionCombobox.vue'
 
 defineProps({
   pauseEnabled: {

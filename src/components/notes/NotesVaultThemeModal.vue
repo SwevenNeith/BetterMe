@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import ColorPickerField from './ColorPickerField.vue'
-import EmojiPickerField from './EmojiPickerField.vue'
+import ColorPickerField from '../common/ColorPickerField.vue'
+import EmojiPickerField from '../common/EmojiPickerField.vue'
 import {
   NOTE_VAULT_DEFAULT_ACCENT,
   NOTE_VAULT_DEFAULT_GRADIENT,
@@ -17,7 +17,7 @@ import {
   normalizeVaultTheme,
   rgbToHex,
   vaultThemeStyle,
-} from '../constants/noteVaults.js'
+} from '../../constants/notes/noteVaults.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },

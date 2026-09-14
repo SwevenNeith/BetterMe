@@ -7,11 +7,11 @@ import {
   filterSummariesForMonth,
   buildVisibleLegendGroups,
   legendSwatchClasses,
-} from '../services/menstruationCalendar.js'
-import { COL, getReglesPeriodEnd } from '../services/menstruationCycles.js'
-import { getCurrentCycle } from '../services/menstruationSymptomEnrichment.js'
-import { TYPE_CYCLE } from '../services/menstruationSymptoms.js'
-import { getLocalTodayISO } from '../services/scheduledReminders.js'
+} from '../../services/menstruation/menstruationCalendar.js'
+import { COL, getReglesPeriodEnd } from '../../services/menstruation/menstruationCycles.js'
+import { getCurrentCycle } from '../../services/menstruation/menstruationSymptomEnrichment.js'
+import { TYPE_CYCLE } from '../../services/menstruation/menstruationSymptoms.js'
+import { getLocalTodayISO } from '../../services/common/scheduledReminders.js'
 
 function getTodayViewParts() {
   const [y, m] = getLocalTodayISO().split('-').map(Number)

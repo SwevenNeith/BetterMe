@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
-import RichTextNoteEditor from './RichTextNoteEditor.vue'
+import RichTextNoteEditor from '../common/RichTextNoteEditor.vue'
 import HabitReadingBookSessionModal from './HabitReadingBookSessionModal.vue'
 import HabitReadingLibraryPickerModal from './HabitReadingLibraryPickerModal.vue'
 import HabitReadingImportModal from './HabitReadingImportModal.vue'
@@ -13,8 +13,8 @@ import {
   isBookInProgress,
   matchBookByTitleExact,
   splitReadingDetails,
-} from '../utils/habitReadingLink.js'
-import { isRichNoteEmpty, sanitizeRichNoteHtml } from '../utils/sanitizeHtml.js'
+} from '../../utils/habit/habitReadingLink.js'
+import { isRichNoteEmpty, sanitizeRichNoteHtml } from '../../utils/common/sanitizeHtml.js'
 
 const props = defineProps({
   habit: {

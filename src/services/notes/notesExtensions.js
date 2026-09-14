@@ -1,8 +1,8 @@
 import {
   NOTES_EXTENSIONS,
   createDefaultNotesExtensionPrefs,
-} from '../constants/notesExtensions.js'
-import { ensureUserSettings } from './menstruationNotifications.js'
+} from '../../constants/notes/notesExtensions.js'
+import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
 
 const SETTINGS_TABLE = 'settings'
 const COLUMN = 'notes_extensions'

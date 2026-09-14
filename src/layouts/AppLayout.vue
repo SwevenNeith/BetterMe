@@ -1,27 +1,27 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { RouterView } from 'vue-router'
-import AppSidebar from '../components/Sidebar.vue'
-import NotificationPrompt from '../components/NotificationPrompt.vue'
-import VisibilityOnboardingModal from '../components/VisibilityOnboardingModal.vue'
-import TodoSnoozePromptModal from '../components/TodoSnoozePromptModal.vue'
+import AppSidebar from '../components/common/Sidebar.vue'
+import NotificationPrompt from '../components/common/NotificationPrompt.vue'
+import VisibilityOnboardingModal from '../components/common/VisibilityOnboardingModal.vue'
+import TodoSnoozePromptModal from '../components/todo/TodoSnoozePromptModal.vue'
 import { supabase } from '../lib/supabase.js'
 import {
   declencherCronNotifications,
   notificationsActives,
-} from '../services/notifications.js'
-import { hasCompletedVisibilityOnboarding } from '../services/visibilityOnboarding.js'
+} from '../services/common/notifications.js'
+import { hasCompletedVisibilityOnboarding } from '../services/settings/visibilityOnboarding.js'
 import {
   applyMorningSnoozeSelection,
   dismissMorningSnoozeCandidates,
   loadPromesseLimitsForSnooze,
   markMorningSnoozePromptShown,
   prepareMorningSnoozePrompt,
-} from '../services/todoSnooze.js'
+} from '../services/todo/todoSnooze.js'
 import {
   getLocalTodayISO,
   purgeOldSentScheduledNotifications,
-} from '../services/scheduledReminders.js'
+} from '../services/common/scheduledReminders.js'
 
 /** Secours si pg_cron Supabase indisponible — le verrou serveur évite le double envoi avec pg_cron */
 const CRON_INTERVAL_MS = 60_000
@@ -142,8 +142,8 @@ onMounted(() => {
         { purgeStaleMenstruationNotificationsOnStartup },
         { realignAllDeviceLocalNotifications },
       ] = await Promise.all([
-        import('../services/menstruationNotificationSync.js'),
-        import('../services/notificationRealign.js'),
+        import('../services/menstruation/menstruationNotificationSync.js'),
+        import('../services/common/notificationRealign.js'),
       ])
       await realignAllDeviceLocalNotifications(supabase, user.id)
       await purgeStaleMenstruationNotificationsOnStartup(user.id)

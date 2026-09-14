@@ -1,11 +1,11 @@
 import {
   DAILY_NOTES_FOLDER_DEFAULT_NAME,
   DAILY_NOTES_FOLDER_SYSTEM_KEY,
-} from '../constants/dailyNotes.js'
+} from '../../constants/dashboard/dailyNotes.js'
 import {
   NOTE_TEMPLATES_FOLDER_DEFAULT_NAME,
   NOTE_TEMPLATES_FOLDER_SYSTEM_KEY,
-} from '../constants/noteTemplates.js'
+} from '../../constants/notes/noteTemplates.js'
 
 const TABLE = 'note_folders'
 const SELECT = 'id, user_id, parent_id, name, system_key, vault_id, created_at, updated_at'

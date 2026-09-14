@@ -1,5 +1,5 @@
-import { supabase } from '../lib/supabase.js'
-import { TODO_FREQUENCY } from '../constants/todoOptions.js'
+import { supabase } from '../../lib/supabase.js'
+import { TODO_FREQUENCY } from '../../constants/todo/todoOptions.js'
 import {
   notificationsActives,
   planifierNotificationActivite,

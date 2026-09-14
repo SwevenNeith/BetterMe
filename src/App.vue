@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { RouterView } from 'vue-router'
 import { useAppTabResume } from './composables/useAppTabResume.js'
 import { supabase } from './lib/supabase.js'
-import { ensureUserSettings } from './services/menstruationNotifications.js'
+import { ensureUserSettings } from './services/menstruation/menstruationNotifications.js'
 
 useAppTabResume()
 

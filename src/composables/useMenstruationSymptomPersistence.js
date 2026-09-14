@@ -1,14 +1,14 @@
 import { ref, watch, unref, onMounted, onUnmounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { TAB_HIDDEN_EVENT } from './useAppTabResume.js'
-import { withTimeout } from '../utils/asyncTimeout.js'
+import { withTimeout } from '../utils/common/asyncTimeout.js'
 import {
   fetchSymptomEntryForDate,
   rowToSymptomValues,
   saveSymptomField,
   createEmptyValuesFromDefs,
-} from '../services/menstruationSymptoms.js'
-import { maybeScheduleReconfortNotification } from '../services/reconfortNotifications.js'
+} from '../services/menstruation/menstruationSymptoms.js'
+import { maybeScheduleReconfortNotification } from '../services/dashboard/reconfortNotifications.js'
 
 const SAVE_TIMEOUT_MS = 25_000
 const LOAD_TIMEOUT_MS = 20_000

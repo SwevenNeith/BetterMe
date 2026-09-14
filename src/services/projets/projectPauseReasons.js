@@ -1,8 +1,8 @@
 import {
   DEFAULT_PROJECT_PAUSE_REASONS,
   normalizePauseReasonList,
-} from '../constants/projectPause.js'
-import { ensureUserSettings } from './menstruationNotifications.js'
+} from '../../constants/projets/projectPause.js'
+import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
 
 const SETTINGS_TABLE = 'settings'
 const COLUMN = 'project_pause_reasons'

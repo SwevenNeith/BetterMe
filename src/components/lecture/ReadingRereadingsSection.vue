@@ -1,6 +1,6 @@
 <script setup>
 import { nextTick, ref, watch } from 'vue'
-import { formatFrenchDate } from '../utils/readingBookForm.js'
+import { formatFrenchDate } from '../../utils/lecture/readingBookForm.js'
 
 const props = defineProps({
   rereadings: {

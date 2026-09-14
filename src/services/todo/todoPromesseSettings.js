@@ -1,9 +1,9 @@
-import { supabase } from '../lib/supabase.js'
+import { supabase } from '../../lib/supabase.js'
 import {
   MAX_TODO_PROMESSES_PER_DAY,
   MAX_TODO_PROMESSES_PER_WEEK,
-} from '../constants/todoOptions.js'
-import { ensureUserSettings } from './menstruationNotifications.js'
+} from '../../constants/todo/todoOptions.js'
+import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
 
 const SETTINGS_TABLE = 'settings'
 

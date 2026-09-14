@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase.js'
+import { supabase } from '../../lib/supabase.js'
 import { countMenstruationCyclesPilule, listCyclesPilule } from './menstruationCycles.js'
 import { countMenstruationCyclesNaturel, listCyclesNaturel } from './menstruationCyclesNaturel.js'
 import { resolveMenstruationCycleMode } from './menstruationCycleModePreference.js'

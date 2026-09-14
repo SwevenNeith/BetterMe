@@ -1,4 +1,4 @@
-import { HABIT_WEEKDAYS } from './habitOptions.js'
+import { HABIT_WEEKDAYS } from '../habit/habitOptions.js'
 
 export const TODO_FREQUENCY = {
   DAILY: 'quotidien',

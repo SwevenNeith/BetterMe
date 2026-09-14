@@ -1,4 +1,4 @@
-import { HABIT_VALUE_TYPE } from '../constants/habitOptions.js'
+import { HABIT_VALUE_TYPE } from '../../constants/habit/habitOptions.js'
 import { addDaysISO, iterateISODateRange } from './habitCalendar.js'
 
 /** Jour compté comme fait : booléen coché ou valeur numérique strictement > 0. */

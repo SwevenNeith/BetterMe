@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { normalizeNoteHighlightElement } from '../utils/richNoteTextColors.js'
+import { normalizeNoteHighlightElement } from '../../utils/common/richNoteTextColors.js'
 
 const props = defineProps({
   html: {

@@ -1,4 +1,4 @@
-import { HABIT_FREQUENCY, HABIT_WEEKDAYS } from '../constants/habitOptions.js'
+import { HABIT_FREQUENCY, HABIT_WEEKDAYS } from '../../constants/habit/habitOptions.js'
 
 export const HABIT_VIEW_MODE = {
   ANNUAL: 'annual',

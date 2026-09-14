@@ -2,13 +2,13 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
-import { getLocalTodayISO } from '../services/scheduledReminders.js'
-import { createHabit, updateHabit, deleteHabits, archiveHabits, unarchiveHabits, listHabits, listArchivedHabits, countArchivedHabits } from '../services/habits.js'
-import EmojiPickerField from '../components/EmojiPickerField.vue'
-import ColorPickerField from '../components/ColorPickerField.vue'
-import HabitTrackerGrid from '../components/HabitTrackerGrid.vue'
-import HabitDayEntryPanel from '../components/HabitDayEntryPanel.vue'
-import HabitManageList from '../components/HabitManageList.vue'
+import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
+import { createHabit, updateHabit, deleteHabits, archiveHabits, unarchiveHabits, listHabits, listArchivedHabits, countArchivedHabits } from '../services/habit/habits.js'
+import EmojiPickerField from '../components/common/EmojiPickerField.vue'
+import ColorPickerField from '../components/common/ColorPickerField.vue'
+import HabitTrackerGrid from '../components/habit/HabitTrackerGrid.vue'
+import HabitDayEntryPanel from '../components/habit/HabitDayEntryPanel.vue'
+import HabitManageList from '../components/habit/HabitManageList.vue'
 import { useHorizontalCarousel } from '../composables/useHorizontalCarousel.js'
 import {
   HABIT_ALL_WEEKDAY_IDS,
@@ -18,8 +18,8 @@ import {
   HABIT_VALUE_TYPE,
   HABIT_VALUE_TYPE_OPTIONS,
   HABIT_WEEKDAYS,
-} from '../constants/habitOptions.js'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+} from '../constants/habit/habitOptions.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 

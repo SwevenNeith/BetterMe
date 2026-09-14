@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import RichSpoilHtmlContent from './RichSpoilHtmlContent.vue'
+import RichSpoilHtmlContent from '../common/RichSpoilHtmlContent.vue'
 
 const props = defineProps({
   bookId: {

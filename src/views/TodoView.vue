@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { supabase } from '../lib/supabase.js'
-import { getLocalTodayISO } from '../services/scheduledReminders.js'
+import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
 import {
   TODO_FREQUENCY,
   TODO_FREQUENCY_OPTIONS,
@@ -10,7 +10,7 @@ import {
   getDefaultTodoFrequencyForView,
   getTodoFrequencyClass,
   getTodoItemColorClass,
-} from '../constants/todoOptions.js'
+} from '../constants/todo/todoOptions.js'
 import {
   listTodoItems,
   createTodoItem,
@@ -21,12 +21,12 @@ import {
   setTodoCompletionForDate,
   setTodoQuantiteForDate,
   syncTodoIsDoneFlags,
-} from '../services/todoItems.js'
-import { loadTodoPromesseLimits } from '../services/todoPromesseSettings.js'
+} from '../services/todo/todoItems.js'
+import { loadTodoPromesseLimits } from '../services/todo/todoPromesseSettings.js'
 import {
   rolloverOverdueNoteTodos,
   syncNoteStatusFromTodoCompletion,
-} from '../services/noteTodoSync.js'
+} from '../services/notes/noteTodoSync.js'
 import {
   canSnoozeTodo,
   getForwardSnoozeTargetDate,
@@ -34,7 +34,7 @@ import {
   getSnoozeConfirmTitle,
   getSnoozeRemainingQuantite,
   snoozeTodoItem,
-} from '../services/todoSnooze.js'
+} from '../services/todo/todoSnooze.js'
 import {
   TODO_VIEW_MODE,
   buildCompletionProgressMap,
@@ -58,39 +58,39 @@ import {
   normalizeDateISO,
   parseISODate,
   shiftAnchorISO,
-} from '../utils/todoCalendar.js'
+} from '../utils/todo/todoCalendar.js'
 import {
   buildMonthOptions,
   buildYearOptions,
   toISODate,
-} from '../utils/habitCalendar.js'
-import TodoItemCard from '../components/TodoItemCard.vue'
-import AppConfirmDialog from '../components/AppConfirmDialog.vue'
-import TodoEncouragementMessage from '../components/TodoEncouragementMessage.vue'
-import TimetablePlanningSubForm from '../components/TimetablePlanningSubForm.vue'
-import { loadUserCategories } from '../services/timetableCategories.js'
+} from '../utils/habit/habitCalendar.js'
+import TodoItemCard from '../components/todo/TodoItemCard.vue'
+import AppConfirmDialog from '../components/common/AppConfirmDialog.vue'
+import TodoEncouragementMessage from '../components/todo/TodoEncouragementMessage.vue'
+import TimetablePlanningSubForm from '../components/timetable/TimetablePlanningSubForm.vue'
+import { loadUserCategories } from '../services/timetable/timetableCategories.js'
 import {
   createTimetableEvent,
   validateTimetableEventTimes,
   validateTimetableReminderAndTimer,
-} from '../services/timetableEvents.js'
+} from '../services/timetable/timetableEvents.js'
 import {
   reminderFieldsFromForm,
   reminderFormFromItem,
   validateTodoReminderInput,
-} from '../services/todoItemReminders.js'
-import { notificationsActives } from '../services/notifications.js'
-import { linkTodoAndTimetable, deleteAllTimetableEventsForTodo, createTimetableEventsForTodo, syncTodoTimetableLink, hasTodoTimetableLink } from '../services/todoTimetableLink.js'
+} from '../services/todo/todoItemReminders.js'
+import { notificationsActives } from '../services/common/notifications.js'
+import { linkTodoAndTimetable, deleteAllTimetableEventsForTodo, createTimetableEventsForTodo, syncTodoTimetableLink, hasTodoTimetableLink } from '../services/todo/todoTimetableLink.js'
 import { useTimetableCacheStore } from '../stores/timetableCache.js'
 import {
   createDefaultPlanningForm,
   resolvePlanningDateFromTodo,
   suggestEndTimeFromStart,
   todoTimeToInput,
-} from '../utils/todoTimetableBridge.js'
-import { isRecurringTodoFrequency } from '../utils/todoPlanningDates.js'
+} from '../utils/todo/todoTimetableBridge.js'
+import { isRecurringTodoFrequency } from '../utils/todo/todoPlanningDates.js'
 import '../styles/todo-frequency.css'
-import { APP_PAGE_IDS } from '../constants/appPages.js'
+import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 
