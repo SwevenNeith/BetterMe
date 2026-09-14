@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
