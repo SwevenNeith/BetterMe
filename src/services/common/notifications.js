@@ -123,7 +123,7 @@ export async function obtenirEtatNotifications() {
 // ABONNEMENT PUSH (permission navigateur)
 // ============================================
 
-async function enregistrerSubscription(supabase, userId) {
+async function enregistrerSubscription(supabase, userId, options = {}) {
   try {
     const registration = await ensureServiceWorker()
     if (!registration) return false
@@ -151,15 +151,35 @@ async function enregistrerSubscription(supabase, userId) {
     }
 
     const existing = (rows ?? []).find((row) => row.subscription?.endpoint === endpoint)
+    const deviceName = String(options.deviceName ?? '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, 80)
+    const deviceMeta = {
+      user_agent:
+        typeof navigator !== 'undefined' ? String(navigator.userAgent || '').slice(0, 512) : null,
+      updated_at: new Date().toISOString(),
+    }
+    // Nom perso uniquement s’il est fourni — ne pas écraser un nom existant au sync silencieux
+    if (deviceName) {
+      deviceMeta.device_name = deviceName
+    }
 
     if (existing) {
       const { error } = await supabase
         .from('push_subscriptions')
-        .update({ subscription: subscriptionJson })
+        .update({ subscription: subscriptionJson, ...deviceMeta })
         .eq('id', existing.id)
       if (error) {
-        console.error('Mise à jour subscription:', error)
-        return false
+        // Colonnes device optionnelles absentes → mise à jour minimale
+        const { error: fallbackError } = await supabase
+          .from('push_subscriptions')
+          .update({ subscription: subscriptionJson })
+          .eq('id', existing.id)
+        if (fallbackError) {
+          console.error('Mise à jour subscription:', fallbackError)
+          return false
+        }
       }
       // Supprime les autres lignes avec le même endpoint (doublons → notifs x2)
       const dupIds = (rows ?? [])
@@ -172,10 +192,17 @@ async function enregistrerSubscription(supabase, userId) {
       const { error } = await supabase.from('push_subscriptions').insert({
         user_id: userId,
         subscription: subscriptionJson,
+        ...deviceMeta,
       })
       if (error) {
-        console.error('Sauvegarde subscription:', error)
-        return false
+        const { error: fallbackError } = await supabase.from('push_subscriptions').insert({
+          user_id: userId,
+          subscription: subscriptionJson,
+        })
+        if (fallbackError) {
+          console.error('Sauvegarde subscription:', fallbackError)
+          return false
+        }
       }
     }
 
@@ -187,7 +214,7 @@ async function enregistrerSubscription(supabase, userId) {
 }
 
 /** Sync abonnement si la permission est déjà accordée (sans popup). */
-export async function synchroniserNotificationsAccordees(supabase) {
+export async function synchroniserNotificationsAccordees(supabase, options = {}) {
   if (Notification.permission !== 'granted') {
     return { success: false, reason: 'not_granted' }
   }
@@ -195,12 +222,12 @@ export async function synchroniserNotificationsAccordees(supabase) {
   const userId = await getAuthUserId(supabase)
   if (!userId) return { success: false, reason: 'no_user' }
 
-  const ok = await enregistrerSubscription(supabase, userId)
+  const ok = await enregistrerSubscription(supabase, userId, options)
   return { success: ok }
 }
 
 /** Popup navigateur + enregistrement abonnement (clic utilisateur requis). */
-export async function activerNotificationsUtilisateur(supabase) {
+export async function activerNotificationsUtilisateur(supabase, options = {}) {
   if (!notificationsSupportees()) {
     return { success: false, reason: 'unsupported' }
   }
@@ -220,7 +247,7 @@ export async function activerNotificationsUtilisateur(supabase) {
     return { success: false, reason: 'pending' }
   }
 
-  const ok = await enregistrerSubscription(supabase, userId)
+  const ok = await enregistrerSubscription(supabase, userId, options)
   if (!ok) {
     return { success: false, reason: 'subscription_failed' }
   }

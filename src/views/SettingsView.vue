@@ -47,6 +47,7 @@ import {
 } from '../services/dashboard/reconfortMessages.js'
 import { sendRandomReconfortNotificationNow, syncReconfortLastSentFromSentNotifications } from '../services/dashboard/reconfortNotifications.js'
 import SettingsVisibilityPanel from '../components/settings/SettingsVisibilityPanel.vue'
+import SettingsDevicesPanel from '../components/settings/SettingsDevicesPanel.vue'
 import { APP_PAGE_IDS, APP_MAIN_PAGES } from '../constants/common/appPages.js'
 import {
   createDefaultPageVisibility,
@@ -65,6 +66,7 @@ import {
   loadTodoPromesseLimitSettings,
   saveTodoPromesseLimitSettings,
 } from '../services/todo/todoPromesseSettings.js'
+import { getDefaultPushDeviceLabel } from '../services/settings/pushDevices.js'
 const EmojiTextField = defineAsyncComponent(
   () => import('../components/common/EmojiTextField.vue'),
 )
@@ -77,6 +79,7 @@ const SETTINGS_TABS = {
   MENSTRUATION: 'menstruation',
   RECONFORT: 'reconfort',
   VISIBILITE: 'visibilite',
+  APPAREILS: 'appareils',
 }
 
 const activeTab = ref(SETTINGS_TABS.VISIBILITE)
@@ -388,6 +391,11 @@ const settingsTabItems = computed(() => [
     label: 'Réconfort',
     shortLabel: 'Réconfort',
   },
+  {
+    id: SETTINGS_TABS.APPAREILS,
+    label: 'Appareils',
+    shortLabel: 'Appareils',
+  },
 ])
 
 const todoPromesseReminderSettings = ref(createDefaultTodoPromesseReminderSettings())
@@ -599,10 +607,28 @@ const saveReminderForm = async () => {
   }
 }
 
+const notificationDeviceName = ref('')
+const defaultNotificationDeviceLabel = computed(() => getDefaultPushDeviceLabel())
+const isActivatingNotifications = ref(false)
+
 const onActiverNotifications = async () => {
-  const result = await activerNotificationsUtilisateur(supabase)
-  if (result.success) {
-    await loadReminders()
+  isActivatingNotifications.value = true
+  saveError.value = ''
+  try {
+    const result = await activerNotificationsUtilisateur(supabase, {
+      deviceName: notificationDeviceName.value,
+    })
+    if (result.success) {
+      notificationDeviceName.value = ''
+      await loadReminders()
+    } else if (result.reason === 'denied') {
+      saveError.value =
+        'Notifications refusées. Autorise-les dans les réglages du navigateur, puis réessaie.'
+    } else if (result.reason === 'subscription_failed') {
+      saveError.value = "Permission accordée, mais l'enregistrement de l'appareil a échoué."
+    }
+  } finally {
+    isActivatingNotifications.value = false
   }
 }
 
@@ -928,9 +954,14 @@ onMounted(async () => {
   oneTimeRefreshIntervalId = window.setInterval(loadStandaloneScheduled, ONE_TIME_REFRESH_MS)
 })
 
+const devicesPanelRef = ref(null)
+
 watch(activeTab, (tab) => {
   if (tab === SETTINGS_TABS.RECONFORT) {
     loadReconfortMessages()
+  }
+  if (tab === SETTINGS_TABS.APPAREILS) {
+    devicesPanelRef.value?.reload?.()
   }
 })
 
@@ -1017,7 +1048,7 @@ onUnmounted(() => {
             <path d="M12 22a7 7 0 0 0 7-7c0-5-7-13-7-13S5 10 5 15a7 7 0 0 0 7 7z" />
           </svg>
           <svg
-            v-else
+            v-else-if="tab.id === SETTINGS_TABS.RECONFORT"
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 24 24"
             fill="none"
@@ -1027,6 +1058,19 @@ onUnmounted(() => {
             stroke-linejoin="round"
           >
             <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+          </svg>
+          <svg
+            v-else
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+            <line x1="12" y1="18" x2="12.01" y2="18" />
           </svg>
         </span>
         <span class="settings-tab__text settings-tab__text--full">{{ tab.label }}</span>
@@ -1084,8 +1128,24 @@ onUnmounted(() => {
 
       <div v-else-if="!notificationsActives()" class="settings-alert">
         <p>Active les notifications pour recevoir tes rappels.</p>
-        <button type="button" class="btn btn--secondary" @click="onActiverNotifications">
-          Autoriser les notifications
+        <label class="field field--grow settings-alert__device">
+          <span>Nom de l’appareil <em>(optionnel)</em></span>
+          <input
+            v-model="notificationDeviceName"
+            type="text"
+            maxlength="80"
+            :placeholder="defaultNotificationDeviceLabel"
+            :disabled="isActivatingNotifications"
+            autocomplete="off"
+          />
+        </label>
+        <button
+          type="button"
+          class="btn btn--secondary"
+          :disabled="isActivatingNotifications"
+          @click="onActiverNotifications"
+        >
+          {{ isActivatingNotifications ? 'Activation…' : 'Autoriser les notifications' }}
         </button>
       </div>
 
@@ -1307,8 +1367,24 @@ onUnmounted(() => {
 
       <div v-else-if="!notificationsActives()" class="settings-alert">
         <p>Autorise les notifications pour recevoir tes rappels planifiés.</p>
-        <button type="button" class="btn btn--secondary" @click="onActiverNotifications">
-          Autoriser les notifications
+        <label class="field field--grow settings-alert__device">
+          <span>Nom de l’appareil <em>(optionnel)</em></span>
+          <input
+            v-model="notificationDeviceName"
+            type="text"
+            maxlength="80"
+            :placeholder="defaultNotificationDeviceLabel"
+            :disabled="isActivatingNotifications"
+            autocomplete="off"
+          />
+        </label>
+        <button
+          type="button"
+          class="btn btn--secondary"
+          :disabled="isActivatingNotifications"
+          @click="onActiverNotifications"
+        >
+          {{ isActivatingNotifications ? 'Activation…' : 'Autoriser les notifications' }}
         </button>
       </div>
 
@@ -2139,6 +2215,15 @@ onUnmounted(() => {
     >
       <SettingsVisibilityPanel :user-id="userId" />
     </div>
+
+    <div
+      v-show="activeTab === SETTINGS_TABS.APPAREILS"
+      role="tabpanel"
+      class="settings-tab-panel"
+      aria-label="Appareils"
+    >
+      <SettingsDevicesPanel ref="devicesPanelRef" :user-id="userId" />
+    </div>
   </div>
 </template>
 
@@ -2425,6 +2510,18 @@ onUnmounted(() => {
   flex: 1;
   font-size: 0.9rem;
   color: #4f5f6f;
+}
+
+.settings-alert__device {
+  flex: 1 1 12rem;
+  min-width: 11rem;
+  max-width: 18rem;
+}
+
+.settings-alert__device em {
+  font-style: normal;
+  font-weight: 600;
+  opacity: 0.75;
 }
 
 .settings-loading {

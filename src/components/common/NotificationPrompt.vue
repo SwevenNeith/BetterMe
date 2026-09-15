@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { supabase } from '../../lib/supabase.js'
 import {
   notificationsSupportees,
@@ -7,12 +7,16 @@ import {
   activerNotificationsUtilisateur,
   synchroniserNotificationsAccordees,
 } from '../../services/common/notifications.js'
+import { getDefaultPushDeviceLabel } from '../../services/settings/pushDevices.js'
 
 const visible = ref(false)
 const denied = ref(false)
 const unsupported = ref(false)
 const loading = ref(false)
 const errorMessage = ref('')
+const deviceName = ref('')
+
+const defaultDeviceLabel = computed(() => getDefaultPushDeviceLabel())
 
 async function refreshEtat() {
   errorMessage.value = ''
@@ -49,7 +53,9 @@ async function onAutoriser() {
   loading.value = true
   errorMessage.value = ''
 
-  const result = await activerNotificationsUtilisateur(supabase)
+  const result = await activerNotificationsUtilisateur(supabase, {
+    deviceName: deviceName.value,
+  })
   loading.value = false
 
   if (result.success) {
@@ -105,6 +111,22 @@ async function onAutoriser() {
           Reçois tes rappels BetterMe (dashboard, emploi du temps, etc.) sur ordinateur et téléphone.
         </span>
       </div>
+
+      <label
+        v-if="!unsupported && !denied"
+        class="notif-prompt-device"
+      >
+        <span class="notif-prompt-device__label">Nom de l’appareil <em>(optionnel)</em></span>
+        <input
+          v-model="deviceName"
+          type="text"
+          class="notif-prompt-device__input"
+          maxlength="80"
+          :placeholder="defaultDeviceLabel"
+          :disabled="loading"
+          autocomplete="off"
+        />
+      </label>
 
       <p v-if="errorMessage" class="notif-prompt-error">{{ errorMessage }}</p>
 
@@ -188,6 +210,62 @@ async function onAutoriser() {
   }
   .notif-prompt-text span {
     color: #adb5bd;
+  }
+}
+
+.notif-prompt-device {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1 1 12rem;
+  min-width: 11rem;
+  max-width: 18rem;
+}
+
+.notif-prompt-device__label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #7a5a8c;
+}
+
+.notif-prompt-device__label em {
+  font-style: normal;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.notif-prompt-device__input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(213, 181, 234, 0.55);
+  border-radius: 12px;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #2c3e50;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.notif-prompt-device__input:focus {
+  outline: none;
+  border-color: #ad81be;
+  box-shadow: 0 0 0 3px rgba(173, 129, 190, 0.18);
+}
+
+.notif-prompt-device__input:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+@media (prefers-color-scheme: dark) {
+  .notif-prompt-device__label {
+    color: #d5b5ea;
+  }
+
+  .notif-prompt-device__input {
+    background: rgba(30, 24, 42, 0.9);
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.28);
   }
 }
 
