@@ -8,7 +8,10 @@ import HabitReadingDetailsPanel from './HabitReadingDetailsPanel.vue'
 import { listReadingBooksWithCovers } from '../../services/lecture/readingBooks.js'
 import { listReadingBookAliases } from '../../services/lecture/readingBookAliases.js'
 import { isRichNoteEmpty, sanitizeRichNoteHtml } from '../../utils/common/sanitizeHtml.js'
-import { isReadingHabit } from '../../utils/habit/habitReadingLink.js'
+import {
+  aggregateReadingBooksFromLogs,
+  isReadingHabit,
+} from '../../utils/habit/habitReadingLink.js'
 import { HABIT_VALUE_TYPE } from '../../constants/habit/habitOptions.js'
 import { formDraftKey, useFormDraft } from '../../composables/useFormDraft.js'
 import {
@@ -87,6 +90,8 @@ const readingContextError = ref('')
 const historyDetailsOpen = ref(false)
 const historyDetailsHtml = ref('')
 const historyDetailsDateLabel = ref('')
+/** @type {import('vue').Ref<Array<{ bookId: string|null, title: string, pagesRead: number }>>} */
+const historyDetailsBooks = ref([])
 const dayPage = ref(0)
 const weekPage = ref(0)
 const monthPage = ref(0)
@@ -214,6 +219,9 @@ function openHistoryDetails(dateIso) {
 
   historyDetailsHtml.value = sanitizeRichNoteHtml(html)
   historyDetailsDateLabel.value = formatDayLabelFr(dateIso)
+  historyDetailsBooks.value = isReadingHabitMode.value
+    ? aggregateReadingBooksFromLogs(historyLogsByDate.value, [dateIso])
+    : []
   historyDetailsOpen.value = true
 }
 
@@ -221,6 +229,7 @@ function closeHistoryDetails() {
   historyDetailsOpen.value = false
   historyDetailsHtml.value = ''
   historyDetailsDateLabel.value = ''
+  historyDetailsBooks.value = []
 }
 
 async function persistDetailsRow(details, valeurOverride = null) {
@@ -515,6 +524,7 @@ function computeYearDaySummaries() {
   const start = toISODate(year, 1, 1)
   const end = toISODate(year, 12, 31)
   const days = []
+  const includeBooks = isReadingHabitMode.value
 
   for (const dateIso of iterateISODateRange(start, end)) {
     const log = historyLogsByDate.value[dateIso]
@@ -522,6 +532,9 @@ function computeYearDaySummaries() {
     days.push({
       dateIso,
       total: getEffectiveValeur(log),
+      books: includeBooks
+        ? aggregateReadingBooksFromLogs(historyLogsByDate.value, [dateIso])
+        : [],
     })
   }
 
@@ -533,6 +546,7 @@ function computeYearDaySummaries() {
       label: `Jour ${index + 1}`,
       dateLabel: formatDayLabelFr(day.dateIso),
       total: day.total,
+      books: day.books,
     }))
 }
 
@@ -541,16 +555,28 @@ function computeYearWeekSummaries() {
   const start = toISODate(year, 1, 1)
   const end = toISODate(year, 12, 31)
   const byWeekStart = new Map()
+  const includeBooks = isReadingHabitMode.value
 
   for (const dateIso of iterateISODateRange(start, end)) {
     const { startIso } = getWeekBoundsFromDateISO(dateIso)
-    if (!byWeekStart.has(startIso)) byWeekStart.set(startIso, 0)
+    if (!byWeekStart.has(startIso)) {
+      byWeekStart.set(startIso, { total: 0, dateIsos: [] })
+    }
+    const bucket = byWeekStart.get(startIso)
     const log = historyLogsByDate.value[dateIso]
-    if (isHabitDayDone(log)) byWeekStart.set(startIso, byWeekStart.get(startIso) + getEffectiveValeur(log))
+    if (!isHabitDayDone(log)) continue
+    bucket.total += getEffectiveValeur(log)
+    bucket.dateIsos.push(dateIso)
   }
 
   return [...byWeekStart.entries()]
-    .map(([startIso, total]) => ({ startIso, total }))
+    .map(([startIso, bucket]) => ({
+      startIso,
+      total: bucket.total,
+      books: includeBooks
+        ? aggregateReadingBooksFromLogs(historyLogsByDate.value, bucket.dateIsos)
+        : [],
+    }))
     .filter((w) => w.total > 0)
     .sort((a, b) => (a.startIso < b.startIso ? 1 : -1))
     .map((w, index) => ({
@@ -559,26 +585,39 @@ function computeYearWeekSummaries() {
       label: `Semaine ${index + 1}`,
       dateLabel: weekLabelFr(w.startIso),
       total: w.total,
+      books: w.books,
     }))
 }
 
 function computeYearMonthSummaries() {
   const year = historyYear.value
-  const byMonth = new Map(Array.from({ length: 12 }, (_, i) => [i + 1, 0]))
+  const byMonth = new Map(
+    Array.from({ length: 12 }, (_, i) => [i + 1, { total: 0, dateIsos: [] }]),
+  )
   const start = toISODate(year, 1, 1)
   const end = toISODate(year, 12, 31)
+  const includeBooks = isReadingHabitMode.value
+
   for (const dateIso of iterateISODateRange(start, end)) {
     const log = historyLogsByDate.value[dateIso]
     if (!isHabitDayDone(log)) continue
     const { month } = parseISODate(dateIso)
-    byMonth.set(month, (byMonth.get(month) ?? 0) + getEffectiveValeur(log))
+    const bucket = byMonth.get(month)
+    bucket.total += getEffectiveValeur(log)
+    bucket.dateIsos.push(dateIso)
   }
   return Array.from({ length: 12 }, (_, i) => 12 - i)
-    .map((month) => ({
-      month,
-      label: monthLabelFr(year, month),
-      total: byMonth.get(month) ?? 0,
-    }))
+    .map((month) => {
+      const bucket = byMonth.get(month)
+      return {
+        month,
+        label: monthLabelFr(year, month),
+        total: bucket?.total ?? 0,
+        books: includeBooks
+          ? aggregateReadingBooksFromLogs(historyLogsByDate.value, bucket?.dateIsos ?? [])
+          : [],
+      }
+    })
     .filter((m) => m.total > 0)
 }
 
@@ -592,6 +631,18 @@ function computeYearTotal(year) {
   }
   return total
 }
+
+const historyYearBooks = computed(() => {
+  if (!isReadingHabitMode.value || historyLoading.value) return []
+  const year = historyYear.value
+  const start = toISODate(year, 1, 1)
+  const end = toISODate(year, 12, 31)
+  const dateIsos = []
+  for (const dateIso of iterateISODateRange(start, end)) {
+    if (isHabitDayDone(historyLogsByDate.value[dateIso])) dateIsos.push(dateIso)
+  }
+  return aggregateReadingBooksFromLogs(historyLogsByDate.value, dateIsos)
+})
 
 const historyDaySummaries = computed(() => (historyLoading.value ? [] : computeYearDaySummaries()))
 const historyWeekSummaries = computed(() => (historyLoading.value ? [] : computeYearWeekSummaries()))
@@ -797,6 +848,7 @@ async function computeRangeResults() {
     rangeTotal.value = total
 
     // Détail jour/semaine/mois/année (uniquement périodes actives)
+    const includeBooks = isReadingHabitMode.value
     const groups = new Map()
     for (const dateIso of iterateISODateRange(rangeStart.value, rangeEnd.value)) {
       const log = byDate[dateIso]
@@ -806,26 +858,41 @@ async function computeRangeResults() {
       if (historyMode.value === 'annee') {
         const { year } = parseISODate(dateIso)
         const key = String(year)
-        if (!groups.has(key)) groups.set(key, { key, label: key, total: 0 })
-        groups.get(key).total += value
+        if (!groups.has(key)) groups.set(key, { key, label: key, total: 0, dateIsos: [] })
+        const group = groups.get(key)
+        group.total += value
+        group.dateIsos.push(dateIso)
       } else if (historyMode.value === 'mois') {
         const { year, month } = parseISODate(dateIso)
         const key = `${year}-${String(month).padStart(2, '0')}`
-        if (!groups.has(key)) groups.set(key, { key, label: monthLabelFr(year, month), total: 0 })
-        groups.get(key).total += value
+        if (!groups.has(key)) groups.set(key, { key, label: monthLabelFr(year, month), total: 0, dateIsos: [] })
+        const group = groups.get(key)
+        group.total += value
+        group.dateIsos.push(dateIso)
       } else if (historyMode.value === 'jour') {
         const key = dateIso
-        if (!groups.has(key)) groups.set(key, { key, label: formatDayLabelFr(dateIso), total: 0 })
-        groups.get(key).total += value
+        if (!groups.has(key)) groups.set(key, { key, label: formatDayLabelFr(dateIso), total: 0, dateIsos: [] })
+        const group = groups.get(key)
+        group.total += value
+        group.dateIsos.push(dateIso)
       } else {
         const { startIso } = getWeekBoundsFromDateISO(dateIso)
         const key = startIso
-        if (!groups.has(key)) groups.set(key, { key, label: weekLabelFr(startIso), total: 0 })
-        groups.get(key).total += value
+        if (!groups.has(key)) groups.set(key, { key, label: weekLabelFr(startIso), total: 0, dateIsos: [] })
+        const group = groups.get(key)
+        group.total += value
+        group.dateIsos.push(dateIso)
       }
     }
 
-    rangeDetails.value = [...groups.values()].sort((a, b) => (a.key < b.key ? 1 : -1))
+    rangeDetails.value = [...groups.values()]
+      .map((group) => ({
+        key: group.key,
+        label: group.label,
+        total: group.total,
+        books: includeBooks ? aggregateReadingBooksFromLogs(byDate, group.dateIsos) : [],
+      }))
+      .sort((a, b) => (a.key < b.key ? 1 : -1))
   } catch (err) {
     if (requestId !== rangeComputeRequestId || !historyOpen.value) return
     console.error(err)
@@ -1208,6 +1275,16 @@ watch(canShowDetails, (visible) => {
                     </span>
                   </div>
                   <span class="habit-history-modal__item-date">{{ d.dateLabel }}</span>
+                  <ul v-if="d.books?.length" class="habit-history-modal__books">
+                    <li
+                      v-for="book in d.books"
+                      :key="`${d.dateIso}-${book.bookId || book.title}`"
+                      class="habit-history-modal__book"
+                    >
+                      <span class="habit-history-modal__book-title">{{ book.title }}</span>
+                      <span class="habit-history-modal__book-pages">{{ book.pagesRead }} p.</span>
+                    </li>
+                  </ul>
                 </li>
               </ul>
               <p v-else class="habit-history-modal__empty">Aucun jour avec données sur cette année.</p>
@@ -1243,6 +1320,16 @@ watch(canShowDetails, (visible) => {
                     <span class="habit-history-modal__item-value">{{ formatStatNumber(w.total, 0) }}</span>
                   </div>
                   <span class="habit-history-modal__item-date">{{ w.dateLabel }}</span>
+                  <ul v-if="w.books?.length" class="habit-history-modal__books">
+                    <li
+                      v-for="book in w.books"
+                      :key="`${w.startIso}-${book.bookId || book.title}`"
+                      class="habit-history-modal__book"
+                    >
+                      <span class="habit-history-modal__book-title">{{ book.title }}</span>
+                      <span class="habit-history-modal__book-pages">{{ book.pagesRead }} p.</span>
+                    </li>
+                  </ul>
                 </li>
               </ul>
               <p v-else class="habit-history-modal__empty">Aucune semaine avec données sur cette année.</p>
@@ -1277,6 +1364,16 @@ watch(canShowDetails, (visible) => {
                     <span class="habit-history-modal__item-title">{{ m.label }}</span>
                     <span class="habit-history-modal__item-value">{{ formatStatNumber(m.total, 0) }}</span>
                   </div>
+                  <ul v-if="m.books?.length" class="habit-history-modal__books">
+                    <li
+                      v-for="book in m.books"
+                      :key="`${m.month}-${book.bookId || book.title}`"
+                      class="habit-history-modal__book"
+                    >
+                      <span class="habit-history-modal__book-title">{{ book.title }}</span>
+                      <span class="habit-history-modal__book-pages">{{ book.pagesRead }} p.</span>
+                    </li>
+                  </ul>
                 </li>
               </ul>
               <p v-else class="habit-history-modal__empty">Aucun mois avec données sur cette année.</p>
@@ -1310,6 +1407,16 @@ watch(canShowDetails, (visible) => {
                   <span class="habit-history-modal__single-title">Année {{ historyYear }}</span>
                   <span class="habit-history-modal__single-value">{{ formatStatNumber(historyYearTotal, 0) }}</span>
                 </div>
+                <ul v-if="historyYearBooks.length" class="habit-history-modal__books habit-history-modal__books--single">
+                  <li
+                    v-for="book in historyYearBooks"
+                    :key="`year-${book.bookId || book.title}`"
+                    class="habit-history-modal__book"
+                  >
+                    <span class="habit-history-modal__book-title">{{ book.title }}</span>
+                    <span class="habit-history-modal__book-pages">{{ book.pagesRead }} p.</span>
+                  </li>
+                </ul>
               </div>
             </template>
 
@@ -1325,6 +1432,16 @@ watch(canShowDetails, (visible) => {
                         <span class="habit-history-modal__item-title">{{ row.label }}</span>
                         <span class="habit-history-modal__item-value">{{ formatStatNumber(row.total, 0) }}</span>
                       </div>
+                      <ul v-if="row.books?.length" class="habit-history-modal__books">
+                        <li
+                          v-for="book in row.books"
+                          :key="`${row.key}-${book.bookId || book.title}`"
+                          class="habit-history-modal__book"
+                        >
+                          <span class="habit-history-modal__book-title">{{ book.title }}</span>
+                          <span class="habit-history-modal__book-pages">{{ book.pagesRead }} p.</span>
+                        </li>
+                      </ul>
                     </li>
                   </ul>
                   <p v-else class="habit-history-modal__empty">Aucune activité sur cette période.</p>
@@ -1376,6 +1493,16 @@ watch(canShowDetails, (visible) => {
                   ✕
                 </button>
               </header>
+              <ul v-if="historyDetailsBooks.length" class="habit-history-modal__books habit-history-modal__books--details">
+                <li
+                  v-for="book in historyDetailsBooks"
+                  :key="`details-${book.bookId || book.title}`"
+                  class="habit-history-modal__book"
+                >
+                  <span class="habit-history-modal__book-title">{{ book.title }}</span>
+                  <span class="habit-history-modal__book-pages">{{ book.pagesRead }} p.</span>
+                </li>
+              </ul>
               <div class="habit-history-details__content" v-html="historyDetailsHtml" />
             </div>
           </div>
@@ -2186,6 +2313,48 @@ watch(canShowDetails, (visible) => {
   color: #6c757d;
 }
 
+.habit-history-modal__books {
+  list-style: none;
+  margin: 0.55rem 0 0;
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border-radius: 10px;
+  background: rgba(213, 181, 234, 0.1);
+  border: 1px solid rgba(213, 181, 234, 0.18);
+}
+
+.habit-history-modal__books--single,
+.habit-history-modal__books--details {
+  margin-top: 0.75rem;
+}
+
+.habit-history-modal__book {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.habit-history-modal__book-title {
+  min-width: 0;
+  flex: 1;
+  font-size: 0.84rem;
+  font-weight: 650;
+  color: #2c3e50;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.habit-history-modal__book-pages {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--habit-color, #ad81be);
+}
+
 .habit-history-modal__empty {
   margin: 0.9rem 0 0;
   text-align: center;
@@ -2260,6 +2429,15 @@ watch(canShowDetails, (visible) => {
   .habit-history-modal__loading,
   .habit-history-modal__item-date {
     color: #adb5bd;
+  }
+
+  .habit-history-modal__books {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(213, 181, 234, 0.14);
+  }
+
+  .habit-history-modal__book-title {
+    color: #e9ecef;
   }
 
   .habit-history-modal__select {

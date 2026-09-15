@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import {
   computeEndPageFromPagesRead,
   computePagesReadFromEndPage,
+  getBookTotalPages,
 } from '../../utils/habit/habitReadingLink.js'
 
 const props = defineProps({
@@ -49,9 +50,13 @@ const emit = defineEmits(['close', 'save', 'remove'])
 const endPageInput = ref('')
 const pagesReadInput = ref('')
 const fieldError = ref('')
+/** @type {import('vue').Ref<{ endPage: number, pagesRead: number, totalPages: number }|null>} */
+const pageOverflow = ref(null)
 let syncSource = null
 
 const bookTitle = computed(() => props.book?.title ?? 'Livre')
+
+const totalPages = computed(() => getBookTotalPages(props.book))
 
 const baselineLabel = computed(() => {
   if (props.baselinePage > 0) {
@@ -66,6 +71,11 @@ const editHint = computed(() => {
   return 'Mettez à jour le total du jour : si vous aviez lu 5 pages ce matin et 15 au total ce soir, indiquez 15 pages lues (ou la page d’arrêt correspondante).'
 })
 
+const pagesHint = computed(() => {
+  if (totalPages.value == null) return 'Nombre de pages non renseigné sur la fiche livre.'
+  return `Fiche livre : ${totalPages.value} page${totalPages.value > 1 ? 's' : ''}.`
+})
+
 function resetDraft() {
   endPageInput.value =
     props.initialEndPage !== '' && props.initialEndPage != null
@@ -76,11 +86,13 @@ function resetDraft() {
       ? String(props.initialPagesRead)
       : ''
   fieldError.value = ''
+  pageOverflow.value = null
 }
 
 function onEndPageInput() {
   if (syncSource === 'pages') return
   syncSource = 'end'
+  pageOverflow.value = null
   const pages = computePagesReadFromEndPage(props.baselinePage, endPageInput.value)
   pagesReadInput.value = pages > 0 ? String(pages) : ''
   syncSource = null
@@ -89,6 +101,7 @@ function onEndPageInput() {
 function onPagesReadInput() {
   if (syncSource === 'end') return
   syncSource = 'pages'
+  pageOverflow.value = null
   const end = computeEndPageFromPagesRead(props.baselinePage, pagesReadInput.value)
   endPageInput.value = end > props.baselinePage ? String(end) : ''
   syncSource = null
@@ -101,6 +114,7 @@ function validate() {
 
   if (!Number.isFinite(endPage) || endPage <= 0) {
     fieldError.value = 'Indiquez la page où vous vous êtes arrêté.'
+    pageOverflow.value = null
     return null
   }
 
@@ -109,16 +123,26 @@ function validate() {
       start > 0
         ? `La page doit être supérieure à ${start} (dernière page avant aujourd'hui).`
         : 'La page doit être supérieure à 0.'
+    pageOverflow.value = null
     return null
   }
 
   const computedPages = endPage - start
   if (!Number.isFinite(pagesRead) || pagesRead <= 0 || pagesRead !== computedPages) {
     fieldError.value = 'Le nombre de pages lues ne correspond pas à la progression.'
+    pageOverflow.value = null
+    return null
+  }
+
+  const total = totalPages.value
+  if (total != null && endPage > total) {
+    fieldError.value = ''
+    pageOverflow.value = { endPage, pagesRead: computedPages, totalPages: total }
     return null
   }
 
   fieldError.value = ''
+  pageOverflow.value = null
   return { endPage, pagesRead: computedPages }
 }
 
@@ -126,6 +150,37 @@ function submit() {
   const payload = validate()
   if (!payload) return
   emit('save', payload)
+}
+
+function resolveOverflowByUpdatingPages() {
+  const overflow = pageOverflow.value
+  if (!overflow) return
+  emit('save', {
+    endPage: overflow.endPage,
+    pagesRead: overflow.pagesRead,
+    updateBookPages: overflow.endPage,
+  })
+  pageOverflow.value = null
+}
+
+function resolveOverflowByClamping() {
+  const overflow = pageOverflow.value
+  if (!overflow) return
+
+  const endPage = overflow.totalPages
+  const pagesRead = endPage - props.baselinePage
+  if (!Number.isFinite(pagesRead) || pagesRead <= 0) {
+    fieldError.value =
+      'Impossible de caler la page d’arrêt : la reprise est déjà à la fin du livre (ou au-delà).'
+    pageOverflow.value = null
+    return
+  }
+
+  endPageInput.value = String(endPage)
+  pagesReadInput.value = String(pagesRead)
+  pageOverflow.value = null
+  fieldError.value = ''
+  emit('save', { endPage, pagesRead })
 }
 
 function close() {
@@ -182,6 +237,7 @@ watch(
         </header>
 
         <p class="habit-reading-session__baseline">{{ baselineLabel }}</p>
+        <p class="habit-reading-session__pages-hint">{{ pagesHint }}</p>
         <p v-if="editHint" class="habit-reading-session__edit-hint">{{ editHint }}</p>
 
         <div class="habit-reading-session__grid">
@@ -193,7 +249,7 @@ watch(
               min="1"
               step="1"
               class="habit-reading-session__input"
-              :disabled="disabled"
+              :disabled="disabled || Boolean(pageOverflow)"
               placeholder="Ex. 120"
               @input="onEndPageInput"
             />
@@ -207,7 +263,7 @@ watch(
               min="1"
               step="1"
               class="habit-reading-session__input"
-              :disabled="disabled"
+              :disabled="disabled || Boolean(pageOverflow)"
               placeholder="Ex. 25"
               @input="onPagesReadInput"
             />
@@ -217,6 +273,34 @@ watch(
         <p class="habit-reading-session__sync-hint">
           Renseignez l'une des deux valeurs : l'autre se calcule automatiquement.
         </p>
+
+        <div v-if="pageOverflow" class="habit-reading-session__overflow" role="alert">
+          <p class="habit-reading-session__overflow-title">
+            Page d’arrêt {{ pageOverflow.endPage }} &gt; {{ pageOverflow.totalPages }} pages sur la
+            fiche.
+          </p>
+          <p class="habit-reading-session__overflow-text">
+            Que veux-tu faire ?
+          </p>
+          <div class="habit-reading-session__overflow-actions">
+            <button
+              type="button"
+              class="habit-reading-session__btn habit-reading-session__btn--primary"
+              :disabled="disabled"
+              @click="resolveOverflowByUpdatingPages"
+            >
+              Corriger la fiche ({{ pageOverflow.endPage }} pages)
+            </button>
+            <button
+              type="button"
+              class="habit-reading-session__btn habit-reading-session__btn--ghost"
+              :disabled="disabled"
+              @click="resolveOverflowByClamping"
+            >
+              Arrêt à la page {{ pageOverflow.totalPages }}
+            </button>
+          </div>
+        </div>
 
         <p v-if="fieldError" class="habit-reading-session__error">{{ fieldError }}</p>
 
@@ -242,7 +326,7 @@ watch(
             <button
               type="button"
               class="habit-reading-session__btn habit-reading-session__btn--primary"
-              :disabled="disabled"
+              :disabled="disabled || Boolean(pageOverflow)"
               @click="submit"
             >
               {{ isEdit ? 'Mettre à jour' : 'Ajouter' }}
@@ -349,12 +433,19 @@ watch(
 }
 
 .habit-reading-session__baseline,
+.habit-reading-session__pages-hint,
 .habit-reading-session__edit-hint,
 .habit-reading-session__sync-hint {
   margin: 0 0 0.75rem;
   font-size: 0.82rem;
   line-height: 1.45;
   color: #6c757d;
+}
+
+.habit-reading-session__pages-hint {
+  margin-top: -0.35rem;
+  font-weight: 600;
+  color: #5c6b7a;
 }
 
 .habit-reading-session__edit-hint {
@@ -395,6 +486,33 @@ watch(
   color: #2c3e50;
   width: 100%;
   box-sizing: border-box;
+}
+
+.habit-reading-session__overflow {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(192, 57, 43, 0.08);
+  border: 1px solid rgba(192, 57, 43, 0.22);
+}
+
+.habit-reading-session__overflow-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #a93226;
+}
+
+.habit-reading-session__overflow-text {
+  margin: 0 0 0.65rem;
+  font-size: 0.82rem;
+  color: #6c757d;
+}
+
+.habit-reading-session__overflow-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
 }
 
 .habit-reading-session__error {
@@ -466,7 +584,9 @@ watch(
 
   .habit-reading-session__author,
   .habit-reading-session__baseline,
-  .habit-reading-session__sync-hint {
+  .habit-reading-session__pages-hint,
+  .habit-reading-session__sync-hint,
+  .habit-reading-session__overflow-text {
     color: #adb5bd;
   }
 
@@ -474,6 +594,15 @@ watch(
     color: #ced4da;
     background: rgba(255, 255, 255, 0.06);
     border-color: rgba(213, 181, 234, 0.15);
+  }
+
+  .habit-reading-session__overflow {
+    background: rgba(192, 57, 43, 0.16);
+    border-color: rgba(231, 76, 60, 0.35);
+  }
+
+  .habit-reading-session__overflow-title {
+    color: #f5b7b1;
   }
 
   .habit-reading-session__input {

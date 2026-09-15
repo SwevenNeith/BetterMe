@@ -4,17 +4,23 @@ import RichTextNoteEditor from '../common/RichTextNoteEditor.vue'
 import HabitReadingBookSessionModal from './HabitReadingBookSessionModal.vue'
 import HabitReadingLibraryPickerModal from './HabitReadingLibraryPickerModal.vue'
 import HabitReadingImportModal from './HabitReadingImportModal.vue'
+import { supabase } from '../../lib/supabase.js'
 import {
   buildReadingDetailsHtml,
   buildReadingAliasIndex,
   collectUnmatchedReadingTitles,
   computeEndPageFromPagesRead,
+  getBookTotalPages,
   getLastReadingPosition,
+  hasReachedBookLastPage,
   isBookInProgress,
   matchBookByTitleExact,
   splitReadingDetails,
 } from '../../utils/habit/habitReadingLink.js'
 import { isRichNoteEmpty, sanitizeRichNoteHtml } from '../../utils/common/sanitizeHtml.js'
+import { bookToEditForm } from '../../utils/lecture/readingBookForm.js'
+import { updateReadingBook } from '../../services/lecture/readingBooks.js'
+import { READING_COLLECTION_TERMINE } from '../../services/lecture/readingCollections.js'
 
 const props = defineProps({
   habit: {
@@ -284,13 +290,73 @@ function closeBookModal() {
   modalBookId.value = null
 }
 
-function onModalSave({ endPage, pagesRead }) {
+/**
+ * Met à jour la fiche livre locale après un patch Supabase.
+ * @param {object} updated
+ */
+function replaceLocalBook(updated) {
+  if (!updated?.id) return
+  extraBooks.value = [
+    ...extraBooks.value.filter((item) => item.id !== updated.id),
+    updated,
+  ]
+}
+
+/**
+ * Après une session : corrige éventuellement le nb de pages, et passe en « Terminé »
+ * si la page d’arrêt atteint la fin du livre.
+ * @param {object} book
+ * @param {number} endPage
+ * @param {{ updateBookPages?: number|null }} [options]
+ */
+async function syncBookFicheAfterSession(book, endPage, { updateBookPages = null } = {}) {
+  if (!book?.id) return book
+
+  const form = bookToEditForm(book)
+  let changed = false
+
+  if (updateBookPages != null) {
+    const nextPages = Number(updateBookPages)
+    if (Number.isFinite(nextPages) && nextPages > 0) {
+      form.pages = String(Math.floor(nextPages))
+      changed = true
+    }
+  }
+
+  const effectiveTotal =
+    getBookTotalPages({ pages: form.pages }) ?? getBookTotalPages(book)
+
+  if (effectiveTotal != null && hasReachedBookLastPage(endPage, { pages: effectiveTotal })) {
+    form.collection = READING_COLLECTION_TERMINE
+    if (!String(form.dateEnd ?? '').trim()) {
+      form.dateEnd = props.selectedDate
+    }
+    changed = true
+  }
+
+  if (!changed) return book
+
+  try {
+    const updated = await updateReadingBook(supabase, props.userId, book.id, form)
+    replaceLocalBook(updated)
+    emit('books-updated')
+    return updated
+  } catch (err) {
+    console.error(err)
+    fieldError.value =
+      err?.message || 'Impossible de mettre à jour la fiche livre (pages / collection).'
+    return book
+  }
+}
+
+async function onModalSave({ endPage, pagesRead, updateBookPages = null }) {
   if (!modalBook.value) return
-  const { page } = getBaselineForBook(modalBook.value)
+  const book = modalBook.value
+  const { page } = getBaselineForBook(book)
 
   bookSessions.value = {
     ...bookSessions.value,
-    [modalBook.value.id]: {
+    [book.id]: {
       startPage: page,
       endPage: String(endPage),
       pagesRead: String(pagesRead),
@@ -299,6 +365,7 @@ function onModalSave({ endPage, pagesRead }) {
 
   closeBookModal()
   emitHabitValue()
+  await syncBookFicheAfterSession(book, endPage, { updateBookPages })
   void persistAutoSave({ closeAfterSave: true })
 }
 

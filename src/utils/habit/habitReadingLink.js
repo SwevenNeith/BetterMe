@@ -87,6 +87,29 @@ export function isBookInProgress(book) {
 }
 
 /**
+ * Nombre de pages de la fiche livre (null si non renseigné / invalide).
+ * @param {{ pages?: number|string|null }|null|undefined} book
+ * @returns {number|null}
+ */
+export function getBookTotalPages(book) {
+  const pages = Number(book?.pages)
+  if (!Number.isFinite(pages) || pages <= 0) return null
+  return Math.floor(pages)
+}
+
+/**
+ * true si la page d’arrêt atteint (ou dépasse) la fin du livre.
+ * @param {number} endPage
+ * @param {{ pages?: number|string|null }|null|undefined} book
+ */
+export function hasReachedBookLastPage(endPage, book) {
+  const total = getBookTotalPages(book)
+  if (total == null) return false
+  const end = Number(endPage)
+  return Number.isFinite(end) && end >= total
+}
+
+/**
  * @param {string} html
  */
 export function htmlToPlainText(html) {
@@ -322,6 +345,52 @@ export function computeEndPageFromPagesRead(lastEndPage, pagesRead) {
   if (!Number.isFinite(pages) || pages <= 0) return Math.max(0, Number(lastEndPage) || 0)
   const start = Math.max(0, Number(lastEndPage) || 0)
   return start + pages
+}
+
+/**
+ * Agrège les livres lus (titre + pages) sur une liste de jours à partir des logs.
+ * Un même titre (normalisé) n’apparaît qu’une fois, même si certains logs ont un bookId
+ * et d’autres non.
+ * @param {Record<string, { details?: string|null }>} logsByDate
+ * @param {Iterable<string>} dateIsos
+ * @returns {Array<{ bookId: string|null, title: string, pagesRead: number }>}
+ */
+export function aggregateReadingBooksFromLogs(logsByDate, dateIsos) {
+  /** @type {Map<string, { bookId: string|null, title: string, pagesRead: number }>} */
+  const byTitle = new Map()
+
+  for (const dateIso of dateIsos ?? []) {
+    const log = logsByDate?.[dateIso]
+    if (!log?.details) continue
+
+    const { readingEntries } = splitReadingDetails(log.details)
+    for (const entry of readingEntries) {
+      const pagesRead = computePagesReadFromEndPage(entry.startPage, entry.endPage)
+      if (pagesRead <= 0) continue
+
+      const title = String(entry.title ?? '').trim()
+      if (!title) continue
+
+      const titleKey = normalizeReadingTitleKey(title)
+      const prev = byTitle.get(titleKey)
+      if (prev) {
+        prev.pagesRead += pagesRead
+        if (!prev.bookId && entry.bookId) prev.bookId = entry.bookId
+        continue
+      }
+
+      byTitle.set(titleKey, {
+        bookId: entry.bookId ?? null,
+        title,
+        pagesRead,
+      })
+    }
+  }
+
+  return [...byTitle.values()].sort((left, right) => {
+    if (right.pagesRead !== left.pagesRead) return right.pagesRead - left.pagesRead
+    return left.title.localeCompare(right.title, 'fr', { sensitivity: 'base' })
+  })
 }
 
 /**
