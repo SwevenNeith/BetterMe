@@ -10,12 +10,17 @@ ALTER TABLE public.push_subscriptions
 ALTER TABLE public.push_subscriptions
   ADD COLUMN IF NOT EXISTS device_name text;
 
+ALTER TABLE public.push_subscriptions
+  ADD COLUMN IF NOT EXISTS notification_prefs jsonb;
+
 COMMENT ON COLUMN public.push_subscriptions.user_agent IS
   'User-Agent du navigateur au moment de l’enregistrement push';
 COMMENT ON COLUMN public.push_subscriptions.updated_at IS
   'Dernière synchronisation de l’abonnement push';
 COMMENT ON COLUMN public.push_subscriptions.device_name IS
   'Nom personnalisé donné par l’utilisateur à cet appareil';
+COMMENT ON COLUMN public.push_subscriptions.notification_prefs IS
+  'Préférences de catégories de notifications par appareil (JSON). null = tout activé.';
 
 -- Limite raisonnable côté base (l’app tronque aussi à 80 caractères).
 DO $$

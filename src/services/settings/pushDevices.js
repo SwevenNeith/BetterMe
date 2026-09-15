@@ -1,6 +1,9 @@
 import { ensureServiceWorker } from '../common/notifications.js'
+import { mergeDeviceNotificationPrefs } from '../../constants/settings/deviceNotificationPrefs.js'
 
 const DEVICE_SELECT_FULL =
+  'id, created_at, updated_at, user_agent, device_name, notification_prefs, subscription'
+const DEVICE_SELECT_NAMED =
   'id, created_at, updated_at, user_agent, device_name, subscription'
 const DEVICE_SELECT_META = 'id, created_at, updated_at, user_agent, subscription'
 const DEVICE_SELECT_BASIC = 'id, created_at, subscription'
@@ -13,6 +16,7 @@ function isMissingColumnError(error) {
     msg.includes('user_agent') ||
     msg.includes('updated_at') ||
     msg.includes('device_name') ||
+    msg.includes('notification_prefs') ||
     msg.includes('schema cache') ||
     msg.includes('does not exist') ||
     msg.includes('could not find')
@@ -109,6 +113,7 @@ export function describePushDevice(row, { currentEndpoint = '' } = {}) {
     deviceName: deviceName || null,
     endpoint,
     userAgent: row?.user_agent || null,
+    notificationPrefs: mergeDeviceNotificationPrefs(row?.notification_prefs),
     createdAt: row?.created_at || null,
     updatedAt: row?.updated_at || null,
     seenAt,
@@ -132,7 +137,12 @@ export async function getCurrentPushEndpoint() {
 export async function listPushDevices(supabase, userId) {
   if (!supabase || !userId) return []
 
-  const attempts = [DEVICE_SELECT_FULL, DEVICE_SELECT_META, DEVICE_SELECT_BASIC]
+  const attempts = [
+    DEVICE_SELECT_FULL,
+    DEVICE_SELECT_NAMED,
+    DEVICE_SELECT_META,
+    DEVICE_SELECT_BASIC,
+  ]
   let rows = null
   let error = null
 
@@ -190,6 +200,43 @@ export async function renamePushDevice(supabase, userId, deviceId, name) {
   }
 
   return deviceName
+}
+
+export async function updateDeviceNotificationPrefs(supabase, userId, deviceId, prefs) {
+  if (!supabase || !userId || !deviceId) {
+    throw new Error('Enregistrement des préférences impossible.')
+  }
+
+  const notificationPrefs = mergeDeviceNotificationPrefs(prefs)
+  const payload = {
+    notification_prefs: notificationPrefs,
+    updated_at: new Date().toISOString(),
+  }
+
+  let { error } = await supabase
+    .from('push_subscriptions')
+    .update(payload)
+    .eq('id', deviceId)
+    .eq('user_id', userId)
+
+  if (error && isMissingColumnError(error) && String(error.message || '').includes('updated_at')) {
+    ;({ error } = await supabase
+      .from('push_subscriptions')
+      .update({ notification_prefs: notificationPrefs })
+      .eq('id', deviceId)
+      .eq('user_id', userId))
+  }
+
+  if (error) {
+    if (isMissingColumnError(error)) {
+      throw new Error(
+        'La colonne notification_prefs n’existe pas encore. Exécute le script SQL add-push-subscription-device-meta.sql.',
+      )
+    }
+    throw new Error(error.message || 'Impossible d’enregistrer ces préférences.')
+  }
+
+  return notificationPrefs
 }
 
 export async function deletePushDevice(supabase, userId, deviceId, { endpoint = '' } = {}) {

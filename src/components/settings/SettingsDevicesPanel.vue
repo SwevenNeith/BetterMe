@@ -2,9 +2,16 @@
 import { nextTick, ref, watch } from 'vue'
 import { supabase } from '../../lib/supabase.js'
 import {
+  DEVICE_NOTIFICATION_CATEGORIES,
+  areAllDeviceCategoriesEnabled,
+  mergeDeviceNotificationPrefs,
+  setAllDeviceCategories,
+} from '../../constants/settings/deviceNotificationPrefs.js'
+import {
   deletePushDevice,
   listPushDevices,
   renamePushDevice,
+  updateDeviceNotificationPrefs,
 } from '../../services/settings/pushDevices.js'
 
 const props = defineProps({
@@ -23,10 +30,13 @@ const actionError = ref('')
 const actionMessage = ref('')
 const deletingId = ref(null)
 const savingRenameId = ref(null)
+const savingPrefsId = ref(null)
 const editingDeviceId = ref(null)
 const editingName = ref('')
 const renameInputRef = ref(null)
 const expandedDevices = ref({})
+
+const notificationCategories = DEVICE_NOTIFICATION_CATEGORIES
 
 function emitCount(count = devices.value.length) {
   emit('count-change', count)
@@ -42,6 +52,61 @@ function toggleDevice(deviceId) {
     ...expandedDevices.value,
     [deviceId]: !expandedDevices.value[deviceId],
   }
+}
+
+function patchDevicePrefs(deviceId, prefs) {
+  devices.value = devices.value.map((device) =>
+    device.id === deviceId
+      ? { ...device, notificationPrefs: mergeDeviceNotificationPrefs(prefs) }
+      : device,
+  )
+}
+
+async function persistDevicePrefs(device, nextPrefs) {
+  if (!props.userId || !device?.id) return
+
+  const previous = mergeDeviceNotificationPrefs(device.notificationPrefs)
+  patchDevicePrefs(device.id, nextPrefs)
+  savingPrefsId.value = device.id
+  actionError.value = ''
+  try {
+    const saved = await updateDeviceNotificationPrefs(
+      supabase,
+      props.userId,
+      device.id,
+      nextPrefs,
+    )
+    patchDevicePrefs(device.id, saved)
+  } catch (err) {
+    console.error(err)
+    patchDevicePrefs(device.id, previous)
+    actionError.value = err.message || 'Impossible d’enregistrer ces préférences.'
+  } finally {
+    savingPrefsId.value = null
+  }
+}
+
+async function onToggleCategory(device, categoryId, checked) {
+  if (savingPrefsId.value || deletingId.value) return
+  const next = {
+    ...mergeDeviceNotificationPrefs(device.notificationPrefs),
+    [categoryId]: Boolean(checked),
+  }
+  await persistDevicePrefs(device, next)
+}
+
+async function onSelectAllCategories(device) {
+  if (savingPrefsId.value || deletingId.value) return
+  await persistDevicePrefs(device, setAllDeviceCategories(true))
+}
+
+async function onDeselectAllCategories(device) {
+  if (savingPrefsId.value || deletingId.value) return
+  await persistDevicePrefs(device, setAllDeviceCategories(false))
+}
+
+function deviceHasAllCategories(device) {
+  return areAllDeviceCategoriesEnabled(device?.notificationPrefs)
 }
 
 async function loadDevices() {
@@ -86,7 +151,7 @@ function setRenameInputRef(el, deviceId) {
 }
 
 async function startRename(device) {
-  if (!device?.id || savingRenameId.value || deletingId.value) return
+  if (!device?.id || savingRenameId.value || deletingId.value || savingPrefsId.value) return
   editingDeviceId.value = device.id
   editingName.value = device.deviceName || device.label || ''
   actionError.value = ''
@@ -132,7 +197,15 @@ function onRenameKeydown(event, device) {
 }
 
 async function onRemoveDevice(device) {
-  if (!props.userId || !device?.id || deletingId.value || savingRenameId.value) return
+  if (
+    !props.userId ||
+    !device?.id ||
+    deletingId.value ||
+    savingRenameId.value ||
+    savingPrefsId.value
+  ) {
+    return
+  }
 
   const label = device.isCurrent ? 'cet appareil (notifications locales)' : `« ${device.label} »`
   if (!window.confirm(`Retirer ${label} de la liste des appareils enregistrés ?`)) return
@@ -265,7 +338,11 @@ defineExpose({ reload: loadDevices })
               <button
                 type="button"
                 class="btn btn--ghost device-card__action"
-                :disabled="deletingId === device.id || Boolean(savingRenameId)"
+                :disabled="
+                  deletingId === device.id ||
+                  Boolean(savingRenameId) ||
+                  savingPrefsId === device.id
+                "
                 @click="startRename(device)"
               >
                 Renommer
@@ -273,7 +350,11 @@ defineExpose({ reload: loadDevices })
               <button
                 type="button"
                 class="btn btn--ghost device-card__action device-card__action--danger"
-                :disabled="deletingId === device.id || Boolean(savingRenameId)"
+                :disabled="
+                  deletingId === device.id ||
+                  Boolean(savingRenameId) ||
+                  savingPrefsId === device.id
+                "
                 @click="onRemoveDevice(device)"
               >
                 {{ deletingId === device.id ? 'Retrait…' : 'Retirer' }}
@@ -287,7 +368,62 @@ defineExpose({ reload: loadDevices })
           :id="`settings-device-${device.id}`"
           class="card-body"
         >
-          <!-- Contenu appareil à venir -->
+          <div class="device-prefs">
+            <div class="device-prefs__toolbar">
+              <p class="device-prefs__intro">
+                Choisis les notifications que cet appareil peut recevoir.
+              </p>
+              <div class="device-prefs__bulk">
+                <button
+                  type="button"
+                  class="btn btn--ghost device-card__action"
+                  :disabled="
+                    savingPrefsId === device.id ||
+                    deletingId === device.id ||
+                    deviceHasAllCategories(device)
+                  "
+                  @click="onSelectAllCategories(device)"
+                >
+                  Sélectionner tout
+                </button>
+                <button
+                  type="button"
+                  class="btn btn--ghost device-card__action"
+                  :disabled="
+                    savingPrefsId === device.id ||
+                    deletingId === device.id ||
+                    !device.notificationPrefs ||
+                    Object.values(device.notificationPrefs).every((value) => value === false)
+                  "
+                  @click="onDeselectAllCategories(device)"
+                >
+                  Désélectionner tout
+                </button>
+              </div>
+            </div>
+
+            <ul class="device-prefs__list" :aria-label="`Notifications pour ${device.label}`">
+              <li
+                v-for="category in notificationCategories"
+                :key="`${device.id}-${category.id}`"
+                class="device-prefs__item"
+              >
+                <label class="device-prefs__check">
+                  <input
+                    type="checkbox"
+                    class="device-prefs__input"
+                    :checked="device.notificationPrefs?.[category.id] !== false"
+                    :disabled="savingPrefsId === device.id || deletingId === device.id"
+                    @change="onToggleCategory(device, category.id, $event.target.checked)"
+                  />
+                  <span class="device-prefs__text">
+                    <span class="device-prefs__label">{{ category.label }}</span>
+                    <span class="device-prefs__desc">{{ category.description }}</span>
+                  </span>
+                </label>
+              </li>
+            </ul>
+          </div>
         </div>
       </section>
     </div>
@@ -431,6 +567,82 @@ defineExpose({ reload: loadDevices })
   min-height: 0;
 }
 
+.device-prefs__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.device-prefs__intro {
+  margin: 0;
+  flex: 1;
+  min-width: 12rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #6c757d;
+}
+
+.device-prefs__bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.device-prefs__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.device-prefs__item {
+  margin: 0;
+}
+
+.device-prefs__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.28);
+  background: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+}
+
+.device-prefs__input {
+  margin-top: 0.15rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex-shrink: 0;
+  accent-color: #ad81be;
+  cursor: pointer;
+}
+
+.device-prefs__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.device-prefs__label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #343a40;
+}
+
+.device-prefs__desc {
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: #868e96;
+}
+
 .device-card__rename {
   display: flex;
   flex: 1;
@@ -561,6 +773,20 @@ defineExpose({ reload: loadDevices })
     background: rgba(30, 24, 42, 0.9);
     color: #e9ecef;
     border-color: rgba(213, 181, 234, 0.28);
+  }
+
+  .device-prefs__intro,
+  .device-prefs__desc {
+    color: #adb5bd;
+  }
+
+  .device-prefs__label {
+    color: #e9ecef;
+  }
+
+  .device-prefs__check {
+    background: rgba(30, 24, 42, 0.45);
+    border-color: rgba(213, 181, 234, 0.18);
   }
 }
 </style>

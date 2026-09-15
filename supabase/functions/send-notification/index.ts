@@ -414,10 +414,18 @@ function subscriptionsForUser(
 
 /** Une seule entrée par endpoint (évite les doublons push_subscriptions). */
 function uniqueSubscriptionsByEndpoint(
-  rows: Array<{ user_id?: string | null; subscription: unknown }>,
+  rows: Array<{
+    user_id?: string | null
+    subscription: unknown
+    notification_prefs?: unknown
+  }>,
 ) {
   const seen = new Set<string>()
-  const unique: Array<{ user_id?: string | null; subscription: unknown }> = []
+  const unique: Array<{
+    user_id?: string | null
+    subscription: unknown
+    notification_prefs?: unknown
+  }> = []
   for (const row of rows) {
     const endpoint = subscriptionEndpoint(row.subscription)
     const key = endpoint || JSON.stringify(parseSubscriptionObject(row.subscription) ?? row)
@@ -427,6 +435,42 @@ function uniqueSubscriptionsByEndpoint(
     unique.push(parsed ? { ...row, subscription: parsed } : row)
   }
   return unique
+}
+
+/** Catégorie appareil pour filtrer les push (null = toujours envoyer, ex. tests manuels). */
+function mapNotificationKindToDeviceCategory(kind: unknown): string | null {
+  const raw = String(kind ?? '').trim()
+  if (!raw) return null
+  if (raw === 'daily_reminder' || raw.startsWith('daily_reminder:')) return 'daily'
+  if (raw === 'ponctuel') return 'ponctuel'
+  if (raw === 'activite') return 'activite'
+  if (raw === 'timer' || raw === 'timer_start') return 'timer'
+  if (raw === 'todo_item_reminder') return 'todo_item'
+  if (raw === 'todo_promesse_reminder') return 'todo_promesse'
+  if (raw === 'reconfort') return 'reconfort'
+  if (raw.startsWith('menstruation_')) return 'menstruation'
+  return null
+}
+
+function isSubscriptionEnabledForCategory(
+  row: { notification_prefs?: unknown },
+  category: string | null,
+): boolean {
+  if (!category) return true
+  const prefs = row.notification_prefs
+  if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) return true
+  return (prefs as Record<string, unknown>)[category] !== false
+}
+
+function filterSubscriptionsByCategory(
+  rows: Array<{
+    user_id?: string | null
+    subscription: unknown
+    notification_prefs?: unknown
+  }>,
+  category: string | null,
+) {
+  return rows.filter((row) => isSubscriptionEnabledForCategory(row, category))
 }
 
 const DAILY_REMINDER_KIND_PREFIX = 'daily_reminder:'
@@ -490,9 +534,15 @@ Deno.serve(async (req) => {
       dayISO,
     } = body
 
-    const { data: subscriptions, error } = await supabase
+    let { data: subscriptions, error } = await supabase
       .from('push_subscriptions')
-      .select('user_id, subscription')
+      .select('user_id, subscription, notification_prefs')
+
+    if (error && String(error.message || '').toLowerCase().includes('notification_prefs')) {
+      ;({ data: subscriptions, error } = await supabase
+        .from('push_subscriptions')
+        .select('user_id, subscription'))
+    }
 
     if (error) {
       console.error('Erreur récupération subscriptions :', error)
@@ -519,12 +569,15 @@ Deno.serve(async (req) => {
         })
       }
 
-      const targets = uniqueSubscriptionsByEndpoint(
-        userId
-          ? subscriptionsForUser(subscriptions ?? [], userId)
-          : type === 'daily_push'
-            ? []
-            : (subscriptions ?? []),
+      const targets = filterSubscriptionsByCategory(
+        uniqueSubscriptionsByEndpoint(
+          userId
+            ? subscriptionsForUser(subscriptions ?? [], userId)
+            : type === 'daily_push'
+              ? []
+              : (subscriptions ?? []),
+        ),
+        type === 'daily_push' ? 'daily' : null,
       )
 
       // daily_push : 1 seul appareil max si plusieurs endpoints (anti-doublon agressif)
@@ -753,11 +806,19 @@ Deno.serve(async (req) => {
         }
 
         if (!skipDailyPush) {
-          const targets = uniqueSubscriptionsByEndpoint(
-            subscriptionsForUser(subscriptions ?? [], notif.user_id),
+          const category = mapNotificationKindToDeviceCategory(notif.kind)
+          const targets = filterSubscriptionsByCategory(
+            uniqueSubscriptionsByEndpoint(
+              subscriptionsForUser(subscriptions ?? [], notif.user_id),
+            ),
+            category,
           )
           if (!targets.length) {
-            console.log('Aucune subscription pour', notif.user_id ?? 'inconnu')
+            console.log(
+              'Aucune subscription (ou catégorie désactivée) pour',
+              notif.user_id ?? 'inconnu',
+              category ?? 'all',
+            )
           }
 
           const pushPayload = JSON.stringify({
