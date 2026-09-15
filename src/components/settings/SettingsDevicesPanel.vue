@@ -14,6 +14,8 @@ const props = defineProps({
   },
 })
 
+const emit = defineEmits(['count-change'])
+
 const devices = ref([])
 const isLoading = ref(false)
 const loadError = ref('')
@@ -24,10 +26,29 @@ const savingRenameId = ref(null)
 const editingDeviceId = ref(null)
 const editingName = ref('')
 const renameInputRef = ref(null)
+const expandedDevices = ref({})
+
+function emitCount(count = devices.value.length) {
+  emit('count-change', count)
+}
+
+function isDeviceExpanded(deviceId) {
+  return Boolean(expandedDevices.value[deviceId])
+}
+
+function toggleDevice(deviceId) {
+  if (editingDeviceId.value === deviceId) return
+  expandedDevices.value = {
+    ...expandedDevices.value,
+    [deviceId]: !expandedDevices.value[deviceId],
+  }
+}
 
 async function loadDevices() {
   if (!props.userId) {
     devices.value = []
+    expandedDevices.value = {}
+    emitCount(0)
     return
   }
 
@@ -35,10 +56,18 @@ async function loadDevices() {
   loadError.value = ''
   try {
     devices.value = await listPushDevices(supabase, props.userId)
+    const ids = new Set(devices.value.map((device) => device.id))
+    const nextExpanded = {}
+    for (const [id, open] of Object.entries(expandedDevices.value)) {
+      if (ids.has(id) && open) nextExpanded[id] = true
+    }
+    expandedDevices.value = nextExpanded
+    emitCount(devices.value.length)
   } catch (err) {
     console.error(err)
     loadError.value = err.message || 'Impossible de charger les appareils.'
     devices.value = []
+    emitCount(0)
   } finally {
     isLoading.value = false
   }
@@ -138,8 +167,7 @@ defineExpose({ reload: loadDevices })
 </script>
 
 <template>
-  <section class="settings-card devices-panel">
-    <h2 class="devices-panel__title">Appareils enregistrés</h2>
+  <div class="devices-panel">
     <p class="devices-panel__hint">
       Navigateurs et téléphones abonnés aux notifications push pour ton compte. Seul ton compte
       peut voir cette liste.
@@ -152,83 +180,121 @@ defineExpose({ reload: loadDevices })
       l’ajouter ici.
     </p>
 
-    <ul v-else class="devices-list" aria-label="Liste des appareils">
-      <li v-for="device in devices" :key="device.id" class="devices-list__item">
-        <div class="devices-list__main">
+    <div v-else class="devices-list" aria-label="Liste des appareils">
+      <section
+        v-for="(device, deviceIndex) in devices"
+        :key="device.id"
+        class="settings-card settings-card--collapsible"
+        :class="{ 'settings-card--spaced': deviceIndex > 0 }"
+      >
+        <div class="device-card__header">
           <template v-if="editingDeviceId === device.id">
-            <label class="devices-list__rename-field">
-              <span class="sr-only">Nom de l’appareil</span>
-              <input
-                :ref="(el) => setRenameInputRef(el, device.id)"
-                v-model="editingName"
-                type="text"
-                class="devices-list__rename-input"
-                maxlength="80"
-                placeholder="Ex. Téléphone, PC bureau…"
-                :disabled="savingRenameId === device.id"
-                @keydown="onRenameKeydown($event, device)"
-              />
-            </label>
-            <div class="devices-list__rename-actions">
-              <button
-                type="button"
-                class="btn btn--ghost devices-list__action"
-                :disabled="savingRenameId === device.id"
-                @click="confirmRename(device)"
-              >
-                {{ savingRenameId === device.id ? 'Enregistrement…' : 'OK' }}
-              </button>
-              <button
-                type="button"
-                class="btn btn--ghost devices-list__action"
-                :disabled="savingRenameId === device.id"
-                @click="cancelRename"
-              >
-                Annuler
-              </button>
+            <div class="device-card__rename">
+              <label class="device-card__rename-field">
+                <span class="sr-only">Nom de l’appareil</span>
+                <input
+                  :ref="(el) => setRenameInputRef(el, device.id)"
+                  v-model="editingName"
+                  type="text"
+                  class="device-card__rename-input"
+                  maxlength="80"
+                  placeholder="Ex. Téléphone, PC bureau…"
+                  :disabled="savingRenameId === device.id"
+                  @keydown="onRenameKeydown($event, device)"
+                />
+              </label>
+              <div class="device-card__actions">
+                <button
+                  type="button"
+                  class="btn btn--ghost device-card__action"
+                  :disabled="savingRenameId === device.id"
+                  @click="confirmRename(device)"
+                >
+                  {{ savingRenameId === device.id ? 'Enregistrement…' : 'OK' }}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn--ghost device-card__action"
+                  :disabled="savingRenameId === device.id"
+                  @click="cancelRename"
+                >
+                  Annuler
+                </button>
+              </div>
             </div>
           </template>
+
           <template v-else>
-            <div class="devices-list__heading">
-              <span class="devices-list__label">{{ device.label }}</span>
+            <button
+              type="button"
+              class="card-toggle"
+              :aria-expanded="isDeviceExpanded(device.id)"
+              :aria-controls="`settings-device-${device.id}`"
+              @click="toggleDevice(device.id)"
+            >
+              <div class="device-card__title-wrap">
+                <h2 class="card-toggle__title">{{ device.label }}</h2>
+                <span
+                  v-if="device.deviceName && device.deviceName !== device.autoLabel"
+                  class="device-card__auto-hint"
+                >
+                  ({{ device.autoLabel }})
+                </span>
+                <span v-if="device.isCurrent" class="device-card__badge">Cet appareil</span>
+              </div>
               <span
-                v-if="device.deviceName && device.deviceName !== device.autoLabel"
-                class="devices-list__auto-hint"
+                class="card-toggle__chevron"
+                :class="{ 'card-toggle__chevron--open': isDeviceExpanded(device.id) }"
+                aria-hidden="true"
               >
-                ({{ device.autoLabel }})
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
               </span>
-              <span v-if="device.isCurrent" class="devices-list__badge">Cet appareil</span>
+            </button>
+
+            <div class="device-card__actions">
+              <button
+                type="button"
+                class="btn btn--ghost device-card__action"
+                :disabled="deletingId === device.id || Boolean(savingRenameId)"
+                @click="startRename(device)"
+              >
+                Renommer
+              </button>
+              <button
+                type="button"
+                class="btn btn--ghost device-card__action device-card__action--danger"
+                :disabled="deletingId === device.id || Boolean(savingRenameId)"
+                @click="onRemoveDevice(device)"
+              >
+                {{ deletingId === device.id ? 'Retrait…' : 'Retirer' }}
+              </button>
             </div>
-            <p v-if="device.seenAtLabel" class="devices-list__meta">
-              Dernière sync : {{ device.seenAtLabel }}
-            </p>
           </template>
         </div>
 
-        <div v-if="editingDeviceId !== device.id" class="devices-list__actions">
-          <button
-            type="button"
-            class="btn btn--ghost devices-list__action"
-            :disabled="deletingId === device.id || Boolean(savingRenameId)"
-            @click="startRename(device)"
-          >
-            Renommer
-          </button>
-          <button
-            type="button"
-            class="btn btn--ghost devices-list__action devices-list__action--danger"
-            :disabled="deletingId === device.id || Boolean(savingRenameId)"
-            @click="onRemoveDevice(device)"
-          >
-            {{ deletingId === device.id ? 'Retrait…' : 'Retirer' }}
-          </button>
+        <div
+          v-show="isDeviceExpanded(device.id) && editingDeviceId !== device.id"
+          :id="`settings-device-${device.id}`"
+          class="card-body"
+        >
+          <!-- Contenu appareil à venir -->
         </div>
-      </li>
-    </ul>
+      </section>
+    </div>
 
     <p v-if="actionMessage" class="settings-feedback settings-feedback--ok">{{ actionMessage }}</p>
     <p v-if="actionError" class="settings-feedback settings-feedback--error">{{ actionError }}</p>
-  </section>
+  </div>
 </template>
 
 <style scoped>
@@ -244,13 +310,6 @@ defineExpose({ reload: loadDevices })
   border: 0;
 }
 
-.devices-panel__title {
-  margin: 0 0 0.35rem;
-  font-size: 1.25rem;
-  font-weight: 800;
-  color: #ad81be;
-}
-
 .devices-panel__hint,
 .devices-panel__status,
 .devices-panel__empty {
@@ -261,52 +320,72 @@ defineExpose({ reload: loadDevices })
 }
 
 .devices-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
 }
 
-.devices-list__item {
+.settings-card {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(213, 181, 234, 0.25);
+  border-radius: 20px;
+  padding: 1.5rem;
+  box-shadow: 0 8px 32px rgba(173, 129, 190, 0.08);
+}
+
+.settings-card--spaced {
+  margin-top: 1rem;
+}
+
+.device-card__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+}
+
+.card-toggle {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.85rem 0;
-  border-top: 1px solid rgba(213, 181, 234, 0.28);
-}
-
-.devices-list__item:first-child {
-  border-top: none;
-  padding-top: 0.15rem;
-}
-
-.devices-list__main {
-  min-width: 0;
   flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
 }
 
-.devices-list__heading {
+.device-card__title-wrap {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.45rem 0.65rem;
+  gap: 0.4rem 0.65rem;
+  min-width: 0;
 }
 
-.devices-list__label {
-  font-weight: 700;
-  color: #343a40;
+.card-toggle__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #ad81be;
 }
 
-.devices-list__auto-hint {
+.card-toggle:hover .card-toggle__title {
+  color: #9a6dad;
+}
+
+.device-card__auto-hint {
   font-size: 0.82rem;
   font-weight: 600;
   color: #868e96;
 }
 
-.devices-list__badge {
+.device-card__badge {
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -317,29 +396,57 @@ defineExpose({ reload: loadDevices })
   border-radius: 6px;
 }
 
-.devices-list__meta {
-  margin: 0.35rem 0 0;
-  font-size: 0.82rem;
-  color: #868e96;
-}
-
-.devices-list__actions,
-.devices-list__rename-actions {
-  display: flex;
+.card-toggle__chevron {
   flex-shrink: 0;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  justify-content: flex-end;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  color: #ad81be;
+  background: rgba(213, 181, 234, 0.15);
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease;
 }
 
-.devices-list__rename-field {
-  display: block;
-  width: 100%;
+.card-toggle:hover .card-toggle__chevron {
+  background: rgba(213, 181, 234, 0.28);
+}
+
+.card-toggle__chevron svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.card-toggle__chevron--open {
+  transform: rotate(180deg);
+}
+
+.card-body {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.25);
+  min-height: 0;
+}
+
+.device-card__rename {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.device-card__rename-field {
+  flex: 1;
+  min-width: 11rem;
   max-width: 22rem;
 }
 
-.devices-list__rename-input {
+.device-card__rename-input {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid rgba(213, 181, 234, 0.45);
@@ -351,15 +458,19 @@ defineExpose({ reload: loadDevices })
   background: rgba(255, 255, 255, 0.85);
 }
 
-.devices-list__rename-input:focus {
+.device-card__rename-input:focus {
   outline: none;
   border-color: #ad81be;
   box-shadow: 0 0 0 3px rgba(173, 129, 190, 0.18);
 }
 
-.devices-list__rename-actions {
-  margin-top: 0.55rem;
-  justify-content: flex-start;
+.device-card__actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  align-items: center;
 }
 
 .btn {
@@ -388,31 +499,21 @@ defineExpose({ reload: loadDevices })
   transform: none;
 }
 
-.devices-list__action {
+.device-card__action {
   padding: 0.65rem 1.15rem;
   font-size: 0.9rem;
   border-radius: 12px;
 }
 
-.devices-list__action--danger {
+.device-card__action--danger {
   background: rgba(192, 57, 43, 0.12);
   color: #c0392b;
   border: 1px solid rgba(192, 57, 43, 0.22);
 }
 
-.devices-list__action--danger:hover:not(:disabled) {
+.device-card__action--danger:hover:not(:disabled) {
   background: rgba(192, 57, 43, 0.18);
   transform: translateY(-1px);
-}
-
-.settings-card {
-  background: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(213, 181, 234, 0.25);
-  border-radius: 20px;
-  padding: 1.5rem;
-  box-shadow: 0 8px 32px rgba(173, 129, 190, 0.08);
 }
 
 .settings-feedback {
@@ -429,12 +530,12 @@ defineExpose({ reload: loadDevices })
 }
 
 @media (max-width: 640px) {
-  .devices-list__item {
-    flex-direction: column;
+  .device-card__header {
     align-items: stretch;
   }
 
-  .devices-list__actions {
+  .device-card__actions {
+    width: 100%;
     justify-content: flex-start;
   }
 }
@@ -445,23 +546,18 @@ defineExpose({ reload: loadDevices })
     border-color: rgba(213, 181, 234, 0.15);
   }
 
-  .devices-list__label {
-    color: #e9ecef;
-  }
-
-  .devices-list__item {
-    border-top-color: rgba(213, 181, 234, 0.15);
-  }
-
   .devices-panel__hint,
   .devices-panel__status,
   .devices-panel__empty,
-  .devices-list__meta,
-  .devices-list__auto-hint {
+  .device-card__auto-hint {
     color: #adb5bd;
   }
 
-  .devices-list__rename-input {
+  .card-body {
+    border-top-color: rgba(213, 181, 234, 0.15);
+  }
+
+  .device-card__rename-input {
     background: rgba(30, 24, 42, 0.9);
     color: #e9ecef;
     border-color: rgba(213, 181, 234, 0.28);

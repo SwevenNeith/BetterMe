@@ -365,6 +365,13 @@ function truncateSettingsTabLabel(text, maxLength = 10) {
   return `${value.slice(0, Math.max(1, maxLength - 1))}…`
 }
 
+const devicesCount = ref(0)
+const devicesPanelRef = ref(null)
+
+function onDevicesCountChange(count) {
+  devicesCount.value = Math.max(0, Number(count) || 0)
+}
+
 const settingsTabItems = computed(() => [
   {
     id: SETTINGS_TABS.VISIBILITE,
@@ -395,6 +402,7 @@ const settingsTabItems = computed(() => [
     id: SETTINGS_TABS.APPAREILS,
     label: 'Appareils',
     shortLabel: 'Appareils',
+    badge: devicesCount.value,
   },
 ])
 
@@ -635,6 +643,7 @@ const onActiverNotifications = async () => {
 const onNotificationsGranted = () => {
   loadReminders()
   loadOneTimeReminders()
+  devicesPanelRef.value?.reload?.()
 }
 
 const onTestPush = async () => {
@@ -954,8 +963,6 @@ onMounted(async () => {
   oneTimeRefreshIntervalId = window.setInterval(loadStandaloneScheduled, ONE_TIME_REFRESH_MS)
 })
 
-const devicesPanelRef = ref(null)
-
 watch(activeTab, (tab) => {
   if (tab === SETTINGS_TABS.RECONFORT) {
     loadReconfortMessages()
@@ -1073,8 +1080,14 @@ onUnmounted(() => {
             <line x1="12" y1="18" x2="12.01" y2="18" />
           </svg>
         </span>
-        <span class="settings-tab__text settings-tab__text--full">{{ tab.label }}</span>
-        <span class="settings-tab__text settings-tab__text--short">{{ tab.shortLabel }}</span>
+        <span class="settings-tab__text settings-tab__text--full">
+          {{ tab.label }}
+          <span v-if="tab.badge != null" class="settings-tab__badge">{{ tab.badge }}</span>
+        </span>
+        <span class="settings-tab__text settings-tab__text--short">
+          {{ tab.shortLabel }}
+          <span v-if="tab.badge != null" class="settings-tab__badge">{{ tab.badge }}</span>
+        </span>
       </button>
     </nav>
 
@@ -2222,7 +2235,11 @@ onUnmounted(() => {
       class="settings-tab-panel"
       aria-label="Appareils"
     >
-      <SettingsDevicesPanel ref="devicesPanelRef" :user-id="userId" />
+      <SettingsDevicesPanel
+        ref="devicesPanelRef"
+        :user-id="userId"
+        @count-change="onDevicesCountChange"
+      />
     </div>
   </div>
 </template>
@@ -2288,6 +2305,28 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+}
+
+.settings-tab__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  margin-left: 0.35rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  vertical-align: middle;
+  color: #7a5a8c;
+  background: rgba(213, 181, 234, 0.35);
+}
+
+.settings-tab--active .settings-tab__badge {
+  color: #fff;
+  background: #ad81be;
 }
 
 .settings-tab__text--short {
