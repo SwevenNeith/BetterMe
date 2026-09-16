@@ -24,9 +24,14 @@ import {
 } from '../services/notes/noteFolders.js'
 import { buildNotesTree, flattenFolderOptions } from '../utils/notes/notesTree.js'
 import { parseNoteWikiHref, renderMarkdownToSafeHtml } from '../utils/common/renderMarkdown.js'
+import {
+  buildHeadingTree,
+  extractMarkdownHeadings,
+} from '../utils/notes/noteTableOfContents.js'
 import { mountNoteWidgets, NOTE_WIDGET_INDEX_ATTR, NOTE_WIDGET_PLACEHOLDER_CLASS } from '../utils/notes/noteWidgets.js'
 import { scrollPreviewToEditorCursor } from '../utils/notes/notesSplitSync.js'
 import NotesTreeNode from '../components/notes/NotesTreeNode.vue'
+import NotesTableOfContentsTree from '../components/notes/NotesTableOfContentsTree.vue'
 import AppConfirmDialog from '../components/common/AppConfirmDialog.vue'
 import NotesExtensionsModal from '../components/notes/NotesExtensionsModal.vue'
 import NotesTemplateSettingsModal from '../components/notes/NotesTemplateSettingsModal.vue'
@@ -122,6 +127,7 @@ const saveStatus = ref('')
 const dirty = ref(false)
 const treeQuery = ref('')
 const sidebarCollapsed = ref(false)
+const tocOpen = ref(false)
 const isMobileNotes = ref(false)
 const editorEl = ref(null)
 const previewEl = ref(null)
@@ -566,6 +572,77 @@ const filteredTree = computed(() => {
 })
 
 const showTreeSearch = computed(() => isExtEnabled('tree-search'))
+
+const activeNoteHeadings = computed(() => {
+  if (!selectedNote.value) return []
+  return extractMarkdownHeadings(draftContent.value)
+})
+
+const activeNoteTocTree = computed(() => buildHeadingTree(activeNoteHeadings.value))
+
+function toggleTableOfContents() {
+  if (!selectedNote.value || isGraphView.value) return
+  tocOpen.value = !tocOpen.value
+  if (tocOpen.value && isMobileNotes.value) {
+    sidebarCollapsed.value = false
+  }
+}
+
+function closeTableOfContents() {
+  tocOpen.value = false
+}
+
+function scrollEditorToHeadingLine(lineIndex) {
+  const el = editorEl.value
+  if (!el || lineIndex == null || lineIndex < 0) return
+
+  const lines = String(el.value ?? '').split('\n')
+  let pos = 0
+  for (let i = 0; i < lineIndex && i < lines.length; i += 1) {
+    pos += lines[i].length + 1
+  }
+
+  el.focus()
+  el.setSelectionRange(pos, pos)
+
+  const style = window.getComputedStyle(el)
+  const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.4 || 20
+  const paddingTop = Number.parseFloat(style.paddingTop) || 0
+  el.scrollTop = Math.max(0, lineIndex * lineHeight - el.clientHeight * 0.25 + paddingTop)
+}
+
+async function goToNoteHeading(heading) {
+  if (!heading?.id || !selectedNote.value) return
+
+  if (effectiveViewMode.value === 'edit') {
+    viewMode.value = isMobileNotes.value ? 'preview' : 'split'
+  }
+
+  await nextTick()
+  scrollEditorToHeadingLine(heading.lineIndex)
+
+  const preview = previewEl.value
+  if (preview) {
+    await nextTick()
+    const target = preview.querySelector(`#${CSS.escape(heading.id)}`)
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
+
+  if (isMobileNotes.value) {
+    tocOpen.value = false
+    sidebarCollapsed.value = true
+  }
+}
+
+watch(selectedNoteId, () => {
+  tocOpen.value = false
+})
+
+watch(isGraphView, (open) => {
+  if (open) tocOpen.value = false
+})
 
 const folderOptions = computed(() =>
   flattenFolderOptions(contextFolders.value).map((opt) => ({
@@ -2213,6 +2290,24 @@ watch(draftFolderId, (value) => {
           <button
             type="button"
             class="notes-page__icon-btn"
+            :class="{ 'notes-page__icon-btn--active': tocOpen }"
+            title="Table des matières"
+            aria-label="Afficher la table des matières de la note active"
+            :disabled="!selectedNote || isGraphView"
+            @click="toggleTableOfContents"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="8" y1="6" x2="21" y2="6" />
+              <line x1="8" y1="12" x2="21" y2="12" />
+              <line x1="8" y1="18" x2="21" y2="18" />
+              <line x1="3" y1="6" x2="3.01" y2="6" />
+              <line x1="3" y1="12" x2="3.01" y2="12" />
+              <line x1="3" y1="18" x2="3.01" y2="18" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="notes-page__icon-btn"
             :class="{ 'notes-page__icon-btn--active': isGraphView }"
             title="Vue globale"
             aria-label="Ouvrir la vue globale des notes"
@@ -2241,6 +2336,34 @@ watch(draftFolderId, (value) => {
       <div v-if="isLoading" class="notes-page__tree-status">Chargement…</div>
       <div v-else-if="errorMessage" class="notes-page__tree-status notes-page__tree-status--error">
         {{ errorMessage }}
+      </div>
+      <div v-else-if="tocOpen" class="notes-page__tree-scroll notes-page__toc">
+        <div class="notes-page__toc-head">
+          <h2 class="notes-page__toc-title">Table des matières</h2>
+          <button
+            type="button"
+            class="notes-page__icon-btn"
+            title="Fermer"
+            aria-label="Fermer la table des matières"
+            @click="closeTableOfContents"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <p v-if="!selectedNote" class="notes-page__toc-empty">
+          Ouvre une note pour afficher sa table des matières.
+        </p>
+        <p v-else-if="!activeNoteTocTree.length" class="notes-page__toc-empty">
+          Aucun titre dans cette note. Ajoute des titres Markdown (#, ##, …).
+        </p>
+        <NotesTableOfContentsTree
+          v-else
+          :nodes="activeNoteTocTree"
+          @select="goToNoteHeading"
+        />
       </div>
       <div v-else class="notes-page__tree-scroll">
         <section
@@ -3157,6 +3280,35 @@ watch(draftFolderId, (value) => {
   display: flex;
   gap: 0.35rem;
   margin-bottom: 0.45rem;
+}
+
+.notes-page__toc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-height: 0;
+}
+
+.notes-page__toc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.notes-page__toc-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #ad81be;
+}
+
+.notes-page__toc-empty {
+  margin: 0;
+  padding: 0.75rem 0.15rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #8b7a96;
 }
 
 .notes-page__icon-btn {

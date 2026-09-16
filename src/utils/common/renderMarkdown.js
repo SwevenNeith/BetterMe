@@ -1,5 +1,6 @@
 import { marked } from 'marked'
 import { extractNoteWidgets } from '../notes/noteWidgets.js'
+import { injectHeadingIdsIntoHtml } from '../notes/noteTableOfContents.js'
 
 marked.setOptions({
   gfm: true,
@@ -67,6 +68,12 @@ const ALLOWED_ATTRS = {
   SPAN: new Set(['class', 'data-dict-id', 'data-dict-word', 'data-dict-alias']),
   DIV: new Set(['class', 'data-widget-index']),
   ABBR: new Set(['title']),
+  H1: new Set(['id']),
+  H2: new Set(['id']),
+  H3: new Set(['id']),
+  H4: new Set(['id']),
+  H5: new Set(['id']),
+  H6: new Set(['id']),
 }
 
 function isSafeUrl(value, { allowDataImage = false } = {}) {
@@ -127,6 +134,10 @@ export function sanitizeMarkdownHtml(html) {
           hrefValue = value
         }
         if (name === 'src' && !isSafeUrl(value, { allowDataImage: true })) continue
+        if (name === 'id') {
+          value = String(value).replace(/[^a-zA-Z0-9_-]/g, '')
+          if (!value) continue
+        }
         if (name === 'class') {
           value = String(value)
             .split(/\s+/)
@@ -252,8 +263,9 @@ export function renderMarkdownToSafeHtml(markdown, options = {}) {
     gfm: true,
     breaks: options.breaks !== false,
   })
+  const withHeadingIds = injectHeadingIdsIntoHtml(typeof html === 'string' ? html : String(html))
   return {
-    html: sanitizeMarkdownHtml(typeof html === 'string' ? html : String(html)),
+    html: sanitizeMarkdownHtml(withHeadingIds),
     widgets,
   }
 }
