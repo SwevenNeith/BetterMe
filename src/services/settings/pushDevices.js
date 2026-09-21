@@ -162,7 +162,15 @@ export async function listPushDevices(supabase, userId) {
   }
 
   const currentEndpoint = await getCurrentPushEndpoint()
-  return (rows ?? []).map((row) => describePushDevice(row, { currentEndpoint }))
+  const devices = (rows ?? []).map((row) => describePushDevice(row, { currentEndpoint }))
+
+  return devices.sort((a, b) => {
+    if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1
+    return String(a.label || '').localeCompare(String(b.label || ''), 'fr', {
+      sensitivity: 'base',
+      numeric: true,
+    })
+  })
 }
 
 export async function renamePushDevice(supabase, userId, deviceId, name) {
