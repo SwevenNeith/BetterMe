@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { searchTmdbAllPages, tmdbPosterUrl } from '../services/television/tmdb.js'
@@ -19,6 +20,8 @@ const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.TELEVISION, undefined, {
   setDocumentTitle: true,
 })
 
+const router = useRouter()
+
 const searchQuery = ref('')
 const isLoading = ref(false)
 const loadError = ref('')
@@ -29,6 +32,11 @@ const gridColumnCount = ref(4)
 const televisionGridRef = ref(null)
 const televisionLayoutRef = ref(null)
 let gridResizeObserver = null
+let searchDebounceTimer = null
+let searchRequestId = 0
+
+const SEARCH_DEBOUNCE_MS = 350
+const MIN_SEARCH_LENGTH = 2
 
 const displayResults = computed(() => {
   const list = searchPayload.value?.results
@@ -57,8 +65,8 @@ function resultTitle(item) {
 }
 
 function resultTypeLabel(item) {
-  if (item?.media_type === 'movie') return 'Movie'
-  if (item?.media_type === 'tv') return 'TV show'
+  if (item?.media_type === 'movie') return 'Film'
+  if (item?.media_type === 'tv') return 'Série'
   return item?.media_type || ''
 }
 
@@ -74,6 +82,16 @@ function resultAriaLabel(item) {
   const year = String(item?.first_air_date || item?.release_date || '').slice(0, 4)
   const type = resultTypeLabel(item)
   return [resultTitle(item), type, year].filter(Boolean).join(' · ')
+}
+
+function openMediaFiche(item) {
+  const mediaType = item?.media_type === 'tv' ? 'tv' : item?.media_type === 'movie' ? 'movie' : ''
+  const tmdbId = item?.id
+  if (!mediaType || !tmdbId) return
+  router.push({
+    name: 'television-fiche',
+    params: { mediaType, tmdbId: String(tmdbId) },
+  })
 }
 
 function updateGridColumnCount() {
@@ -110,35 +128,77 @@ function goToPage(page) {
   televisionGridRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-async function onSearch() {
-  const q = searchQuery.value.trim()
-  if (!q || isLoading.value) return
+async function runSearch(rawQuery) {
+  const q = String(rawQuery ?? '').trim()
+  const requestId = ++searchRequestId
+
+  if (q.length < MIN_SEARCH_LENGTH) {
+    searchPayload.value = null
+    loadError.value = ''
+    progressLabel.value = ''
+    isLoading.value = false
+    currentPage.value = 1
+    return
+  }
 
   isLoading.value = true
   loadError.value = ''
-  searchPayload.value = null
   currentPage.value = 1
-  progressLabel.value = 'Loading…'
+  progressLabel.value = 'Chargement…'
 
   try {
-    searchPayload.value = await searchTmdbAllPages(q, {
+    const payload = await searchTmdbAllPages(q, {
       onProgress: ({ loadedPages, totalPages: pages }) => {
+        if (requestId !== searchRequestId) return
         progressLabel.value =
           pages > 1
-            ? `Loading pages… (${Math.min(loadedPages, pages)} / ${pages})`
-            : 'Loading…'
+            ? `Chargement… (${Math.min(loadedPages, pages)} / ${pages})`
+            : 'Chargement…'
       },
     })
+    if (requestId !== searchRequestId) return
+    searchPayload.value = payload
     await nextTick()
     bindGridResizeObserver()
   } catch (err) {
+    if (requestId !== searchRequestId) return
     console.error(err)
-    loadError.value = err.message || 'TMDB search failed.'
+    searchPayload.value = null
+    loadError.value = err.message || 'Échec de la recherche TMDB.'
   } finally {
-    isLoading.value = false
-    progressLabel.value = ''
+    if (requestId === searchRequestId) {
+      isLoading.value = false
+      progressLabel.value = ''
+    }
   }
 }
+
+function scheduleSearch(query) {
+  if (searchDebounceTimer != null) {
+    clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+  }
+
+  const q = String(query ?? '').trim()
+  if (q.length < MIN_SEARCH_LENGTH) {
+    searchRequestId += 1
+    searchPayload.value = null
+    loadError.value = ''
+    progressLabel.value = ''
+    isLoading.value = false
+    currentPage.value = 1
+    return
+  }
+
+  searchDebounceTimer = window.setTimeout(() => {
+    searchDebounceTimer = null
+    runSearch(q)
+  }, SEARCH_DEBOUNCE_MS)
+}
+
+watch(searchQuery, (value) => {
+  scheduleSearch(value)
+})
 
 watch(totalPages, (pages) => {
   if (currentPage.value > pages) currentPage.value = pages
@@ -156,6 +216,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (searchDebounceTimer != null) clearTimeout(searchDebounceTimer)
+  searchRequestId += 1
   gridResizeObserver?.disconnect()
   gridResizeObserver = null
 })
@@ -171,43 +233,35 @@ onUnmounted(() => {
     </header>
 
     <section class="television-card">
-      <form class="television-search" @submit.prevent="onSearch">
-        <label class="television-search__field">
-          <span class="sr-only">Rechercher un film ou une série</span>
+      <div class="television-toolbar">
+        <label class="television-search">
+          <span class="television-search__label">Rechercher</span>
           <input
             v-model="searchQuery"
             type="search"
             class="television-search__input"
-            placeholder="Search movies & TV shows…"
+            placeholder="Titre de film ou série (FR / EN)…"
             maxlength="120"
             autocomplete="off"
-            :disabled="isLoading"
           />
         </label>
-        <button
-          type="submit"
-          class="television-search__btn"
-          :disabled="isLoading || !searchQuery.trim()"
-        >
-          {{ isLoading ? 'Searching…' : 'Search' }}
-        </button>
-      </form>
+      </div>
 
       <div ref="televisionLayoutRef" class="television-layout-measure" aria-hidden="true" />
 
-      <p v-if="isLoading" class="television-status">{{ progressLabel || 'Searching…' }}</p>
+      <p v-if="isLoading" class="television-status">{{ progressLabel || 'Recherche…' }}</p>
       <p v-else-if="loadError" class="television-error">{{ loadError }}</p>
 
-      <template v-else-if="searchPayload">
-        <p class="television-count">
-          {{ displayResults.length }} result{{ displayResults.length === 1 ? '' : 's' }}
+      <template v-if="searchPayload && !loadError">
+        <p v-if="!isLoading" class="television-count">
+          {{ displayResults.length }} résultat{{ displayResults.length === 1 ? '' : 's' }}
           <span
             v-if="
               searchPayload.movie_total_results != null || searchPayload.tv_total_results != null
             "
           >
-            ({{ searchPayload.movie_total_results || 0 }} movies ·
-            {{ searchPayload.tv_total_results || 0 }} TV)
+            ({{ searchPayload.movie_total_results || 0 }} films ·
+            {{ searchPayload.tv_total_results || 0 }} séries)
           </span>
         </p>
 
@@ -227,6 +281,7 @@ onUnmounted(() => {
                 class="television-poster__btn"
                 :title="resultAriaLabel(item)"
                 :aria-label="resultAriaLabel(item)"
+                @click="openMediaFiche(item)"
               >
                 <img
                   v-if="resultPoster(item)"
@@ -247,7 +302,7 @@ onUnmounted(() => {
           </div>
 
           <nav
-            v-if="showPagination"
+            v-if="showPagination && !isLoading"
             class="television-pagination"
             aria-label="Pagination des résultats"
           >
@@ -275,29 +330,24 @@ onUnmounted(() => {
           </nav>
         </template>
 
-        <p v-else class="television-status">No movies or TV shows found.</p>
+        <p v-else-if="!isLoading" class="television-status">Aucun film ou série trouvé.</p>
       </template>
 
-      <p v-else class="television-status">
-        Tape un titre puis lance la recherche pour interroger TMDB.
+      <p
+        v-else-if="!isLoading && searchQuery.trim().length > 0 && searchQuery.trim().length < MIN_SEARCH_LENGTH"
+        class="television-status"
+      >
+        Tape au moins {{ MIN_SEARCH_LENGTH }} caractères…
+      </p>
+
+      <p v-else-if="!isLoading && !loadError" class="television-status">
+        Tape un titre (français ou anglais) pour lancer la recherche.
       </p>
     </section>
   </div>
 </template>
 
 <style scoped>
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 .television-wrapper {
   flex: 1;
   width: 100%;
@@ -335,54 +385,46 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-.television-search {
+.television-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.65rem;
+  gap: 0.75rem;
+  align-items: end;
   margin-bottom: 1.15rem;
 }
 
-.television-search__field {
+.television-search {
   flex: 1;
   min-width: 12rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.television-search__label {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #6c757d;
 }
 
 .television-search__input {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid rgba(213, 181, 234, 0.5);
+  padding: 0.6rem 0.75rem;
   border-radius: 12px;
-  padding: 0.7rem 0.95rem;
-  font-size: 0.95rem;
-  font-weight: 600;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.85);
   color: #2c3e50;
-  background: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  font-weight: 600;
 }
 
 .television-search__input:focus {
-  outline: none;
-  border-color: #ad81be;
-  box-shadow: 0 0 0 3px rgba(173, 129, 190, 0.18);
+  outline: 2px solid rgba(173, 129, 190, 0.45);
+  outline-offset: 1px;
 }
 
-.television-search__btn {
-  border: none;
-  border-radius: 12px;
-  padding: 0.7rem 1.2rem;
-  font-size: 0.95rem;
-  font-weight: 700;
+.television-search__input::-webkit-search-cancel-button {
   cursor: pointer;
-  background: linear-gradient(135deg, #d5b5ea, #ad81be);
-  color: #fff;
-}
-
-.television-search__btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.television-search__btn:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
 }
 
 .television-layout-measure {
@@ -526,6 +568,9 @@ onUnmounted(() => {
     background: rgba(30, 24, 42, 0.9);
     color: #f0e8f8;
     border-color: rgba(213, 181, 234, 0.28);
+  }
+  .television-search__label {
+    color: #adb5bd;
   }
   .television-count {
     color: #e9ecef;

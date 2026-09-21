@@ -18,6 +18,30 @@ defineProps({
     type: Boolean,
     default: true,
   },
+  title: {
+    type: String,
+    default: 'Fiche de Lecture',
+  },
+  aboutTitle: {
+    type: String,
+    default: 'À propos',
+  },
+  commentsTitle: {
+    type: String,
+    default: 'Commentaires',
+  },
+  quoteTitle: {
+    type: String,
+    default: 'Citation',
+  },
+  showQuote: {
+    type: Boolean,
+    default: true,
+  },
+  showComments: {
+    type: Boolean,
+    default: true,
+  },
 })
 </script>
 
@@ -32,7 +56,7 @@ defineProps({
     }"
   >
     <header class="reading-fiche-header">
-      <h2 class="reading-fiche-title">Fiche de Lecture</h2>
+      <h2 class="reading-fiche-title">{{ title }}</h2>
       <div v-if="$slots.actions" class="reading-fiche-actions">
         <slot name="actions" />
       </div>
@@ -57,18 +81,18 @@ defineProps({
     <slot name="cover-controls" />
 
     <section class="reading-fiche-section">
-      <h3 class="reading-fiche-section-title">À propos</h3>
+      <h3 class="reading-fiche-section-title">{{ aboutTitle }}</h3>
       <slot name="about" />
     </section>
 
-    <section class="reading-fiche-section">
-      <h3 class="reading-fiche-section-title reading-fiche-section-title--boxed">Commentaires</h3>
+    <section v-if="showComments" class="reading-fiche-section">
+      <h3 class="reading-fiche-section-title reading-fiche-section-title--boxed">{{ commentsTitle }}</h3>
       <div class="reading-fiche-box reading-fiche-box--comments">
         <slot name="comments" />
       </div>
     </section>
 
-    <div class="reading-fiche-bottom">
+    <div v-if="showSpoil || showQuote" class="reading-fiche-bottom">
       <section v-if="showSpoil" class="reading-fiche-section reading-fiche-section--half">
         <h3 class="reading-fiche-section-title reading-fiche-section-title--boxed">Spoil</h3>
         <div class="reading-fiche-box reading-fiche-box--spoil">
@@ -76,8 +100,12 @@ defineProps({
         </div>
       </section>
 
-      <section class="reading-fiche-section" :class="{ 'reading-fiche-section--half': showSpoil }">
-        <h3 class="reading-fiche-section-title">Citation</h3>
+      <section
+        v-if="showQuote"
+        class="reading-fiche-section"
+        :class="{ 'reading-fiche-section--half': showSpoil }"
+      >
+        <h3 class="reading-fiche-section-title">{{ quoteTitle }}</h3>
         <div class="reading-fiche-box reading-fiche-box--quote">
           <span class="reading-fiche-quote-mark reading-fiche-quote-mark--open" aria-hidden="true">“</span>
           <slot name="quote" />
