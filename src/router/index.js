@@ -14,6 +14,7 @@ const ProjectDetailView = () => import('../views/ProjectDetailView.vue')
 const HabitTrackerView = () => import('../views/HabitTrackerView.vue')
 const TodoView = () => import('../views/TodoView.vue')
 const LectureView = () => import('../views/LectureView.vue')
+const TelevisionView = () => import('../views/TelevisionView.vue')
 const ReadingSpoilChapterView = () => import('../views/ReadingSpoilChapterView.vue')
 const ReadingSpoilBookView = () => import('../views/ReadingSpoilBookView.vue')
 const ReadingBookDetailView = () => import('../views/ReadingBookDetailView.vue')
@@ -88,6 +89,11 @@ function createAppChildRoutes(namePrefix = '') {
       path: 'lecture/:bookId/spoil/lire/:chapterId?',
       name: n('lecture-spoil-lecture'),
       component: ReadingSpoilBookView,
+    },
+    {
+      path: 'television',
+      name: n('television'),
+      component: TelevisionView,
     },
     {
       path: 'ressources',

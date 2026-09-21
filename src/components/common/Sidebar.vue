@@ -61,6 +61,12 @@ const lectureLink = {
   icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>`,
 }
 
+const televisionLink = {
+  name: 'Television',
+  path: '/television',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect><polyline points="17 2 12 7 7 2"></polyline></svg>`,
+}
+
 const ressourcesLink = {
   name: 'Ressources',
   path: '/ressources',
@@ -125,6 +131,7 @@ const settingsLink = {
 const isActive = (path) => {
   if (path === '/projets') return route.path === path || route.path.startsWith('/projets/')
   if (path === '/lecture') return route.path === path || route.path.startsWith('/lecture/')
+  if (path === '/television') return route.path === path || route.path.startsWith('/television/')
   if (path === '/ressources') return route.path === path || route.path.startsWith('/ressources/')
   if (path === '/journal') return route.path === path || route.path.startsWith('/journal/')
   if (path === '/notes') return route.path === path || route.path.startsWith('/notes/')
@@ -180,6 +187,7 @@ const defaultSidebarOrder = [
   SIDEBAR_ITEM_IDS.HABIT,
   SIDEBAR_ITEM_IDS.PROJETS,
   SIDEBAR_ITEM_IDS.LECTURE,
+  SIDEBAR_ITEM_IDS.TELEVISION,
   SIDEBAR_ITEM_IDS.RESSOURCES,
   SIDEBAR_ITEM_IDS.JOURNAL,
   SIDEBAR_ITEM_IDS.NOTES,
@@ -194,6 +202,7 @@ const sidebarItemsById = {
   [SIDEBAR_ITEM_IDS.TODO]: todoLink,
   [SIDEBAR_ITEM_IDS.PROJETS]: projetsLink,
   [SIDEBAR_ITEM_IDS.LECTURE]: lectureLink,
+  [SIDEBAR_ITEM_IDS.TELEVISION]: televisionLink,
   [SIDEBAR_ITEM_IDS.RESSOURCES]: ressourcesLink,
   [SIDEBAR_ITEM_IDS.JOURNAL]: journalLink,
   [SIDEBAR_ITEM_IDS.NOTES]: notesLink,

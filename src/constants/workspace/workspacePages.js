@@ -36,6 +36,12 @@ export const WORKSPACE_PAGE_OPTIONS = [
     icon: 'lecture',
   },
   {
+    id: APP_PAGE_IDS.TELEVISION,
+    path: '/television',
+    defaultLabel: 'Television',
+    icon: 'television',
+  },
+  {
     id: APP_PAGE_IDS.RESSOURCES,
     path: '/ressources',
     defaultLabel: 'Ressources',
