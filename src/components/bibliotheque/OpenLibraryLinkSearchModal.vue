@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { onUnmounted, ref, watch } from 'vue'
 import { searchOpenLibrary } from '../../services/bibliotheque/openLibrary.js'
+import { stripLeadingArticles } from '../../utils/bibliotheque/openLibraryMatch.js'
 
 const props = defineProps({
   open: {
@@ -22,7 +23,8 @@ const emit = defineEmits(['close', 'select'])
 const SEARCH_DEBOUNCE_MS = 350
 const MIN_SEARCH_LENGTH = 2
 
-const searchQuery = ref('')
+const titleQuery = ref('')
+const authorQuery = ref('')
 const isLoading = ref(false)
 const loadError = ref('')
 const results = ref([])
@@ -31,13 +33,6 @@ const numFound = ref(0)
 let searchDebounceTimer = null
 let searchAbortController = null
 let searchRequestId = 0
-
-const defaultQuery = computed(() => {
-  const title = String(props.book?.title ?? '').trim()
-  const author = String(props.book?.author ?? '').trim()
-  if (title && author) return `${title} ${author}`
-  return title || author
-})
 
 function close() {
   if (props.linking) return
@@ -52,14 +47,22 @@ function onCoverError(doc) {
   if (doc) doc.coverUrl = null
 }
 
-async function runSearch(rawQuery) {
-  const q = String(rawQuery ?? '').trim()
+function canSearch(title, author) {
+  return (
+    String(title ?? '').trim().length >= MIN_SEARCH_LENGTH ||
+    String(author ?? '').trim().length >= MIN_SEARCH_LENGTH
+  )
+}
+
+async function runSearch(titleRaw, authorRaw) {
+  const title = String(titleRaw ?? '').trim()
+  const author = String(authorRaw ?? '').trim()
   const requestId = ++searchRequestId
 
   searchAbortController?.abort()
   searchAbortController = null
 
-  if (q.length < MIN_SEARCH_LENGTH) {
+  if (!canSearch(title, author)) {
     results.value = []
     numFound.value = 0
     loadError.value = ''
@@ -72,14 +75,52 @@ async function runSearch(rawQuery) {
   searchAbortController = new AbortController()
 
   try {
-    const payload = await searchOpenLibrary(q, {
-      page: 1,
-      limit: 20,
-      signal: searchAbortController.signal,
-    })
-    if (requestId !== searchRequestId) return
-    results.value = payload.docs
-    numFound.value = payload.numFound
+    const bareTitle = title ? stripLeadingArticles(title) : ''
+    const titleAttempts = title
+      ? bareTitle && bareTitle !== title
+        ? [title, bareTitle]
+        : [title]
+      : [undefined]
+
+    let docs = []
+    let found = 0
+
+    for (const attemptTitle of titleAttempts) {
+      const payload = await searchOpenLibrary('', {
+        title: attemptTitle,
+        author: author || undefined,
+        page: 1,
+        limit: 20,
+        signal: searchAbortController.signal,
+      })
+      if (requestId !== searchRequestId) return
+      if (payload.docs.length) {
+        docs = payload.docs
+        found = payload.numFound
+        break
+      }
+    }
+
+    // Si titre+auteur ne donne rien, élargir au titre seul
+    if (!docs.length && title && author) {
+      for (const attemptTitle of titleAttempts) {
+        const payload = await searchOpenLibrary('', {
+          title: attemptTitle,
+          page: 1,
+          limit: 20,
+          signal: searchAbortController.signal,
+        })
+        if (requestId !== searchRequestId) return
+        if (payload.docs.length) {
+          docs = payload.docs
+          found = payload.numFound
+          break
+        }
+      }
+    }
+
+    results.value = docs
+    numFound.value = found
   } catch (err) {
     if (err?.name === 'AbortError') return
     if (requestId !== searchRequestId) return
@@ -92,11 +133,11 @@ async function runSearch(rawQuery) {
   }
 }
 
-function scheduleSearch(query) {
+function scheduleSearch() {
   if (searchDebounceTimer != null) clearTimeout(searchDebounceTimer)
   searchDebounceTimer = window.setTimeout(() => {
     searchDebounceTimer = null
-    runSearch(query)
+    runSearch(titleQuery.value, authorQuery.value)
   }, SEARCH_DEBOUNCE_MS)
 }
 
@@ -109,19 +150,20 @@ watch(
   () => props.open,
   (open) => {
     if (!open) return
-    searchQuery.value = defaultQuery.value
+    titleQuery.value = String(props.book?.title ?? '').trim()
+    authorQuery.value = String(props.book?.author ?? '').trim()
     results.value = []
     numFound.value = 0
     loadError.value = ''
-    if (searchQuery.value.trim().length >= MIN_SEARCH_LENGTH) {
-      runSearch(searchQuery.value)
+    if (canSearch(titleQuery.value, authorQuery.value)) {
+      runSearch(titleQuery.value, authorQuery.value)
     }
   },
 )
 
-watch(searchQuery, (value) => {
+watch([titleQuery, authorQuery], () => {
   if (!props.open) return
-  scheduleSearch(value)
+  scheduleSearch()
 })
 
 onUnmounted(() => {
@@ -141,7 +183,6 @@ onUnmounted(() => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="ol-link-picker-title"
-        @click.stop
       >
         <header class="ol-link-picker__header">
           <div>
@@ -166,23 +207,37 @@ onUnmounted(() => {
           </button>
         </header>
 
-        <label class="ol-link-picker__search">
-          <span class="ol-link-picker__search-label">Recherche Open Library</span>
-          <input
-            v-model="searchQuery"
-            type="search"
-            class="ol-link-picker__search-input"
-            placeholder="Titre, auteur, ISBN…"
-            maxlength="200"
-            autocomplete="off"
-            :disabled="linking"
-          />
-        </label>
+        <div class="ol-link-picker__fields">
+          <label class="ol-link-picker__search">
+            <span class="ol-link-picker__search-label">Titre</span>
+            <input
+              v-model="titleQuery"
+              type="search"
+              class="ol-link-picker__search-input"
+              placeholder="Titre du livre"
+              maxlength="200"
+              autocomplete="off"
+              :disabled="linking"
+            />
+          </label>
+          <label class="ol-link-picker__search">
+            <span class="ol-link-picker__search-label">Auteur</span>
+            <input
+              v-model="authorQuery"
+              type="search"
+              class="ol-link-picker__search-input"
+              placeholder="Auteur (optionnel)"
+              maxlength="200"
+              autocomplete="off"
+              :disabled="linking"
+            />
+          </label>
+        </div>
 
         <p v-if="isLoading" class="ol-link-picker__status">Recherche…</p>
         <p v-else-if="loadError" class="ol-link-picker__error">{{ loadError }}</p>
         <p
-          v-else-if="searchQuery.trim().length >= MIN_SEARCH_LENGTH && !results.length"
+          v-else-if="canSearch(titleQuery, authorQuery) && !results.length"
           class="ol-link-picker__status"
         >
           Aucun résultat.
@@ -301,10 +356,17 @@ onUnmounted(() => {
   cursor: wait;
 }
 
+.ol-link-picker__fields {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 0.65rem;
+}
+
 .ol-link-picker__search {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  min-width: 0;
 }
 
 .ol-link-picker__search-label {
@@ -408,6 +470,12 @@ onUnmounted(() => {
 .ol-link-picker__book-extra {
   font-size: 0.8rem;
   color: #6c757d;
+}
+
+@media (max-width: 520px) {
+  .ol-link-picker__fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (prefers-color-scheme: dark) {

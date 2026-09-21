@@ -64,12 +64,14 @@ export function normalizeOpenLibraryDoc(doc) {
 
 /**
  * Recherche de livres via Open Library Search API.
+ * Titre et auteur passent en paramètres dédiés (`title`, `author`) — pas collés dans `q`.
  * @see https://openlibrary.org/dev/docs/api/search
- * @param {string} query
+ * @param {string} query Requête libre (catalogue) ; laisser vide si title/author seuls.
  * @param {{
  *   page?: number,
  *   limit?: number,
  *   signal?: AbortSignal,
+ *   title?: string|null,
  *   language?: string|null,
  *   sort?: string|null,
  *   yearFrom?: number|string|null,
@@ -84,9 +86,6 @@ export async function searchOpenLibrary(query, options = {}) {
   const qParts = []
   const base = String(query ?? '').trim()
   if (base) qParts.push(base)
-
-  const author = String(options.author ?? '').trim()
-  if (author) qParts.push(`author:(${author})`)
 
   const subject = String(options.subject ?? '').trim()
   if (subject) qParts.push(`subject:(${subject})`)
@@ -103,8 +102,11 @@ export async function searchOpenLibrary(query, options = {}) {
     qParts.push(`first_publish_year:[* TO ${yearTo}]`)
   }
 
+  const title = String(options.title ?? '').trim()
+  const author = String(options.author ?? '').trim()
   const q = qParts.join(' ').trim()
-  if (!q) {
+
+  if (!q && !title && !author && !subject) {
     throw new Error('Requête de recherche vide.')
   }
 
@@ -115,11 +117,13 @@ export async function searchOpenLibrary(query, options = {}) {
   const ebookAccess = String(options.ebookAccess ?? '').trim()
 
   const params = new URLSearchParams({
-    q,
     page: String(page),
     limit: String(limit),
     fields: DEFAULT_FIELDS,
   })
+  if (q) params.set('q', q)
+  if (title) params.set('title', title)
+  if (author) params.set('author', author)
 
   // Langue : paramètre dédié si possible, sinon filtre dans q déjà géré ailleurs
   if (language && language !== 'any') {

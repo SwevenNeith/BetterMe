@@ -3,7 +3,10 @@ import {
   linkReadingBookToOpenLibrary,
 } from '../lecture/readingBooks.js'
 import { getOpenLibraryWork, searchOpenLibrary } from './openLibrary.js'
-import { isExactOpenLibraryMatch } from '../../utils/bibliotheque/openLibraryMatch.js'
+import {
+  isExactOpenLibraryMatch,
+  stripLeadingArticles,
+} from '../../utils/bibliotheque/openLibraryMatch.js'
 
 /**
  * Sujets d’un work : d’abord ceux du doc search, sinon fiche work.
@@ -22,7 +25,8 @@ async function resolveSubjectsForWork(workKey, subjectsFromDoc, options = {}) {
 }
 
 /**
- * Trouve le doc Open Library exact pour un livre Lecture (titre + auteur).
+ * Trouve le doc Open Library exact pour un livre Lecture (titre + auteur séparés).
+ * Essaie d’abord title+author, puis titre sans article, puis titre seul (auteur validé côté client).
  * @param {{ title?: string, author?: string }} book
  * @param {{ signal?: AbortSignal }} [options]
  */
@@ -31,14 +35,36 @@ export async function findExactOpenLibraryMatchForBook(book, options = {}) {
   const author = String(book?.author ?? '').trim()
   if (!title) return null
 
-  const query = author ? `${title} ${author}` : title
-  const payload = await searchOpenLibrary(query, {
-    page: 1,
-    limit: 12,
-    signal: options.signal,
-  })
+  const bareTitle = stripLeadingArticles(title)
+  /** @type {Array<{ title: string, author?: string }>} */
+  const attempts = []
 
-  return payload.docs.find((doc) => isExactOpenLibraryMatch(book, doc)) || null
+  if (author) {
+    attempts.push({ title, author })
+    if (bareTitle && bareTitle !== title) attempts.push({ title: bareTitle, author })
+  }
+  attempts.push({ title })
+  if (bareTitle && bareTitle !== title) attempts.push({ title: bareTitle })
+
+  const seen = new Set()
+  for (const attempt of attempts) {
+    const key = `${attempt.title}\0${attempt.author || ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    const payload = await searchOpenLibrary('', {
+      title: attempt.title,
+      author: attempt.author || undefined,
+      page: 1,
+      limit: 20,
+      signal: options.signal,
+    })
+
+    const match = payload.docs.find((doc) => isExactOpenLibraryMatch(book, doc))
+    if (match) return match
+  }
+
+  return null
 }
 
 /**

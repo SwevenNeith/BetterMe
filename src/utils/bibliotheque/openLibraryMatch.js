@@ -22,7 +22,13 @@ export function authorFingerprint(value) {
 }
 
 const LEADING_ARTICLE_RE = /^(?:(?:the|an|a|le|la|les|un|une|des)\s+|l')/
+const LEADING_ARTICLE_SEARCH_RE = /^(?:(?:the|an|a|le|la|les|un|une|des)\s+|l['’])/i
 const TITLE_ARTICLES = ['the', 'a', 'an', 'le', 'la', 'les', 'un', 'une', 'des']
+
+/** Retire l’article EN/FR en tête pour une requête de recherche OL. */
+export function stripLeadingArticles(value) {
+  return String(value ?? '').replace(LEADING_ARTICLE_SEARCH_RE, '').replace(/\s+/g, ' ').trim()
+}
 
 /** Variantes de titre (sous-titre, tome, articles EN/FR…). */
 export function titleVariants(value) {
