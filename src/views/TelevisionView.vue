@@ -1,13 +1,36 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import {
   readPersistedPageState,
   writePersistedPageState,
 } from '../composables/usePersistedPageState.js'
-import { searchTmdbAllPages, tmdbPosterUrl } from '../services/television/tmdb.js'
+import { supabase } from '../lib/supabase.js'
+import { getTmdbDetails, getTmdbSeason, searchTmdbAllPages, tmdbPosterUrl } from '../services/television/tmdb.js'
+import {
+  TELEVISION_COLLECTION_EN_COURS,
+  TELEVISION_COLLECTION_TERMINE,
+  listTelevisionCollections,
+} from '../services/television/televisionCollections.js'
+import {
+  listEpisodeProgressByMediaIds,
+  setEpisodeWatched,
+} from '../services/television/televisionEpisodeProgress.js'
+import {
+  listTelevisionMedia,
+  updateTelevisionMedia,
+} from '../services/television/televisionMedia.js'
+import {
+  resolveNextEpisode,
+} from '../utils/television/nextEpisode.js'
+import {
+  applyTelevisionMediaFilters,
+  formatTelevisionFilterLabel,
+} from '../utils/television/televisionMediaFilters.js'
+import TelevisionContinueCard from '../components/television/TelevisionContinueCard.vue'
+import TelevisionMediaFilterPopover from '../components/television/TelevisionMediaFilterPopover.vue'
 
 defineOptions({ name: 'TelevisionView' })
 
@@ -29,31 +52,108 @@ const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.TELEVISION, undefined, {
 })
 
 const router = useRouter()
+const route = useRoute()
 
 const persistedTv = readPersistedPageState(TV_SEARCH_STORAGE_KEY, {
+  libraryMode: 'mine',
   searchQuery: '',
+  librarySearchQuery: '',
+  libraryFilters: [],
+  catalogFilters: [],
+  filterOpen: false,
   currentPage: 1,
 })
 
+const libraryMode = ref(
+  route.query.mode === 'catalogue' || persistedTv.libraryMode === 'catalog' ? 'catalog' : 'mine',
+)
 const searchQuery = ref(String(persistedTv.searchQuery ?? ''))
+const librarySearchQuery = ref(String(persistedTv.librarySearchQuery ?? ''))
+const libraryFilters = ref(
+  Array.isArray(persistedTv.libraryFilters) ? persistedTv.libraryFilters : [],
+)
+const catalogFilters = ref(
+  Array.isArray(persistedTv.catalogFilters) ? persistedTv.catalogFilters : [],
+)
+const filterOpen = ref(Boolean(persistedTv.filterOpen))
 const isLoading = ref(false)
+const isLibraryLoading = ref(false)
 const loadError = ref('')
+const libraryError = ref('')
 const searchPayload = ref(null)
+const libraryItems = ref([])
+const collections = ref([])
+/** @type {import('vue').Ref<Record<string, { seasonNumber?: number, episodeNumber?: number, episodeName?: string, complete?: boolean }|null>>} */
+const nextEpisodeByMediaId = ref({})
+/** @type {import('vue').Ref<Record<string, Array<object>>>} */
+const progressByMediaId = ref({})
+/** @type {import('vue').Ref<Record<string, Array<object>>>} */
+const seasonsByMediaId = ref({})
+const markingMediaId = ref(null)
 const progressLabel = ref('')
 const currentPage = ref(Math.max(1, Number(persistedTv.currentPage) || 1))
 const gridColumnCount = ref(4)
 const televisionGridRef = ref(null)
 const televisionLayoutRef = ref(null)
+const userId = ref(null)
 let gridResizeObserver = null
 let searchDebounceTimer = null
 let searchRequestId = 0
+let skipFirstActivated = true
 
 const SEARCH_DEBOUNCE_MS = 350
 const MIN_SEARCH_LENGTH = 2
 
+const pageSubtitle = computed(() => {
+  if (libraryMode.value === 'catalog') {
+    return 'Cherche un film ou une série dans le catalogue TMDB.'
+  }
+  const total = libraryItems.value.length
+  if (total === 0) return 'Ajoute des titres depuis le catalogue (À regarder, En cours, Terminé…).'
+  return `${total} titre${total === 1 ? '' : 's'} dans ta télé.`
+})
+
+const displayedLibraryItems = computed(() => {
+  const query = librarySearchQuery.value.trim().toLowerCase()
+  let list = libraryItems.value
+  if (query) {
+    list = list.filter((item) => {
+      const title = String(item.title || '').toLowerCase()
+      const original = String(item.original_title || '').toLowerCase()
+      const col = String(item.collection || '').toLowerCase()
+      return title.includes(query) || original.includes(query) || col.includes(query)
+    })
+  }
+  return applyTelevisionMediaFilters(list, libraryFilters.value)
+})
+
+const inProgressItems = computed(() =>
+  displayedLibraryItems.value.filter(
+    (item) =>
+      String(item.collection || '').toLowerCase() ===
+      TELEVISION_COLLECTION_EN_COURS.toLowerCase(),
+  ),
+)
+
+const inProgressSeries = computed(() =>
+  inProgressItems.value.filter((item) => item.media_type === 'tv'),
+)
+
+const inProgressMovies = computed(() =>
+  inProgressItems.value.filter((item) => item.media_type === 'movie'),
+)
+
+const filteredLibraryItems = computed(() =>
+  displayedLibraryItems.value.filter(
+    (item) =>
+      String(item.collection || '').toLowerCase() !==
+      TELEVISION_COLLECTION_EN_COURS.toLowerCase(),
+  ),
+)
+
 const displayResults = computed(() => {
-  const list = searchPayload.value?.results
-  return Array.isArray(list) ? list : []
+  const list = Array.isArray(searchPayload.value?.results) ? searchPayload.value.results : []
+  return applyTelevisionMediaFilters(list, catalogFilters.value)
 })
 
 const itemsPerPage = computed(() => Math.max(2, gridColumnCount.value) * GRID_ROWS)
@@ -73,6 +173,14 @@ const paginatedResults = computed(() => {
 
 const showPagination = computed(() => displayResults.value.length > itemsPerPage.value)
 
+function setLibraryMode(mode) {
+  libraryMode.value = mode === 'catalog' ? 'catalog' : 'mine'
+  const nextQuery = { ...route.query }
+  if (libraryMode.value === 'catalog') nextQuery.mode = 'catalogue'
+  else delete nextQuery.mode
+  router.replace({ query: nextQuery })
+}
+
 function resultTitle(item) {
   return item?.title || item?.name || item?.original_title || item?.original_name || 'Untitled'
 }
@@ -84,22 +192,27 @@ function resultTypeLabel(item) {
 }
 
 function resultPoster(item) {
-  return tmdbPosterUrl(item?.poster_path, 'w342')
+  return item?.posterUrl || tmdbPosterUrl(item?.poster_path, 'w342')
 }
 
 function resultKey(item) {
-  return `${item?.media_type ?? 'x'}-${item?.id ?? Math.random()}`
+  if (item?.id && item?.media_type && item?.tmdb_id) {
+    return `lib-${item.id}`
+  }
+  return `${item?.media_type ?? 'x'}-${item?.id ?? item?.tmdb_id ?? Math.random()}`
 }
 
 function resultAriaLabel(item) {
   const year = String(item?.first_air_date || item?.release_date || '').slice(0, 4)
   const type = resultTypeLabel(item)
-  return [resultTitle(item), type, year].filter(Boolean).join(' · ')
+  const collection = item?.collection ? String(item.collection) : ''
+  return [resultTitle(item), type, year || collection].filter(Boolean).join(' · ')
 }
 
 function openMediaFiche(item) {
-  const mediaType = item?.media_type === 'tv' ? 'tv' : item?.media_type === 'movie' ? 'movie' : ''
-  const tmdbId = item?.id
+  const mediaType =
+    item?.media_type === 'tv' ? 'tv' : item?.media_type === 'movie' ? 'movie' : ''
+  const tmdbId = item?.tmdb_id ?? item?.id
   if (!mediaType || !tmdbId) return
   router.push({
     name: 'television-fiche',
@@ -139,6 +252,185 @@ function goToPage(page) {
   if (nextPage === currentPage.value) return
   currentPage.value = nextPage
   televisionGridRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+async function refreshContinueProgress(seriesItems) {
+  const series = (seriesItems ?? []).filter((item) => item?.media_type === 'tv' && item?.id)
+  if (!userId.value || !series.length) {
+    nextEpisodeByMediaId.value = {}
+    progressByMediaId.value = {}
+    seasonsByMediaId.value = {}
+    return
+  }
+
+  const progressMap = await listEpisodeProgressByMediaIds(
+    supabase,
+    userId.value,
+    series.map((item) => item.id),
+  )
+
+  /** @type {Record<string, Array<object>>} */
+  const progressRecord = {}
+  /** @type {Record<string, Array<object>>} */
+  const seasonsRecord = { ...seasonsByMediaId.value }
+  /** @type {Record<string, object|null>} */
+  const nextRecord = {}
+
+  for (const [mediaId, rows] of progressMap.entries()) {
+    progressRecord[mediaId] = rows
+  }
+
+  await Promise.all(
+    series.map(async (item) => {
+      let seasons = seasonsRecord[item.id]
+      if (!seasons) {
+        try {
+          const details = await getTmdbDetails('tv', item.tmdb_id, 'fr-FR')
+          seasons = Array.isArray(details?.seasons) ? details.seasons : []
+          seasonsRecord[item.id] = seasons
+        } catch (err) {
+          console.warn('Seasons meta failed for', item.title, err)
+          seasons = []
+          seasonsRecord[item.id] = seasons
+        }
+      }
+
+      const watched = progressRecord[item.id] ?? []
+      const next = resolveNextEpisode(watched, seasons)
+      if (!next) {
+        nextRecord[item.id] = null
+        return
+      }
+      if (next.complete) {
+        nextRecord[item.id] = { complete: true }
+        return
+      }
+
+      let episodeName = ''
+      try {
+        const season = await getTmdbSeason(item.tmdb_id, next.seasonNumber, 'fr-FR')
+        const ep = (season.episodes ?? []).find((row) => row.episodeNumber === next.episodeNumber)
+        episodeName = ep?.name || ''
+      } catch (err) {
+        console.warn('Episode name failed for', item.title, err)
+      }
+
+      nextRecord[item.id] = {
+        seasonNumber: next.seasonNumber,
+        episodeNumber: next.episodeNumber,
+        episodeName,
+      }
+    }),
+  )
+
+  progressByMediaId.value = progressRecord
+  seasonsByMediaId.value = seasonsRecord
+  nextEpisodeByMediaId.value = nextRecord
+}
+
+async function loadLibrary() {
+  if (!userId.value) {
+    libraryItems.value = []
+    nextEpisodeByMediaId.value = {}
+    progressByMediaId.value = {}
+    seasonsByMediaId.value = {}
+    return
+  }
+  isLibraryLoading.value = true
+  libraryError.value = ''
+  try {
+    collections.value = await listTelevisionCollections(supabase, userId.value)
+    libraryItems.value = await listTelevisionMedia(supabase, userId.value)
+    const series = libraryItems.value.filter(
+      (item) =>
+        item.media_type === 'tv' &&
+        String(item.collection || '').toLowerCase() ===
+          TELEVISION_COLLECTION_EN_COURS.toLowerCase(),
+    )
+    await refreshContinueProgress(series)
+  } catch (err) {
+    console.error(err)
+    libraryError.value = err.message || 'Impossible de charger ta télé.'
+    libraryItems.value = []
+  } finally {
+    isLibraryLoading.value = false
+    await nextTick()
+    bindGridResizeObserver()
+  }
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+async function onMarkEpisodeWatched({ item, seasonNumber, episodeNumber }) {
+  if (!userId.value || !item?.id || markingMediaId.value) return
+  markingMediaId.value = item.id
+  libraryError.value = ''
+  try {
+    await setEpisodeWatched(supabase, userId.value, item.id, seasonNumber, episodeNumber, true)
+
+    const watched = [...(progressByMediaId.value[item.id] ?? [])]
+    watched.push({
+      media_id: item.id,
+      season_number: seasonNumber,
+      episode_number: episodeNumber,
+    })
+    progressByMediaId.value = {
+      ...progressByMediaId.value,
+      [item.id]: watched,
+    }
+
+    const seasons = seasonsByMediaId.value[item.id] ?? []
+    const next = resolveNextEpisode(watched, seasons)
+
+    if (next?.complete) {
+      await updateTelevisionMedia(supabase, userId.value, item.id, {
+        collection: TELEVISION_COLLECTION_TERMINE,
+        dateStart: item.date_start || todayIso(),
+        dateEnd: item.date_end || todayIso(),
+      })
+      libraryItems.value = libraryItems.value.map((row) =>
+        row.id === item.id
+          ? {
+              ...row,
+              collection: TELEVISION_COLLECTION_TERMINE,
+              date_start: row.date_start || todayIso(),
+              date_end: row.date_end || todayIso(),
+            }
+          : row,
+      )
+      nextEpisodeByMediaId.value = {
+        ...nextEpisodeByMediaId.value,
+        [item.id]: { complete: true },
+      }
+      return
+    }
+
+    let episodeName = ''
+    if (next) {
+      try {
+        const season = await getTmdbSeason(item.tmdb_id, next.seasonNumber, 'fr-FR')
+        const ep = (season.episodes ?? []).find((row) => row.episodeNumber === next.episodeNumber)
+        episodeName = ep?.name || ''
+      } catch {
+        /* ignore */
+      }
+      nextEpisodeByMediaId.value = {
+        ...nextEpisodeByMediaId.value,
+        [item.id]: {
+          seasonNumber: next.seasonNumber,
+          episodeNumber: next.episodeNumber,
+          episodeName,
+        },
+      }
+    }
+  } catch (err) {
+    console.error(err)
+    libraryError.value = err.message || 'Impossible de marquer l’épisode.'
+  } finally {
+    markingMediaId.value = null
+  }
 }
 
 async function runSearch(rawQuery, options = {}) {
@@ -209,16 +501,49 @@ function scheduleSearch(query) {
   }, SEARCH_DEBOUNCE_MS)
 }
 
+function persistState() {
+  writePersistedPageState(TV_SEARCH_STORAGE_KEY, {
+    libraryMode: libraryMode.value,
+    searchQuery: searchQuery.value,
+    librarySearchQuery: librarySearchQuery.value,
+    libraryFilters: libraryFilters.value,
+    catalogFilters: catalogFilters.value,
+    filterOpen: filterOpen.value,
+    currentPage: currentPage.value,
+  })
+}
+
+function removeActiveFilter(filterId) {
+  if (libraryMode.value === 'catalog') {
+    catalogFilters.value = catalogFilters.value.filter((filter) => filter.id !== filterId)
+  } else {
+    libraryFilters.value = libraryFilters.value.filter((filter) => filter.id !== filterId)
+  }
+}
+
+function onFiltersUpdate(next) {
+  if (libraryMode.value === 'catalog') catalogFilters.value = next
+  else libraryFilters.value = next
+}
+
 watch(searchQuery, (value) => {
+  if (libraryMode.value !== 'catalog') return
   scheduleSearch(value)
 })
 
-watch([searchQuery, currentPage], () => {
-  writePersistedPageState(TV_SEARCH_STORAGE_KEY, {
-    searchQuery: searchQuery.value,
-    currentPage: currentPage.value,
-  })
-})
+watch(
+  [
+    libraryMode,
+    searchQuery,
+    librarySearchQuery,
+    libraryFilters,
+    catalogFilters,
+    filterOpen,
+    currentPage,
+  ],
+  () => persistState(),
+  { deep: true },
+)
 
 watch(totalPages, (pages) => {
   if (currentPage.value > pages) currentPage.value = pages
@@ -230,12 +555,49 @@ watch(itemsPerPage, () => {
   }
 })
 
-onMounted(async () => {
+watch(libraryMode, async (mode) => {
   await nextTick()
   bindGridResizeObserver()
-  const q = String(searchQuery.value ?? '').trim()
-  if (q.length >= MIN_SEARCH_LENGTH) {
-    await runSearch(q, { keepPage: true })
+  if (mode === 'catalog') {
+    const q = String(searchQuery.value ?? '').trim()
+    if (q.length >= MIN_SEARCH_LENGTH && !searchPayload.value) {
+      await runSearch(q, { keepPage: true })
+    }
+  } else if (userId.value) {
+    await loadLibrary()
+  }
+})
+
+watch(userId, (id) => {
+  if (id) loadLibrary()
+})
+
+onMounted(async () => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (user) userId.value = user.id
+
+  await nextTick()
+  bindGridResizeObserver()
+
+  if (libraryMode.value === 'mine') {
+    await loadLibrary()
+  } else {
+    const q = String(searchQuery.value ?? '').trim()
+    if (q.length >= MIN_SEARCH_LENGTH) {
+      await runSearch(q, { keepPage: true })
+    }
+  }
+})
+
+onActivated(async () => {
+  if (skipFirstActivated) {
+    skipFirstActivated = false
+    return
+  }
+  if (libraryMode.value === 'mine' && userId.value) {
+    await loadLibrary()
   }
 })
 
@@ -251,122 +613,379 @@ onUnmounted(() => {
   <div class="television-wrapper">
     <header class="television-header">
       <h1 class="television-title">{{ pageTitle }}</h1>
-      <p class="television-subtitle">
-        Suis tes séries et films : vus, en cours, à voir…
-      </p>
+      <p class="television-subtitle">{{ pageSubtitle }}</p>
+
+      <div class="television-mode-tabs" role="tablist" aria-label="Mode télévision">
+        <button
+          type="button"
+          role="tab"
+          class="television-mode-tab"
+          :class="{ 'television-mode-tab--active': libraryMode === 'mine' }"
+          :aria-selected="libraryMode === 'mine'"
+          @click="setLibraryMode('mine')"
+        >
+          Ma télé
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="television-mode-tab"
+          :class="{ 'television-mode-tab--active': libraryMode === 'catalog' }"
+          :aria-selected="libraryMode === 'catalog'"
+          @click="setLibraryMode('catalog')"
+        >
+          Catalogue
+        </button>
+      </div>
     </header>
 
     <section class="television-card">
-      <div class="television-toolbar">
-        <label class="television-search">
-          <span class="television-search__label">Rechercher</span>
-          <input
-            v-model="searchQuery"
-            type="search"
-            class="television-search__input"
-            placeholder="Titre de film ou série (FR / EN)…"
-            maxlength="120"
-            autocomplete="off"
-          />
-        </label>
-      </div>
-
       <div ref="televisionLayoutRef" class="television-layout-measure" aria-hidden="true" />
 
-      <p v-if="isLoading" class="television-status">{{ progressLabel || 'Recherche…' }}</p>
-      <p v-else-if="loadError" class="television-error">{{ loadError }}</p>
+      <!-- Ma télé -->
+      <template v-if="libraryMode === 'mine'">
+        <div
+          v-if="libraryItems.length || librarySearchQuery || libraryFilters.length"
+          class="television-toolbar"
+        >
+          <label class="television-search">
+            <span class="television-search__label">Rechercher</span>
+            <input
+              v-model="librarySearchQuery"
+              type="search"
+              class="television-search__input"
+              placeholder="Titre, collection…"
+              maxlength="120"
+              autocomplete="off"
+            />
+          </label>
+          <div class="television-toolbar__filters">
+            <button
+              type="button"
+              class="television-filter-btn"
+              :class="{ 'television-filter-btn--active': libraryFilters.length > 0 }"
+              @click="filterOpen = !filterOpen"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="currentColor" d="M3 4h18v2l-7 8v5l-4 1v-6L3 6V4z" />
+              </svg>
+              Filtre
+              <span v-if="libraryFilters.length > 0" class="television-filter-btn__count">
+                {{ libraryFilters.length }}
+              </span>
+            </button>
+          </div>
+        </div>
 
-      <template v-if="searchPayload && !loadError">
-        <p v-if="!isLoading" class="television-count">
-          {{ displayResults.length }} résultat{{ displayResults.length === 1 ? '' : 's' }}
-          <span
-            v-if="
-              searchPayload.movie_total_results != null || searchPayload.tv_total_results != null
-            "
+        <TelevisionMediaFilterPopover
+          :filters="libraryFilters"
+          :open="filterOpen && libraryMode === 'mine'"
+          context="library"
+          :collections="collections"
+          @update:filters="onFiltersUpdate"
+          @close="filterOpen = false"
+        />
+
+        <div v-if="libraryFilters.length > 0" class="television-active-filters">
+          <button
+            v-for="filter in libraryFilters"
+            :key="filter.id"
+            type="button"
+            class="television-active-filter-pill"
+            @click="filterOpen = true"
           >
-            ({{ searchPayload.movie_total_results || 0 }} films ·
-            {{ searchPayload.tv_total_results || 0 }} séries)
-          </span>
-        </p>
+            <span>{{ formatTelevisionFilterLabel(filter) }}</span>
+            <span
+              class="television-active-filter-pill__remove"
+              role="button"
+              tabindex="0"
+              aria-label="Retirer ce filtre"
+              @click.stop="removeActiveFilter(filter.id)"
+              @keydown.enter.stop.prevent="removeActiveFilter(filter.id)"
+              @keydown.space.stop.prevent="removeActiveFilter(filter.id)"
+            >
+              ✕
+            </span>
+          </button>
+        </div>
 
-        <template v-if="displayResults.length">
-          <div
-            ref="televisionGridRef"
-            class="television-grid"
+        <p v-if="isLibraryLoading" class="television-status">Chargement…</p>
+        <p v-else-if="libraryError" class="television-error">{{ libraryError }}</p>
+        <p v-else-if="!userId" class="television-status">
+          Connecte-toi pour suivre tes films et séries.
+        </p>
+        <template v-else-if="!isLibraryLoading">
+          <section
+            v-if="inProgressItems.length"
+            class="television-section television-section--en-cours"
             :style="televisionGridStyle"
           >
-            <article
-              v-for="item in paginatedResults"
-              :key="resultKey(item)"
-              class="television-poster"
+            <h2 class="television-section__title">En cours</h2>
+
+            <div v-if="inProgressSeries.length" class="television-continue-list">
+              <TelevisionContinueCard
+                v-for="item in inProgressSeries"
+                :key="resultKey(item)"
+                :item="item"
+                :next-episode="nextEpisodeByMediaId[item.id] || null"
+                :busy="markingMediaId === item.id"
+                @open="openMediaFiche"
+                @mark-watched="onMarkEpisodeWatched"
+              />
+            </div>
+
+            <div v-if="inProgressMovies.length" class="television-grid" :class="{ 'television-grid--after-continue': inProgressSeries.length }">
+              <article
+                v-for="item in inProgressMovies"
+                :key="resultKey(item)"
+                class="television-poster television-poster--en-cours"
+              >
+                <button
+                  type="button"
+                  class="television-poster__btn"
+                  :title="resultAriaLabel(item)"
+                  :aria-label="resultAriaLabel(item)"
+                  @click="openMediaFiche(item)"
+                >
+                  <img
+                    v-if="resultPoster(item)"
+                    :src="resultPoster(item)"
+                    :alt="resultTitle(item)"
+                    class="television-poster__cover"
+                    loading="lazy"
+                  />
+                  <div
+                    v-else
+                    class="television-poster__cover television-poster__cover--placeholder"
+                    aria-hidden="true"
+                  >
+                    <span>🎬</span>
+                  </div>
+                </button>
+              </article>
+            </div>
+          </section>
+
+          <section
+            v-if="filteredLibraryItems.length"
+            class="television-section"
+            :style="televisionGridStyle"
+          >
+            <h2 v-if="inProgressItems.length" class="television-section__title">Bibliothèque</h2>
+            <div class="television-grid">
+              <article
+                v-for="item in filteredLibraryItems"
+                :key="resultKey(item)"
+                class="television-poster"
+              >
+                <button
+                  type="button"
+                  class="television-poster__btn"
+                  :title="resultAriaLabel(item)"
+                  :aria-label="resultAriaLabel(item)"
+                  @click="openMediaFiche(item)"
+                >
+                  <img
+                    v-if="resultPoster(item)"
+                    :src="resultPoster(item)"
+                    :alt="resultTitle(item)"
+                    class="television-poster__cover"
+                    loading="lazy"
+                  />
+                  <div
+                    v-else
+                    class="television-poster__cover television-poster__cover--placeholder"
+                    aria-hidden="true"
+                  >
+                    <span>🎬</span>
+                  </div>
+                </button>
+              </article>
+            </div>
+          </section>
+
+          <p
+            v-if="!inProgressItems.length && !filteredLibraryItems.length"
+            class="television-status"
+          >
+            <template v-if="libraryItems.length && (librarySearchQuery || libraryFilters.length)">
+              Aucun titre ne correspond à ta recherche / tes filtres.
+            </template>
+            <template v-else>
+              Aucun titre pour l’instant. Passe par l’onglet Catalogue pour en ajouter.
+            </template>
+          </p>
+        </template>
+      </template>
+
+      <!-- Catalogue TMDB -->
+      <template v-else>
+        <div class="television-toolbar">
+          <label class="television-search">
+            <span class="television-search__label">Rechercher</span>
+            <input
+              v-model="searchQuery"
+              type="search"
+              class="television-search__input"
+              placeholder="Titre de film ou série (FR / EN)…"
+              maxlength="120"
+              autocomplete="off"
+            />
+          </label>
+          <div class="television-toolbar__filters">
+            <button
+              type="button"
+              class="television-filter-btn"
+              :class="{ 'television-filter-btn--active': catalogFilters.length > 0 }"
+              @click="filterOpen = !filterOpen"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="currentColor" d="M3 4h18v2l-7 8v5l-4 1v-6L3 6V4z" />
+              </svg>
+              Filtre
+              <span v-if="catalogFilters.length > 0" class="television-filter-btn__count">
+                {{ catalogFilters.length }}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <TelevisionMediaFilterPopover
+          :filters="catalogFilters"
+          :open="filterOpen && libraryMode === 'catalog'"
+          context="catalog"
+          :collections="collections"
+          @update:filters="onFiltersUpdate"
+          @close="filterOpen = false"
+        />
+
+        <div v-if="catalogFilters.length > 0" class="television-active-filters">
+          <button
+            v-for="filter in catalogFilters"
+            :key="filter.id"
+            type="button"
+            class="television-active-filter-pill"
+            @click="filterOpen = true"
+          >
+            <span>{{ formatTelevisionFilterLabel(filter) }}</span>
+            <span
+              class="television-active-filter-pill__remove"
+              role="button"
+              tabindex="0"
+              aria-label="Retirer ce filtre"
+              @click.stop="removeActiveFilter(filter.id)"
+              @keydown.enter.stop.prevent="removeActiveFilter(filter.id)"
+              @keydown.space.stop.prevent="removeActiveFilter(filter.id)"
+            >
+              ✕
+            </span>
+          </button>
+        </div>
+
+        <p v-if="isLoading" class="television-status">{{ progressLabel || 'Recherche…' }}</p>
+        <p v-else-if="loadError" class="television-error">{{ loadError }}</p>
+
+        <template v-if="searchPayload && !loadError">
+          <p v-if="!isLoading" class="television-count">
+            {{ displayResults.length }} résultat{{ displayResults.length === 1 ? '' : 's' }}
+            <span
+              v-if="
+                searchPayload.movie_total_results != null || searchPayload.tv_total_results != null
+              "
+            >
+              ({{ searchPayload.movie_total_results || 0 }} films ·
+              {{ searchPayload.tv_total_results || 0 }} séries)
+            </span>
+          </p>
+
+          <template v-if="displayResults.length">
+            <div
+              ref="televisionGridRef"
+              class="television-grid"
+              :style="televisionGridStyle"
+            >
+              <article
+                v-for="item in paginatedResults"
+                :key="resultKey(item)"
+                class="television-poster"
+              >
+                <button
+                  type="button"
+                  class="television-poster__btn"
+                  :title="resultAriaLabel(item)"
+                  :aria-label="resultAriaLabel(item)"
+                  @click="openMediaFiche(item)"
+                >
+                  <img
+                    v-if="resultPoster(item)"
+                    :src="resultPoster(item)"
+                    :alt="resultTitle(item)"
+                    class="television-poster__cover"
+                    loading="lazy"
+                  />
+                  <div
+                    v-else
+                    class="television-poster__cover television-poster__cover--placeholder"
+                    aria-hidden="true"
+                  >
+                    <span>🎬</span>
+                  </div>
+                </button>
+              </article>
+            </div>
+
+            <nav
+              v-if="showPagination && !isLoading"
+              class="television-pagination"
+              aria-label="Pagination des résultats"
             >
               <button
                 type="button"
-                class="television-poster__btn"
-                :title="resultAriaLabel(item)"
-                :aria-label="resultAriaLabel(item)"
-                @click="openMediaFiche(item)"
+                class="television-pagination__btn"
+                :disabled="currentPage <= 1"
+                aria-label="Page précédente"
+                @click="goToPage(currentPage - 1)"
               >
-                <img
-                  v-if="resultPoster(item)"
-                  :src="resultPoster(item)"
-                  :alt="resultTitle(item)"
-                  class="television-poster__cover"
-                  loading="lazy"
-                />
-                <div
-                  v-else
-                  class="television-poster__cover television-poster__cover--placeholder"
-                  aria-hidden="true"
-                >
-                  <span>🎬</span>
-                </div>
+                ‹
               </button>
-            </article>
-          </div>
+              <span class="television-pagination__label">
+                Page {{ currentPage }} / {{ totalPages }}
+              </span>
+              <button
+                type="button"
+                class="television-pagination__btn"
+                :disabled="currentPage >= totalPages"
+                aria-label="Page suivante"
+                @click="goToPage(currentPage + 1)"
+              >
+                ›
+              </button>
+            </nav>
+          </template>
 
-          <nav
-            v-if="showPagination && !isLoading"
-            class="television-pagination"
-            aria-label="Pagination des résultats"
-          >
-            <button
-              type="button"
-              class="television-pagination__btn"
-              :disabled="currentPage <= 1"
-              aria-label="Page précédente"
-              @click="goToPage(currentPage - 1)"
-            >
-              ‹
-            </button>
-            <span class="television-pagination__label">
-              Page {{ currentPage }} / {{ totalPages }}
-            </span>
-            <button
-              type="button"
-              class="television-pagination__btn"
-              :disabled="currentPage >= totalPages"
-              aria-label="Page suivante"
-              @click="goToPage(currentPage + 1)"
-            >
-              ›
-            </button>
-          </nav>
+          <p v-else-if="!isLoading" class="television-status">
+            <template v-if="catalogFilters.length">
+              Aucun résultat avec ces filtres.
+            </template>
+            <template v-else>Aucun film ou série trouvé.</template>
+          </p>
         </template>
 
-        <p v-else-if="!isLoading" class="television-status">Aucun film ou série trouvé.</p>
+        <p
+          v-else-if="
+            !isLoading &&
+            searchQuery.trim().length > 0 &&
+            searchQuery.trim().length < MIN_SEARCH_LENGTH
+          "
+          class="television-status"
+        >
+          Tape au moins {{ MIN_SEARCH_LENGTH }} caractères…
+        </p>
+
+        <p v-else-if="!isLoading && !loadError" class="television-status">
+          Tape un titre (français ou anglais) pour lancer la recherche.
+        </p>
       </template>
-
-      <p
-        v-else-if="!isLoading && searchQuery.trim().length > 0 && searchQuery.trim().length < MIN_SEARCH_LENGTH"
-        class="television-status"
-      >
-        Tape au moins {{ MIN_SEARCH_LENGTH }} caractères…
-      </p>
-
-      <p v-else-if="!isLoading && !loadError" class="television-status">
-        Tape un titre (français ou anglais) pour lancer la recherche.
-      </p>
     </section>
   </div>
 </template>
@@ -399,6 +1018,31 @@ onUnmounted(() => {
   font-size: 1rem;
 }
 
+.television-mode-tabs {
+  display: inline-flex;
+  gap: 0.35rem;
+  margin-top: 1rem;
+  padding: 0.25rem;
+  border-radius: 12px;
+  background: rgba(213, 181, 234, 0.18);
+}
+
+.television-mode-tab {
+  padding: 0.45rem 0.9rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #6b4f7c;
+  font-weight: 700;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.television-mode-tab--active {
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 4px rgba(92, 62, 112, 0.12);
+}
+
 .television-card {
   width: 100%;
   background: rgba(255, 255, 255, 0.65);
@@ -417,11 +1061,85 @@ onUnmounted(() => {
   margin-bottom: 1.15rem;
 }
 
-.television-search {
+.television-toolbar__filters {
+  display: flex;
+  align-items: end;
+}
+
+.television-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  background: rgba(255, 255, 255, 0.85);
+  color: #6b4f7c;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.television-filter-btn svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.television-filter-btn--active {
+  background: rgba(173, 129, 190, 0.2);
+  border-color: rgba(173, 129, 190, 0.55);
+}
+
+.television-filter-btn__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: #ad81be;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.television-active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: -0.35rem 0 0.85rem;
+}
+
+.television-active-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(213, 181, 234, 0.4);
+  background: rgba(213, 181, 234, 0.16);
+  color: #6b4f7c;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.television-active-filter-pill__remove {
+  opacity: 0.75;
+}
+
+.television-search,
+.television-filter {
   flex: 1;
   min-width: 12rem;
   display: grid;
   gap: 0.35rem;
+}
+
+.television-filter {
+  flex: 0 1 12rem;
 }
 
 .television-search__label {
@@ -447,15 +1165,56 @@ onUnmounted(() => {
   outline-offset: 1px;
 }
 
-.television-search__input::-webkit-search-cancel-button {
-  cursor: pointer;
-}
-
 .television-layout-measure {
   width: 100%;
   height: 0;
   overflow: hidden;
   pointer-events: none;
+}
+
+.television-section {
+  margin-bottom: 1.25rem;
+}
+
+.television-section__title {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #5a4a68;
+}
+
+.television-section--en-cours {
+  padding: 0.85rem 0.85rem 1rem;
+  margin: 0 -0.15rem 1.25rem;
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(213, 181, 234, 0.22), rgba(173, 129, 190, 0.1));
+  border: 1px solid rgba(173, 129, 190, 0.28);
+}
+
+.television-section--en-cours .television-section__title {
+  color: #7a4f8f;
+}
+
+.television-section--en-cours :deep(.tv-continue) {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(173, 129, 190, 0.45);
+  box-shadow: 0 2px 10px rgba(173, 129, 190, 0.12);
+}
+
+.television-poster--en-cours .television-poster__cover {
+  border-color: rgba(173, 129, 190, 0.45);
+  box-shadow: 0 2px 10px rgba(173, 129, 190, 0.18);
+}
+
+.television-continue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.television-grid--after-continue {
+  margin-top: 0.85rem;
 }
 
 .television-status {
@@ -553,9 +1312,6 @@ onUnmounted(() => {
   font-size: 1.1rem;
   font-weight: 800;
   cursor: pointer;
-  transition:
-    background 0.15s ease,
-    opacity 0.15s ease;
 }
 
 .television-pagination__btn:hover:not(:disabled) {
@@ -576,9 +1332,31 @@ onUnmounted(() => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .television-title {
+  .television-title,
+  .television-section__title {
     color: #f0e8f8;
   }
+
+  .television-section--en-cours {
+    background: linear-gradient(145deg, rgba(173, 129, 190, 0.22), rgba(61, 47, 74, 0.55));
+    border-color: rgba(213, 181, 234, 0.28);
+  }
+
+  .television-section--en-cours .television-section__title {
+    color: #e8dcf5;
+  }
+
+  .television-section--en-cours :deep(.tv-continue) {
+    background: rgba(45, 38, 60, 0.9);
+    border-color: rgba(213, 181, 234, 0.4);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  }
+
+  .television-poster--en-cours .television-poster__cover {
+    border-color: rgba(213, 181, 234, 0.4);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  }
+
   .television-subtitle,
   .television-status,
   .television-pagination__label {
@@ -587,6 +1365,13 @@ onUnmounted(() => {
   .television-card {
     background: rgba(35, 30, 48, 0.75);
     border-color: rgba(213, 181, 234, 0.2);
+  }
+  .television-mode-tabs {
+    background: rgba(213, 181, 234, 0.12);
+  }
+  .television-mode-tab--active {
+    background: rgba(45, 38, 60, 0.95);
+    color: #f0e8f8;
   }
   .television-search__input {
     background: rgba(30, 24, 42, 0.9);

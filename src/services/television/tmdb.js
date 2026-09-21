@@ -112,6 +112,53 @@ export async function getTmdbDetails(type, id, language = 'fr-FR') {
 }
 
 /**
+ * Détail d’une saison (épisodes) pour une série TMDB.
+ * @param {number|string} tvId
+ * @param {number|string} seasonNumber
+ * @param {string} [language]
+ */
+export async function getTmdbSeason(tvId, seasonNumber, language = 'fr-FR') {
+  const id = Number.parseInt(String(tvId), 10)
+  const season = Number.parseInt(String(seasonNumber), 10)
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new Error('Identifiant série TMDB invalide.')
+  }
+  if (!Number.isFinite(season) || season < 0) {
+    throw new Error('Numéro de saison invalide.')
+  }
+
+  const lang = SEARCH_LANGUAGES.includes(language) ? language : 'fr-FR'
+  const data = await callTmdbFunction({
+    action: 'season',
+    id,
+    seasonNumber: season,
+    language: lang,
+  })
+
+  const episodes = Array.isArray(data?.episodes)
+    ? data.episodes.map((ep) => ({
+        id: ep?.id ?? null,
+        episodeNumber: Number(ep?.episode_number) || 0,
+        name: String(ep?.name || '').trim() || `Épisode ${ep?.episode_number ?? '?'}`,
+        overview: String(ep?.overview || '').trim(),
+        airDate: ep?.air_date || null,
+        runtime: ep?.runtime ?? null,
+        stillPath: ep?.still_path || null,
+      }))
+    : []
+
+  return {
+    id: data?.id ?? null,
+    seasonNumber: Number(data?.season_number) || season,
+    name: String(data?.name || '').trim() || `Saison ${season}`,
+    overview: String(data?.overview || '').trim(),
+    posterPath: data?.poster_path || null,
+    airDate: data?.air_date || null,
+    episodes,
+  }
+}
+
+/**
  * Charge la fiche en FR puis complète les champs vides avec la version EN.
  * @param {'movie' | 'tv'} type
  * @param {number|string} id

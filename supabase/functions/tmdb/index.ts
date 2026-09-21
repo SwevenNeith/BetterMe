@@ -33,6 +33,14 @@ function resolveDetailsPath(typeRaw: unknown, idRaw: unknown) {
   return null
 }
 
+function resolveSeasonPath(idRaw: unknown, seasonRaw: unknown) {
+  const id = Number.parseInt(String(idRaw ?? ''), 10)
+  const season = Number.parseInt(String(seasonRaw ?? ''), 10)
+  if (!Number.isFinite(id) || id <= 0) return null
+  if (!Number.isFinite(season) || season < 0) return null
+  return `/tv/${id}/season/${season}`
+}
+
 async function readPayload(req: Request) {
   try {
     const data = await req.json()
@@ -122,10 +130,27 @@ Deno.serve(async (req) => {
       tmdbParams.set('query', query)
       tmdbParams.set('include_adult', 'false')
       tmdbParams.set('page', String(page))
+    } else if (action === 'season') {
+      const seasonPath = resolveSeasonPath(body.id ?? body.tmdbId, body.seasonNumber ?? body.season)
+      if (!seasonPath) {
+        return new Response(
+          JSON.stringify({
+            error: 'Missing or invalid id/seasonNumber for season',
+          }),
+          {
+            status: 400,
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+      tmdbPath = seasonPath
     } else {
       return new Response(
         JSON.stringify({
-          error: 'Missing action in body: "search" or "details"',
+          error: 'Missing action in body: "search", "details" or "season"',
         }),
         {
           status: 400,

@@ -180,6 +180,10 @@ function formatFrenchDate(value) {
 
     <slot name="alert" />
 
+    <div v-if="$slots.tracking" class="cinema-fiche__tracking">
+      <slot name="tracking" />
+    </div>
+
     <div class="cinema-fiche__top">
       <div class="cinema-poster-frame">
         <div class="cinema-poster-frame__sprocket cinema-poster-frame__sprocket--left" aria-hidden="true">
@@ -395,6 +399,10 @@ function formatFrenchDate(value) {
 .cinema-fiche__actions {
   display: flex;
   gap: 0.35rem;
+}
+
+.cinema-fiche__tracking {
+  margin: 0 1.25rem 1rem;
 }
 
 .cinema-filmstrip {
