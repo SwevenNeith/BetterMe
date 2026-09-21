@@ -52,6 +52,27 @@ export function mergePageVisibility(raw) {
     }
   }
 
+  // Ancienne page « Lecture » → Bibliothèque (pas de perte de préférences)
+  const legacyLecture = raw.lecture
+  if (legacyLecture && typeof legacyLecture === 'object') {
+    const biblio = defaults.bibliotheque
+    const rawBiblio = raw.bibliotheque
+    const biblioWasExplicit =
+      rawBiblio && typeof rawBiblio === 'object' && typeof rawBiblio.visible === 'boolean'
+
+    if (!biblioWasExplicit && typeof legacyLecture.visible === 'boolean') {
+      biblio.visible = legacyLecture.visible
+    }
+
+    if (
+      !biblio.label &&
+      typeof legacyLecture.label === 'string' &&
+      legacyLecture.label.trim()
+    ) {
+      biblio.label = legacyLecture.label.trim()
+    }
+  }
+
   return defaults
 }
 

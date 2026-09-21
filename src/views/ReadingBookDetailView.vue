@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import ReadingBookFiche from '../components/lecture/ReadingBookFiche.vue'
 import { setFilePickerActive, setFileUploadInProgress } from '../composables/useAppTabResume.js'
 import { bookToEditForm, getBookGenre, formatExtraTagsInput } from '../utils/lecture/readingBookForm.js'
-import { deleteReadingBook, getReadingBookWithCover, updateReadingBook } from '../services/lecture/readingBooks.js'
+import { deleteReadingBook, getReadingBookWithCover, linkReadingBookToOpenLibrary, updateReadingBook } from '../services/lecture/readingBooks.js'
 import {
   listReadingRereadings,
   startReadingRereading,
@@ -15,6 +15,9 @@ import {
 } from '../services/lecture/readingRereadings.js'
 import { listReadingCollections } from '../services/lecture/readingCollections.js'
 import { deleteSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/lecture/readingSpoilChapters.js'
+import { isLinkedToOpenLibrary } from '../utils/bibliotheque/openLibraryMatch.js'
+import { getOpenLibraryWork } from '../services/bibliotheque/openLibrary.js'
+import OpenLibraryLinkSearchModal from '../components/bibliotheque/OpenLibraryLinkSearchModal.vue'
 import { supabase } from '../lib/supabase.js'
 
 const route = useRoute()
@@ -38,6 +41,8 @@ const rereadingStarting = ref(false)
 const rereadingCancelling = ref(false)
 const pendingRereadUndo = ref(null)
 const deleteConfirmOpen = ref(false)
+const olLinkPickerOpen = ref(false)
+const isLinkingOl = ref(false)
 let coverPreviewObjectUrl = ''
 let skipNextBlurCommit = false
 
@@ -127,7 +132,88 @@ const FIELD_GETTERS = {
 }
 
 function returnToLibrary() {
-  router.push({ name: 'lecture' })
+  router.push({ name: 'bibliotheque' })
+}
+
+function openOlLinkPicker() {
+  if (!book.value || isSaving.value || isLinkingOl.value) return
+  olLinkPickerOpen.value = true
+}
+
+async function onOlManualLinkSelected(doc) {
+  if (!userId.value || !book.value?.id || !doc?.key) return
+
+  isLinkingOl.value = true
+  errorMessage.value = ''
+
+  try {
+    let subjects = Array.isArray(doc.subjects) ? doc.subjects : []
+    if (!subjects.length) {
+      try {
+        const work = await getOpenLibraryWork(doc.key)
+        subjects = work.subjects || []
+      } catch {
+        subjects = []
+      }
+    }
+
+    await linkReadingBookToOpenLibrary(supabase, userId.value, book.value.id, {
+      workKey: doc.key,
+      // Pas de replaceCover : on garde la couverture perso
+      pages: doc.pageCount,
+      publicationYear: doc.firstPublishYear,
+      subjects,
+    })
+    book.value = await getReadingBookWithCover(supabase, userId.value, book.value.id)
+    olLinkPickerOpen.value = false
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible de lier ce livre à Open Library.'
+  } finally {
+    isLinkingOl.value = false
+  }
+}
+
+async function onOlEditionSelected(option) {
+  if (!userId.value || !book.value?.id || !option?.coverUrlLarge) return
+
+  isSaving.value = true
+  errorMessage.value = ''
+
+  try {
+    const workKey = String(option.workKey || book.value.open_library_work_key || '').trim()
+    if (workKey) {
+      let subjects = []
+      const needsTags = !Array.isArray(book.value.tags) || book.value.tags.length === 0
+      if (needsTags) {
+        try {
+          const work = await getOpenLibraryWork(workKey)
+          subjects = work.subjects || []
+        } catch {
+          subjects = []
+        }
+      }
+
+      await linkReadingBookToOpenLibrary(supabase, userId.value, book.value.id, {
+        workKey,
+        coverUrl: option.coverUrlLarge,
+        replaceCover: true,
+        subjects,
+      })
+      book.value = await getReadingBookWithCover(supabase, userId.value, book.value.id)
+    } else {
+      book.value = await updateReadingBook(supabase, userId.value, book.value.id, {
+        ...bookToEditForm(book.value),
+        imageUrl: option.coverUrlLarge,
+        file: null,
+      })
+    }
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible d’appliquer cette édition.'
+  } finally {
+    isSaving.value = false
+  }
 }
 
 function revokeCoverPreview() {
@@ -163,7 +249,29 @@ async function loadBook() {
   errorMessage.value = ''
   try {
     book.value = await getReadingBookWithCover(supabase, userId.value, bookId.value)
-    if (!book.value) errorMessage.value = 'Livre introuvable.'
+    if (!book.value) {
+      errorMessage.value = 'Livre introuvable.'
+      return
+    }
+
+    // Livres déjà liés sans tags : récupère les sujets OL une fois
+    const workKey = String(book.value.open_library_work_key ?? '').trim()
+    const hasTags = Array.isArray(book.value.tags) && book.value.tags.length > 0
+    if (workKey && !hasTags) {
+      try {
+        const work = await getOpenLibraryWork(workKey)
+        if (Array.isArray(work.subjects) && work.subjects.length) {
+          book.value = await linkReadingBookToOpenLibrary(supabase, userId.value, book.value.id, {
+            workKey,
+            subjects: work.subjects,
+          })
+          const withCover = await getReadingBookWithCover(supabase, userId.value, book.value.id)
+          if (withCover) book.value = withCover
+        }
+      } catch (err) {
+        console.warn('enrichissement sujets OL:', err)
+      }
+    }
   } catch (err) {
     console.error(err)
     book.value = null
@@ -652,6 +760,7 @@ watch(bookId, () => {
       @start-rereading="onStartRereading"
       @update-rereading="onUpdateRereading"
       @cancel-rereading="onCancelRereading"
+      @select-edition="onOlEditionSelected"
     >
       <template #actions>
         <button
@@ -672,10 +781,35 @@ watch(bookId, () => {
         </button>
       </template>
 
-      <template v-if="errorMessage" #alert>
-        <div class="reading-fiche-error">{{ errorMessage }}</div>
+      <template v-if="!isLinkedToOpenLibrary(book) || errorMessage" #alert>
+        <div
+          v-if="!isLinkedToOpenLibrary(book)"
+          class="reading-ol-status reading-ol-status--missing"
+        >
+          <p class="reading-ol-status__text">
+            Non lié à Open Library — aucune correspondance exacte titre + auteur trouvée
+            (ou pas encore synchronisé).
+          </p>
+          <button
+            type="button"
+            class="reading-ol-status__btn"
+            :disabled="isSaving || isLinkingOl"
+            @click="openOlLinkPicker"
+          >
+            Lier manuellement
+          </button>
+        </div>
+        <div v-if="errorMessage" class="reading-fiche-error">{{ errorMessage }}</div>
       </template>
     </ReadingBookFiche>
+
+    <OpenLibraryLinkSearchModal
+      :open="olLinkPickerOpen"
+      :book="book"
+      :linking="isLinkingOl"
+      @close="olLinkPickerOpen = false"
+      @select="onOlManualLinkSelected"
+    />
 
     <Teleport to="body">
       <div
@@ -750,6 +884,54 @@ watch(bookId, () => {
   color: #b02a37;
   font-size: 0.9rem;
   text-align: center;
+}
+
+.reading-ol-status {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 650;
+  line-height: 1.35;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 0.85rem;
+}
+
+.reading-ol-status--missing {
+  background: rgba(196, 120, 72, 0.14);
+  border: 1px solid rgba(196, 120, 72, 0.45);
+  color: #8a4f28;
+}
+
+.reading-ol-status__text {
+  margin: 0;
+  flex: 1 1 14rem;
+}
+
+.reading-ol-status__btn {
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 10px;
+  padding: 0.5rem 0.85rem;
+  background: linear-gradient(135deg, #e0a070, #c47848);
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.reading-ol-status__btn:hover:not(:disabled) {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.reading-ol-status__btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .reading-delete-overlay {
@@ -840,6 +1022,12 @@ watch(bookId, () => {
   .reading-book-page__error {
     background: rgba(220, 53, 69, 0.18);
     color: #ff8a95;
+  }
+
+  .reading-ol-status--missing {
+    background: rgba(196, 120, 72, 0.2);
+    border-color: rgba(220, 150, 100, 0.45);
+    color: #f0c9a8;
   }
 
   .reading-delete-dialog {

@@ -177,7 +177,11 @@ onUnmounted(() => {
       <AppSidebar />
       <main class="app-content">
         <NotificationPrompt />
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <KeepAlive :include="['LectureView', 'TelevisionView']" :max="6">
+            <component :is="Component" />
+          </KeepAlive>
+        </RouterView>
       </main>
     </div>
     <VisibilityOnboardingModal

@@ -40,10 +40,6 @@ function closePopover() {
   emit('close')
 }
 
-function onOverlayClick() {
-  closePopover()
-}
-
 function addFilter(field) {
   const next = [...props.filters, createReadingBookFilter(field, props.collections)]
   updateFilters(next)
@@ -100,155 +96,141 @@ function toggleAddFieldMenu() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <template v-if="open">
-      <div class="reading-books-filter__overlay" @click="onOverlayClick" />
+  <div v-if="open" class="reading-books-filter" role="dialog" aria-label="Filtres">
+    <header class="reading-books-filter__header">
+      <h4 class="reading-books-filter__title">Filtres</h4>
+      <button type="button" class="reading-books-filter__close" aria-label="Fermer" @click="closePopover">
+        ✕
+      </button>
+    </header>
 
-      <div class="reading-books-filter__popover" role="dialog" aria-modal="true" aria-label="Filtres">
-        <header class="reading-books-filter__header">
-          <h4 class="reading-books-filter__title">Filtres</h4>
-          <button type="button" class="reading-books-filter__close" aria-label="Fermer" @click="closePopover">
-            ✕
-          </button>
-        </header>
+    <div v-if="filters.length === 0" class="reading-books-filter__empty">
+      Aucun filtre actif.
+    </div>
 
-        <div v-if="filters.length === 0" class="reading-books-filter__empty">
-          Aucun filtre actif.
+    <ul v-else class="reading-books-filter__rules">
+      <li v-for="filter in filters" :key="filter.id" class="reading-books-filter__rule">
+        <select
+          v-model="filter.field"
+          class="reading-books-filter__select reading-books-filter__select--field"
+          @change="onFieldChange(filter)"
+        >
+          <option v-for="field in fieldOptions" :key="field.id" :value="field.id">
+            {{ field.label }}
+          </option>
+        </select>
+
+        <select
+          v-model="filter.operator"
+          class="reading-books-filter__select reading-books-filter__select--operator"
+          @change="onOperatorChange(filter)"
+        >
+          <option
+            v-for="operator in getOperatorsForField(filter.field)"
+            :key="operator.id"
+            :value="operator.id"
+          >
+            {{ operator.label }}
+          </option>
+        </select>
+
+        <select
+          v-if="operatorNeedsSelect(filter)"
+          v-model="filter.value"
+          class="reading-books-filter__select reading-books-filter__select--value"
+          @change="onValueChange"
+        >
+          <option v-for="collection in collections" :key="collection.id ?? collection.name" :value="collection.name">
+            {{ collection.name }}
+          </option>
+        </select>
+
+        <div v-else-if="operatorNeedsRange(filter)" class="reading-books-filter__range">
+          <input
+            v-model="filter.value"
+            type="number"
+            :min="rangeMinForField(filter.field)"
+            class="reading-books-filter__input reading-books-filter__input--range"
+            placeholder="Min"
+            @input="onValueChange"
+          />
+          <span class="reading-books-filter__range-sep">et</span>
+          <input
+            v-model="filter.valueTo"
+            type="number"
+            :min="rangeMinForField(filter.field)"
+            class="reading-books-filter__input reading-books-filter__input--range"
+            placeholder="Max"
+            @input="onValueChange"
+          />
         </div>
 
-        <ul v-else class="reading-books-filter__rules">
-          <li v-for="filter in filters" :key="filter.id" class="reading-books-filter__rule">
-            <select
-              v-model="filter.field"
-              class="reading-books-filter__select reading-books-filter__select--field"
-              @change="onFieldChange(filter)"
-            >
-              <option v-for="field in fieldOptions" :key="field.id" :value="field.id">
-                {{ field.label }}
-              </option>
-            </select>
+        <input
+          v-else-if="operatorNeedsNumber(filter)"
+          v-model="filter.value"
+          type="number"
+          min="1"
+          class="reading-books-filter__input reading-books-filter__select--value"
+          placeholder="Tome…"
+          @input="onValueChange"
+        />
 
-            <select
-              v-model="filter.operator"
-              class="reading-books-filter__select reading-books-filter__select--operator"
-              @change="onOperatorChange(filter)"
-            >
-              <option
-                v-for="operator in getOperatorsForField(filter.field)"
-                :key="operator.id"
-                :value="operator.id"
-              >
-                {{ operator.label }}
-              </option>
-            </select>
+        <input
+          v-else-if="operatorNeedsText(filter)"
+          v-model="filter.value"
+          type="text"
+          class="reading-books-filter__input reading-books-filter__select--value"
+          :placeholder="filter.field === 'keyword' ? 'Mot-clé…' : 'Texte…'"
+          @input="onValueChange"
+        />
 
-            <select
-              v-if="operatorNeedsSelect(filter)"
-              v-model="filter.value"
-              class="reading-books-filter__select reading-books-filter__select--value"
-              @change="onValueChange"
-            >
-              <option v-for="collection in collections" :key="collection.id ?? collection.name" :value="collection.name">
-                {{ collection.name }}
-              </option>
-            </select>
+        <span v-else class="reading-books-filter__value-placeholder" aria-hidden="true" />
 
-            <div v-else-if="operatorNeedsRange(filter)" class="reading-books-filter__range">
-              <input
-                v-model="filter.value"
-                type="number"
-                :min="rangeMinForField(filter.field)"
-                class="reading-books-filter__input reading-books-filter__input--range"
-                placeholder="Min"
-                @input="onValueChange"
-              />
-              <span class="reading-books-filter__range-sep">et</span>
-              <input
-                v-model="filter.valueTo"
-                type="number"
-                :min="rangeMinForField(filter.field)"
-                class="reading-books-filter__input reading-books-filter__input--range"
-                placeholder="Max"
-                @input="onValueChange"
-              />
-            </div>
+        <button
+          type="button"
+          class="reading-books-filter__remove"
+          :aria-label="`Retirer le filtre ${formatReadingFilterLabel(filter)}`"
+          @click="removeFilter(filter.id)"
+        >
+          ✕
+        </button>
+      </li>
+    </ul>
 
-            <input
-              v-else-if="operatorNeedsNumber(filter)"
-              v-model="filter.value"
-              type="number"
-              min="1"
-              class="reading-books-filter__input reading-books-filter__select--value"
-              placeholder="Tome…"
-              @input="onValueChange"
-            />
+    <div class="reading-books-filter__footer">
+      <div class="reading-books-filter__add-wrap">
+        <button type="button" class="reading-books-filter__add-btn" @click="toggleAddFieldMenu">
+          + Ajouter un filtre
+        </button>
 
-            <input
-              v-else-if="operatorNeedsText(filter)"
-              v-model="filter.value"
-              type="text"
-              class="reading-books-filter__input reading-books-filter__select--value"
-              :placeholder="filter.field === 'keyword' ? 'Mot-clé…' : 'Texte…'"
-              @input="onValueChange"
-            />
-
-            <span v-else class="reading-books-filter__value-placeholder" aria-hidden="true" />
-
-            <button
-              type="button"
-              class="reading-books-filter__remove"
-              :aria-label="`Retirer le filtre ${formatReadingFilterLabel(filter)}`"
-              @click="removeFilter(filter.id)"
-            >
-              ✕
-            </button>
-          </li>
-        </ul>
-
-        <div class="reading-books-filter__footer">
-          <div class="reading-books-filter__add-wrap">
-            <button type="button" class="reading-books-filter__add-btn" @click="toggleAddFieldMenu">
-              + Ajouter un filtre
-            </button>
-
-            <div v-if="addFieldMenuOpen" class="reading-books-filter__add-menu">
-              <button
-                v-for="field in fieldOptions"
-                :key="field.id"
-                type="button"
-                class="reading-books-filter__add-option"
-                @click="addFilter(field.id)"
-              >
-                {{ field.label }}
-              </button>
-            </div>
-          </div>
+        <div v-if="addFieldMenuOpen" class="reading-books-filter__add-menu">
+          <button
+            v-for="field in fieldOptions"
+            :key="field.id"
+            type="button"
+            class="reading-books-filter__add-option"
+            @click="addFilter(field.id)"
+          >
+            {{ field.label }}
+          </button>
         </div>
       </div>
-    </template>
-  </Teleport>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.reading-books-filter__overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1250;
-}
-
-.reading-books-filter__popover {
-  position: fixed;
-  z-index: 1251;
-  top: max(5.5rem, 18vh);
-  right: max(1rem, calc((100vw - 72rem) / 2 + 1rem));
-  width: min(94vw, 36rem);
+.reading-books-filter {
+  width: 100%;
+  margin: 0.65rem 0 0.85rem;
   overflow: visible;
   border-radius: 12px;
-  border: 1px solid rgba(213, 181, 234, 0.28);
-  background: white;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.16);
-  padding: 0.55rem 0.65rem 0.6rem;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 24px rgba(173, 129, 190, 0.12);
+  padding: 0.65rem 0.75rem 0.7rem;
   font-size: 0.75rem;
+  box-sizing: border-box;
 }
 
 .reading-books-filter__header {
@@ -418,13 +400,6 @@ function toggleAddFieldMenu() {
 }
 
 @media (max-width: 720px) {
-  .reading-books-filter__popover {
-    left: 50%;
-    right: auto;
-    transform: translateX(-50%);
-    width: min(92vw, 34rem);
-  }
-
   .reading-books-filter__rule {
     grid-template-columns: 1fr 1fr auto;
     grid-template-areas:
@@ -455,10 +430,10 @@ function toggleAddFieldMenu() {
 }
 
 @media (prefers-color-scheme: dark) {
-  .reading-books-filter__popover {
-    background: #2a2438;
+  .reading-books-filter {
+    background: rgba(35, 30, 48, 0.92);
     border-color: rgba(213, 181, 234, 0.28);
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   }
 
   .reading-books-filter__title {

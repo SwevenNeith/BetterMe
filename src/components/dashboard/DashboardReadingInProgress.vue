@@ -22,7 +22,7 @@ const props = defineProps({
   },
 })
 
-const { pageTitle: readingPageTitle } = usePageDisplayLabel(APP_PAGE_IDS.LECTURE)
+const { pageTitle: readingPageTitle } = usePageDisplayLabel(APP_PAGE_IDS.BIBLIOTHEQUE)
 
 const pageVisibility = ref(mergePageVisibility(null))
 const isLoading = ref(false)
@@ -31,7 +31,7 @@ const books = ref([])
 const currentPage = ref(0)
 
 const isReadingPageVisible = computed(() =>
-  isPageVisible(APP_PAGE_IDS.LECTURE, pageVisibility.value),
+  isPageVisible(APP_PAGE_IDS.BIBLIOTHEQUE, pageVisibility.value),
 )
 
 const inProgressBooks = computed(() =>
@@ -124,7 +124,7 @@ onUnmounted(() => {
   >
     <div class="dashboard-reading__header">
       <h2 id="dashboard-reading-title" class="dashboard-reading__title">En cours</h2>
-      <RouterLink :to="{ name: 'lecture' }" class="dashboard-reading__link">
+      <RouterLink :to="{ name: 'bibliotheque' }" class="dashboard-reading__link">
         {{ readingPageTitle }}
       </RouterLink>
     </div>

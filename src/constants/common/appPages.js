@@ -5,7 +5,9 @@ export const APP_PAGE_IDS = {
   TODO: 'todo',
   HABIT: 'habit-tracker',
   PROJETS: 'projets',
+  /** @deprecated Remplacé par BIBLIOTHEQUE — conservé pour migrer visibilité / sidebar. */
   LECTURE: 'lecture',
+  BIBLIOTHEQUE: 'bibliotheque',
   TELEVISION: 'television',
   RESSOURCES: 'ressources',
   JOURNAL: 'journal',
@@ -24,7 +26,7 @@ export const APP_MAIN_PAGES = [
   { id: APP_PAGE_IDS.TODO, defaultLabel: 'TODO' },
   { id: APP_PAGE_IDS.HABIT, defaultLabel: 'Habit Tracker' },
   { id: APP_PAGE_IDS.PROJETS, defaultLabel: 'Projets' },
-  { id: APP_PAGE_IDS.LECTURE, defaultLabel: 'Lecture' },
+  { id: APP_PAGE_IDS.BIBLIOTHEQUE, defaultLabel: 'Bibliothèque' },
   { id: APP_PAGE_IDS.TELEVISION, defaultLabel: 'Television' },
   { id: APP_PAGE_IDS.RESSOURCES, defaultLabel: 'Ressources' },
   { id: APP_PAGE_IDS.JOURNAL, defaultLabel: 'Journaling' },

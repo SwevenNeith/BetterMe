@@ -3,7 +3,15 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import {
+  readPersistedPageState,
+  writePersistedPageState,
+} from '../composables/usePersistedPageState.js'
 import { searchTmdbAllPages, tmdbPosterUrl } from '../services/television/tmdb.js'
+
+defineOptions({ name: 'TelevisionView' })
+
+const TV_SEARCH_STORAGE_KEY = 'betterme-television-search-v1'
 
 /** Nombre de lignes max dans la grille (comme Lecture). */
 const GRID_ROWS = 5
@@ -22,12 +30,17 @@ const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.TELEVISION, undefined, {
 
 const router = useRouter()
 
-const searchQuery = ref('')
+const persistedTv = readPersistedPageState(TV_SEARCH_STORAGE_KEY, {
+  searchQuery: '',
+  currentPage: 1,
+})
+
+const searchQuery = ref(String(persistedTv.searchQuery ?? ''))
 const isLoading = ref(false)
 const loadError = ref('')
 const searchPayload = ref(null)
 const progressLabel = ref('')
-const currentPage = ref(1)
+const currentPage = ref(Math.max(1, Number(persistedTv.currentPage) || 1))
 const gridColumnCount = ref(4)
 const televisionGridRef = ref(null)
 const televisionLayoutRef = ref(null)
@@ -128,7 +141,7 @@ function goToPage(page) {
   televisionGridRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-async function runSearch(rawQuery) {
+async function runSearch(rawQuery, options = {}) {
   const q = String(rawQuery ?? '').trim()
   const requestId = ++searchRequestId
 
@@ -143,7 +156,7 @@ async function runSearch(rawQuery) {
 
   isLoading.value = true
   loadError.value = ''
-  currentPage.value = 1
+  if (!options.keepPage) currentPage.value = 1
   progressLabel.value = 'Chargement…'
 
   try {
@@ -200,6 +213,13 @@ watch(searchQuery, (value) => {
   scheduleSearch(value)
 })
 
+watch([searchQuery, currentPage], () => {
+  writePersistedPageState(TV_SEARCH_STORAGE_KEY, {
+    searchQuery: searchQuery.value,
+    currentPage: currentPage.value,
+  })
+})
+
 watch(totalPages, (pages) => {
   if (currentPage.value > pages) currentPage.value = pages
 })
@@ -213,6 +233,10 @@ watch(itemsPerPage, () => {
 onMounted(async () => {
   await nextTick()
   bindGridResizeObserver()
+  const q = String(searchQuery.value ?? '').trim()
+  if (q.length >= MIN_SEARCH_LENGTH) {
+    await runSearch(q, { keepPage: true })
+  }
 })
 
 onUnmounted(() => {

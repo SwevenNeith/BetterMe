@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ReadingBookFiche from '../components/lecture/ReadingBookFiche.vue'
 import ReadingBooksFilterPopover from '../components/lecture/ReadingBooksFilterPopover.vue'
@@ -16,11 +16,22 @@ import {
   READING_COLLECTION_EN_COURS,
 } from '../services/lecture/readingCollections.js'
 import { applyReadingBookFilters, formatReadingFilterLabel } from '../utils/lecture/readingBookFilters.js'
+import BibliothequeCatalogPanel from '../components/bibliotheque/BibliothequeCatalogPanel.vue'
+import {
+  readPersistedPageState,
+  writePersistedPageState,
+} from '../composables/usePersistedPageState.js'
+
+defineOptions({ name: 'LectureView' })
+
+const MINE_SEARCH_STORAGE_KEY = 'betterme-bibliotheque-mine-v1'
 
 /** Nombre de lignes toujours remplies dans la grille bibliothèque. */
 const GRID_ROWS = 5
 /** Largeur mini d’une couverture — le nombre de colonnes s’adapte à l’écran. */
 const MIN_BOOK_COL_PX = 96
+/** Cap historique (grille Lecture à 8 colonnes max sur grand écran). */
+const MAX_BOOK_COLS = 8
 
 function isEnCoursBook(book) {
   return (
@@ -36,13 +47,25 @@ function sortBooksByTitle(a, b) {
 function computeGridColumnCount(widthPx, gapPx = 7.2) {
   const width = Math.max(0, Number(widthPx) || 0)
   const gap = Number.isFinite(gapPx) ? gapPx : 7.2
-  return Math.max(2, Math.floor((width + gap) / (MIN_BOOK_COL_PX + gap)))
+  return Math.min(MAX_BOOK_COLS, Math.max(2, Math.floor((width + gap) / (MIN_BOOK_COL_PX + gap))))
 }
 
-const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.LECTURE, undefined, { setDocumentTitle: true })
+const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.BIBLIOTHEQUE, undefined, {
+  setDocumentTitle: true,
+})
 
 const route = useRoute()
 const router = useRouter()
+
+/** 'mine' = bibliothèque perso (données Lecture) ; 'catalog' = Open Library */
+const libraryMode = ref(route.query.mode === 'catalogue' ? 'catalog' : 'mine')
+
+const persistedMine = readPersistedPageState(MINE_SEARCH_STORAGE_KEY, {
+  searchQuery: '',
+  bookFilters: [],
+  currentPage: 1,
+  filterOpen: false,
+})
 
 const userId = ref(null)
 const isLoading = ref(true)
@@ -54,10 +77,10 @@ const pickModalOpen = ref(false)
 const bookFormOpen = ref(false)
 const coverFileInputRef = ref(null)
 const coverPreviewUrl = ref('')
-const searchQuery = ref('')
-const bookFilters = ref([])
-const filterOpen = ref(false)
-const currentPage = ref(1)
+const searchQuery = ref(String(persistedMine.searchQuery ?? ''))
+const bookFilters = ref(Array.isArray(persistedMine.bookFilters) ? persistedMine.bookFilters : [])
+const filterOpen = ref(Boolean(persistedMine.filterOpen))
+const currentPage = ref(Math.max(1, Number(persistedMine.currentPage) || 1))
 const readingGridRef = ref(null)
 const readingLayoutRef = ref(null)
 const gridColumnCount = ref(4)
@@ -211,8 +234,12 @@ function goToPage(page) {
 }
 
 const booksSubtitle = computed(() => {
+  if (libraryMode.value === 'catalog') {
+    return 'Catalogue Open Library — ajoute ou retrouve tes livres sans perdre tes données Lecture.'
+  }
+
   const total = books.value.length
-  if (total === 0) return 'Ta bibliothèque personnelle.'
+  if (total === 0) return 'Ta bibliothèque personnelle (WishList, En cours, Terminé…).'
 
   const displayed = displayedBooks.value.length
   if (hasActiveFilters.value && displayed !== total) {
@@ -221,6 +248,15 @@ const booksSubtitle = computed(() => {
 
   return `${total} livre${total > 1 ? 's' : ''} enregistré${total > 1 ? 's' : ''}.`
 })
+
+function setLibraryMode(mode) {
+  libraryMode.value = mode === 'catalog' ? 'catalog' : 'mine'
+  if (libraryMode.value === 'mine') closeBookForm()
+  const nextQuery = { ...route.query }
+  if (libraryMode.value === 'catalog') nextQuery.mode = 'catalogue'
+  else delete nextQuery.mode
+  router.replace({ query: nextQuery })
+}
 
 const addCoverPreview = computed(() => {
   if (bookForm.imageMode === 'upload' && coverPreviewUrl.value) return coverPreviewUrl.value
@@ -243,12 +279,23 @@ function resetCoverSelection() {
   if (coverFileInputRef.value) coverFileInputRef.value.value = ''
 }
 
-async function openBookForm() {
-  Object.assign(bookForm, emptyBookForm())
+async function openBookForm(prefill = {}) {
+  Object.assign(bookForm, emptyBookForm(), {
+    title: String(prefill.title ?? '').trim(),
+    author: String(prefill.author ?? '').trim(),
+  })
   resetCoverSelection()
   bookFormOpen.value = true
   await nextTick()
-  restoreBookDraft()
+  // Ne restaure un brouillon que si le formulaire n’est pas prérempli depuis le catalogue
+  if (!String(prefill.title ?? '').trim()) restoreBookDraft()
+}
+
+function openBookFormFromCatalog(payload = {}) {
+  openBookForm({
+    title: payload.query || payload.title || '',
+    author: payload.author || '',
+  })
 }
 
 function closeBookForm() {
@@ -386,7 +433,9 @@ function openBookFromQuery() {
   if (book) openBookPage(book)
 
   if (route.query.book) {
-    router.replace({ name: 'lecture' })
+    const nextQuery = { ...route.query }
+    delete nextQuery.book
+    router.replace({ query: nextQuery })
   }
 }
 
@@ -399,11 +448,34 @@ onMounted(async () => {
   bindGridResizeObserver()
 })
 
+/** Évite un double fetch au premier mount (userId watch charge déjà). */
+const skipNextActivatedRefresh = ref(true)
+
+onActivated(async () => {
+  await nextTick()
+  bindGridResizeObserver()
+
+  if (skipNextActivatedRefresh.value) {
+    skipNextActivatedRefresh.value = false
+    return
+  }
+
+  // Au retour d’une fiche : rafraîchir pour que les filtres (ex. non liés OL) restent justes
+  if (userId.value) await loadBooks()
+})
+
 onUnmounted(() => {
   revokeCoverPreview()
   gridResizeObserver?.disconnect()
   gridResizeObserver = null
 })
+
+watch(
+  () => route.query.mode,
+  (mode) => {
+    libraryMode.value = mode === 'catalogue' ? 'catalog' : 'mine'
+  },
+)
 
 watch(userId, (id) => {
   if (id) loadBooks()
@@ -417,6 +489,19 @@ watch(
 watch([searchQuery, bookFilters], () => {
   currentPage.value = 1
 }, { deep: true })
+
+watch(
+  [searchQuery, bookFilters, currentPage, filterOpen],
+  () => {
+    writePersistedPageState(MINE_SEARCH_STORAGE_KEY, {
+      searchQuery: searchQuery.value,
+      bookFilters: bookFilters.value,
+      currentPage: currentPage.value,
+      filterOpen: filterOpen.value,
+    })
+  },
+  { deep: true },
+)
 
 watch(totalPages, (pages) => {
   if (currentPage.value > pages) currentPage.value = pages
@@ -440,57 +525,37 @@ watch(booksPerPage, () => {
     <header class="reading-header">
       <h1 class="reading-title">{{ pageTitle }}</h1>
       <p class="reading-subtitle">{{ booksSubtitle }}</p>
+
+      <div class="reading-mode-tabs" role="tablist" aria-label="Mode bibliothèque">
+        <button
+          type="button"
+          role="tab"
+          class="reading-mode-tab"
+          :class="{ 'reading-mode-tab--active': libraryMode === 'mine' }"
+          :aria-selected="libraryMode === 'mine'"
+          @click="setLibraryMode('mine')"
+        >
+          Ma bibliothèque
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="reading-mode-tab"
+          :class="{ 'reading-mode-tab--active': libraryMode === 'catalog' }"
+          :aria-selected="libraryMode === 'catalog'"
+          @click="setLibraryMode('catalog')"
+        >
+          Catalogue
+        </button>
+      </div>
     </header>
 
+    <template v-if="libraryMode === 'mine'">
     <div class="reading-add">
       <button type="button" class="reading-pick-btn" @click="openPickModal">
         Choisir ma lecture
       </button>
-      <button type="button" class="reading-add-btn" @click="openBookForm">
-        Ajouter un livre
-      </button>
     </div>
-
-    <form v-if="bookFormOpen" @submit.prevent="submitBookForm">
-      <ReadingBookFiche
-        mode="create"
-        :form="bookForm"
-        :collections="collections"
-        :cover-preview="addCoverPreview"
-        show-cover-controls
-        :cover-file-input-ref="coverFileInputRef"
-        :disabled="isSaving"
-        inline
-        @switch-image-mode="switchImageMode"
-        @cover-file-change="onCoverFileChange"
-        @trigger-cover-picker="triggerCoverFilePicker"
-        @image-url-input="onImageUrlInput"
-      >
-        <template #actions>
-          <button
-            type="button"
-            class="reading-fiche-close"
-            title="Fermer"
-            aria-label="Fermer le formulaire"
-            :disabled="isSaving"
-            @click="closeBookForm"
-          >
-            ✕
-          </button>
-        </template>
-
-        <template #footer>
-          <div class="reading-fiche-form-actions">
-            <button type="submit" class="reading-fiche-add-btn" :disabled="isSaving">
-              {{ isSaving ? 'Ajout…' : 'Ajouter' }}
-            </button>
-            <button type="button" class="reading-fiche-cancel-btn" :disabled="isSaving" @click="closeBookForm">
-              Annuler
-            </button>
-          </div>
-        </template>
-      </ReadingBookFiche>
-    </form>
 
     <section class="reading-card" :style="readingGridStyle">
       <div ref="readingLayoutRef" class="reading-layout-measure" aria-hidden="true"></div>
@@ -515,7 +580,7 @@ watch(booksPerPage, () => {
               type="button"
               class="reading-filter-btn"
               :class="{ 'reading-filter-btn--active': bookFilters.length > 0 }"
-              @click="filterOpen = true"
+              @click="filterOpen = !filterOpen"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path fill="currentColor" d="M3 4h18v2l-7 8v5l-4 1v-6L3 6V4z" />
@@ -525,6 +590,13 @@ watch(booksPerPage, () => {
             </button>
           </div>
         </div>
+
+        <ReadingBooksFilterPopover
+          v-model:filters="bookFilters"
+          :open="filterOpen"
+          :collections="collectionFilterOptions"
+          @close="filterOpen = false"
+        />
 
         <div v-if="bookFilters.length > 0" class="reading-active-filters">
           <button
@@ -647,13 +719,56 @@ watch(booksPerPage, () => {
         </template>
       </template>
     </section>
+    </template>
 
-    <ReadingBooksFilterPopover
-      v-model:filters="bookFilters"
-      :open="filterOpen"
-      :collections="collectionFilterOptions"
-      @close="filterOpen = false"
-    />
+    <template v-else>
+      <BibliothequeCatalogPanel
+        :lecture-books="books"
+        @linked-change="loadBooks"
+        @request-add-book="openBookFormFromCatalog"
+      />
+
+      <form v-if="bookFormOpen" class="reading-catalog-add-form" @submit.prevent="submitBookForm">
+        <ReadingBookFiche
+          mode="create"
+          :form="bookForm"
+          :collections="collections"
+          :cover-preview="addCoverPreview"
+          show-cover-controls
+          :cover-file-input-ref="coverFileInputRef"
+          :disabled="isSaving"
+          inline
+          @switch-image-mode="switchImageMode"
+          @cover-file-change="onCoverFileChange"
+          @trigger-cover-picker="triggerCoverFilePicker"
+          @image-url-input="onImageUrlInput"
+        >
+          <template #actions>
+            <button
+              type="button"
+              class="reading-fiche-close"
+              title="Fermer"
+              aria-label="Fermer le formulaire"
+              :disabled="isSaving"
+              @click="closeBookForm"
+            >
+              ✕
+            </button>
+          </template>
+
+          <template #footer>
+            <div class="reading-fiche-form-actions">
+              <button type="submit" class="reading-fiche-add-btn" :disabled="isSaving">
+                {{ isSaving ? 'Ajout…' : 'Ajouter' }}
+              </button>
+              <button type="button" class="reading-fiche-cancel-btn" :disabled="isSaving" @click="closeBookForm">
+                Annuler
+              </button>
+            </div>
+          </template>
+        </ReadingBookFiche>
+      </form>
+    </template>
 
     <ReadingPickModal
       :open="pickModalOpen"
@@ -692,6 +807,37 @@ watch(booksPerPage, () => {
   margin: 0.5rem 0 0;
   color: #6c757d;
   font-size: 1rem;
+}
+
+.reading-mode-tabs {
+  display: inline-flex;
+  gap: 0.35rem;
+  margin-top: 1rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: rgba(213, 181, 234, 0.22);
+  border: 1px solid rgba(173, 129, 190, 0.28);
+}
+
+.reading-mode-tab {
+  border: none;
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem;
+  background: transparent;
+  color: #6b4f7c;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.reading-mode-tab:hover {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.reading-mode-tab--active {
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  color: #fff;
 }
 
 .reading-card {
@@ -748,6 +894,10 @@ watch(booksPerPage, () => {
 .reading-add-btn:disabled {
   opacity: 0.7;
   cursor: wait;
+}
+
+.reading-catalog-add-form {
+  margin-top: 1rem;
 }
 
 .reading-error {

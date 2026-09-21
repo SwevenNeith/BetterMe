@@ -10,6 +10,7 @@ export const READING_FILTER_FIELDS = {
   series: { id: 'series', label: 'Série' },
   sagaVolume: { id: 'sagaVolume', label: 'Tome' },
   pages: { id: 'pages', label: 'Pages' },
+  openLibrary: { id: 'openLibrary', label: 'Open Library' },
 }
 
 const TEXT_OPERATORS = [
@@ -50,6 +51,10 @@ export const READING_FILTER_OPERATORS = {
     { id: 'between', label: 'entre', needsValue: 'range' },
     { id: 'is_empty', label: 'est vide', needsValue: false },
     { id: 'is_not_empty', label: "n'est pas vide", needsValue: false },
+  ],
+  openLibrary: [
+    { id: 'is_linked', label: 'est lié', needsValue: false },
+    { id: 'is_not_linked', label: "n'est pas lié", needsValue: false },
   ],
 }
 
@@ -321,6 +326,13 @@ export function bookMatchesReadingFilter(book, filter) {
       default:
         return true
     }
+  }
+
+  if (filter.field === 'openLibrary') {
+    const linked = Boolean(String(book.open_library_work_key ?? '').trim())
+    if (filter.operator === 'is_linked') return linked
+    if (filter.operator === 'is_not_linked') return !linked
+    return true
   }
 
   return true

@@ -57,12 +57,20 @@ function loadState() {
       ? parsed.panes
           .filter((p) => p && typeof p.id === 'string' && typeof p.path === 'string')
           .slice(0, WORKSPACE_MAX_PANES)
-          .map((p) => ({
-            id: p.id,
-            pageId: String(p.pageId ?? ''),
-            path: String(p.path),
-            label: String(p.label ?? 'Page'),
-          }))
+          .map((p) => {
+            let pageId = String(p.pageId ?? '')
+            let path = String(p.path)
+            let label = String(p.label ?? 'Page')
+
+            // Ancienne page Lecture → Bibliothèque (données / panneau inchangés)
+            if (pageId === 'lecture' || path === '/lecture' || path.startsWith('/lecture?')) {
+              pageId = 'bibliotheque'
+              path = path.replace(/^\/lecture/, '/bibliotheque')
+              if (label === 'Lecture') label = 'Bibliothèque'
+            }
+
+            return { id: p.id, pageId, path, label }
+          })
       : []
 
     let layoutId = typeof parsed.layoutId === 'string' ? parsed.layoutId : defaultLayoutIdForCount(panes.length)

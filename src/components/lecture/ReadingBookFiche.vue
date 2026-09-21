@@ -9,6 +9,7 @@ import ReadingHalfRating from './ReadingHalfRating.vue'
 import ReadingCollectionCombobox from './ReadingCollectionCombobox.vue'
 import ReadingSpoilSection from './ReadingSpoilSection.vue'
 import ReadingRereadingsSection from './ReadingRereadingsSection.vue'
+import ReadingOpenLibraryEditionsField from './ReadingOpenLibraryEditionsField.vue'
 import {
   formatExtraTagsInput,
   formatFrenchDate,
@@ -119,6 +120,7 @@ const emit = defineEmits([
   'start-rereading',
   'update-rereading',
   'cancel-rereading',
+  'select-edition',
 ])
 
 const fieldInputRef = ref(null)
@@ -306,6 +308,13 @@ function fieldClass(field) {
           {{ book?.author || '—' }}
         </button>
       </div>
+
+      <ReadingOpenLibraryEditionsField
+        v-if="mode === 'sheet' && book"
+        :book="book"
+        :disabled="disabled"
+        @select="(option) => emit('select-edition', option)"
+      />
 
       <!-- Collection + Série -->
       <div class="reading-fiche-row reading-fiche-row--collection">
@@ -620,13 +629,13 @@ function fieldClass(field) {
           </label>
         </div>
         <label class="reading-fiche-edit-field" style="margin-top: 0.65rem">
-          <span class="reading-fiche-label">Autres mots clés :</span>
+          <span class="reading-fiche-label">Autres mots clés / sujets :</span>
           <input
             v-model="form.extraTags"
             type="text"
             class="reading-fiche-input"
             maxlength="400"
-            placeholder="classique, dystopie"
+            placeholder="fantasy, dystopie…"
           />
         </label>
       </template>
@@ -712,7 +721,7 @@ function fieldClass(field) {
         </div>
 
         <div class="reading-fiche-field" style="margin-top: 0.65rem">
-          <span class="reading-fiche-label">Autres mots clés :</span>
+          <span class="reading-fiche-label">Autres mots clés / sujets :</span>
           <template v-if="isEditing('extraTags')">
             <input
               ref="fieldInputRef"

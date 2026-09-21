@@ -55,10 +55,10 @@ const projetsLink = {
   icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
 }
 
-const lectureLink = {
-  name: 'Lecture',
-  path: '/lecture',
-  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>`,
+const bibliothequeLink = {
+  name: 'Bibliothèque',
+  path: '/bibliotheque',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path></svg>`,
 }
 
 const televisionLink = {
@@ -76,7 +76,7 @@ const ressourcesLink = {
 const journalLink = {
   name: 'Journaling',
   path: '/journal',
-  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path><path d="M8 7h8"></path><path d="M8 11h8"></path><path d="M8 15h5"></path></svg>`,
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"></path><path d="M2 6h4"></path><path d="M2 10h4"></path><path d="M2 14h4"></path><path d="M2 18h4"></path><path d="m21.378 5.626-1.004-1.004a2.121 2.121 0 0 0-3 0L12 9.997v3h3l6.378-6.371a2.122 2.122 0 0 0 0-3z"></path></svg>`,
 }
 
 const notesLink = {
@@ -130,7 +130,14 @@ const settingsLink = {
 
 const isActive = (path) => {
   if (path === '/projets') return route.path === path || route.path.startsWith('/projets/')
-  if (path === '/lecture') return route.path === path || route.path.startsWith('/lecture/')
+  if (path === '/bibliotheque') {
+    return (
+      route.path === path ||
+      route.path.startsWith('/bibliotheque/') ||
+      route.path === '/lecture' ||
+      route.path.startsWith('/lecture/')
+    )
+  }
   if (path === '/television') return route.path === path || route.path.startsWith('/television/')
   if (path === '/ressources') return route.path === path || route.path.startsWith('/ressources/')
   if (path === '/journal') return route.path === path || route.path.startsWith('/journal/')
@@ -186,7 +193,7 @@ const defaultSidebarOrder = [
   SIDEBAR_ITEM_IDS.TODO,
   SIDEBAR_ITEM_IDS.HABIT,
   SIDEBAR_ITEM_IDS.PROJETS,
-  SIDEBAR_ITEM_IDS.LECTURE,
+  SIDEBAR_ITEM_IDS.BIBLIOTHEQUE,
   SIDEBAR_ITEM_IDS.TELEVISION,
   SIDEBAR_ITEM_IDS.RESSOURCES,
   SIDEBAR_ITEM_IDS.JOURNAL,
@@ -201,7 +208,7 @@ const sidebarItemsById = {
   [SIDEBAR_ITEM_IDS.TIMETABLE]: navLinksTop[1],
   [SIDEBAR_ITEM_IDS.TODO]: todoLink,
   [SIDEBAR_ITEM_IDS.PROJETS]: projetsLink,
-  [SIDEBAR_ITEM_IDS.LECTURE]: lectureLink,
+  [SIDEBAR_ITEM_IDS.BIBLIOTHEQUE]: bibliothequeLink,
   [SIDEBAR_ITEM_IDS.TELEVISION]: televisionLink,
   [SIDEBAR_ITEM_IDS.RESSOURCES]: ressourcesLink,
   [SIDEBAR_ITEM_IDS.JOURNAL]: journalLink,
@@ -332,11 +339,24 @@ function normalizeSidebarTree(raw) {
   const seen = new Set()
   const result = []
 
+  const remapLegacyId = (id) => (id === SIDEBAR_ITEM_IDS.LECTURE ? SIDEBAR_ITEM_IDS.BIBLIOTHEQUE : id)
+
   // Ancien format : ["dashboard", "todo", ...]
   const looksLegacy = safe.length > 0 && safe.every((item) => typeof item === 'string')
   const source = looksLegacy
-    ? safe.map((id) => ({ type: 'link', id }))
-    : safe
+    ? safe.map((id) => ({ type: 'link', id: remapLegacyId(id) }))
+    : safe.map((node) => {
+        if (isLinkNode(node)) return { ...node, id: remapLegacyId(node.id) }
+        if (isFolderNode(node)) {
+          return {
+            ...node,
+            children: (node.children || []).map((child) =>
+              isLinkNode(child) ? { ...child, id: remapLegacyId(child.id) } : child,
+            ),
+          }
+        }
+        return node
+      })
 
   for (const node of source) {
     if (isLinkNode(node) && knownLinks.has(node.id) && !seen.has(node.id)) {

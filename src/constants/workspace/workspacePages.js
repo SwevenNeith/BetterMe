@@ -30,10 +30,10 @@ export const WORKSPACE_PAGE_OPTIONS = [
     icon: 'projets',
   },
   {
-    id: APP_PAGE_IDS.LECTURE,
-    path: '/lecture',
-    defaultLabel: 'Lecture',
-    icon: 'lecture',
+    id: APP_PAGE_IDS.BIBLIOTHEQUE,
+    path: '/bibliotheque',
+    defaultLabel: 'Bibliothèque',
+    icon: 'bibliotheque',
   },
   {
     id: APP_PAGE_IDS.TELEVISION,

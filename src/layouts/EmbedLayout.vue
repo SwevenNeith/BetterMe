@@ -3,11 +3,16 @@
  * Layout minimal pour les iframes du Plan de Travail.
  * Pas de sidebar : chaque panneau est une app « pleine ».
  */
+import { RouterView } from 'vue-router'
 </script>
 
 <template>
   <div class="embed-layout">
-    <RouterView />
+    <RouterView v-slot="{ Component }">
+      <KeepAlive :include="['LectureView', 'TelevisionView']" :max="6">
+        <component :is="Component" />
+      </KeepAlive>
+    </RouterView>
   </div>
 </template>
 
