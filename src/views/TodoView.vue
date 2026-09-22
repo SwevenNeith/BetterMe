@@ -120,6 +120,15 @@ const planningCategories = ref([])
 const planningCategoriesLoading = ref(false)
 const planningForm = reactive(createDefaultPlanningForm())
 
+/** Writable pour v-model (reactive const ne peut pas être réassigné). */
+const planningFormModel = computed({
+  get: () => planningForm,
+  set: (next) => {
+    if (!next || typeof next !== 'object') return
+    Object.assign(planningForm, next)
+  },
+})
+
 const viewMode = ref(TODO_VIEW_MODE.DAY)
 const anchorDate = ref(getLocalTodayISO())
 const dayPickerRef = ref(null)
@@ -1570,7 +1579,7 @@ watch(userId, (id) => {
 
       <TimetablePlanningSubForm
         v-if="addToPlanning"
-        v-model="planningForm"
+        v-model="planningFormModel"
         :categories="planningCategories"
         :date-start="planningDateStart"
         :loading-categories="planningCategoriesLoading"

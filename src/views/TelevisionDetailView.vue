@@ -30,9 +30,14 @@ import {
   episodeKey,
   episodeProgressKeySet,
   listEpisodeProgress,
-  setEpisodeWatched,
-  setSeasonWatched,
+  setEpisodesWatchedBatch,
 } from '../services/television/televisionEpisodeProgress.js'
+import {
+  cascadeEpisodeTargets,
+  cascadeSeasonTargets,
+  normalizeRegularSeasons,
+  resolveNextEpisode,
+} from '../utils/television/nextEpisode.js'
 
 const REWATCH_UNDO_PREFIX = 'betterme-tv-rewatch-undo-'
 
@@ -78,6 +83,22 @@ const rewatchInProgress = computed(() => {
 const regularSeasons = computed(() => {
   const list = Array.isArray(media.value?.seasons) ? media.value.seasons : []
   return list.filter((s) => Number(s?.season_number) > 0)
+})
+
+/** Saison à ouvrir en priorité quand la série est en cours. */
+const preferredSeasonNumber = computed(() => {
+  if (libraryItem.value?.collection !== TELEVISION_COLLECTION_EN_COURS) return null
+  const seasons = media.value?.seasons ?? []
+  const rows = [...watchedKeys.value].map((key) => {
+    const [season_number, episode_number] = String(key).split(':').map(Number)
+    return { season_number, episode_number }
+  })
+  const next = resolveNextEpisode(rows, seasons)
+  if (next?.complete) {
+    const regs = normalizeRegularSeasons(seasons)
+    return regs.length ? regs[regs.length - 1].seasonNumber : null
+  }
+  return next?.seasonNumber ?? null
 })
 
 function returnToSearch() {
@@ -369,24 +390,34 @@ async function maybeMarkSeriesFinished() {
   }
 }
 
-async function onToggleEpisode({ seasonNumber, episodeNumber, watched }) {
+async function onToggleEpisode({ seasonNumber, episodeNumber, watched, seasonEpisodeNumbers }) {
   if (!userId.value || !libraryItem.value?.id || episodeBusy.value) return
   episodeBusy.value = true
   actionError.value = ''
   try {
-    await setEpisodeWatched(
-      supabase,
-      userId.value,
-      libraryItem.value.id,
+    const targets = cascadeEpisodeTargets(
+      media.value?.seasons ?? [],
       seasonNumber,
       episodeNumber,
       watched,
+      seasonEpisodeNumbers ?? [],
     )
-    const next = new Set(watchedKeys.value)
-    const key = episodeKey(seasonNumber, episodeNumber)
-    if (watched) next.add(key)
-    else next.delete(key)
-    watchedKeys.value = next
+    const current = watchedKeys.value
+    const toApply = targets.filter((item) => {
+      const key = episodeKey(item.seasonNumber, item.episodeNumber)
+      return watched ? !current.has(key) : current.has(key)
+    })
+
+    if (toApply.length) {
+      const rows = await setEpisodesWatchedBatch(
+        supabase,
+        userId.value,
+        libraryItem.value.id,
+        toApply,
+        watched,
+      )
+      watchedKeys.value = episodeProgressKeySet(rows)
+    }
 
     if (watched) {
       await maybePromoteOnEpisodeWatch()
@@ -405,15 +436,28 @@ async function onToggleSeason({ seasonNumber, episodeNumbers, watched }) {
   episodeBusy.value = true
   actionError.value = ''
   try {
-    const rows = await setSeasonWatched(
-      supabase,
-      userId.value,
-      libraryItem.value.id,
+    const targets = cascadeSeasonTargets(
+      media.value?.seasons ?? [],
       seasonNumber,
       episodeNumbers,
       watched,
     )
-    watchedKeys.value = episodeProgressKeySet(rows)
+    const current = watchedKeys.value
+    const toApply = targets.filter((item) => {
+      const key = episodeKey(item.seasonNumber, item.episodeNumber)
+      return watched ? !current.has(key) : current.has(key)
+    })
+
+    if (toApply.length) {
+      const rows = await setEpisodesWatchedBatch(
+        supabase,
+        userId.value,
+        libraryItem.value.id,
+        toApply,
+        watched,
+      )
+      watchedKeys.value = episodeProgressKeySet(rows)
+    }
 
     if (watched) {
       await maybePromoteOnEpisodeWatch()
@@ -568,6 +612,7 @@ watch(userId, async (id) => {
             :tmdb-id="mediaId"
             :seasons="media.seasons || []"
             :watched-keys="watchedKeys"
+            :preferred-season-number="preferredSeasonNumber"
             :disabled="isSaving"
             :busy="episodeBusy"
             @toggle-episode="onToggleEpisode"

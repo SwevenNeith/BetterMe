@@ -285,26 +285,46 @@ function upgradeLegacyDefaultFirstPage(groups) {
 
 /**
  * Ancien défaut : lectures en cours sur sa propre page → fusion avec l'emploi du temps.
+ * Place aussi la télévision juste après les lectures (même page EDT).
  * @param {string[][]} groups
  * @returns {string[][]}
  */
 function upgradeTimetableReadingPage(groups) {
   const timetableId = DASHBOARD_WIDGET_IDS.TIMETABLE
   const readingId = DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS
+  const televisionId = DASHBOARD_WIDGET_IDS.TELEVISION_IN_PROGRESS
+
+  const next = groups.map((group) => [...group])
 
   let timetableGroupIndex = -1
   let readingAloneGroupIndex = -1
-
-  groups.forEach((group, index) => {
+  next.forEach((group, index) => {
     if (group.length === 1 && group[0] === timetableId) timetableGroupIndex = index
     if (group.length === 1 && group[0] === readingId) readingAloneGroupIndex = index
   })
 
-  if (timetableGroupIndex < 0 || readingAloneGroupIndex < 0) return groups
+  if (timetableGroupIndex >= 0 && readingAloneGroupIndex >= 0) {
+    next[timetableGroupIndex] = [timetableId, readingId]
+    next.splice(readingAloneGroupIndex, 1)
+  }
 
-  const next = groups.map((group) => [...group])
-  next[timetableGroupIndex] = [timetableId, readingId]
-  next.splice(readingAloneGroupIndex, 1)
+  const televisionAloneIndex = next.findIndex(
+    (group) => group.length === 1 && group[0] === televisionId,
+  )
+  const readingGroupIndex = next.findIndex(
+    (group) => group.includes(readingId) && !group.includes(televisionId),
+  )
+
+  if (televisionAloneIndex >= 0 && readingGroupIndex >= 0) {
+    const readingPos = next[readingGroupIndex].indexOf(readingId)
+    next[readingGroupIndex] = [
+      ...next[readingGroupIndex].slice(0, readingPos + 1),
+      televisionId,
+      ...next[readingGroupIndex].slice(readingPos + 1),
+    ]
+    next.splice(televisionAloneIndex, 1)
+  }
+
   return next
 }
 

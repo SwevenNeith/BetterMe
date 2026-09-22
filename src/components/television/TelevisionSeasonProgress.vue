@@ -17,6 +17,11 @@ const props = defineProps({
     type: [Set, Array],
     default: () => new Set(),
   },
+  /** Saison à afficher en priorité (ex. saison en cours). */
+  preferredSeasonNumber: {
+    type: Number,
+    default: null,
+  },
   disabled: {
     type: Boolean,
     default: false,
@@ -33,6 +38,7 @@ const selectedSeason = ref(null)
 const seasonDetail = ref(null)
 const isLoadingSeason = ref(false)
 const seasonError = ref('')
+const userPickedSeason = ref(false)
 let seasonRequestId = 0
 
 const seasonOptions = computed(() => {
@@ -52,7 +58,35 @@ const watchedSet = computed(() => {
   return new Set(props.watchedKeys ?? [])
 })
 
-const episodes = computed(() => seasonDetail.value?.episodes ?? [])
+const episodes = computed(() => {
+  const loaded = seasonDetail.value?.episodes ?? []
+  if (!detailMatchesSeason(selectedSeason.value)) return []
+
+  const option = seasonOptions.value.find((s) => s.seasonNumber === selectedSeason.value)
+  const expected = Number(option?.episodeCount) || 0
+  if (expected <= 0 || loaded.length >= expected) return loaded
+
+  const byNumber = new Map(loaded.map((ep) => [ep.episodeNumber, ep]))
+  const padded = []
+  for (let n = 1; n <= expected; n += 1) {
+    padded.push(
+      byNumber.get(n) || {
+        id: null,
+        episodeNumber: n,
+        name: `Épisode ${n}`,
+        overview: '',
+        airDate: null,
+        runtime: null,
+        stillPath: null,
+      },
+    )
+  }
+  // Conserver d’éventuels épisodes hors plage 1..expected
+  for (const ep of loaded) {
+    if (ep.episodeNumber > expected) padded.push(ep)
+  }
+  return padded
+})
 
 const seasonEpisodeNumbers = computed(() =>
   episodes.value.map((ep) => ep.episodeNumber).filter((n) => n > 0),
@@ -92,6 +126,19 @@ function formatAirDate(value) {
   }).format(date)
 }
 
+function resolvePreferredSeason(options) {
+  if (!options.length) return null
+  const preferred = Number(props.preferredSeasonNumber)
+  if (Number.isFinite(preferred) && options.some((s) => s.seasonNumber === preferred)) {
+    return preferred
+  }
+  const firstRegular =
+    options.find((s) => s.seasonNumber === 1) ||
+    options.find((s) => s.seasonNumber > 0) ||
+    options[0]
+  return firstRegular.seasonNumber
+}
+
 async function loadSeason(seasonNumber) {
   const season = Number(seasonNumber)
   if (!Number.isFinite(season) || season < 0) return
@@ -104,6 +151,11 @@ async function loadSeason(seasonNumber) {
   try {
     const detail = await getTmdbSeason(props.tmdbId, season, 'fr-FR')
     if (requestId !== seasonRequestId) return
+    // Sécurité : ignorer une réponse qui ne correspond pas à la saison demandée
+    if (Number(detail?.seasonNumber) !== season) {
+      seasonError.value = 'Réponse saison incohérente.'
+      return
+    }
     seasonDetail.value = detail
   } catch (err) {
     if (requestId !== seasonRequestId) return
@@ -114,25 +166,52 @@ async function loadSeason(seasonNumber) {
   }
 }
 
-function onSeasonChange() {
-  if (selectedSeason.value == null || selectedSeason.value === '') {
+function detailMatchesSeason(seasonNumber) {
+  return (
+    seasonDetail.value != null &&
+    Number(seasonDetail.value.seasonNumber) === Number(seasonNumber)
+  )
+}
+
+function selectSeason(seasonNumber, { userInitiated = false } = {}) {
+  if (userInitiated) userPickedSeason.value = true
+  if (seasonNumber == null || seasonNumber === '') {
+    selectedSeason.value = null
     seasonDetail.value = null
     return
   }
-  loadSeason(selectedSeason.value)
+
+  const season = Number(seasonNumber)
+  if (!Number.isFinite(season) || season < 0) return
+
+  // Ne pas court-circuiter si le détail affiché est celui d’une autre saison
+  // (v-model du <select> met à jour selectedSeason avant @change).
+  if (selectedSeason.value === season && detailMatchesSeason(season)) {
+    return
+  }
+
+  selectedSeason.value = season
+  loadSeason(season)
+}
+
+function onSeasonChange() {
+  selectSeason(selectedSeason.value, { userInitiated: true })
 }
 
 function onToggleEpisode(episodeNumber, event) {
   if (props.disabled || props.busy || selectedSeason.value == null) return
+  if (!detailMatchesSeason(selectedSeason.value)) return
   emit('toggle-episode', {
     seasonNumber: selectedSeason.value,
     episodeNumber,
     watched: Boolean(event?.target?.checked),
+    seasonEpisodeNumbers: seasonEpisodeNumbers.value,
   })
 }
 
 function onToggleSeason(event) {
   if (props.disabled || props.busy || selectedSeason.value == null) return
+  if (!detailMatchesSeason(selectedSeason.value)) return
   emit('toggle-season', {
     seasonNumber: selectedSeason.value,
     episodeNumbers: seasonEpisodeNumbers.value,
@@ -141,20 +220,26 @@ function onToggleSeason(event) {
 }
 
 watch(
-  seasonOptions,
-  (options) => {
+  [seasonOptions, () => props.preferredSeasonNumber],
+  ([options]) => {
     if (!options.length) {
       selectedSeason.value = null
+      seasonDetail.value = null
       return
     }
-    const preferred =
-      options.find((s) => s.seasonNumber === 1) ||
-      options.find((s) => s.seasonNumber > 0) ||
-      options[0]
-    if (selectedSeason.value == null) {
-      selectedSeason.value = preferred.seasonNumber
-      loadSeason(preferred.seasonNumber)
+
+    const stillValid = options.some((s) => s.seasonNumber === selectedSeason.value)
+    if (userPickedSeason.value && stillValid) {
+      if (!detailMatchesSeason(selectedSeason.value) && !isLoadingSeason.value) {
+        loadSeason(selectedSeason.value)
+      }
+      return
     }
+
+    const next = resolvePreferredSeason(options)
+    if (next == null) return
+    if (selectedSeason.value === next && detailMatchesSeason(next)) return
+    selectSeason(next)
   },
   { immediate: true },
 )
@@ -162,6 +247,8 @@ watch(
 watch(
   () => props.tmdbId,
   () => {
+    userPickedSeason.value = false
+    seasonDetail.value = null
     if (selectedSeason.value != null) loadSeason(selectedSeason.value)
   },
 )
@@ -171,7 +258,9 @@ watch(
   <section class="tv-season-progress">
     <header class="tv-season-progress__header">
       <h3 class="tv-season-progress__title">Suivi des épisodes</h3>
-      <p class="tv-season-progress__hint">Coche les épisodes (ou toute une saison) que tu as vus.</p>
+      <p class="tv-season-progress__hint">
+        Cocher un épisode coche aussi tous les précédents ; décocher décoche aussi les suivants.
+      </p>
     </header>
 
     <label v-if="seasonOptions.length" class="tv-season-progress__select-wrap">
@@ -240,6 +329,8 @@ watch(
 
 <style scoped>
 .tv-season-progress {
+  width: 100%;
+  box-sizing: border-box;
   margin-top: 1rem;
   padding: 0.85rem 0.9rem;
   border-radius: 14px;
@@ -268,6 +359,7 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  width: 100%;
   margin-bottom: 0.75rem;
 }
 
@@ -279,7 +371,6 @@ watch(
 
 .tv-season-progress__select {
   width: 100%;
-  max-width: 22rem;
   box-sizing: border-box;
   padding: 0.5rem 0.65rem;
   border-radius: 10px;
@@ -324,10 +415,11 @@ watch(
   list-style: none;
   margin: 0;
   padding: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  max-height: 22rem;
+  max-height: 28rem;
   overflow: auto;
 }
 

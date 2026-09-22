@@ -403,6 +403,9 @@ function formatFrenchDate(value) {
 
 .cinema-fiche__tracking {
   margin: 0 1.25rem 1rem;
+  width: auto;
+  max-width: none;
+  box-sizing: border-box;
 }
 
 .cinema-filmstrip {

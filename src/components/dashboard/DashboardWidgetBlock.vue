@@ -10,6 +10,7 @@ import DashboardNotesGraph from './DashboardNotesGraph.vue'
 import DashboardDailyNote from './DashboardDailyNote.vue'
 import DashboardPinnedNote from './DashboardPinnedNote.vue'
 import DashboardReadingInProgress from './DashboardReadingInProgress.vue'
+import DashboardTelevisionInProgress from './DashboardTelevisionInProgress.vue'
 import DashboardActiveProjects from './DashboardActiveProjects.vue'
 import { DASHBOARD_WIDGET_IDS } from '../../constants/dashboard/dashboardWidgets.js'
 import { isPinnedNoteWidgetId } from '../../constants/dashboard/dashboardPinnedNotes.js'
@@ -116,6 +117,7 @@ const COLUMN_CLASS_BY_ID = {
   [IDS.HABITS]: 'habits-column',
   [IDS.NOTES_GRAPH]: 'notes-graph-column',
   [IDS.READING_IN_PROGRESS]: 'reading-column',
+  [IDS.TELEVISION_IN_PROGRESS]: 'television-column',
   [IDS.PROJECTS]: 'projects-column',
 }
 
@@ -249,6 +251,11 @@ function rootClass(widgetId, asColumn) {
       :user-id="userId"
     />
 
+    <DashboardTelevisionInProgress
+      v-else-if="widgetId === IDS.TELEVISION_IN_PROGRESS"
+      :user-id="userId"
+    />
+
     <DashboardActiveProjects v-else-if="widgetId === IDS.PROJECTS" :user-id="userId" />
   </div>
 </template>
@@ -273,6 +280,7 @@ function rootClass(widgetId, asColumn) {
 .notes-graph-column,
 .projects-column,
 .reading-column,
+.television-column,
 .dictionary-word-column,
 .todo-column,
 .comfort-column,

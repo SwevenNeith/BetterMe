@@ -151,6 +151,80 @@ export async function setEpisodeWatched(
 }
 
 /**
+ * Coche / décoche une liste d’épisodes (plusieurs saisons possibles).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} mediaId
+ * @param {Array<{ seasonNumber: number, episodeNumber: number }>} episodes
+ * @param {boolean} watched
+ */
+export async function setEpisodesWatchedBatch(supabase, userId, mediaId, episodes, watched) {
+  if (!userId) throw new Error('Utilisateur non connecté.')
+  if (!mediaId) throw new Error('Média introuvable.')
+
+  /** @type {Array<{ seasonNumber: number, episodeNumber: number }>} */
+  const targets = []
+  const seen = new Set()
+  for (const item of episodes ?? []) {
+    const seasonNumber = Number(item?.seasonNumber)
+    const episodeNumber = Number(item?.episodeNumber)
+    if (!Number.isFinite(seasonNumber) || seasonNumber < 0) continue
+    if (!Number.isFinite(episodeNumber) || episodeNumber <= 0) continue
+    const key = episodeKey(seasonNumber, episodeNumber)
+    if (seen.has(key)) continue
+    seen.add(key)
+    targets.push({ seasonNumber, episodeNumber })
+  }
+
+  if (!targets.length) return listEpisodeProgress(supabase, userId, mediaId)
+
+  if (watched) {
+    const now = new Date().toISOString()
+    const rows = targets.map(({ seasonNumber, episodeNumber }) => ({
+      user_id: userId,
+      media_id: mediaId,
+      season_number: seasonNumber,
+      episode_number: episodeNumber,
+      watched_at: now,
+    }))
+
+    const { error } = await supabase
+      .from(TABLE)
+      .upsert(rows, { onConflict: 'media_id,season_number,episode_number' })
+
+    if (error) {
+      if (isMissingTableError(error)) throw new Error(missingTableMessage())
+      throw error
+    }
+  } else {
+    /** @type {Map<number, number[]>} */
+    const bySeason = new Map()
+    for (const { seasonNumber, episodeNumber } of targets) {
+      const list = bySeason.get(seasonNumber) ?? []
+      list.push(episodeNumber)
+      bySeason.set(seasonNumber, list)
+    }
+
+    for (const [seasonNumber, episodeNumbers] of bySeason) {
+      const { error } = await supabase
+        .from(TABLE)
+        .delete()
+        .eq('user_id', userId)
+        .eq('media_id', mediaId)
+        .eq('season_number', seasonNumber)
+        .in('episode_number', episodeNumbers)
+
+      if (error) {
+        if (isMissingTableError(error)) throw new Error(missingTableMessage())
+        throw error
+      }
+    }
+  }
+
+  return listEpisodeProgress(supabase, userId, mediaId)
+}
+
+/**
  * Coche / décoche tous les épisodes d’une saison.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
@@ -167,51 +241,13 @@ export async function setSeasonWatched(
   episodeNumbers,
   watched,
 ) {
-  if (!userId) throw new Error('Utilisateur non connecté.')
-  if (!mediaId) throw new Error('Média introuvable.')
-
   const season = Number(seasonNumber)
   const episodes = (episodeNumbers ?? [])
     .map((n) => Number(n))
     .filter((n) => Number.isFinite(n) && n > 0)
+    .map((episodeNumber) => ({ seasonNumber: season, episodeNumber }))
 
-  if (!Number.isFinite(season) || season < 0) throw new Error('Saison invalide.')
-  if (!episodes.length) return listEpisodeProgress(supabase, userId, mediaId)
-
-  if (watched) {
-    const now = new Date().toISOString()
-    const rows = episodes.map((episode_number) => ({
-      user_id: userId,
-      media_id: mediaId,
-      season_number: season,
-      episode_number,
-      watched_at: now,
-    }))
-
-    const { error } = await supabase
-      .from(TABLE)
-      .upsert(rows, { onConflict: 'media_id,season_number,episode_number' })
-
-    if (error) {
-      if (isMissingTableError(error)) throw new Error(missingTableMessage())
-      throw error
-    }
-  } else {
-    const { error } = await supabase
-      .from(TABLE)
-      .delete()
-      .eq('user_id', userId)
-      .eq('media_id', mediaId)
-      .eq('season_number', season)
-      .in('episode_number', episodes)
-
-    if (error) {
-      if (isMissingTableError(error)) throw new Error(missingTableMessage())
-      throw error
-    }
-  }
-
-  return listEpisodeProgress(supabase, userId, mediaId)
+  return setEpisodesWatchedBatch(supabase, userId, mediaId, episodes, watched)
 }
 
 /**

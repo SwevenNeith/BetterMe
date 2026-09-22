@@ -113,6 +113,7 @@ export async function getTmdbDetails(type, id, language = 'fr-FR') {
 
 /**
  * Détail d’une saison (épisodes) pour une série TMDB.
+ * Charge FR puis complète avec EN si la liste FR est incomplète.
  * @param {number|string} tvId
  * @param {number|string} seasonNumber
  * @param {string} [language]
@@ -128,15 +129,10 @@ export async function getTmdbSeason(tvId, seasonNumber, language = 'fr-FR') {
   }
 
   const lang = SEARCH_LANGUAGES.includes(language) ? language : 'fr-FR'
-  const data = await callTmdbFunction({
-    action: 'season',
-    id,
-    seasonNumber: season,
-    language: lang,
-  })
 
-  const episodes = Array.isArray(data?.episodes)
-    ? data.episodes.map((ep) => ({
+  const normalizeEpisodes = (rawEpisodes) =>
+    (Array.isArray(rawEpisodes) ? rawEpisodes : [])
+      .map((ep) => ({
         id: ep?.id ?? null,
         episodeNumber: Number(ep?.episode_number) || 0,
         name: String(ep?.name || '').trim() || `Épisode ${ep?.episode_number ?? '?'}`,
@@ -145,17 +141,68 @@ export async function getTmdbSeason(tvId, seasonNumber, language = 'fr-FR') {
         runtime: ep?.runtime ?? null,
         stillPath: ep?.still_path || null,
       }))
-    : []
+      .filter((ep) => ep.episodeNumber > 0)
+      .sort((a, b) => a.episodeNumber - b.episodeNumber)
 
-  return {
+  const mergeEpisodeLists = (primary, fallback) => {
+    const map = new Map()
+    for (const ep of fallback) map.set(ep.episodeNumber, ep)
+    for (const ep of primary) {
+      const existing = map.get(ep.episodeNumber)
+      if (!existing) {
+        map.set(ep.episodeNumber, ep)
+        continue
+      }
+      map.set(ep.episodeNumber, {
+        ...existing,
+        ...ep,
+        name: ep.name && !/^Épisode\s+\d+$/i.test(ep.name) ? ep.name : existing.name || ep.name,
+        overview: ep.overview || existing.overview,
+      })
+    }
+    return [...map.values()].sort((a, b) => a.episodeNumber - b.episodeNumber)
+  }
+
+  const normalizeSeason = (data, episodes) => ({
     id: data?.id ?? null,
-    seasonNumber: Number(data?.season_number) || season,
+    seasonNumber: Number.isFinite(Number(data?.season_number))
+      ? Number(data.season_number)
+      : season,
     name: String(data?.name || '').trim() || `Saison ${season}`,
     overview: String(data?.overview || '').trim(),
     posterPath: data?.poster_path || null,
     airDate: data?.air_date || null,
     episodes,
+  })
+
+  const primary = await callTmdbFunction({
+    action: 'season',
+    id,
+    seasonNumber: season,
+    language: lang,
+  })
+
+  let episodes = normalizeEpisodes(primary?.episodes)
+
+  // Compléter avec EN si la langue demandée renvoie moins d’épisodes
+  if (lang !== 'en-US') {
+    try {
+      const fallback = await callTmdbFunction({
+        action: 'season',
+        id,
+        seasonNumber: season,
+        language: 'en-US',
+      })
+      const enEpisodes = normalizeEpisodes(fallback?.episodes)
+      if (enEpisodes.length > episodes.length) {
+        episodes = mergeEpisodeLists(episodes, enEpisodes)
+      }
+    } catch (err) {
+      console.warn('Complément saison EN impossible:', err)
+    }
   }
+
+  return normalizeSeason(primary, episodes)
 }
 
 /**

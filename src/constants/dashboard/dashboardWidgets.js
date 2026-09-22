@@ -10,6 +10,7 @@ export const DASHBOARD_WIDGET_IDS = {
   HABITS: 'habits',
   NOTES_GRAPH: 'notes-graph',
   READING_IN_PROGRESS: 'reading-in-progress',
+  TELEVISION_IN_PROGRESS: 'television-in-progress',
   PROJECTS: 'projects',
 }
 
@@ -34,6 +35,7 @@ export const DASHBOARD_WIDGETS = [
   { id: DASHBOARD_WIDGET_IDS.MENSTRUATION, defaultLabel: 'Menstruation' },
   { id: DASHBOARD_WIDGET_IDS.HABITS, defaultLabel: 'Habitudes (vue mensuelle)' },
   { id: DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS, defaultLabel: 'Lectures en cours' },
+  { id: DASHBOARD_WIDGET_IDS.TELEVISION_IN_PROGRESS, defaultLabel: 'Télévision en cours' },
   { id: DASHBOARD_WIDGET_IDS.PROJECTS, defaultLabel: 'Projets actifs' },
   { id: DASHBOARD_WIDGET_IDS.NOTES_GRAPH, defaultLabel: 'Notes · vue globale' },
 ]
@@ -47,6 +49,7 @@ export const DASHBOARD_WIDGET_MOBILE_ORDER = [
   DASHBOARD_WIDGET_IDS.TODO,
   DASHBOARD_WIDGET_IDS.TIMETABLE,
   DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS,
+  DASHBOARD_WIDGET_IDS.TELEVISION_IN_PROGRESS,
   DASHBOARD_WIDGET_IDS.DAILY_NOTE,
   DASHBOARD_WIDGET_IDS.HABITS,
   DASHBOARD_WIDGET_IDS.PROJECTS,
@@ -62,6 +65,7 @@ export const DASHBOARD_WIDGET_DESKTOP_LEFT = [
   DASHBOARD_WIDGET_IDS.TODO,
   DASHBOARD_WIDGET_IDS.TIMETABLE,
   DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS,
+  DASHBOARD_WIDGET_IDS.TELEVISION_IN_PROGRESS,
   DASHBOARD_WIDGET_IDS.PROJECTS,
   DASHBOARD_WIDGET_IDS.NOTES_GRAPH,
 ]
@@ -117,6 +121,7 @@ export const DASHBOARD_MOBILE_FIRST_PAGE_COMPANIONS = [
 /** Widgets regroupés sur la page Emploi du temps (mobile). */
 export const DASHBOARD_MOBILE_TIMETABLE_PAGE_COMPANIONS = [
   DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS,
+  DASHBOARD_WIDGET_IDS.TELEVISION_IN_PROGRESS,
 ]
 
 /**
@@ -154,7 +159,7 @@ function buildMobileGroupsFromRest(rest) {
 
 /**
  * Groupes mobile par défaut : image + mot du jour + TODO sur la 1ʳᵉ page ;
- * emploi du temps + lectures en cours sur la même page ; sinon 1 bloc / page.
+ * emploi du temps + lectures / télévision en cours sur la même page ; sinon 1 bloc / page.
  * @param {string[]} [mobileOrder]
  * @returns {string[][]}
  */
