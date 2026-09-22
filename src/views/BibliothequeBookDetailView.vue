@@ -127,8 +127,7 @@ async function addToLecture() {
       publicationYear: work.value.firstPublishYear ?? '',
       imageUrl: work.value.coverUrl || '',
       openLibraryWorkKey: work.value.key,
-      genre: subjects[0] || '',
-      extraTags: subjects.slice(1).join(', '),
+      tags: subjects,
       ...seriesFields,
     })
 

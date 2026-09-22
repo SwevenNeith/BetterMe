@@ -11,6 +11,7 @@ import { READING_COLLECTION_WISHLIST } from '../../services/lecture/readingColle
 import { searchOpenLibrary, getOpenLibraryWorkSeriesInfo } from '../../services/bibliotheque/openLibrary.js'
 import {
   findLectureBookForOpenLibraryDoc,
+  resolveSubjectsForWork,
   syncLectureBooksWithOpenLibrary,
 } from '../../services/bibliotheque/openLibraryLink.js'
 import { isExactOpenLibraryMatch } from '../../utils/bibliotheque/openLibraryMatch.js'
@@ -158,15 +159,18 @@ async function quickAddToLibrary(doc) {
     if (matched) {
       const series = await getOpenLibraryWorkSeriesInfo(doc.key)
       const seriesFields = seriesToReadingBookFields(series)
+      const subjects = await resolveSubjectsForWork(doc.key, doc.subjects)
       await linkReadingBookToOpenLibrary(supabase, userId.value, matched.id, {
         workKey: doc.key,
         pages: doc.pageCount,
         publicationYear: doc.firstPublishYear,
-        subjects: doc.subjects,
+        subjects,
         ...seriesFields,
       })
     } else {
-      const subjects = normalizeOpenLibrarySubjects(doc.subjects)
+      const subjects = normalizeOpenLibrarySubjects(
+        await resolveSubjectsForWork(doc.key, doc.subjects),
+      )
       const series = await getOpenLibraryWorkSeriesInfo(doc.key)
       const seriesFields = seriesToReadingBookFields(series)
       await createReadingBook(supabase, userId.value, {
@@ -177,8 +181,8 @@ async function quickAddToLibrary(doc) {
         publicationYear: doc.firstPublishYear ?? '',
         imageUrl: doc.coverUrl || '',
         openLibraryWorkKey: doc.key,
-        genre: subjects[0] || '',
-        extraTags: subjects.slice(1).join(', '),
+        // Tableau de tags direct (évite le round-trip genre/extraTags qui re-coupe les virgules)
+        tags: subjects,
         ...seriesFields,
       })
     }
@@ -321,6 +325,7 @@ async function syncWithOpenLibrary() {
     syncSummary.value =
       `${result.linked} nouvellement lié${result.linked === 1 ? '' : 's'} · ` +
       `${result.alreadyLinked} déjà lié${result.alreadyLinked === 1 ? '' : 's'} · ` +
+      `${result.subjectsUpdated || 0} sujet${result.subjectsUpdated === 1 ? '' : 's'} complété${result.subjectsUpdated === 1 ? '' : 's'} · ` +
       `${result.unmatched} sans match exact titre+auteur` +
       (result.unmatched
         ? ' (titre/auteur différent sur Open Library, faute de frappe, ou introuvable — normal).'

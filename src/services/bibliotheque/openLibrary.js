@@ -2,6 +2,7 @@ import {
   enrichSeriesWithTitleHints,
   parseOpenLibrarySeries,
 } from '../../utils/bibliotheque/openLibrarySeries.js'
+import { normalizeOpenLibrarySubjects } from '../../utils/bibliotheque/openLibrarySubjects.js'
 
 const OPEN_LIBRARY_SEARCH_URL = 'https://openlibrary.org/search.json'
 const OPEN_LIBRARY_COVER_BASE = 'https://covers.openlibrary.org/b/id'
@@ -45,7 +46,7 @@ export function normalizeOpenLibraryDoc(doc) {
   const isbns = Array.isArray(doc?.isbn) ? doc.isbn.filter(Boolean) : []
   const publishers = Array.isArray(doc?.publisher) ? doc.publisher.filter(Boolean) : []
   const subjects = Array.isArray(doc?.subject)
-    ? doc.subject.map((item) => String(item ?? '').trim()).filter(Boolean).slice(0, 16)
+    ? normalizeOpenLibrarySubjects(doc.subject)
     : []
 
   return {
@@ -241,16 +242,13 @@ export async function getOpenLibraryWork(workKey, options = {}) {
       ? authors.join(', ')
       : searchDoc?.authorLabel || 'Auteur inconnu',
     description: readDescription(data?.description) || 'Aucun résumé disponible.',
-    subjects: (
+    subjects: normalizeOpenLibrarySubjects(
       Array.isArray(data?.subjects) && data.subjects.length
         ? data.subjects
         : Array.isArray(searchDoc?.subjects)
           ? searchDoc.subjects
-          : []
-    )
-      .map((item) => String(item ?? '').trim())
-      .filter(Boolean)
-      .slice(0, 16),
+          : [],
+    ),
     firstPublishYear: searchDoc?.firstPublishYear || null,
     coverId: coverId || searchDoc?.coverId || null,
     coverUrl: openLibraryCoverUrl(coverId || searchDoc?.coverId, 'L'),

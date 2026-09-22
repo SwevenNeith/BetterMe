@@ -3,6 +3,9 @@
  */
 
 function normalizeSubject(value) {
+  if (value && typeof value === 'object') {
+    value = value.name ?? value.value ?? value.title ?? ''
+  }
   return String(value ?? '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -14,14 +17,18 @@ function normalizeSubject(value) {
  * @returns {string[]}
  */
 export function normalizeOpenLibrarySubjects(subjects, options = {}) {
-  const max = Math.max(1, Number(options.max) || 16)
-  const list = Array.isArray(subjects) ? subjects : []
+  const max = Math.max(1, Number(options.max) || 24)
+  const list = Array.isArray(subjects)
+    ? subjects
+    : typeof subjects === 'string' && subjects.trim()
+      ? subjects.split(/[,;]+/)
+      : []
   const seen = new Set()
   const out = []
 
   for (const raw of list) {
     const subject = normalizeSubject(raw)
-    if (!subject) continue
+    if (!subject || subject === '[object Object]') continue
     const key = subject.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
@@ -67,4 +74,12 @@ export function mergeOpenLibrarySubjectsIntoTags(existingTags, subjects, options
   if (!extrasFromSubjects.length) return null
 
   return [genre, ...extrasFromSubjects]
+}
+
+/**
+ * Indique si les tags Lecture semblent incomplets face aux sujets OL
+ * (aucun tag, ou genre seul alors qu’OL a plusieurs sujets).
+ */
+export function readingTagsNeedOpenLibrarySubjects(existingTags, subjects) {
+  return mergeOpenLibrarySubjectsIntoTags(existingTags, subjects) != null
 }

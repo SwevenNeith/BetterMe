@@ -657,7 +657,7 @@ function fieldClass(field) {
             v-model="form.extraTags"
             type="text"
             class="reading-fiche-input"
-            maxlength="400"
+            maxlength="2000"
             placeholder="fantasy, dystopie…"
           />
         </label>
@@ -751,7 +751,7 @@ function fieldClass(field) {
               :value="draft"
               type="text"
               class="reading-fiche-input"
-              maxlength="400"
+              maxlength="2000"
               :disabled="disabled"
               @input="onDraftInput"
               @keydown="onFieldKeydown"

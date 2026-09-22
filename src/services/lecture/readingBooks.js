@@ -4,7 +4,7 @@ const SIGNED_URL_TTL_SEC = 3600
 const MAX_FILE_BYTES = 8 * 1024 * 1024
 
 import { buildTagsFromGenreAndExtra, formToBookPayload } from '../../utils/lecture/readingBookForm.js'
-import { mergeOpenLibrarySubjectsIntoTags } from '../../utils/bibliotheque/openLibrarySubjects.js'
+import { mergeOpenLibrarySubjectsIntoTags, normalizeOpenLibrarySubjects } from '../../utils/bibliotheque/openLibrarySubjects.js'
 import { ensureReadingCollection } from './readingCollections.js'
 
 const ALLOWED_MIME = new Set([
@@ -299,12 +299,20 @@ function buildBookRowFromInput(input, existing = null) {
   const title = payload.title || existing?.title || ''
   if (!title.trim()) throw new Error('Le titre est obligatoire.')
 
-  const tags =
-    input?.tags !== undefined && input?.genre === undefined && input?.extraTags === undefined
-      ? Array.isArray(input.tags)
-        ? input.tags.map((t) => String(t).trim()).filter(Boolean)
-        : parseReadingTags(input.tags)
-      : buildTagsFromGenreAndExtra(payload.genre, payload.extraTags)
+  let tags
+  if (input?.subjects !== undefined && input?.genre === undefined && input?.extraTags === undefined) {
+    tags = normalizeOpenLibrarySubjects(input.subjects)
+  } else if (
+    input?.tags !== undefined &&
+    input?.genre === undefined &&
+    input?.extraTags === undefined
+  ) {
+    tags = Array.isArray(input.tags)
+      ? input.tags.map((t) => String(t).trim()).filter(Boolean)
+      : parseReadingTags(input.tags)
+  } else {
+    tags = buildTagsFromGenreAndExtra(payload.genre, payload.extraTags)
+  }
 
   return {
     title,

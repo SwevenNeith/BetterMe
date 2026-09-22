@@ -11,6 +11,7 @@ export const READING_FILTER_FIELDS = {
   sagaVolume: { id: 'sagaVolume', label: 'Tome' },
   pages: { id: 'pages', label: 'Pages' },
   openLibrary: { id: 'openLibrary', label: 'Open Library' },
+  cover: { id: 'cover', label: 'Couverture' },
 }
 
 const TEXT_OPERATORS = [
@@ -55,6 +56,10 @@ export const READING_FILTER_OPERATORS = {
   openLibrary: [
     { id: 'is_linked', label: 'est lié', needsValue: false },
     { id: 'is_not_linked', label: "n'est pas lié", needsValue: false },
+  ],
+  cover: [
+    { id: 'is_missing', label: 'est absente', needsValue: false },
+    { id: 'is_present', label: 'est présente', needsValue: false },
   ],
 }
 
@@ -223,6 +228,15 @@ function getBookSagaVolume(book) {
   return volume ?? 1
 }
 
+/** Couverture affichable : upload, URL perso, Open Library, ou URL déjà résolue. */
+function bookHasCover(book) {
+  if (String(book?.coverUrl ?? '').trim()) return true
+  if (String(book?.cover_storage_path ?? '').trim()) return true
+  if (String(book?.cover_image_url ?? '').trim()) return true
+  if (String(book?.open_library_cover_url ?? '').trim()) return true
+  return false
+}
+
 /**
  * @param {Record<string, unknown>} book
  * @param {{ field: string, operator: string, value: string, valueTo?: string }} filter
@@ -332,6 +346,13 @@ export function bookMatchesReadingFilter(book, filter) {
     const linked = Boolean(String(book.open_library_work_key ?? '').trim())
     if (filter.operator === 'is_linked') return linked
     if (filter.operator === 'is_not_linked') return !linked
+    return true
+  }
+
+  if (filter.field === 'cover') {
+    const hasCover = bookHasCover(book)
+    if (filter.operator === 'is_missing') return !hasCover
+    if (filter.operator === 'is_present') return hasCover
     return true
   }
 

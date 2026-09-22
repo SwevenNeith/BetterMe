@@ -7,6 +7,7 @@ import {
   isExactOpenLibraryMatch,
   stripLeadingArticles,
 } from '../../utils/bibliotheque/openLibraryMatch.js'
+import { readingTagsNeedOpenLibrarySubjects } from '../../utils/bibliotheque/openLibrarySubjects.js'
 
 /**
  * Sujets d’un work : d’abord ceux du doc search, sinon fiche work.
@@ -14,7 +15,7 @@ import {
  * @param {string[]|null|undefined} subjectsFromDoc
  * @param {{ signal?: AbortSignal }} [options]
  */
-async function resolveSubjectsForWork(workKey, subjectsFromDoc, options = {}) {
+export async function resolveSubjectsForWork(workKey, subjectsFromDoc, options = {}) {
   if (Array.isArray(subjectsFromDoc) && subjectsFromDoc.length) return subjectsFromDoc
   try {
     const work = await getOpenLibraryWork(workKey, { signal: options.signal })
@@ -68,13 +69,14 @@ export async function findExactOpenLibraryMatchForBook(book, options = {}) {
 }
 
 /**
- * Lie les livres Lecture non encore associés à Open Library.
+ * Lie les livres Lecture non encore associés à Open Library,
+ * et complète les sujets (genre / mots clés) des livres déjà liés s’ils sont vides.
  * Ne recrée aucun livre : UPDATE in-place uniquement (dates, spoils, collections inchangés).
  *
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {{
- *   onProgress?: (info: { done: number, total: number, linked: number, skipped: number, currentTitle: string }) => void,
+ *   onProgress?: (info: { done: number, total: number, linked: number, skipped: number, subjectsUpdated?: number, currentTitle: string }) => void,
  *   signal?: AbortSignal,
  *   concurrency?: number,
  * }} [options]
@@ -88,21 +90,61 @@ export async function syncLectureBooksWithOpenLibrary(supabase, userId, options 
   let processed = 0
   let linked = 0
   let unmatched = 0
+  let subjectsUpdated = 0
   let cursor = 0
 
-  function emit(currentTitle = '') {
+  const totalWork = books.length
+
+  function emit(currentTitle = '', doneOverride = null) {
     options.onProgress?.({
-      done: alreadyLinked.length + processed,
-      total: books.length,
+      done: doneOverride ?? alreadyLinked.length + processed,
+      total: totalWork,
       linked: alreadyLinked.length + linked,
       skipped: unmatched,
       pending: pending.length,
+      subjectsUpdated,
       currentTitle,
     })
   }
 
+  emit('', 0)
+
+  // 1) Complète les sujets manquants pour les livres déjà liés
+  let subjectCursor = 0
+  async function subjectsWorker() {
+    while (subjectCursor < alreadyLinked.length) {
+      if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      const index = subjectCursor
+      subjectCursor += 1
+      const book = alreadyLinked[index]
+      emit(book.title, index)
+
+      try {
+        const workKey = String(book.open_library_work_key || '').trim()
+        if (!workKey) continue
+        const subjects = await resolveSubjectsForWork(workKey, null, { signal: options.signal })
+        if (!readingTagsNeedOpenLibrarySubjects(book.tags, subjects)) continue
+        await linkReadingBookToOpenLibrary(supabase, userId, book.id, {
+          workKey,
+          subjects,
+        })
+        subjectsUpdated += 1
+      } catch (err) {
+        if (err?.name === 'AbortError') throw err
+        console.warn('Open Library subjects sync skipped for', book.title, err)
+      }
+    }
+  }
+
+  if (alreadyLinked.length) {
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, alreadyLinked.length) }, () => subjectsWorker()),
+    )
+  }
+
   emit()
 
+  // 2) Lie les livres encore sans work key
   async function worker() {
     while (cursor < pending.length) {
       if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
@@ -110,7 +152,7 @@ export async function syncLectureBooksWithOpenLibrary(supabase, userId, options 
       const index = cursor
       cursor += 1
       const book = pending[index]
-      emit(book.title)
+      emit(book.title, alreadyLinked.length + processed)
 
       try {
         const match = await findExactOpenLibraryMatchForBook(book, { signal: options.signal })
@@ -135,7 +177,7 @@ export async function syncLectureBooksWithOpenLibrary(supabase, userId, options 
         unmatched += 1
       } finally {
         processed += 1
-        emit(book.title)
+        emit(book.title, alreadyLinked.length + processed)
       }
     }
   }
@@ -146,12 +188,15 @@ export async function syncLectureBooksWithOpenLibrary(supabase, userId, options 
     )
   }
 
+  emit('', totalWork)
+
   return {
     total: books.length,
     pending: pending.length,
     linked,
     alreadyLinked: alreadyLinked.length,
     unmatched,
+    subjectsUpdated,
   }
 }
 

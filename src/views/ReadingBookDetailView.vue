@@ -16,6 +16,7 @@ import {
 import { listReadingCollections } from '../services/lecture/readingCollections.js'
 import { deleteSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/lecture/readingSpoilChapters.js'
 import { isLinkedToOpenLibrary } from '../utils/bibliotheque/openLibraryMatch.js'
+import { readingTagsNeedOpenLibrarySubjects } from '../utils/bibliotheque/openLibrarySubjects.js'
 import { getOpenLibraryWork } from '../services/bibliotheque/openLibrary.js'
 import OpenLibraryLinkSearchModal from '../components/bibliotheque/OpenLibraryLinkSearchModal.vue'
 import { supabase } from '../lib/supabase.js'
@@ -253,13 +254,16 @@ async function loadBook() {
       return
     }
 
-    // Livres déjà liés sans tags : récupère les sujets OL une fois
+    // Livres déjà liés sans mots clés / sujets : récupère les sujets OL
     const workKey = String(book.value.open_library_work_key ?? '').trim()
-    const hasTags = Array.isArray(book.value.tags) && book.value.tags.length > 0
-    if (workKey && !hasTags) {
+    if (workKey) {
       try {
         const work = await getOpenLibraryWork(workKey)
-        if (Array.isArray(work.subjects) && work.subjects.length) {
+        if (
+          Array.isArray(work.subjects) &&
+          work.subjects.length &&
+          readingTagsNeedOpenLibrarySubjects(book.value.tags, work.subjects)
+        ) {
           book.value = await linkReadingBookToOpenLibrary(supabase, userId.value, book.value.id, {
             workKey,
             subjects: work.subjects,
