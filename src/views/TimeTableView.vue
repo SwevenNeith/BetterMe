@@ -584,8 +584,10 @@ const fetchWeekEvents = async (gen) => {
       .from('timetable_events')
       .select('*')
       .eq('user_id', user.id)
-      .gte('date_start', mondayStr)
       .lte('date_start', sundayStr)
+      // Chevauchement avec la semaine : début avant sa fin et fin après son début.
+      // La première branche conserve les événements sans date_end qui commencent cette semaine.
+      .or(`date_start.gte.${mondayStr},date_end.gte.${mondayStr}`)
 
     if (error) throw error
     if (gen === timetableLoadGen) {
