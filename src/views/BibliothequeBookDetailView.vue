@@ -12,6 +12,7 @@ import { getOpenLibraryWork } from '../services/bibliotheque/openLibrary.js'
 import { findLectureBookForOpenLibraryDoc } from '../services/bibliotheque/openLibraryLink.js'
 import { isExactOpenLibraryMatch } from '../utils/bibliotheque/openLibraryMatch.js'
 import { normalizeOpenLibrarySubjects } from '../utils/bibliotheque/openLibrarySubjects.js'
+import { seriesToReadingBookFields } from '../utils/bibliotheque/openLibrarySeries.js'
 import { READING_COLLECTION_WISHLIST } from '../services/lecture/readingCollections.js'
 
 const route = useRoute()
@@ -99,11 +100,13 @@ async function addToLecture() {
       null
 
     if (matched) {
+      const seriesFields = seriesToReadingBookFields(work.value)
       await linkReadingBookToOpenLibrary(supabase, userId.value, matched.id, {
         workKey: work.value.key,
         pages: work.value.pageCount,
         publicationYear: work.value.firstPublishYear,
         subjects: work.value.subjects,
+        ...seriesFields,
       })
       await loadLectureBooks()
       const isEmbed = route.path.startsWith('/embed')
@@ -115,6 +118,7 @@ async function addToLecture() {
     }
 
     const subjects = normalizeOpenLibrarySubjects(work.value.subjects)
+    const seriesFields = seriesToReadingBookFields(work.value)
     const created = await createReadingBook(supabase, userId.value, {
       title: work.value.title,
       author: work.value.authorLabel === 'Auteur inconnu' ? '' : work.value.authorLabel,
@@ -125,6 +129,7 @@ async function addToLecture() {
       openLibraryWorkKey: work.value.key,
       genre: subjects[0] || '',
       extraTags: subjects.slice(1).join(', '),
+      ...seriesFields,
     })
 
     const isEmbed = route.path.startsWith('/embed')

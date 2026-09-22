@@ -8,13 +8,14 @@ import {
   listReadingBooks,
 } from '../../services/lecture/readingBooks.js'
 import { READING_COLLECTION_WISHLIST } from '../../services/lecture/readingCollections.js'
-import { searchOpenLibrary } from '../../services/bibliotheque/openLibrary.js'
+import { searchOpenLibrary, getOpenLibraryWorkSeriesInfo } from '../../services/bibliotheque/openLibrary.js'
 import {
   findLectureBookForOpenLibraryDoc,
   syncLectureBooksWithOpenLibrary,
 } from '../../services/bibliotheque/openLibraryLink.js'
 import { isExactOpenLibraryMatch } from '../../utils/bibliotheque/openLibraryMatch.js'
 import { normalizeOpenLibrarySubjects } from '../../utils/bibliotheque/openLibrarySubjects.js'
+import { seriesToReadingBookFields } from '../../utils/bibliotheque/openLibrarySeries.js'
 import {
   OPEN_LIBRARY_EBOOK_OPTIONS,
   OPEN_LIBRARY_LANGUAGE_OPTIONS,
@@ -155,14 +156,19 @@ async function quickAddToLibrary(doc) {
       null
 
     if (matched) {
+      const series = await getOpenLibraryWorkSeriesInfo(doc.key)
+      const seriesFields = seriesToReadingBookFields(series)
       await linkReadingBookToOpenLibrary(supabase, userId.value, matched.id, {
         workKey: doc.key,
         pages: doc.pageCount,
         publicationYear: doc.firstPublishYear,
         subjects: doc.subjects,
+        ...seriesFields,
       })
     } else {
       const subjects = normalizeOpenLibrarySubjects(doc.subjects)
+      const series = await getOpenLibraryWorkSeriesInfo(doc.key)
+      const seriesFields = seriesToReadingBookFields(series)
       await createReadingBook(supabase, userId.value, {
         title: doc.title,
         author: doc.authorLabel === 'Auteur inconnu' ? '' : doc.authorLabel,
@@ -173,6 +179,7 @@ async function quickAddToLibrary(doc) {
         openLibraryWorkKey: doc.key,
         genre: subjects[0] || '',
         extraTags: subjects.slice(1).join(', '),
+        ...seriesFields,
       })
     }
 

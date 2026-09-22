@@ -1,3 +1,8 @@
+import {
+  enrichSeriesWithTitleHints,
+  parseOpenLibrarySeries,
+} from '../../utils/bibliotheque/openLibrarySeries.js'
+
 const OPEN_LIBRARY_SEARCH_URL = 'https://openlibrary.org/search.json'
 const OPEN_LIBRARY_COVER_BASE = 'https://covers.openlibrary.org/b/id'
 
@@ -216,6 +221,11 @@ export async function getOpenLibraryWork(workKey, options = {}) {
     ? searchDoc.authors
     : []
 
+  const series = enrichSeriesWithTitleHints(parseOpenLibrarySeries(data?.series), {
+    title: data?.title || searchDoc?.title,
+    subtitle: data?.subtitle || searchDoc?.subtitle,
+  })
+
   return {
     key,
     title: String(data?.title || searchDoc?.title || '').trim() || 'Sans titre',
@@ -243,7 +253,42 @@ export async function getOpenLibraryWork(workKey, options = {}) {
     pageCount: searchDoc?.pageCount || null,
     isbn: searchDoc?.isbn || null,
     publisher: searchDoc?.publisher || null,
+    isSaga: series.isSaga,
+    sagaVolume: series.sagaVolume,
+    seriesKey: series.seriesKey,
+    seriesLabel: series.seriesLabel,
     openLibraryUrl: `https://openlibrary.org${key}`,
+  }
+}
+
+/**
+ * Récupère uniquement les infos série/tome d’un work (requête légère).
+ * @param {string} workKey
+ * @param {{ signal?: AbortSignal }} [options]
+ */
+export async function getOpenLibraryWorkSeriesInfo(workKey, options = {}) {
+  const raw = String(workKey ?? '').trim()
+  if (!raw) {
+    return enrichSeriesWithTitleHints(parseOpenLibrarySeries(null))
+  }
+
+  const key = raw.startsWith('/works/') ? raw : `/works/${raw.replace(/^\/+/, '')}`
+  try {
+    const response = await fetch(`https://openlibrary.org${key}.json`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: options.signal,
+    })
+    if (!response.ok) {
+      return enrichSeriesWithTitleHints(parseOpenLibrarySeries(null))
+    }
+    const data = await response.json()
+    return enrichSeriesWithTitleHints(parseOpenLibrarySeries(data?.series), {
+      title: data?.title,
+      subtitle: data?.subtitle,
+    })
+  } catch {
+    return enrichSeriesWithTitleHints(parseOpenLibrarySeries(null))
   }
 }
 

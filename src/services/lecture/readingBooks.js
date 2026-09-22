@@ -452,6 +452,8 @@ export async function updateReadingBook(supabase, userId, bookId, input) {
  *   replaceCover?: boolean,
  *   subjects?: string[]|null,
  *   replaceTags?: boolean,
+ *   isSaga?: boolean,
+ *   sagaVolume?: number|null,
  * }} link
  */
 export async function linkReadingBookToOpenLibrary(supabase, userId, bookId, link) {
@@ -509,6 +511,20 @@ export async function linkReadingBookToOpenLibrary(supabase, userId, bookId, lin
   ) {
     const year = Number(link.publicationYear)
     if (Number.isFinite(year) && year > 0) patch.publication_year = year
+  }
+
+  // Complète série / tome seulement si non déjà renseigné
+  if (!existing.is_saga && link?.isSaga) {
+    patch.is_saga = true
+    const volume = Number(link.sagaVolume)
+    patch.saga_volume = Number.isFinite(volume) && volume > 0 ? volume : 1
+  } else if (
+    existing.is_saga &&
+    (existing.saga_volume == null || existing.saga_volume === '') &&
+    link?.sagaVolume != null
+  ) {
+    const volume = Number(link.sagaVolume)
+    if (Number.isFinite(volume) && volume > 0) patch.saga_volume = volume
   }
 
   const mergedTags = mergeOpenLibrarySubjectsIntoTags(existing.tags, link?.subjects, {
