@@ -111,6 +111,10 @@ const buyLabel = computed(() => formatProviderList(providerNames(frWatchProvider
 
 const rentLabel = computed(() => formatProviderList(providerNames(frWatchProviders.value?.rent)))
 
+const flatrateLabel = computed(() =>
+  formatProviderList(providerNames(frWatchProviders.value?.flatrate)),
+)
+
 const castList = computed(() => {
   if (isTv.value) return []
   const cast = Array.isArray(props.media?.credits?.cast) ? props.media.credits.cast : []
@@ -255,6 +259,10 @@ function formatFrenchDate(value) {
             <div class="cinema-field">
               <span class="cinema-field__label">Louer</span>
               <span class="cinema-field__value">{{ rentLabel }}</span>
+            </div>
+            <div class="cinema-field">
+              <span class="cinema-field__label">Abonnement</span>
+              <span class="cinema-field__value">{{ flatrateLabel }}</span>
             </div>
           </div>
         </section>
@@ -569,15 +577,18 @@ function formatFrenchDate(value) {
 
 .cinema-providers {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.65rem;
   margin-top: 0.35rem;
+  align-items: start;
 }
 
 .cinema-providers .cinema-field {
   grid-template-columns: 1fr;
   gap: 0.2rem;
   margin-bottom: 0;
+  align-items: start;
+  align-self: start;
 }
 
 .cinema-cast-gallery {

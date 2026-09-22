@@ -2,6 +2,7 @@ export const TELEVISION_FILTER_FIELDS = {
   mediaType: { id: 'mediaType', label: 'Type' },
   title: { id: 'title', label: 'Titre' },
   collection: { id: 'collection', label: 'Collection' },
+  favorite: { id: 'favorite', label: 'Favoris' },
   year: { id: 'year', label: 'Année' },
   rating: { id: 'rating', label: 'Note' },
   comments: { id: 'comments', label: 'Notes' },
@@ -27,6 +28,10 @@ export const TELEVISION_FILTER_OPERATORS = {
     { id: 'is_empty', label: 'est vide', needsValue: false },
     { id: 'is_not_empty', label: "n'est pas vide", needsValue: false },
   ],
+  favorite: [
+    { id: 'is_favorite', label: 'oui', needsValue: false },
+    { id: 'is_not_favorite', label: 'non', needsValue: false },
+  ],
   year: [
     { id: 'between', label: 'entre', needsValue: 'range' },
     { id: 'is', label: 'est', needsValue: 'number' },
@@ -45,7 +50,7 @@ export const TELEVISION_FILTER_OPERATORS = {
   ],
 }
 
-const LIBRARY_FIELDS = ['mediaType', 'title', 'collection', 'rating', 'comments']
+const LIBRARY_FIELDS = ['mediaType', 'title', 'collection', 'favorite', 'rating', 'comments']
 const CATALOG_FIELDS = ['mediaType', 'title', 'year', 'rating']
 
 let filterIdSeq = 0
@@ -218,6 +223,11 @@ export function getTelevisionItemYear(item) {
  * @param {{ field: string, operator: string, value: string, valueTo?: string }} filter
  */
 export function formatTelevisionFilterLabel(filter) {
+  if (filter.field === 'favorite') {
+    if (filter.operator === 'is_favorite') return 'En favoris'
+    if (filter.operator === 'is_not_favorite') return 'Pas en favoris'
+  }
+
   const fieldLabel = TELEVISION_FILTER_FIELDS[filter.field]?.label ?? filter.field
   const operator = getTelevisionOperatorMeta(filter.field, filter.operator)
   const operatorLabel = operator?.label ?? filter.operator
@@ -286,6 +296,13 @@ export function itemMatchesTelevisionFilter(item, filter) {
       default:
         return true
     }
+  }
+
+  if (filter.field === 'favorite') {
+    const isFavorite = Boolean(item?.is_favorite)
+    if (filter.operator === 'is_favorite') return isFavorite
+    if (filter.operator === 'is_not_favorite') return !isFavorite
+    return true
   }
 
   if (filter.field === 'year') {

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { tmdbPosterUrl } from '../../services/television/tmdb.js'
 import { formatNextEpisodeLabel } from '../../utils/television/nextEpisode.js'
+import TelevisionFavoriteStar from './TelevisionFavoriteStar.vue'
 
 const props = defineProps({
   item: {
@@ -17,9 +18,13 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  favoriteBusy: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-const emit = defineEmits(['open', 'mark-watched'])
+const emit = defineEmits(['open', 'mark-watched', 'toggle-favorite'])
 
 const title = computed(
   () => props.item?.title || props.item?.original_title || 'Sans titre',
@@ -28,6 +33,8 @@ const title = computed(
 const posterUrl = computed(
   () => props.item?.posterUrl || tmdbPosterUrl(props.item?.poster_path, 'w185'),
 )
+
+const isFavorite = computed(() => Boolean(props.item?.is_favorite))
 
 const label = computed(() => {
   if (!props.nextEpisode) return 'Progression…'
@@ -62,20 +69,33 @@ function onMark(event) {
     episodeNumber: props.nextEpisode.episodeNumber,
   })
 }
+
+function onToggleFavorite() {
+  emit('toggle-favorite', props.item)
+}
 </script>
 
 <template>
   <article class="tv-continue">
     <button type="button" class="tv-continue__main" @click="emit('open', item)">
-      <img
-        v-if="posterUrl"
-        :src="posterUrl"
-        :alt="title"
-        class="tv-continue__poster"
-        loading="lazy"
-      />
-      <div v-else class="tv-continue__poster tv-continue__poster--placeholder" aria-hidden="true">
-        🎬
+      <div class="tv-continue__poster-wrap">
+        <img
+          v-if="posterUrl"
+          :src="posterUrl"
+          :alt="title"
+          class="tv-continue__poster"
+          loading="lazy"
+        />
+        <div v-else class="tv-continue__poster tv-continue__poster--placeholder" aria-hidden="true">
+          🎬
+        </div>
+        <TelevisionFavoriteStar
+          class="tv-continue__fav"
+          size="sm"
+          :active="isFavorite"
+          :disabled="favoriteBusy"
+          @toggle="onToggleFavorite"
+        />
       </div>
       <div class="tv-continue__meta">
         <p class="tv-continue__title">{{ title }}</p>
@@ -127,12 +147,27 @@ function onMark(event) {
   cursor: pointer;
 }
 
+.tv-continue__poster-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.tv-continue__fav {
+  position: absolute;
+  top: -0.2rem;
+  right: -0.2rem;
+  z-index: 2;
+  font-size: 0.85rem;
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
 .tv-continue__poster {
   width: 2.75rem;
   aspect-ratio: 2 / 3;
   object-fit: cover;
   border-radius: 4px;
-  flex-shrink: 0;
+  display: block;
   border: 1px solid rgba(213, 181, 234, 0.25);
 }
 

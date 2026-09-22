@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS public.television_media (
   date_end date,
   rating numeric(3, 1),
   comments text,
+  is_favorite boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT television_media_type_check CHECK (media_type IN ('movie', 'tv')),
@@ -43,11 +44,16 @@ CREATE INDEX IF NOT EXISTS television_media_user_collection_idx
 CREATE INDEX IF NOT EXISTS television_media_user_created_at_idx
   ON public.television_media (user_id, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS television_media_user_favorite_idx
+  ON public.television_media (user_id, is_favorite)
+  WHERE is_favorite = true;
+
 COMMENT ON TABLE public.television_media IS 'Films et séries suivis par l''utilisateur (clé TMDB)';
 COMMENT ON COLUMN public.television_media.media_type IS 'movie ou tv';
 COMMENT ON COLUMN public.television_media.tmdb_id IS 'Identifiant TMDB';
 COMMENT ON COLUMN public.television_media.collection IS 'Nom de collection (À regarder / En cours / Terminé…)';
 COMMENT ON COLUMN public.television_media.poster_path IS 'Chemin affiche TMDB (ex. /abc.jpg)';
+COMMENT ON COLUMN public.television_media.is_favorite IS 'Titre marqué en favoris par l''utilisateur';
 
 ALTER TABLE public.television_media ENABLE ROW LEVEL SECURITY;
 

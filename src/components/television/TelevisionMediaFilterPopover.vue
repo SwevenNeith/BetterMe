@@ -95,7 +95,9 @@ function rangeMinForField(field) {
 }
 
 function rangeMaxForField(field) {
-  return field === 'rating' ? 10 : undefined
+  if (field !== 'rating') return undefined
+  // Catalogue = note TMDB (/10) · Bibliothèque = note perso (/5)
+  return props.context === 'catalog' ? 10 : 5
 }
 
 function rangeStepForField(field) {

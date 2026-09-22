@@ -4,7 +4,7 @@ import { tmdbPosterUrl } from './tmdb.js'
 const TABLE = 'television_media'
 
 export const MEDIA_SELECT =
-  'id, user_id, media_type, tmdb_id, title, original_title, poster_path, overview, collection, date_start, date_end, rating, comments, created_at, updated_at'
+  'id, user_id, media_type, tmdb_id, title, original_title, poster_path, overview, collection, date_start, date_end, rating, comments, is_favorite, created_at, updated_at'
 
 function isMissingTableError(error) {
   return (
@@ -13,8 +13,26 @@ function isMissingTableError(error) {
   )
 }
 
+function isMissingFavoriteColumnError(error) {
+  return (
+    error?.code === 'PGRST204' ||
+    (typeof error?.message === 'string' &&
+      error.message.toLowerCase().includes('is_favorite'))
+  )
+}
+
 function missingTableMessage() {
   return 'Table television_media absente. Exécute scripts/create-television-media.sql dans Supabase.'
+}
+
+function missingFavoriteColumnMessage() {
+  return 'Colonne is_favorite absente. Exécute scripts/alter-television-media-favorite.sql dans Supabase.'
+}
+
+function throwMediaError(error) {
+  if (isMissingFavoriteColumnError(error)) throw new Error(missingFavoriteColumnMessage())
+  if (isMissingTableError(error)) throw new Error(missingTableMessage())
+  throw error
 }
 
 function normalizeMediaType(value) {
@@ -49,6 +67,7 @@ export function withPosterUrl(row) {
   if (!row) return row
   return {
     ...row,
+    is_favorite: Boolean(row.is_favorite),
     posterUrl: tmdbPosterUrl(row.poster_path, 'w342'),
   }
 }
@@ -88,10 +107,7 @@ export async function listTelevisionMedia(supabase, userId) {
     .eq('user_id', userId)
     .order('updated_at', { ascending: false })
 
-  if (error) {
-    if (isMissingTableError(error)) throw new Error(missingTableMessage())
-    throw error
-  }
+  if (error) throwMediaError(error)
 
   return (data ?? []).map(withPosterUrl)
 }
@@ -116,10 +132,7 @@ export async function getTelevisionMediaByTmdb(supabase, userId, mediaType, tmdb
     .eq('tmdb_id', id)
     .maybeSingle()
 
-  if (error) {
-    if (isMissingTableError(error)) throw new Error(missingTableMessage())
-    throw error
-  }
+  if (error) throwMediaError(error)
 
   return data ? withPosterUrl(data) : null
 }
@@ -139,10 +152,7 @@ export async function getTelevisionMediaById(supabase, userId, mediaId) {
     .eq('id', mediaId)
     .maybeSingle()
 
-  if (error) {
-    if (isMissingTableError(error)) throw new Error(missingTableMessage())
-    throw error
-  }
+  if (error) throwMediaError(error)
 
   return data ? withPosterUrl(data) : null
 }
@@ -210,10 +220,7 @@ export async function upsertTelevisionMediaFromTmdb(supabase, userId, tmdbDoc, e
       .select(MEDIA_SELECT)
       .single()
 
-    if (error) {
-      if (isMissingTableError(error)) throw new Error(missingTableMessage())
-      throw error
-    }
+    if (error) throwMediaError(error)
     return withPosterUrl(data)
   }
 
@@ -230,6 +237,7 @@ export async function upsertTelevisionMediaFromTmdb(supabase, userId, tmdbDoc, e
     date_end: dateEnd ?? null,
     rating: extras.rating !== undefined ? parseOptionalRating(extras.rating) : null,
     comments: extras.comments !== undefined ? String(extras.comments ?? '').trim() || null : null,
+    is_favorite: false,
     updated_at: new Date().toISOString(),
   }
 
@@ -239,10 +247,7 @@ export async function upsertTelevisionMediaFromTmdb(supabase, userId, tmdbDoc, e
     .select(MEDIA_SELECT)
     .single()
 
-  if (error) {
-    if (isMissingTableError(error)) throw new Error(missingTableMessage())
-    throw error
-  }
+  if (error) throwMediaError(error)
 
   return withPosterUrl(data)
 }
@@ -258,6 +263,7 @@ export async function upsertTelevisionMediaFromTmdb(supabase, userId, tmdbDoc, e
  *   rating?: number|string|null,
  *   comments?: string|null,
  *   title?: string,
+ *   isFavorite?: boolean,
  * }} input
  */
 export async function updateTelevisionMedia(supabase, userId, mediaId, input = {}) {
@@ -273,6 +279,7 @@ export async function updateTelevisionMedia(supabase, userId, mediaId, input = {
   if (input.dateEnd !== undefined) patch.date_end = parseOptionalDate(input.dateEnd)
   if (input.rating !== undefined) patch.rating = parseOptionalRating(input.rating)
   if (input.comments !== undefined) patch.comments = String(input.comments ?? '').trim() || null
+  if (input.isFavorite !== undefined) patch.is_favorite = Boolean(input.isFavorite)
   if (input.title !== undefined) {
     const title = String(input.title ?? '').trim()
     if (title) patch.title = title
@@ -286,10 +293,7 @@ export async function updateTelevisionMedia(supabase, userId, mediaId, input = {
     .select(MEDIA_SELECT)
     .maybeSingle()
 
-  if (error) {
-    if (isMissingTableError(error)) throw new Error(missingTableMessage())
-    throw error
-  }
+  if (error) throwMediaError(error)
   if (!data) throw new Error('Média introuvable.')
   return withPosterUrl(data)
 }
@@ -305,10 +309,7 @@ export async function deleteTelevisionMedia(supabase, userId, mediaId) {
 
   const { error } = await supabase.from(TABLE).delete().eq('id', mediaId).eq('user_id', userId)
 
-  if (error) {
-    if (isMissingTableError(error)) throw new Error(missingTableMessage())
-    throw error
-  }
+  if (error) throwMediaError(error)
 }
 
 /**

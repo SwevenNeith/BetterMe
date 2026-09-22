@@ -30,6 +30,7 @@ import {
   formatTelevisionFilterLabel,
 } from '../utils/television/televisionMediaFilters.js'
 import TelevisionContinueCard from '../components/television/TelevisionContinueCard.vue'
+import TelevisionFavoriteStar from '../components/television/TelevisionFavoriteStar.vue'
 import TelevisionMediaFilterPopover from '../components/television/TelevisionMediaFilterPopover.vue'
 
 defineOptions({ name: 'TelevisionView' })
@@ -218,6 +219,36 @@ function openMediaFiche(item) {
     name: 'television-fiche',
     params: { mediaType, tmdbId: String(tmdbId) },
   })
+}
+
+const favoriteBusyId = ref(null)
+
+async function onToggleFavorite(item) {
+  if (!userId.value || !item?.id || favoriteBusyId.value) return
+  const previous = Boolean(item.is_favorite)
+  const next = !previous
+  favoriteBusyId.value = item.id
+
+  const applyLocal = (value) => {
+    const idx = libraryItems.value.findIndex((row) => row.id === item.id)
+    if (idx >= 0) {
+      libraryItems.value[idx] = { ...libraryItems.value[idx], is_favorite: value }
+    }
+  }
+
+  applyLocal(next)
+  try {
+    const updated = await updateTelevisionMedia(supabase, userId.value, item.id, {
+      isFavorite: next,
+    })
+    applyLocal(Boolean(updated?.is_favorite))
+  } catch (err) {
+    console.error(err)
+    applyLocal(previous)
+    libraryError.value = err?.message || 'Impossible de mettre à jour le favori.'
+  } finally {
+    favoriteBusyId.value = null
+  }
 }
 
 function updateGridColumnCount() {
@@ -729,8 +760,10 @@ onUnmounted(() => {
                 :item="item"
                 :next-episode="nextEpisodeByMediaId[item.id] || null"
                 :busy="markingMediaId === item.id"
+                :favorite-busy="favoriteBusyId === item.id"
                 @open="openMediaFiche"
                 @mark-watched="onMarkEpisodeWatched"
+                @toggle-favorite="onToggleFavorite"
               />
             </div>
 
@@ -740,28 +773,37 @@ onUnmounted(() => {
                 :key="resultKey(item)"
                 class="television-poster television-poster--en-cours"
               >
-                <button
-                  type="button"
-                  class="television-poster__btn"
-                  :title="resultAriaLabel(item)"
-                  :aria-label="resultAriaLabel(item)"
-                  @click="openMediaFiche(item)"
-                >
-                  <img
-                    v-if="resultPoster(item)"
-                    :src="resultPoster(item)"
-                    :alt="resultTitle(item)"
-                    class="television-poster__cover"
-                    loading="lazy"
-                  />
-                  <div
-                    v-else
-                    class="television-poster__cover television-poster__cover--placeholder"
-                    aria-hidden="true"
+                <div class="television-poster__wrap">
+                  <button
+                    type="button"
+                    class="television-poster__btn"
+                    :title="resultAriaLabel(item)"
+                    :aria-label="resultAriaLabel(item)"
+                    @click="openMediaFiche(item)"
                   >
-                    <span>🎬</span>
-                  </div>
-                </button>
+                    <img
+                      v-if="resultPoster(item)"
+                      :src="resultPoster(item)"
+                      :alt="resultTitle(item)"
+                      class="television-poster__cover"
+                      loading="lazy"
+                    />
+                    <div
+                      v-else
+                      class="television-poster__cover television-poster__cover--placeholder"
+                      aria-hidden="true"
+                    >
+                      <span>🎬</span>
+                    </div>
+                  </button>
+                  <TelevisionFavoriteStar
+                    class="television-poster__fav"
+                    size="sm"
+                    :active="Boolean(item.is_favorite)"
+                    :disabled="favoriteBusyId === item.id"
+                    @toggle="onToggleFavorite(item)"
+                  />
+                </div>
               </article>
             </div>
           </section>
@@ -778,28 +820,37 @@ onUnmounted(() => {
                 :key="resultKey(item)"
                 class="television-poster"
               >
-                <button
-                  type="button"
-                  class="television-poster__btn"
-                  :title="resultAriaLabel(item)"
-                  :aria-label="resultAriaLabel(item)"
-                  @click="openMediaFiche(item)"
-                >
-                  <img
-                    v-if="resultPoster(item)"
-                    :src="resultPoster(item)"
-                    :alt="resultTitle(item)"
-                    class="television-poster__cover"
-                    loading="lazy"
-                  />
-                  <div
-                    v-else
-                    class="television-poster__cover television-poster__cover--placeholder"
-                    aria-hidden="true"
+                <div class="television-poster__wrap">
+                  <button
+                    type="button"
+                    class="television-poster__btn"
+                    :title="resultAriaLabel(item)"
+                    :aria-label="resultAriaLabel(item)"
+                    @click="openMediaFiche(item)"
                   >
-                    <span>🎬</span>
-                  </div>
-                </button>
+                    <img
+                      v-if="resultPoster(item)"
+                      :src="resultPoster(item)"
+                      :alt="resultTitle(item)"
+                      class="television-poster__cover"
+                      loading="lazy"
+                    />
+                    <div
+                      v-else
+                      class="television-poster__cover television-poster__cover--placeholder"
+                      aria-hidden="true"
+                    >
+                      <span>🎬</span>
+                    </div>
+                  </button>
+                  <TelevisionFavoriteStar
+                    class="television-poster__fav"
+                    size="sm"
+                    :active="Boolean(item.is_favorite)"
+                    :disabled="favoriteBusyId === item.id"
+                    @toggle="onToggleFavorite(item)"
+                  />
+                </div>
               </article>
             </div>
           </section>
@@ -1248,6 +1299,17 @@ onUnmounted(() => {
 
 .television-poster {
   min-width: 0;
+}
+
+.television-poster__wrap {
+  position: relative;
+}
+
+.television-poster__fav {
+  position: absolute;
+  top: 0.28rem;
+  right: 0.28rem;
+  z-index: 2;
 }
 
 .television-poster__btn {

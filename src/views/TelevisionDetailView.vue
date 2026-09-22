@@ -3,6 +3,8 @@ import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ReadingCollectionCombobox from '../components/lecture/ReadingCollectionCombobox.vue'
 import TelevisionMediaFiche from '../components/television/TelevisionMediaFiche.vue'
+import TelevisionFavoriteStar from '../components/television/TelevisionFavoriteStar.vue'
+import TelevisionHalfRating from '../components/television/TelevisionHalfRating.vue'
 import TelevisionRewatchesSection from '../components/television/TelevisionRewatchesSection.vue'
 import TelevisionSeasonProgress from '../components/television/TelevisionSeasonProgress.vue'
 import { supabase } from '../lib/supabase.js'
@@ -58,6 +60,7 @@ const isSaving = ref(false)
 const isStartingRewatch = ref(false)
 const isCancellingRewatch = ref(false)
 const episodeBusy = ref(false)
+const commentsDraft = ref('')
 
 const userId = ref(null)
 
@@ -161,9 +164,11 @@ async function loadLibraryState() {
     rewatches.value = []
     watchedKeys.value = new Set()
     rewatchUndo.value = null
+    commentsDraft.value = ''
     return
   }
 
+  commentsDraft.value = libraryItem.value.comments ?? ''
   rewatchUndo.value = readRewatchUndo(libraryItem.value.id)
   rewatches.value = await listTelevisionRewatches(supabase, userId.value, libraryItem.value.id)
 
@@ -272,6 +277,87 @@ async function onDateChange(field, value) {
   }
 }
 
+async function onToggleFavorite() {
+  if (!userId.value || !libraryItem.value?.id || isSaving.value) return
+  isSaving.value = true
+  actionError.value = ''
+  try {
+    libraryItem.value = await updateTelevisionMedia(
+      supabase,
+      userId.value,
+      libraryItem.value.id,
+      { isFavorite: !libraryItem.value.is_favorite },
+    )
+  } catch (err) {
+    console.error(err)
+    actionError.value = err.message || 'Impossible de mettre à jour le favori.'
+  } finally {
+    isSaving.value = false
+  }
+}
+
+function formatUserRatingLabel(rating) {
+  if (rating === null || rating === undefined || rating === '') return ''
+  const num = Number(rating)
+  if (!Number.isFinite(num)) return ''
+  return Number.isInteger(num) ? `${num}/5` : `${String(num).replace(/\.0$/, '')}/5`
+}
+
+async function onRatingChange(value) {
+  if (!userId.value || !libraryItem.value?.id || isSaving.value) return
+  const next =
+    value === null || value === undefined || value === ''
+      ? null
+      : Math.min(5, Math.max(0, Math.round(Number(value) * 2) / 2))
+  const current =
+    libraryItem.value.rating == null ? null : Number(libraryItem.value.rating)
+  if (current === next || (current == null && next == null)) return
+
+  isSaving.value = true
+  actionError.value = ''
+  try {
+    libraryItem.value = await updateTelevisionMedia(
+      supabase,
+      userId.value,
+      libraryItem.value.id,
+      { rating: next },
+    )
+  } catch (err) {
+    console.error(err)
+    actionError.value = err.message || 'Impossible de mettre à jour la note.'
+  } finally {
+    isSaving.value = false
+  }
+}
+
+async function onCommentsCommit() {
+  if (!userId.value || !libraryItem.value?.id || isSaving.value) return
+  const next = String(commentsDraft.value ?? '').trim()
+  const current = String(libraryItem.value.comments ?? '').trim()
+  if (next === current) {
+    commentsDraft.value = libraryItem.value.comments ?? ''
+    return
+  }
+
+  isSaving.value = true
+  actionError.value = ''
+  try {
+    libraryItem.value = await updateTelevisionMedia(
+      supabase,
+      userId.value,
+      libraryItem.value.id,
+      { comments: next || null },
+    )
+    commentsDraft.value = libraryItem.value.comments ?? ''
+  } catch (err) {
+    console.error(err)
+    actionError.value = err.message || 'Impossible de mettre à jour le commentaire.'
+    commentsDraft.value = libraryItem.value.comments ?? ''
+  } finally {
+    isSaving.value = false
+  }
+}
+
 async function removeFromLibrary() {
   if (!userId.value || !libraryItem.value?.id || isSaving.value) return
   if (!window.confirm('Retirer ce titre de ta télé ?')) return
@@ -284,6 +370,7 @@ async function removeFromLibrary() {
     rewatches.value = []
     watchedKeys.value = new Set()
     rewatchUndo.value = null
+    commentsDraft.value = ''
   } catch (err) {
     console.error(err)
     actionError.value = err.message || 'Impossible de retirer ce titre.'
@@ -517,6 +604,13 @@ watch(userId, async (id) => {
 
     <TelevisionMediaFiche v-else :media="media">
       <template #actions>
+        <TelevisionFavoriteStar
+          v-if="isInLibrary"
+          size="md"
+          :active="Boolean(libraryItem?.is_favorite)"
+          :disabled="isSaving"
+          @toggle="onToggleFavorite"
+        />
         <template v-if="!isInLibrary">
           <button
             type="button"
@@ -591,6 +685,34 @@ watch(userId, async (id) => {
                 :value="libraryItem.date_end || ''"
                 :disabled="isSaving"
                 @change="onDateChange('dateEnd', $event.target.value)"
+              />
+            </label>
+          </div>
+
+          <div class="tv-tracking__review">
+            <div class="tv-tracking__field">
+              <span class="tv-tracking__label">Ma note</span>
+              <div class="tv-tracking__rating-row">
+                <TelevisionHalfRating
+                  :model-value="libraryItem.rating == null ? null : Number(libraryItem.rating)"
+                  :disabled="isSaving"
+                  @update:model-value="onRatingChange"
+                />
+                <span v-if="libraryItem.rating != null" class="tv-tracking__rating-label">
+                  {{ formatUserRatingLabel(libraryItem.rating) }}
+                </span>
+              </div>
+            </div>
+            <label class="tv-tracking__field">
+              <span class="tv-tracking__label">Commentaire</span>
+              <textarea
+                v-model="commentsDraft"
+                class="tv-tracking__textarea"
+                rows="3"
+                maxlength="4000"
+                placeholder="Ton avis, spoiler, etc."
+                :disabled="isSaving"
+                @blur="onCommentsCommit"
               />
             </label>
           </div>
@@ -734,6 +856,47 @@ watch(userId, async (id) => {
   color: #2c3e50;
 }
 
+.tv-tracking__review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.55rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.28);
+}
+
+.tv-tracking__rating-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.65rem;
+}
+
+.tv-tracking__rating-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #5a4a68;
+}
+
+.tv-tracking__textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 4.5rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  background: rgba(255, 255, 255, 0.95);
+  font: inherit;
+  color: #2c3e50;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.tv-tracking__textarea:focus {
+  outline: 2px solid rgba(173, 129, 190, 0.45);
+  outline-offset: 1px;
+}
+
 @media (max-width: 720px) {
   .tv-tracking__row {
     grid-template-columns: 1fr;
@@ -755,11 +918,13 @@ watch(userId, async (id) => {
     color: #ff8a8a;
   }
   .tv-action-btn,
-  .tv-tracking__input {
+  .tv-tracking__input,
+  .tv-tracking__textarea {
     background: rgba(35, 30, 48, 0.9);
     color: #f0e8f8;
   }
-  .tv-tracking__label {
+  .tv-tracking__label,
+  .tv-tracking__rating-label {
     color: #c9b0d8;
   }
 }
