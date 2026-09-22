@@ -42,6 +42,18 @@ export const WORKSPACE_PAGE_OPTIONS = [
     icon: 'television',
   },
   {
+    id: APP_PAGE_IDS.JEUX,
+    path: '/jeux',
+    defaultLabel: 'Jeux',
+    icon: 'jeux',
+  },
+  {
+    id: APP_PAGE_IDS.FINANCES,
+    path: '/finances',
+    defaultLabel: 'Finances',
+    icon: 'finances',
+  },
+  {
     id: APP_PAGE_IDS.RESSOURCES,
     path: '/ressources',
     defaultLabel: 'Ressources',

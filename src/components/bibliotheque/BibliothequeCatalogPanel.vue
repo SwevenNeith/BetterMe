@@ -2,12 +2,19 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../../lib/supabase.js'
-import { listReadingBooks } from '../../services/lecture/readingBooks.js'
+import {
+  createReadingBook,
+  linkReadingBookToOpenLibrary,
+  listReadingBooks,
+} from '../../services/lecture/readingBooks.js'
+import { READING_COLLECTION_WISHLIST } from '../../services/lecture/readingCollections.js'
 import { searchOpenLibrary } from '../../services/bibliotheque/openLibrary.js'
 import {
   findLectureBookForOpenLibraryDoc,
   syncLectureBooksWithOpenLibrary,
 } from '../../services/bibliotheque/openLibraryLink.js'
+import { isExactOpenLibraryMatch } from '../../utils/bibliotheque/openLibraryMatch.js'
+import { normalizeOpenLibrarySubjects } from '../../utils/bibliotheque/openLibrarySubjects.js'
 import {
   OPEN_LIBRARY_EBOOK_OPTIONS,
   OPEN_LIBRARY_LANGUAGE_OPTIONS,
@@ -64,6 +71,9 @@ const isSyncing = ref(false)
 const syncError = ref('')
 const syncSummary = ref('')
 const syncProgress = ref(null)
+/** Clé work Open Library en cours d’ajout rapide. */
+const addingWorkKey = ref('')
+const addError = ref('')
 
 let searchDebounceTimer = null
 let searchAbortController = null
@@ -117,6 +127,64 @@ function openBook(doc) {
   })
 }
 
+function docWorkKey(doc) {
+  return String(doc?.key || '').trim()
+}
+
+async function refreshLectureBooksAfterAdd() {
+  if (Array.isArray(props.lectureBooks)) {
+    emit('linked-change')
+    return
+  }
+  await loadLectureBooks()
+  emit('linked-change')
+}
+
+async function quickAddToLibrary(doc) {
+  if (!doc?.key || !userId.value || addingWorkKey.value) return
+  if (isLinkedDoc(doc)) return
+
+  const workKey = docWorkKey(doc)
+  addingWorkKey.value = workKey
+  addError.value = ''
+
+  try {
+    const matched =
+      findLectureBookForOpenLibraryDoc(books.value, doc) ||
+      books.value.find((book) => isExactOpenLibraryMatch(book, doc)) ||
+      null
+
+    if (matched) {
+      await linkReadingBookToOpenLibrary(supabase, userId.value, matched.id, {
+        workKey: doc.key,
+        pages: doc.pageCount,
+        publicationYear: doc.firstPublishYear,
+        subjects: doc.subjects,
+      })
+    } else {
+      const subjects = normalizeOpenLibrarySubjects(doc.subjects)
+      await createReadingBook(supabase, userId.value, {
+        title: doc.title,
+        author: doc.authorLabel === 'Auteur inconnu' ? '' : doc.authorLabel,
+        collection: READING_COLLECTION_WISHLIST,
+        pages: doc.pageCount ?? '',
+        publicationYear: doc.firstPublishYear ?? '',
+        imageUrl: doc.coverUrl || '',
+        openLibraryWorkKey: doc.key,
+        genre: subjects[0] || '',
+        extraTags: subjects.slice(1).join(', '),
+      })
+    }
+
+    await refreshLectureBooksAfterAdd()
+  } catch (err) {
+    console.error(err)
+    addError.value = err?.message || 'Impossible d’ajouter ce livre.'
+  } finally {
+    addingWorkKey.value = ''
+  }
+}
+
 async function runSearch(rawQuery, page = 1) {
   const q = String(rawQuery ?? '').trim()
   const requestId = ++searchRequestId
@@ -129,12 +197,14 @@ async function runSearch(rawQuery, page = 1) {
     numFound.value = 0
     currentPage.value = 1
     loadError.value = ''
+    addError.value = ''
     isLoading.value = false
     return
   }
 
   isLoading.value = true
   loadError.value = ''
+  addError.value = ''
   currentPage.value = page
 
   const controller = new AbortController()
@@ -454,6 +524,7 @@ onUnmounted(() => {
     <p v-else-if="loadError" class="catalog-panel__error">{{ loadError }}</p>
 
     <template v-else-if="results.length">
+      <p v-if="addError" class="catalog-panel__error">{{ addError }}</p>
       <p class="catalog-panel__count">
         {{ numFound }} résultat{{ numFound === 1 ? '' : 's' }}
         <span v-if="totalPages > 1">· page {{ currentPage }} / {{ totalPages }}</span>
@@ -461,13 +532,13 @@ onUnmounted(() => {
 
       <div class="catalog-panel__grid">
         <article v-for="doc in results" :key="resultKey(doc)" class="catalog-book">
-          <button
-            type="button"
-            class="catalog-book__btn"
-            :aria-label="`${doc.title} — ${doc.authorLabel}`"
-            @click="openBook(doc)"
-          >
-            <div class="catalog-book__cover-wrap">
+          <div class="catalog-book__cover-area">
+            <button
+              type="button"
+              class="catalog-book__cover-btn"
+              :aria-label="`Ouvrir la fiche de ${doc.title}`"
+              @click="openBook(doc)"
+            >
               <img
                 v-if="coverFor(doc)"
                 :src="coverFor(doc)"
@@ -484,18 +555,36 @@ onUnmounted(() => {
                 <span>📖</span>
               </div>
               <span v-if="isLinkedDoc(doc)" class="catalog-book__badge">Dans ma bibliothèque</span>
-            </div>
-            <div class="catalog-book__meta">
-              <h3 class="catalog-book__title">{{ doc.title }}</h3>
-              <p v-if="doc.subtitle" class="catalog-book__subtitle">{{ doc.subtitle }}</p>
-              <p class="catalog-book__author">{{ doc.authorLabel }}</p>
-              <p class="catalog-book__details">
-                <span v-if="doc.firstPublishYear">{{ doc.firstPublishYear }}</span>
-                <span v-if="doc.editionCount">
-                  · {{ doc.editionCount }} édition{{ doc.editionCount > 1 ? 's' : '' }}
-                </span>
-              </p>
-            </div>
+            </button>
+
+            <button
+              v-if="!isLinkedDoc(doc)"
+              type="button"
+              class="catalog-book__add"
+              :disabled="!userId || addingWorkKey === docWorkKey(doc)"
+              :aria-label="`Ajouter « ${doc.title} » à ma bibliothèque`"
+              :title="userId ? 'Ajouter à ma bibliothèque' : 'Connecte-toi pour ajouter'"
+              @click="quickAddToLibrary(doc)"
+            >
+              <span aria-hidden="true">{{ addingWorkKey === docWorkKey(doc) ? '…' : '+' }}</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            class="catalog-book__meta-btn"
+            :aria-label="`${doc.title} — ${doc.authorLabel}`"
+            @click="openBook(doc)"
+          >
+            <h3 class="catalog-book__title">{{ doc.title }}</h3>
+            <p v-if="doc.subtitle" class="catalog-book__subtitle">{{ doc.subtitle }}</p>
+            <p class="catalog-book__author">{{ doc.authorLabel }}</p>
+            <p class="catalog-book__details">
+              <span v-if="doc.firstPublishYear">{{ doc.firstPublishYear }}</span>
+              <span v-if="doc.editionCount">
+                · {{ doc.editionCount }} édition{{ doc.editionCount > 1 ? 's' : '' }}
+              </span>
+            </p>
           </button>
         </article>
       </div>
@@ -746,30 +835,92 @@ onUnmounted(() => {
   gap: 1rem;
 }
 
-.catalog-book__btn {
+.catalog-book {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+}
+
+.catalog-book__cover-area {
+  position: relative;
+}
+
+.catalog-book__cover-btn {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  overflow: hidden;
+  background: linear-gradient(145deg, #f4eef8, #e8d9f0);
+  border: 1px solid rgba(213, 181, 234, 0.25);
+  transition: transform 0.15s ease;
+}
+
+.catalog-book__cover-btn:hover {
+  transform: translateY(-2px);
+}
+
+.catalog-book__add {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(20, 16, 28, 0.55);
+  color: #fff;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease;
+}
+
+.catalog-book__add:hover:not(:disabled) {
+  transform: scale(1.08);
+  background: rgba(173, 129, 190, 0.92);
+}
+
+.catalog-book__add:focus-visible {
+  outline: 2px solid rgba(173, 129, 190, 0.75);
+  outline-offset: 2px;
+}
+
+.catalog-book__add:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.catalog-book__meta-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
   width: 100%;
   padding: 0;
   border: none;
   background: transparent;
   text-align: left;
   cursor: pointer;
-  border-radius: 10px;
-  transition: transform 0.15s ease;
-}
-
-.catalog-book__btn:hover {
-  transform: translateY(-2px);
-}
-
-.catalog-book__cover-wrap {
-  position: relative;
   border-radius: 8px;
-  overflow: hidden;
-  background: linear-gradient(145deg, #f4eef8, #e8d9f0);
-  border: 1px solid rgba(213, 181, 234, 0.25);
+}
+
+.catalog-book__meta-btn:focus-visible {
+  outline: 2px solid rgba(173, 129, 190, 0.65);
+  outline-offset: 2px;
 }
 
 .catalog-book__cover {
@@ -929,7 +1080,7 @@ onUnmounted(() => {
   .catalog-book__author {
     color: #c9b0d8;
   }
-  .catalog-book__cover-wrap,
+  .catalog-book__cover-btn,
   .catalog-book__cover--placeholder {
     background: linear-gradient(145deg, #2a2235, #3a2f48);
   }

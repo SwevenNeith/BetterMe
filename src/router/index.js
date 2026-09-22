@@ -17,6 +17,8 @@ const LectureView = () => import('../views/LectureView.vue')
 const BibliothequeBookDetailView = () => import('../views/BibliothequeBookDetailView.vue')
 const TelevisionView = () => import('../views/TelevisionView.vue')
 const TelevisionDetailView = () => import('../views/TelevisionDetailView.vue')
+const JeuxView = () => import('../views/JeuxView.vue')
+const FinancesView = () => import('../views/FinancesView.vue')
 const ReadingSpoilChapterView = () => import('../views/ReadingSpoilChapterView.vue')
 const ReadingSpoilBookView = () => import('../views/ReadingSpoilBookView.vue')
 const ReadingBookDetailView = () => import('../views/ReadingBookDetailView.vue')
@@ -111,6 +113,16 @@ function createAppChildRoutes(namePrefix = '') {
       path: 'television/:mediaType(movie|tv)/:tmdbId',
       name: n('television-fiche'),
       component: TelevisionDetailView,
+    },
+    {
+      path: 'jeux',
+      name: n('jeux'),
+      component: JeuxView,
+    },
+    {
+      path: 'finances',
+      name: n('finances'),
+      component: FinancesView,
     },
     {
       path: 'ressources',
