@@ -109,6 +109,13 @@ export async function searchOpenLibrary(query, options = {}) {
 
   const title = String(options.title ?? '').trim()
   const author = String(options.author ?? '').trim()
+  const language = String(options.language ?? '').trim()
+
+  // FR+EN en une seule requête (évite un double fetch eng puis fre)
+  if (language === 'eng_fre') {
+    qParts.push('language:(eng OR fre)')
+  }
+
   const q = qParts.join(' ').trim()
 
   if (!q && !title && !author && !subject) {
@@ -117,7 +124,6 @@ export async function searchOpenLibrary(query, options = {}) {
 
   const page = Math.max(1, Number(options.page) || 1)
   const limit = Math.min(100, Math.max(1, Number(options.limit) || 24))
-  const language = String(options.language ?? '').trim()
   const sort = String(options.sort ?? '').trim()
   const ebookAccess = String(options.ebookAccess ?? '').trim()
 
@@ -130,8 +136,8 @@ export async function searchOpenLibrary(query, options = {}) {
   if (title) params.set('title', title)
   if (author) params.set('author', author)
 
-  // Langue : paramètre dédié si possible, sinon filtre dans q déjà géré ailleurs
-  if (language && language !== 'any') {
+  // Langue unique via paramètre dédié (hors eng_fre déjà injecté dans q)
+  if (language && language !== 'any' && language !== 'eng_fre') {
     params.set('language', language)
   }
 

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onActivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ReadingBookFiche from '../components/lecture/ReadingBookFiche.vue'
 import ReadingBooksFilterPopover from '../components/lecture/ReadingBooksFilterPopover.vue'
@@ -90,12 +90,18 @@ let gridResizeObserver = null
 const bookForm = reactive(emptyBookForm())
 const coverFile = ref(null)
 
+/** Clé stable (indépendante de l’ouverture) pour survivre à un changement de page. */
 const bookDraftKey = computed(() => {
-  if (!userId.value || !bookFormOpen.value) return null
-  return formDraftKey('book-form', userId.value, 'new')
+  if (!userId.value) return null
+  return formDraftKey('book-form-catalog', userId.value, 'new')
 })
 
-const { clearDraft: clearBookDraft, restoreDraft: restoreBookDraft } = useFormDraft(bookDraftKey, {
+const {
+  clearDraft: clearBookDraft,
+  restoreDraft: restoreBookDraft,
+  hasDraft: hasBookDraft,
+  saveDraftNow: saveBookDraftNow,
+} = useFormDraft(bookDraftKey, {
   enabled: computed(() => Boolean(userId.value) && bookFormOpen.value && !isSaving.value),
   getState: () => ({
     title: bookForm.title,
@@ -144,6 +150,24 @@ const { clearDraft: clearBookDraft, restoreDraft: restoreBookDraft } = useFormDr
     }
   },
 })
+
+function bookDraftLooksFilled(state) {
+  if (!state || typeof state !== 'object') return false
+  return Boolean(
+    String(state.title ?? '').trim() ||
+      String(state.author ?? '').trim() ||
+      String(state.collection ?? '').trim() ||
+      String(state.comments ?? '').trim() ||
+      String(state.quote ?? '').trim() ||
+      String(state.genre ?? '').trim() ||
+      String(state.extraTags ?? '').trim() ||
+      String(state.pages ?? '').trim() ||
+      String(state.publicationYear ?? '').trim() ||
+      String(state.imageUrl ?? '').trim() ||
+      Boolean(state.isSaga) ||
+      state.rating != null,
+  )
+}
 
 const booksPerPage = computed(() => Math.max(2, gridColumnCount.value) * GRID_ROWS)
 
@@ -280,15 +304,32 @@ function resetCoverSelection() {
 }
 
 async function openBookForm(prefill = {}) {
+  resetCoverSelection()
+  bookFormOpen.value = true
+  await nextTick()
+
+  if (hasBookDraft() && restoreBookDraft() && bookDraftLooksFilled(bookForm)) {
+    return
+  }
+
   Object.assign(bookForm, emptyBookForm(), {
     title: String(prefill.title ?? '').trim(),
     author: String(prefill.author ?? '').trim(),
   })
-  resetCoverSelection()
+}
+
+async function resumeCatalogBookDraftIfAny() {
+  if (!userId.value || libraryMode.value !== 'catalog') return
+  if (bookFormOpen.value || isSaving.value) return
+  if (!hasBookDraft()) return
+
   bookFormOpen.value = true
   await nextTick()
-  // Ne restaure un brouillon que si le formulaire n’est pas prérempli depuis le catalogue
-  if (!String(prefill.title ?? '').trim()) restoreBookDraft()
+  if (!restoreBookDraft() || !bookDraftLooksFilled(bookForm)) {
+    bookFormOpen.value = false
+    Object.assign(bookForm, emptyBookForm())
+    resetCoverSelection()
+  }
 }
 
 function openBookFormFromCatalog(payload = {}) {
@@ -454,6 +495,7 @@ const skipNextActivatedRefresh = ref(true)
 onActivated(async () => {
   await nextTick()
   bindGridResizeObserver()
+  await resumeCatalogBookDraftIfAny()
 
   if (skipNextActivatedRefresh.value) {
     skipNextActivatedRefresh.value = false
@@ -464,7 +506,12 @@ onActivated(async () => {
   if (userId.value) await loadBooks()
 })
 
+onDeactivated(() => {
+  if (bookFormOpen.value) saveBookDraftNow()
+})
+
 onUnmounted(() => {
+  if (bookFormOpen.value) saveBookDraftNow()
   revokeCoverPreview()
   gridResizeObserver?.disconnect()
   gridResizeObserver = null
@@ -477,8 +524,15 @@ watch(
   },
 )
 
-watch(userId, (id) => {
-  if (id) loadBooks()
+watch(libraryMode, async (mode) => {
+  if (mode === 'catalog') await resumeCatalogBookDraftIfAny()
+})
+
+watch(userId, async (id) => {
+  if (id) {
+    await loadBooks()
+    await resumeCatalogBookDraftIfAny()
+  }
 })
 
 watch(

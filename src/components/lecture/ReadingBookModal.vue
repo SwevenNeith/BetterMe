@@ -3,7 +3,7 @@ import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import ReadingBookFiche from './ReadingBookFiche.vue'
 import { setFilePickerActive, setFileUploadInProgress } from '../../composables/useAppTabResume.js'
 import { bookToEditForm, getBookGenre, formatExtraTagsInput } from '../../utils/lecture/readingBookForm.js'
-import { deleteReadingBook, updateReadingBook } from '../../services/lecture/readingBooks.js'
+import { deleteReadingBook, hasCustomReadingCover, splitReadingCoverFields, updateReadingBook } from '../../services/lecture/readingBooks.js'
 import { deleteSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../../services/lecture/readingSpoilChapters.js'
 import { supabase } from '../../lib/supabase.js'
 
@@ -269,7 +269,10 @@ async function commitCoverEdit() {
 
   try {
     const payload = bookToEditForm(props.book)
-    if (coverForm.imageMode === 'upload' && coverFile.value) {
+    if (coverForm.imageMode === 'remove') {
+      payload.removeCover = true
+      payload.file = null
+    } else if (coverForm.imageMode === 'upload' && coverFile.value) {
       payload.file = coverFile.value
     } else if (coverForm.imageMode === 'url') {
       payload.imageUrl = coverForm.imageUrl
@@ -377,24 +380,27 @@ function onImageUrlInput() {
 function switchImageMode(nextMode) {
   if (coverForm.imageMode === nextMode) return
   coverForm.imageMode = nextMode
+  coverFile.value = null
+  coverForm.imageUrl = ''
+  revokeCoverPreview()
   if (nextMode === 'keep') {
-    coverFile.value = null
-    coverForm.imageUrl = ''
-    revokeCoverPreview()
     coverPreviewUrl.value = props.book?.coverUrl ?? ''
-  } else {
-    coverFile.value = null
-    coverForm.imageUrl = ''
-    revokeCoverPreview()
+  } else if (nextMode === 'remove') {
+    coverPreviewUrl.value = splitReadingCoverFields(props.book).openLibraryUrl || ''
   }
 }
 
 const coverPreview = computed(() => {
   if (coverForm.imageMode === 'upload' && coverPreviewUrl.value) return coverPreviewUrl.value
   if (coverForm.imageMode === 'url' && coverForm.imageUrl.trim()) return coverForm.imageUrl.trim()
+  if (coverForm.imageMode === 'remove') {
+    return coverPreviewUrl.value || splitReadingCoverFields(props.book).openLibraryUrl || ''
+  }
   if (coverForm.imageMode === 'keep') return props.book?.coverUrl ?? ''
   return coverPreviewUrl.value || props.book?.coverUrl || ''
 })
+
+const bookHasCustomCover = computed(() => hasCustomReadingCover(props.book))
 
 function onDraftUpdate(value) {
   draft.value = value
@@ -474,6 +480,7 @@ onUnmounted(() => {
         :draft="draft"
         :cover-preview="coverPreview"
         :cover-file-input-ref="coverFileInputRef"
+        :has-custom-cover="bookHasCustomCover"
         :disabled="isSaving"
         :spoil-chapters="spoilChapters"
         :spoil-saving="spoilSaving"

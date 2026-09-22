@@ -66,6 +66,11 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /** Couverture perso (upload / URL) — permet de la retirer pour revenir à OL */
+  hasCustomCover: {
+    type: Boolean,
+    default: false,
+  },
   coverFileInputRef: {
     type: Object,
     default: null,
@@ -534,7 +539,25 @@ function fieldClass(field) {
           >
             URL
           </button>
+          <button
+            v-if="mode === 'sheet' && hasCustomCover"
+            type="button"
+            class="reading-fiche-mode-btn"
+            :class="{ 'reading-fiche-mode-btn--active': form?.imageMode === 'remove' }"
+            :disabled="disabled"
+            @click="emit('switch-image-mode', 'remove')"
+          >
+            Retirer ma couverture
+          </button>
         </div>
+
+        <p
+          v-if="mode === 'sheet' && form?.imageMode === 'remove'"
+          class="reading-fiche-cover-hint"
+        >
+          Ta couverture perso sera retirée. La couverture Open Library s’affichera si elle est
+          disponible.
+        </p>
 
         <div v-if="form?.imageMode === 'upload'" class="reading-fiche-upload">
           <input
@@ -851,6 +874,13 @@ function fieldClass(field) {
   border: none;
   background: transparent;
   cursor: pointer;
+}
+
+.reading-fiche-cover-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: #6b4f7c;
 }
 
 .reading-fiche-value {

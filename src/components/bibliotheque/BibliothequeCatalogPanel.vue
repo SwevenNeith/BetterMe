@@ -27,7 +27,7 @@ import {
   writePersistedPageState,
 } from '../../composables/usePersistedPageState.js'
 
-const CATALOG_SEARCH_STORAGE_KEY = 'betterme-bibliotheque-catalog-v1'
+const CATALOG_SEARCH_STORAGE_KEY = 'betterme-bibliotheque-catalog-v2'
 
 const props = defineProps({
   /** Livres Lecture déjà chargés (évite un 2e fetch si le parent les a). */

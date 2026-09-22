@@ -3,6 +3,11 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { listOpenLibraryCoverOptions } from '../../services/bibliotheque/openLibrary.js'
 import { findExactOpenLibraryMatchForBook } from '../../services/bibliotheque/openLibraryLink.js'
 import { isLinkedToOpenLibrary } from '../../utils/bibliotheque/openLibraryMatch.js'
+import {
+  hasCustomReadingCover,
+  isOpenLibraryCoverUrl,
+  splitReadingCoverFields,
+} from '../../services/lecture/readingBooks.js'
 
 const props = defineProps({
   book: {
@@ -27,14 +32,29 @@ const selectedLabel = ref('')
 let abortController = null
 let loadedForKey = ''
 
+const hasCustomCover = computed(() => hasCustomReadingCover(props.book))
+
 const summaryLabel = computed(() => {
-  if (selectedLabel.value) return selectedLabel.value
+  if (selectedLabel.value) {
+    if (hasCustomCover.value) return `${selectedLabel.value} · ta couverture prime`
+    return selectedLabel.value
+  }
+  if (hasCustomCover.value) return 'Ta couverture (édition OL en secours)'
   if (!isLinkedToOpenLibrary(props.book)) return 'Non lié — ouvrir pour chercher'
   return 'Choisir une édition…'
 })
 
+function editionCoverCandidate() {
+  const { openLibraryUrl, customUrl } = splitReadingCoverFields(props.book)
+  if (openLibraryUrl) return openLibraryUrl
+  const displayed = String(props.book?.coverUrl || props.book?.cover_image_url || '').trim()
+  if (displayed && isOpenLibraryCoverUrl(displayed)) return displayed
+  if (customUrl && isOpenLibraryCoverUrl(customUrl)) return customUrl
+  return ''
+}
+
 function coverMatchesCurrent(option) {
-  const current = String(props.book?.coverUrl || props.book?.cover_image_url || '').trim()
+  const current = editionCoverCandidate()
   if (!current || !option?.coverId) return false
   return (
     current.includes(`/${option.coverId}-`) ||
@@ -120,7 +140,14 @@ async function selectOption(option) {
 }
 
 watch(
-  () => [props.book?.id, props.book?.open_library_work_key, props.book?.coverUrl],
+  () => [
+    props.book?.id,
+    props.book?.open_library_work_key,
+    props.book?.open_library_cover_url,
+    props.book?.cover_image_url,
+    props.book?.cover_storage_path,
+    props.book?.coverUrl,
+  ],
   ([bookId, workKey]) => {
     const cacheKey = String(workKey || bookId || '')
     if (cacheKey !== loadedForKey) {
@@ -158,6 +185,9 @@ onUnmounted(() => {
       </button>
 
       <div v-if="open" class="reading-editions__panel" role="listbox" aria-label="Éditions Open Library">
+        <p v-if="hasCustomCover" class="reading-editions__hint">
+          Choisir une édition met à jour le secours Open Library. Ta couverture perso reste affichée.
+        </p>
         <p v-if="isLoading" class="reading-editions__status">Chargement des éditions…</p>
         <p v-else-if="loadError" class="reading-editions__error">{{ loadError }}</p>
         <div v-else class="reading-editions__list">
@@ -261,6 +291,15 @@ onUnmounted(() => {
   padding: 0.35rem;
 }
 
+.reading-editions__hint {
+  margin: 0 0 0.35rem;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1.35;
+  color: #6b4f7c;
+}
+
 .reading-editions__status,
 .reading-editions__error {
   margin: 0;
@@ -336,7 +375,8 @@ onUnmounted(() => {
   }
 
   .reading-editions__summary,
-  .reading-editions__option-label {
+  .reading-editions__option-label,
+  .reading-editions__hint {
     color: #f0e8f8;
   }
 

@@ -1,6 +1,7 @@
 /** Options de filtres pour la recherche catalogue Open Library. */
 
 export const OPEN_LIBRARY_LANGUAGE_OPTIONS = [
+  { id: 'eng_fre', label: 'Français & Anglais' },
   { id: 'any', label: 'Toutes les langues' },
   { id: 'fre', label: 'Français' },
   { id: 'eng', label: 'Anglais' },
@@ -14,6 +15,9 @@ export const OPEN_LIBRARY_LANGUAGE_OPTIONS = [
   { id: 'chi', label: 'Chinois' },
   { id: 'ara', label: 'Arabe' },
 ]
+
+/** Valeur par défaut : une seule requête Open Library (pas 2 appels). */
+export const OPEN_LIBRARY_DEFAULT_LANGUAGE = 'eng_fre'
 
 export const OPEN_LIBRARY_SORT_OPTIONS = [
   { id: '', label: 'Pertinence' },
@@ -36,7 +40,7 @@ export const OPEN_LIBRARY_EBOOK_OPTIONS = [
 
 export function createDefaultOpenLibrarySearchFilters() {
   return {
-    language: 'eng',
+    language: OPEN_LIBRARY_DEFAULT_LANGUAGE,
     sort: '',
     yearFrom: '',
     yearTo: '',
@@ -50,7 +54,9 @@ export function createDefaultOpenLibrarySearchFilters() {
 export function openLibrarySearchFiltersActive(filters) {
   if (!filters) return false
   return Boolean(
-    (filters.language && filters.language !== 'any' && filters.language !== 'eng') ||
+    (filters.language &&
+      filters.language !== 'any' &&
+      filters.language !== OPEN_LIBRARY_DEFAULT_LANGUAGE) ||
       filters.sort ||
       String(filters.yearFrom ?? '').trim() ||
       String(filters.yearTo ?? '').trim() ||

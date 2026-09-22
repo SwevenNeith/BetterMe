@@ -15,20 +15,31 @@ const ALLOWED_MIME = new Set([
 ])
 
 const BOOK_SELECT =
+  'id, user_id, title, author, collection, is_saga, saga_volume, date_start, date_end, rating, pages, publication_year, comments, quote, spoil, cover_storage_path, cover_image_url, open_library_cover_url, tags, open_library_work_key, created_at'
+
+const BOOK_SELECT_NO_OL_COVER =
   'id, user_id, title, author, collection, is_saga, saga_volume, date_start, date_end, rating, pages, publication_year, comments, quote, spoil, cover_storage_path, cover_image_url, tags, open_library_work_key, created_at'
 
 const BOOK_SELECT_LEGACY =
   'id, user_id, title, author, collection, is_saga, saga_volume, date_start, date_end, rating, pages, publication_year, comments, quote, spoil, cover_storage_path, cover_image_url, tags, created_at'
 
-function isMissingOpenLibraryColumnError(error) {
+function isMissingColumnError(error, columnName) {
   const message = String(error?.message ?? '')
   return (
-    message.includes('open_library_work_key') &&
+    message.includes(columnName) &&
     (error?.code === 'PGRST204' ||
       error?.code === '42703' ||
       message.includes('does not exist') ||
       message.includes('schema cache'))
   )
+}
+
+function isMissingOpenLibraryColumnError(error) {
+  return isMissingColumnError(error, 'open_library_work_key')
+}
+
+function isMissingOpenLibraryCoverColumnError(error) {
+  return isMissingColumnError(error, 'open_library_cover_url')
 }
 
 const DUPLICATE_BOOK_MESSAGE =
@@ -103,6 +114,38 @@ function assertImageUrl(url) {
   }
 }
 
+/** URL de couverture servie par Open Library (covers.openlibrary.org). */
+export function isOpenLibraryCoverUrl(url) {
+  return /covers\.openlibrary\.org/i.test(String(url ?? ''))
+}
+
+/**
+ * Couverture renseignée par l’utilisateur (upload ou URL perso).
+ * Les URL Open Library legacy dans cover_image_url ne comptent pas.
+ */
+export function hasCustomReadingCover(book) {
+  if (String(book?.cover_storage_path ?? '').trim()) return true
+  const url = String(book?.cover_image_url ?? '').trim()
+  return Boolean(url && !isOpenLibraryCoverUrl(url))
+}
+
+/**
+ * Sépare couverture perso / fallback OL (y compris legacy avant migration SQL).
+ * @returns {{ customUrl: string|null, openLibraryUrl: string|null }}
+ */
+export function splitReadingCoverFields(book) {
+  let customUrl = String(book?.cover_image_url ?? '').trim() || null
+  let openLibraryUrl = String(book?.open_library_cover_url ?? '').trim() || null
+
+  // URL OL jamais considérée comme couverture perso
+  if (customUrl && isOpenLibraryCoverUrl(customUrl)) {
+    if (!openLibraryUrl) openLibraryUrl = customUrl
+    customUrl = null
+  }
+
+  return { customUrl, openLibraryUrl }
+}
+
 /**
  * Parse une chaîne de tags séparés par des virgules ou des point-virgules.
  * @param {string} raw
@@ -134,19 +177,44 @@ export async function getReadingCoverSignedUrl(supabase, storagePath) {
 }
 
 /**
+ * Priorité d’affichage : upload perso → URL perso → couverture Open Library.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
- * @param {{ cover_storage_path?: string|null, cover_image_url?: string|null }} book
+ * @param {{ cover_storage_path?: string|null, cover_image_url?: string|null, open_library_cover_url?: string|null }} book
  */
 export async function resolveReadingCoverUrl(supabase, book) {
   if (book?.cover_storage_path) {
     try {
       return await getReadingCoverSignedUrl(supabase, book.cover_storage_path)
     } catch {
-      return null
+      /* fallback ci-dessous */
     }
   }
-  const external = String(book?.cover_image_url ?? '').trim()
-  return external || null
+
+  const { customUrl, openLibraryUrl } = splitReadingCoverFields(book)
+  return customUrl || openLibraryUrl || null
+}
+
+function withCoverMeta(row, coverUrl = null) {
+  return {
+    ...row,
+    open_library_work_key: row?.open_library_work_key ?? null,
+    open_library_cover_url: row?.open_library_cover_url ?? null,
+    coverUrl,
+  }
+}
+
+/**
+ * Select avec repli si colonnes OL absentes.
+ */
+async function selectReadingBookQuery(supabase, build) {
+  let result = await build(BOOK_SELECT)
+  if (result.error && isMissingOpenLibraryCoverColumnError(result.error)) {
+    result = await build(BOOK_SELECT_NO_OL_COVER)
+  }
+  if (result.error && isMissingOpenLibraryColumnError(result.error)) {
+    result = await build(BOOK_SELECT_LEGACY)
+  }
+  return result
 }
 
 /**
@@ -154,25 +222,16 @@ export async function resolveReadingCoverUrl(supabase, book) {
  * @param {string} userId
  */
 export async function listReadingBooks(supabase, userId) {
-  let { data, error } = await supabase
-    .from(TABLE)
-    .select(BOOK_SELECT)
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-
-  if (error && isMissingOpenLibraryColumnError(error)) {
-    ;({ data, error } = await supabase
+  const { data, error } = await selectReadingBookQuery(supabase, (columns) =>
+    supabase
       .from(TABLE)
-      .select(BOOK_SELECT_LEGACY)
+      .select(columns)
       .eq('user_id', userId)
-      .order('created_at', { ascending: false }))
-  }
+      .order('created_at', { ascending: false }),
+  )
 
   if (error) throw error
-  return (data ?? []).map((row) => ({
-    ...row,
-    open_library_work_key: row.open_library_work_key ?? null,
-  }))
+  return (data ?? []).map((row) => withCoverMeta(row))
 }
 
 /**
@@ -197,27 +256,20 @@ export async function listReadingBooksWithCovers(supabase, userId) {
 export async function getReadingBookWithCover(supabase, userId, bookId) {
   if (!userId || !bookId) return null
 
-  let { data, error } = await supabase
-    .from(TABLE)
-    .select(BOOK_SELECT)
-    .eq('id', bookId)
-    .eq('user_id', userId)
-    .maybeSingle()
-
-  if (error && isMissingOpenLibraryColumnError(error)) {
-    ;({ data, error } = await supabase
+  const { data, error } = await selectReadingBookQuery(supabase, (columns) =>
+    supabase
       .from(TABLE)
-      .select(BOOK_SELECT_LEGACY)
+      .select(columns)
       .eq('id', bookId)
       .eq('user_id', userId)
-      .maybeSingle())
-  }
+      .maybeSingle(),
+  )
 
   if (error) throw error
   if (!data) return null
 
   const coverUrl = await resolveReadingCoverUrl(supabase, data)
-  return { ...data, open_library_work_key: data.open_library_work_key ?? null, coverUrl }
+  return withCoverMeta(data, coverUrl)
 }
 
 /**
@@ -279,6 +331,44 @@ async function resolveCollectionName(supabase, userId, collection) {
 }
 
 /**
+ * Répartit une URL d’entrée entre couverture perso et fallback OL.
+ * @returns {{ coverImageUrl: string|null, openLibraryCoverUrl: string|null }}
+ */
+function classifyIncomingCoverUrl(url, { treatOpenLibraryAsFallback = true } = {}) {
+  const trimmed = assertImageUrl(url)
+  if (!trimmed) return { coverImageUrl: null, openLibraryCoverUrl: null }
+  if (treatOpenLibraryAsFallback && isOpenLibraryCoverUrl(trimmed)) {
+    return { coverImageUrl: null, openLibraryCoverUrl: trimmed }
+  }
+  return { coverImageUrl: trimmed, openLibraryCoverUrl: null }
+}
+
+async function insertReadingBookRow(supabase, insertPayload) {
+  let result = await supabase.from(TABLE).insert(insertPayload).select(BOOK_SELECT).single()
+
+  if (result.error && isMissingOpenLibraryCoverColumnError(result.error)) {
+    const fallback = { ...insertPayload }
+    if (fallback.open_library_cover_url && !fallback.cover_image_url) {
+      fallback.cover_image_url = fallback.open_library_cover_url
+    }
+    delete fallback.open_library_cover_url
+    result = await supabase.from(TABLE).insert(fallback).select(BOOK_SELECT_NO_OL_COVER).single()
+  }
+
+  if (result.error && isMissingOpenLibraryColumnError(result.error)) {
+    const fallback = { ...insertPayload }
+    delete fallback.open_library_work_key
+    if (fallback.open_library_cover_url && !fallback.cover_image_url) {
+      fallback.cover_image_url = fallback.open_library_cover_url
+    }
+    delete fallback.open_library_cover_url
+    result = await supabase.from(TABLE).insert(fallback).select(BOOK_SELECT_LEGACY).single()
+  }
+
+  return result
+}
+
+/**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {object} input
@@ -292,11 +382,25 @@ export async function createReadingBook(supabase, userId, input) {
 
   let coverStoragePath = null
   let coverImageUrl = null
+  let openLibraryCoverUrl = null
 
   if (input?.file) {
     coverStoragePath = await uploadReadingCover(supabase, userId, input.file)
   } else if (input?.imageUrl) {
-    coverImageUrl = assertImageUrl(input.imageUrl)
+    const classified = classifyIncomingCoverUrl(input.imageUrl, {
+      // URL saisie manuellement = perso ; URL OL (catalogue) = fallback
+      treatOpenLibraryAsFallback: true,
+    })
+    coverImageUrl = classified.coverImageUrl
+    openLibraryCoverUrl = classified.openLibraryCoverUrl
+  }
+
+  if (input?.openLibraryCoverUrl) {
+    try {
+      openLibraryCoverUrl = assertImageUrl(input.openLibraryCoverUrl) || openLibraryCoverUrl
+    } catch {
+      /* ignore */
+    }
   }
 
   const insertPayload = {
@@ -304,25 +408,13 @@ export async function createReadingBook(supabase, userId, input) {
     ...row,
     cover_storage_path: coverStoragePath,
     cover_image_url: coverImageUrl,
+    open_library_cover_url: openLibraryCoverUrl,
   }
 
   const olKey = input?.openLibraryWorkKey ? String(input.openLibraryWorkKey).trim() || null : null
   if (olKey) insertPayload.open_library_work_key = olKey
 
-  let { data, error } = await supabase
-    .from(TABLE)
-    .insert(insertPayload)
-    .select(BOOK_SELECT)
-    .single()
-
-  if (error && isMissingOpenLibraryColumnError(error)) {
-    delete insertPayload.open_library_work_key
-    ;({ data, error } = await supabase
-      .from(TABLE)
-      .insert(insertPayload)
-      .select(BOOK_SELECT_LEGACY)
-      .single())
-  }
+  const { data, error } = await insertReadingBookRow(supabase, insertPayload)
 
   if (error) {
     if (coverStoragePath) {
@@ -333,7 +425,74 @@ export async function createReadingBook(supabase, userId, input) {
   }
 
   const coverUrl = await resolveReadingCoverUrl(supabase, data)
-  return { ...data, open_library_work_key: data.open_library_work_key ?? null, coverUrl }
+  return withCoverMeta(data, coverUrl)
+}
+
+/**
+ * Sans colonne open_library_cover_url : n’écrit l’URL OL dans cover_image_url
+ * que si le patch touche déjà les champs de couverture perso (create/update complets).
+ * Un lien OL seul ne doit jamais écraser cover_image_url existant.
+ */
+function stripOpenLibraryCoverForLegacyPatch(patch) {
+  const fallback = { ...patch }
+  if (!Object.prototype.hasOwnProperty.call(fallback, 'open_library_cover_url')) {
+    return fallback
+  }
+
+  const olUrl = fallback.open_library_cover_url
+  delete fallback.open_library_cover_url
+
+  const touchesCustomCover =
+    Object.prototype.hasOwnProperty.call(fallback, 'cover_storage_path') ||
+    Object.prototype.hasOwnProperty.call(fallback, 'cover_image_url')
+
+  if (!touchesCustomCover) return fallback
+
+  const hasCustomInPatch =
+    Boolean(String(fallback.cover_storage_path ?? '').trim()) ||
+    (Boolean(String(fallback.cover_image_url ?? '').trim()) &&
+      !isOpenLibraryCoverUrl(fallback.cover_image_url))
+
+  if (olUrl && !hasCustomInPatch) {
+    fallback.cover_image_url = olUrl
+  }
+
+  return fallback
+}
+
+async function updateReadingBookRow(supabase, bookId, userId, patch) {
+  let result = await supabase
+    .from(TABLE)
+    .update(patch)
+    .eq('id', bookId)
+    .eq('user_id', userId)
+    .select(BOOK_SELECT)
+    .single()
+
+  if (result.error && isMissingOpenLibraryCoverColumnError(result.error)) {
+    const fallback = stripOpenLibraryCoverForLegacyPatch(patch)
+    result = await supabase
+      .from(TABLE)
+      .update(fallback)
+      .eq('id', bookId)
+      .eq('user_id', userId)
+      .select(BOOK_SELECT_NO_OL_COVER)
+      .single()
+  }
+
+  if (result.error && isMissingOpenLibraryColumnError(result.error)) {
+    const fallback = stripOpenLibraryCoverForLegacyPatch(patch)
+    delete fallback.open_library_work_key
+    result = await supabase
+      .from(TABLE)
+      .update(fallback)
+      .eq('id', bookId)
+      .eq('user_id', userId)
+      .select(BOOK_SELECT_LEGACY)
+      .single()
+  }
+
+  return result
 }
 
 /**
@@ -346,6 +505,7 @@ export async function createReadingBook(supabase, userId, input) {
  *   tags?: string[]|string,
  *   file?: File|null,
  *   imageUrl?: string|null,
+ *   openLibraryCoverUrl?: string|null,
  *   removeCover?: boolean,
  * }} input
  */
@@ -353,21 +513,14 @@ export async function updateReadingBook(supabase, userId, bookId, input) {
   if (!userId) throw new Error('Utilisateur non connecté.')
   if (!bookId) throw new Error('Livre introuvable.')
 
-  let { data: existing, error: readError } = await supabase
-    .from(TABLE)
-    .select(BOOK_SELECT)
-    .eq('id', bookId)
-    .eq('user_id', userId)
-    .maybeSingle()
-
-  if (readError && isMissingOpenLibraryColumnError(readError)) {
-    ;({ data: existing, error: readError } = await supabase
+  const { data: existing, error: readError } = await selectReadingBookQuery(supabase, (columns) =>
+    supabase
       .from(TABLE)
-      .select(BOOK_SELECT_LEGACY)
+      .select(columns)
       .eq('id', bookId)
       .eq('user_id', userId)
-      .maybeSingle())
-  }
+      .maybeSingle(),
+  )
 
   if (readError) throw readError
   if (!existing) throw new Error('Livre introuvable.')
@@ -378,47 +531,40 @@ export async function updateReadingBook(supabase, userId, bookId, input) {
 
   const oldStoragePath = existing.cover_storage_path
   let coverStoragePath = existing.cover_storage_path
-  let coverImageUrl = existing.cover_image_url
+  const splitExisting = splitReadingCoverFields(existing)
+  // Normalise le legacy : URL OL dans cover_image_url → open_library_cover_url
+  let coverImageUrl = splitExisting.customUrl
+  let openLibraryCoverUrl = splitExisting.openLibraryUrl
 
   if (input?.file) {
     coverStoragePath = await uploadReadingCover(supabase, userId, input.file)
     coverImageUrl = null
   } else if (input?.removeCover) {
+    // Retire uniquement la couverture perso → fallback OL si présent
     coverStoragePath = null
     coverImageUrl = null
   } else if (input?.imageUrl !== undefined) {
     const url = String(input.imageUrl ?? '').trim()
     if (url) {
+      // URL saisie dans le formulaire fiche = couverture perso (même si domaine OL)
       coverImageUrl = assertImageUrl(url)
       coverStoragePath = null
     }
   }
 
-  let { data, error } = await supabase
-    .from(TABLE)
-    .update({
-      ...row,
-      cover_storage_path: coverStoragePath,
-      cover_image_url: coverImageUrl,
-    })
-    .eq('id', bookId)
-    .eq('user_id', userId)
-    .select(BOOK_SELECT)
-    .single()
-
-  if (error && isMissingOpenLibraryColumnError(error)) {
-    ;({ data, error } = await supabase
-      .from(TABLE)
-      .update({
-        ...row,
-        cover_storage_path: coverStoragePath,
-        cover_image_url: coverImageUrl,
-      })
-      .eq('id', bookId)
-      .eq('user_id', userId)
-      .select(BOOK_SELECT_LEGACY)
-      .single())
+  if (input?.openLibraryCoverUrl !== undefined) {
+    const url = String(input.openLibraryCoverUrl ?? '').trim()
+    openLibraryCoverUrl = url ? assertImageUrl(url) : null
   }
+
+  const patch = {
+    ...row,
+    cover_storage_path: coverStoragePath,
+    cover_image_url: coverImageUrl,
+    open_library_cover_url: openLibraryCoverUrl,
+  }
+
+  const { data, error } = await updateReadingBookRow(supabase, bookId, userId, patch)
 
   if (error) {
     if (input?.file && coverStoragePath && coverStoragePath !== oldStoragePath) {
@@ -433,13 +579,13 @@ export async function updateReadingBook(supabase, userId, bookId, input) {
   }
 
   const coverUrl = await resolveReadingCoverUrl(supabase, data)
-  return { ...data, open_library_work_key: data.open_library_work_key ?? null, coverUrl }
+  return withCoverMeta(data, coverUrl)
 }
 
 /**
  * Lie un livre Lecture à un work Open Library sans toucher aux données perso
  * (collection, dates, spoils, notes, titre/auteur saisis, etc.).
- * Met à jour la couverture externe seulement s’il n’y a pas d’upload local.
+ * La couverture OL est stockée à part et ne remplace jamais une couverture perso.
  *
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
@@ -449,7 +595,6 @@ export async function updateReadingBook(supabase, userId, bookId, input) {
  *   coverUrl?: string|null,
  *   pages?: number|null,
  *   publicationYear?: number|null,
- *   replaceCover?: boolean,
  *   subjects?: string[]|null,
  *   replaceTags?: boolean,
  *   isSaga?: boolean,
@@ -463,12 +608,14 @@ export async function linkReadingBookToOpenLibrary(supabase, userId, bookId, lin
   const workKey = String(link?.workKey ?? '').trim()
   if (!workKey) throw new Error('Clé Open Library manquante.')
 
-  const { data: existing, error: readError } = await supabase
-    .from(TABLE)
-    .select(BOOK_SELECT)
-    .eq('id', bookId)
-    .eq('user_id', userId)
-    .maybeSingle()
+  const { data: existing, error: readError } = await selectReadingBookQuery(supabase, (columns) =>
+    supabase
+      .from(TABLE)
+      .select(columns)
+      .eq('id', bookId)
+      .eq('user_id', userId)
+      .maybeSingle(),
+  )
 
   if (readError) {
     if (isMissingOpenLibraryColumnError(readError)) {
@@ -485,16 +632,10 @@ export async function linkReadingBookToOpenLibrary(supabase, userId, bookId, lin
     open_library_work_key: workKey,
   }
 
-  const hasLocalUpload = Boolean(String(existing.cover_storage_path ?? '').trim())
-  const hasExistingCoverUrl = Boolean(String(existing.cover_image_url ?? '').trim())
-  const replaceCover = link?.replaceCover === true
-  // Ne jamais écraser une couverture existante sauf choix explicite
-  if (link?.coverUrl && (replaceCover || (!hasLocalUpload && !hasExistingCoverUrl))) {
+  if (link?.coverUrl) {
     try {
-      patch.cover_image_url = assertImageUrl(link.coverUrl)
-      if (replaceCover && hasLocalUpload) {
-        patch.cover_storage_path = null
-      }
+      patch.open_library_cover_url = assertImageUrl(link.coverUrl)
+      // Ne jamais écraser cover_storage_path / cover_image_url (couverture perso)
     } catch {
       /* ignore invalid cover */
     }
@@ -532,13 +673,7 @@ export async function linkReadingBookToOpenLibrary(supabase, userId, bookId, lin
   })
   if (mergedTags) patch.tags = mergedTags
 
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update(patch)
-    .eq('id', bookId)
-    .eq('user_id', userId)
-    .select(BOOK_SELECT)
-    .single()
+  const { data, error } = await updateReadingBookRow(supabase, bookId, userId, patch)
 
   if (error) {
     if (isMissingOpenLibraryColumnError(error)) {
@@ -552,17 +687,8 @@ export async function linkReadingBookToOpenLibrary(supabase, userId, bookId, lin
     throw error
   }
 
-  if (
-    replaceCover &&
-    hasLocalUpload &&
-    existing.cover_storage_path &&
-    patch.cover_storage_path === null
-  ) {
-    await supabase.storage.from(BUCKET).remove([existing.cover_storage_path])
-  }
-
   const coverUrl = await resolveReadingCoverUrl(supabase, data)
-  return { ...data, coverUrl }
+  return withCoverMeta(data, coverUrl)
 }
 
 /**
