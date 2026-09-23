@@ -220,6 +220,14 @@ async function addToLibrary(collection) {
     })
     await loadCollections()
     await loadLibraryState()
+    try {
+      const { syncTelevisionReleaseNotificationsAfterMediaChange } = await import(
+        '../services/television/televisionReleaseNotifications.js'
+      )
+      await syncTelevisionReleaseNotificationsAfterMediaChange(userId.value)
+    } catch (syncErr) {
+      console.warn('syncTelevisionReleaseNotifications:', syncErr)
+    }
   } catch (err) {
     console.error(err)
     actionError.value = err.message || 'Impossible d’ajouter à ta télé.'

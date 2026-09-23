@@ -8,6 +8,7 @@ export const DEVICE_NOTIFICATION_CATEGORY_IDS = {
   TODO_PROMESSE: 'todo_promesse',
   RECONFORT: 'reconfort',
   MENSTRUATION: 'menstruation',
+  TELEVISION: 'television',
 }
 
 /** Liste affichée sous chaque appareil (ordre UI). */
@@ -51,6 +52,12 @@ export const DEVICE_NOTIFICATION_CATEGORIES = [
     id: DEVICE_NOTIFICATION_CATEGORY_IDS.MENSTRUATION,
     label: 'Menstruation',
     description: 'Phases, règles estimées, SPM et patterns de symptômes.',
+  },
+  {
+    id: DEVICE_NOTIFICATION_CATEGORY_IDS.TELEVISION,
+    label: 'Télévision',
+    description:
+      'Sortie d’un film, nouvel épisode, ou retour d’une série terminée (nouvelle saison).',
   },
 ]
 
@@ -99,6 +106,12 @@ export function mapNotificationKindToDeviceCategory(kind) {
   if (raw === 'reconfort') return DEVICE_NOTIFICATION_CATEGORY_IDS.RECONFORT
   if (raw.startsWith('menstruation_')) {
     return DEVICE_NOTIFICATION_CATEGORY_IDS.MENSTRUATION
+  }
+  if (
+    raw.startsWith('television_movie_release:') ||
+    raw.startsWith('television_episode_air:')
+  ) {
+    return DEVICE_NOTIFICATION_CATEGORY_IDS.TELEVISION
   }
   return null
 }

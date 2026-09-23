@@ -102,7 +102,7 @@ export async function getTmdbDetails(type, id, language = 'fr-FR') {
     mediaType,
     id: mediaId,
     language: lang,
-    append_to_response: 'credits,videos,watch/providers',
+    append_to_response: 'credits,videos,watch/providers,release_dates',
   })
 
   return {

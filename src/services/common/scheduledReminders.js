@@ -388,6 +388,12 @@ export async function loadStandaloneScheduledGrouped(supabase, userId) {
     if (String(row?.kind || '').startsWith(MENSTRUATION_KIND_PREFIX)) {
       continue
     }
+    if (
+      String(row?.kind || '').startsWith('television_movie_release:') ||
+      String(row?.kind || '').startsWith('television_episode_air:')
+    ) {
+      continue
+    }
     if (row?.kind === SCHEDULED_KIND.RECONFORT) {
       continue
     }

@@ -372,6 +372,14 @@ async function loadLibrary() {
   try {
     collections.value = await listTelevisionCollections(supabase, userId.value)
     libraryItems.value = await listTelevisionMedia(supabase, userId.value)
+    try {
+      const { syncTelevisionReleaseNotificationsForUser } = await import(
+        '../services/television/televisionReleaseNotifications.js'
+      )
+      void syncTelevisionReleaseNotificationsForUser(userId.value)
+    } catch (syncErr) {
+      console.warn('syncTelevisionReleaseNotifications:', syncErr)
+    }
     const series = libraryItems.value.filter(
       (item) =>
         item.media_type === 'tv' &&

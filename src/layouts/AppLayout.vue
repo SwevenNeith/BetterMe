@@ -141,12 +141,19 @@ onMounted(() => {
       const [
         { purgeStaleMenstruationNotificationsOnStartup },
         { realignAllDeviceLocalNotifications },
+        { syncTelevisionReleaseNotificationsForUser },
       ] = await Promise.all([
         import('../services/menstruation/menstruationNotificationSync.js'),
         import('../services/common/notificationRealign.js'),
+        import('../services/television/televisionReleaseNotifications.js'),
       ])
       await realignAllDeviceLocalNotifications(supabase, user.id)
       await purgeStaleMenstruationNotificationsOnStartup(user.id)
+      try {
+        await syncTelevisionReleaseNotificationsForUser(user.id)
+      } catch (tvErr) {
+        console.error('syncTelevisionReleaseNotifications:', tvErr)
+      }
       try {
         await purgeOldSentScheduledNotifications(supabase, user.id)
       } catch (purgeErr) {

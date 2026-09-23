@@ -449,6 +449,12 @@ function mapNotificationKindToDeviceCategory(kind: unknown): string | null {
   if (raw === 'todo_promesse_reminder') return 'todo_promesse'
   if (raw === 'reconfort') return 'reconfort'
   if (raw.startsWith('menstruation_')) return 'menstruation'
+  if (
+    raw.startsWith('television_movie_release:') ||
+    raw.startsWith('television_episode_air:')
+  ) {
+    return 'television'
+  }
   return null
 }
 
