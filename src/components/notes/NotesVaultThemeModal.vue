@@ -18,6 +18,7 @@ import {
   rgbToHex,
   vaultThemeStyle,
 } from '../../constants/notes/noteVaults.js'
+import { usePrefersDark } from '../../composables/usePrefersDark.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -52,13 +53,17 @@ const modalTitle = computed(() =>
 )
 const submitLabel = computed(() => (isEditMode.value ? 'Enregistrer' : 'Créer le coffre'))
 
+const prefersDark = usePrefersDark()
 const previewStyle = computed(() =>
-  vaultThemeStyle({
-    color: primaryColor.value,
-    accent_color: accentColor.value,
-    surface_color: surfaceColor.value,
-    gradient_color: gradientColor.value,
-  }),
+  vaultThemeStyle(
+    {
+      color: primaryColor.value,
+      accent_color: accentColor.value,
+      surface_color: surfaceColor.value,
+      gradient_color: gradientColor.value,
+    },
+    { dark: prefersDark.value },
+  ),
 )
 
 function syncRgbFromHex(target, hex) {

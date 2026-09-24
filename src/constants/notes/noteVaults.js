@@ -142,11 +142,54 @@ export function vaultSettingsKey(vaultId) {
 /**
  * Variables CSS appliquées à la page Notes quand un coffre est ouvert.
  * @param {{ color?: string, accent_color?: string, accentColor?: string, surface_color?: string, surfaceColor?: string, gradient_color?: string, gradientColor?: string } | null | undefined} vault
+ * @param {{ dark?: boolean }} [options]
  */
-export function vaultThemeStyle(vault) {
+export function vaultThemeStyle(vault, options = {}) {
   if (!vault) return {}
 
   const { color, accent, surface, gradient } = normalizeVaultTheme(vault)
+  const dark = Boolean(options.dark)
+
+  if (dark) {
+    const base = '#1a1524'
+    const panel = '#221a2e'
+    const main = '#1f1a2c'
+    const input = '#2a2438'
+    return {
+      '--notes-vault-color': color,
+      '--notes-vault-accent': accent,
+      '--notes-vault-surface': surface,
+      '--notes-vault-gradient': gradient,
+      '--notes-vault-on-color': '#ffffff',
+      '--notes-vault-text': '#f0e8f8',
+      '--notes-vault-text-muted': '#b8a8c8',
+      '--notes-vault-page-bg': `color-mix(in srgb, ${accent} 16%, ${base})`,
+      '--notes-vault-sidebar-bg': `color-mix(in srgb, ${accent} 22%, ${panel})`,
+      '--notes-vault-main-bg': `color-mix(in srgb, ${accent} 12%, ${main})`,
+      '--notes-vault-header-bg': `color-mix(in srgb, ${accent} 20%, ${panel})`,
+      '--notes-vault-tabs-bg': `color-mix(in srgb, ${accent} 24%, ${panel})`,
+      '--notes-vault-border': `color-mix(in srgb, ${color} 32%, #3a3148)`,
+      '--notes-vault-border-strong': `color-mix(in srgb, ${color} 45%, #4a3d5c)`,
+      '--notes-vault-btn-bg': color,
+      '--notes-vault-btn-text': '#ffffff',
+      '--notes-vault-icon': `color-mix(in srgb, ${color} 72%, white)`,
+      '--notes-vault-icon-active': `color-mix(in srgb, ${color} 55%, #95d1aa)`,
+      '--notes-vault-icon-hover-bg': `color-mix(in srgb, ${accent} 28%, ${input})`,
+      '--notes-vault-input-bg': input,
+      '--notes-vault-mode-bg': `color-mix(in srgb, ${accent} 22%, ${input})`,
+      '--notes-vault-mode-active': `color-mix(in srgb, ${gradient} 40%, ${color} 60%)`,
+      '--notes-vault-graph-header-bg': `color-mix(in srgb, ${accent} 20%, ${panel})`,
+      '--notes-vault-graph-bg':
+        `radial-gradient(ellipse 80% 70% at 50% 40%, color-mix(in srgb, ${accent} 28%, transparent) 0%, transparent 60%),` +
+        `radial-gradient(ellipse 70% 65% at 72% 78%, color-mix(in srgb, ${gradient} 22%, transparent) 0%, transparent 55%),` +
+        `linear-gradient(160deg, ${base} 0%, color-mix(in srgb, ${gradient} 14%, ${main}) 52%, color-mix(in srgb, ${accent} 18%, ${main}) 100%)`,
+      '--notes-vault-graph-link': `color-mix(in srgb, ${color} 70%, #c5a0dc)`,
+      '--notes-vault-graph-node': `color-mix(in srgb, ${color} 75%, #d5b5ea)`,
+      '--notes-vault-graph-node-stroke': `color-mix(in srgb, ${color} 55%, #f0e8f8)`,
+      '--notes-vault-graph-node-active': `color-mix(in srgb, ${color} 60%, white)`,
+      '--notes-vault-graph-node-active-stroke': `color-mix(in srgb, ${color} 45%, #f0e8f8)`,
+    }
+  }
 
   return {
     '--notes-vault-color': color,

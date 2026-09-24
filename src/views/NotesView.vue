@@ -59,6 +59,7 @@ import {
   updateNoteVault,
 } from '../services/notes/noteVaults.js'
 import { vaultThemeStyle, normalizeVaultIcon } from '../constants/notes/noteVaults.js'
+import { usePrefersDark } from '../composables/usePrefersDark.js'
 import NotesVaultThemeModal from '../components/notes/NotesVaultThemeModal.vue'
 import DictionaryEntryModal from '../components/dictionnaire/DictionaryEntryModal.vue'
 import DictionaryLinkEntryModal from '../components/dictionnaire/DictionaryLinkEntryModal.vue'
@@ -176,7 +177,10 @@ const activeVault = computed(() =>
   activeVaultId.value ? vaults.value.find((vault) => vault.id === activeVaultId.value) ?? null : null,
 )
 
-const activeVaultStyle = computed(() => vaultThemeStyle(activeVault.value))
+const prefersDark = usePrefersDark()
+const activeVaultStyle = computed(() =>
+  vaultThemeStyle(activeVault.value, { dark: prefersDark.value }),
+)
 
 const contextFolders = computed(() =>
   folders.value.filter((folder) => (folder.vault_id ?? null) === (activeVaultId.value ?? null)),
@@ -2464,7 +2468,7 @@ watch(draftFolderId, (value) => {
               :key="vault.id"
               type="button"
               class="notes-page__vault-card"
-              :style="vaultThemeStyle(vault)"
+              :style="vaultThemeStyle(vault, { dark: prefersDark })"
               @click="openVault(vault.id)"
             >
               <div class="notes-page__vault-card-head">

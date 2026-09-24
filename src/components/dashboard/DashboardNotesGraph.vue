@@ -21,6 +21,7 @@ import {
 import { listNotes } from '../../services/notes/notes.js'
 import { listNoteVaults } from '../../services/notes/noteVaults.js'
 import { normalizeVaultIcon, vaultThemeStyle } from '../../constants/notes/noteVaults.js'
+import { usePrefersDark } from '../../composables/usePrefersDark.js'
 import NotesGraphView from '../notes/NotesGraphView.vue'
 
 const props = defineProps({
@@ -56,8 +57,9 @@ const scopedNotes = computed(() => {
   return notes.value.filter((note) => (note.vault_id ?? null) === vaultId)
 })
 
+const prefersDark = usePrefersDark()
 const graphThemeStyle = computed(() =>
-  activeVault.value ? vaultThemeStyle(activeVault.value) : null,
+  activeVault.value ? vaultThemeStyle(activeVault.value, { dark: prefersDark.value }) : null,
 )
 
 const graphLinkTarget = computed(() => {

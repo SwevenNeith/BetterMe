@@ -1,6 +1,8 @@
 import './assets/main.css'
 import './styles/readingLinedField.css'
 import './styles/reading-dark.css'
+import './styles/notes-dark.css'
+import './styles/notes-dark.css'
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
