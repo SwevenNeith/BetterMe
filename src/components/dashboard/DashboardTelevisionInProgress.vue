@@ -68,10 +68,6 @@ const inProgressMovies = computed(() =>
   inProgressItems.value.filter((item) => item.media_type === 'movie'),
 )
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10)
-}
-
 function moviePoster(item) {
   return item?.posterUrl || tmdbPosterUrl(item?.poster_path, 'w185')
 }
@@ -238,16 +234,12 @@ async function onMarkEpisodeWatched({ item, seasonNumber, episodeNumber }) {
     if (next?.complete) {
       await updateTelevisionMedia(supabase, props.userId, item.id, {
         collection: TELEVISION_COLLECTION_TERMINE,
-        dateStart: item.date_start || todayIso(),
-        dateEnd: item.date_end || todayIso(),
       })
       items.value = items.value.map((row) =>
         row.id === item.id
           ? {
               ...row,
               collection: TELEVISION_COLLECTION_TERMINE,
-              date_start: row.date_start || todayIso(),
-              date_end: row.date_end || todayIso(),
             }
           : row,
       )

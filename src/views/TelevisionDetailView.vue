@@ -245,10 +245,6 @@ async function onCollectionCommit(name) {
     if (name === TELEVISION_COLLECTION_EN_COURS && !libraryItem.value.date_start) {
       patch.dateStart = todayIso()
     }
-    if (name === TELEVISION_COLLECTION_TERMINE) {
-      if (!libraryItem.value.date_start) patch.dateStart = todayIso()
-      if (!libraryItem.value.date_end) patch.dateEnd = todayIso()
-    }
     libraryItem.value = await updateTelevisionMedia(
       supabase,
       userId.value,
@@ -479,8 +475,6 @@ async function maybeMarkSeriesFinished() {
   if (libraryItem.value.collection !== TELEVISION_COLLECTION_TERMINE) {
     libraryItem.value = await updateTelevisionMedia(supabase, userId.value, libraryItem.value.id, {
       collection: TELEVISION_COLLECTION_TERMINE,
-      dateStart: libraryItem.value.date_start || todayIso(),
-      dateEnd: libraryItem.value.date_end || todayIso(),
     })
   }
 }

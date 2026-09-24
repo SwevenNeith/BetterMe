@@ -477,10 +477,6 @@ async function loadLibrary() {
   }
 }
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10)
-}
-
 async function onMarkEpisodeWatched({ item, seasonNumber, episodeNumber }) {
   if (!userId.value || !item?.id || markingMediaId.value) return
   markingMediaId.value = item.id
@@ -505,16 +501,12 @@ async function onMarkEpisodeWatched({ item, seasonNumber, episodeNumber }) {
     if (next?.complete) {
       await updateTelevisionMedia(supabase, userId.value, item.id, {
         collection: TELEVISION_COLLECTION_TERMINE,
-        dateStart: item.date_start || todayIso(),
-        dateEnd: item.date_end || todayIso(),
       })
       libraryItems.value = libraryItems.value.map((row) =>
         row.id === item.id
           ? {
               ...row,
               collection: TELEVISION_COLLECTION_TERMINE,
-              date_start: row.date_start || todayIso(),
-              date_end: row.date_end || todayIso(),
             }
           : row,
       )

@@ -348,10 +348,7 @@ export async function upsertTelevisionMediaFromTmdb(supabase, userId, tmdbDoc, e
   if (collection === 'En cours' && dateStart === undefined) {
     dateStart = todayIsoDate()
   }
-  if (collection === 'Terminé') {
-    if (dateStart === undefined) dateStart = todayIsoDate()
-    if (dateEnd === undefined) dateEnd = todayIsoDate()
-  }
+  // « Terminé » : pas de dates auto (catalogue ≠ visionnage terminé aujourd’hui)
 
   const existing = await getTelevisionMediaByTmdb(supabase, userId, mediaType, tmdbId)
 
