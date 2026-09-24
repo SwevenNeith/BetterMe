@@ -48,6 +48,18 @@ export const WORKSPACE_PAGE_OPTIONS = [
     icon: 'jeux',
   },
   {
+    id: APP_PAGE_IDS.SPORT,
+    path: '/sport',
+    defaultLabel: 'Sport',
+    icon: 'sport',
+  },
+  {
+    id: APP_PAGE_IDS.WISHLIST,
+    path: '/wishlist',
+    defaultLabel: 'WishList',
+    icon: 'wishlist',
+  },
+  {
     id: APP_PAGE_IDS.FINANCES,
     path: '/finances',
     defaultLabel: 'Finances',

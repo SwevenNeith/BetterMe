@@ -18,6 +18,8 @@ const BibliothequeBookDetailView = () => import('../views/BibliothequeBookDetail
 const TelevisionView = () => import('../views/TelevisionView.vue')
 const TelevisionDetailView = () => import('../views/TelevisionDetailView.vue')
 const JeuxView = () => import('../views/JeuxView.vue')
+const SportView = () => import('../views/SportView.vue')
+const WishListView = () => import('../views/WishListView.vue')
 const FinancesView = () => import('../views/FinancesView.vue')
 const ReadingSpoilChapterView = () => import('../views/ReadingSpoilChapterView.vue')
 const ReadingSpoilBookView = () => import('../views/ReadingSpoilBookView.vue')
@@ -118,6 +120,16 @@ function createAppChildRoutes(namePrefix = '') {
       path: 'jeux',
       name: n('jeux'),
       component: JeuxView,
+    },
+    {
+      path: 'sport',
+      name: n('sport'),
+      component: SportView,
+    },
+    {
+      path: 'wishlist',
+      name: n('wishlist'),
+      component: WishListView,
     },
     {
       path: 'finances',

@@ -73,6 +73,18 @@ const jeuxLink = {
   icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><line x1="6" y1="12" x2="10" y2="12"></line><line x1="8" y1="10" x2="8" y2="14"></line><line x1="15" y1="13" x2="15.01" y2="13"></line><line x1="18" y1="11" x2="18.01" y2="11"></line><rect x="2" y="6" width="20" height="12" rx="2"></rect></svg>`,
 }
 
+const sportLink = {
+  name: 'Sport',
+  path: '/sport',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M14.4 14.4 9.6 9.6"/><path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z"/><path d="m21.5 21.5-1.4-1.4"/><path d="M3.9 3.9 2.5 2.5"/><path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"/></svg>`,
+}
+
+const wishlistLink = {
+  name: 'WishList',
+  path: '/wishlist',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>`,
+}
+
 const financesLink = {
   name: 'Finances',
   path: '/finances',
@@ -152,6 +164,8 @@ const isActive = (path) => {
   }
   if (path === '/television') return route.path === path || route.path.startsWith('/television/')
   if (path === '/jeux') return route.path === path || route.path.startsWith('/jeux/')
+  if (path === '/sport') return route.path === path || route.path.startsWith('/sport/')
+  if (path === '/wishlist') return route.path === path || route.path.startsWith('/wishlist/')
   if (path === '/finances') return route.path === path || route.path.startsWith('/finances/')
   if (path === '/ressources') return route.path === path || route.path.startsWith('/ressources/')
   if (path === '/journal') return route.path === path || route.path.startsWith('/journal/')
@@ -210,6 +224,8 @@ const defaultSidebarOrder = [
   SIDEBAR_ITEM_IDS.BIBLIOTHEQUE,
   SIDEBAR_ITEM_IDS.TELEVISION,
   SIDEBAR_ITEM_IDS.JEUX,
+  SIDEBAR_ITEM_IDS.SPORT,
+  SIDEBAR_ITEM_IDS.WISHLIST,
   SIDEBAR_ITEM_IDS.FINANCES,
   SIDEBAR_ITEM_IDS.RESSOURCES,
   SIDEBAR_ITEM_IDS.JOURNAL,
@@ -227,6 +243,8 @@ const sidebarItemsById = {
   [SIDEBAR_ITEM_IDS.BIBLIOTHEQUE]: bibliothequeLink,
   [SIDEBAR_ITEM_IDS.TELEVISION]: televisionLink,
   [SIDEBAR_ITEM_IDS.JEUX]: jeuxLink,
+  [SIDEBAR_ITEM_IDS.SPORT]: sportLink,
+  [SIDEBAR_ITEM_IDS.WISHLIST]: wishlistLink,
   [SIDEBAR_ITEM_IDS.FINANCES]: financesLink,
   [SIDEBAR_ITEM_IDS.RESSOURCES]: ressourcesLink,
   [SIDEBAR_ITEM_IDS.JOURNAL]: journalLink,
