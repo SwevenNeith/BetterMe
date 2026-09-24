@@ -105,7 +105,7 @@ defineEmits([
           :depth="depth + 1"
           :selected-note-id="selectedNoteId"
           :is-folder-expanded="isFolderExpanded"
-          @select-note="$emit('select-note', $event)"
+          @select-note="(id, ev) => $emit('select-note', id, ev)"
           @toggle-folder="$emit('toggle-folder', $event)"
           @create-note="$emit('create-note', $event)"
           @create-folder="$emit('create-folder', $event)"
@@ -124,7 +124,11 @@ defineEmits([
         :class="{ 'notes-tree-node__row--active': selectedNoteId === node.id }"
         @contextmenu.prevent.stop="$emit('note-context-menu', { noteId: node.id, event: $event })"
       >
-        <button type="button" class="notes-tree-node__main" @click="$emit('select-note', node.id)">
+        <button
+          type="button"
+          class="notes-tree-node__main"
+          @click="$emit('select-note', node.id, $event)"
+        >
           <span class="notes-tree-node__chevron notes-tree-node__chevron--spacer" />
           <svg
             class="notes-tree-node__icon"

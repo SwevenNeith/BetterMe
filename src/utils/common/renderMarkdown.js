@@ -1,5 +1,11 @@
 import { marked } from 'marked'
-import { extractNoteWidgets } from '../notes/noteWidgets.js'
+import {
+  extractNoteWidgets,
+  isCompleteHtmlDocument,
+  NOTE_WIDGET_FULL_PAGE_ATTR,
+  NOTE_WIDGET_INDEX_ATTR,
+  NOTE_WIDGET_PLACEHOLDER_CLASS,
+} from '../notes/noteWidgets.js'
 import { injectHeadingIdsIntoHtml } from '../notes/noteTableOfContents.js'
 
 marked.setOptions({
@@ -66,7 +72,7 @@ const ALLOWED_ATTRS = {
   CODE: new Set(['class']),
   PRE: new Set(['class']),
   SPAN: new Set(['class', 'data-dict-id', 'data-dict-word', 'data-dict-alias']),
-  DIV: new Set(['class', 'data-widget-index']),
+  DIV: new Set(['class', 'data-widget-index', 'data-full-page']),
   ABBR: new Set(['title']),
   H1: new Set(['id']),
   H2: new Set(['id']),
@@ -246,6 +252,19 @@ export function renderMarkdownToSafeHtml(markdown, options = {}) {
   let widgets = []
 
   if (!source.trim()) return { html: '', widgets }
+
+  // Note entière = document HTML : aperçu iframe (CSS/layout natifs)
+  if (options.enableHtmlWidgets && isCompleteHtmlDocument(source)) {
+    let page = source.trim()
+    if (page.length > 200_000) {
+      page = `${page.slice(0, 200_000)}\n<!-- tronqué -->`
+    }
+    widgets = [page]
+    return {
+      html: `<div class="${NOTE_WIDGET_PLACEHOLDER_CLASS} notes-html-widget--full-page" ${NOTE_WIDGET_INDEX_ATTR}="0" ${NOTE_WIDGET_FULL_PAGE_ATTR}="1"></div>`,
+      widgets,
+    }
+  }
 
   if (options.enableHtmlWidgets) {
     const extracted = extractNoteWidgets(source)

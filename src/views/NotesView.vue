@@ -429,10 +429,42 @@ function persistVaultsSectionCollapsed() {
   }
 }
 
-function ensureNoteTab(noteId) {
+function ensureNoteTab(noteId, { newTab = false, replaceId = null, replaceGraph = false } = {}) {
   if (!noteId) return
-  if (openTabs.value.some((tab) => tab.type === 'note' && tab.id === noteId)) return
-  openTabs.value = [...openTabs.value, { type: 'note', id: noteId }]
+  if (openTabs.value.some((tab) => tab.type === 'note' && tab.id === noteId)) {
+    persistOpenTabs()
+    return
+  }
+
+  if (newTab) {
+    openTabs.value = [...openTabs.value, { type: 'note', id: noteId }]
+    persistOpenTabs()
+    return
+  }
+
+  let replaceIdx = -1
+  if (replaceGraph) {
+    replaceIdx = openTabs.value.findIndex((tab) => tab.type === 'graph')
+  }
+  if (replaceIdx < 0 && replaceId) {
+    replaceIdx = openTabs.value.findIndex(
+      (tab) => tab.type === 'note' && tab.id === replaceId,
+    )
+  }
+
+  if (replaceIdx >= 0) {
+    const replaced = openTabs.value[replaceIdx]
+    const next = [...openTabs.value]
+    next[replaceIdx] = { type: 'note', id: noteId }
+    openTabs.value = next
+    if (replaced?.type === 'note' && replaced.id && replaced.id !== noteId) {
+      const sessions = { ...noteSessions.value }
+      delete sessions[replaced.id]
+      noteSessions.value = sessions
+    }
+  } else {
+    openTabs.value = [...openTabs.value, { type: 'note', id: noteId }]
+  }
   persistOpenTabs()
 }
 
@@ -1060,7 +1092,7 @@ async function onDraftStatusChange() {
   }
 }
 
-async function selectNote(noteId, { syncRoute = true, openTab = true } = {}) {
+async function selectNote(noteId, { syncRoute = true, openTab = true, newTab = false } = {}) {
   if (!noteId || !userId.value) return
 
   const listed = notes.value.find((note) => note.id === noteId)
@@ -1070,6 +1102,9 @@ async function selectNote(noteId, { syncRoute = true, openTab = true } = {}) {
     await loadVaultPrefs()
     pruneOpenTabsForContext()
   }
+
+  const previousNoteId = selectedNoteId.value
+  const wasGraphView = isGraphView.value
 
   if (selectedNoteId.value && selectedNoteId.value !== noteId) {
     stashCurrentNoteSession()
@@ -1110,7 +1145,13 @@ async function selectNote(noteId, { syncRoute = true, openTab = true } = {}) {
     await nextTick()
     switchingTabs = false
     expandAncestorsOfNote(note.id)
-    if (openTab) ensureNoteTab(note.id)
+    if (openTab) {
+      ensureNoteTab(note.id, {
+        newTab,
+        replaceId: newTab ? null : previousNoteId,
+        replaceGraph: !newTab && wasGraphView,
+      })
+    }
     if (syncRoute) {
       const onGraph = isGraphView.value
       if (activeVaultId.value) {
@@ -1134,6 +1175,17 @@ async function selectNote(noteId, { syncRoute = true, openTab = true } = {}) {
     console.error(err)
     saveError.value = err.message || 'Impossible d’ouvrir la note.'
   }
+}
+
+function onTreeSelectNote(noteId, event) {
+  const newTab = Boolean(event?.ctrlKey || event?.metaKey)
+  void selectNote(noteId, { newTab })
+}
+
+function openNoteInNewTab(noteId) {
+  closeEditorContextMenu()
+  if (!noteId) return
+  void selectNote(noteId, { newTab: true })
 }
 
 async function openGraphView() {
@@ -1833,7 +1885,9 @@ function onPreviewClick(event) {
   event.preventDefault()
   if (parsed.kind === 'note') {
     if (!isExtEnabled('wikilinks')) return
-    void selectNote(parsed.noteId)
+    void selectNote(parsed.noteId, {
+      newTab: Boolean(event.ctrlKey || event.metaKey),
+    })
     return
   }
   if (parsed.kind === 'missing') {
@@ -2465,7 +2519,7 @@ watch(draftFolderId, (value) => {
             :depth="0"
             :selected-note-id="selectedNoteId"
             :is-folder-expanded="isFolderExpanded"
-            @select-note="selectNote"
+            @select-note="onTreeSelectNote"
             @toggle-folder="toggleFolder"
             @create-note="onTreeCreateNote"
             @create-folder="onTreeCreateFolder"
@@ -2524,7 +2578,7 @@ watch(draftFolderId, (value) => {
         :notes="graphNotes"
         :selected-note-id="selectedNoteId"
         :theme-style="activeVault ? activeVaultStyle : null"
-        @select-note="selectNote"
+        @select-note="onTreeSelectNote"
       />
 
       <template v-else-if="selectedNote">
@@ -2736,6 +2790,15 @@ watch(draftFolderId, (value) => {
       <p v-if="editorContextSelectionHit" class="notes-dict-context__hint">
         Déjà connu : {{ editorContextSelectionHit.word }}
       </p>
+      <button
+        v-if="editorContextMenu.source === 'sidebar' && editorContextMenu.noteId"
+        type="button"
+        class="notes-dict-context__item"
+        role="menuitem"
+        @click="openNoteInNewTab(editorContextMenu.noteId)"
+      >
+        Ouvrir dans un nouvel onglet
+      </button>
       <template v-if="editorContextMenu.word">
         <button
           type="button"
@@ -3701,6 +3764,15 @@ watch(draftFolderId, (value) => {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+:deep(.markdown-body .notes-html-widget--full-page) {
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  overflow: hidden;
 }
 
 :deep(.markdown-body .notes-html-widget__frame) {

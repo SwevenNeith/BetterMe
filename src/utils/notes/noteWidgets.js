@@ -2,17 +2,21 @@
 
 export const NOTE_WIDGET_PLACEHOLDER_CLASS = 'notes-html-widget'
 export const NOTE_WIDGET_INDEX_ATTR = 'data-widget-index'
+export const NOTE_WIDGET_FULL_PAGE_ATTR = 'data-full-page'
 export const NOTE_WIDGET_MESSAGE_TYPE = 'bm-notes-widget-resize'
 
 /** Langages de fence exécutés (pas affichés comme code). */
-const WIDGET_LANGS = new Set(['widget', 'interactive', 'html-run'])
+const WIDGET_LANGS = new Set(['widget', 'interactive', 'html-run', 'html'])
 
 const WIDGET_FENCE_RE = /^```([a-zA-Z0-9_-]*)[ \t]*\r?\n([\s\S]*?)```/gm
 
-const MAX_WIDGET_CHARS = 80_000
+const MAX_WIDGET_CHARS = 200_000
 
 /** Marge anti-coupure (descenders, badges absolus, subpixels). */
 const HEIGHT_BUFFER_PX = 20
+
+const WIDGET_CSP =
+  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https: http: blob:; font-src data: https: http:; media-src data: https: http: blob:; connect-src 'none'; base-uri 'none'; form-action 'none';"
 
 /**
  * @param {string} lang
@@ -23,6 +27,16 @@ export function isNoteWidgetLang(lang) {
       .trim()
       .toLowerCase(),
   )
+}
+
+/**
+ * Document HTML autonome (DOCTYPE / <html>…), à rendre en iframe pleine page.
+ * @param {string} source
+ */
+export function isCompleteHtmlDocument(source) {
+  const text = String(source ?? '').trim()
+  if (!text) return false
+  return /^<!DOCTYPE\s+html\b/i.test(text) || /^<html[\s>]/i.test(text)
 }
 
 /**
@@ -70,7 +84,7 @@ export function findNoteWidgetFence(markdown, opts = {}) {
   const fenceText = String(opts.fenceText ?? '').trim()
   if (fenceText) {
     const m = fenceText.match(
-      /^```(?:widget|interactive|html-run)[ \t]*\r?\n([\s\S]*?)```$/i,
+      /^```(?:widget|interactive|html-run|html)[ \t]*\r?\n([\s\S]*?)```$/i,
     )
     if (m) {
       needle = m[1]
@@ -88,7 +102,7 @@ export function findNoteWidgetFence(markdown, opts = {}) {
 }
 
 /**
- * Remplace les fences ```widget / ```interactive / ```html-run par des placeholders HTML.
+ * Remplace les fences ```widget / ```html / … par des placeholders HTML.
  * @param {string} markdown
  * @returns {{ text: string, widgets: string[] }}
  */
@@ -116,9 +130,160 @@ export function extractNoteWidgets(markdown) {
 }
 
 /**
+ * Script de report de hauteur (pages complètes : scrollHeight du document).
+ * @param {string} widgetId
+ * @param {boolean} fullPage
+ */
+function buildResizeReporterScript(widgetId, fullPage) {
+  return `<script>
+(function () {
+  var id = ${JSON.stringify(widgetId)};
+  var fullPage = ${fullPage ? 'true' : 'false'};
+  var scheduled = false;
+  var BUFFER = ${HEIGHT_BUFFER_PX};
+  var lastScale = 1;
+
+  function reportHeight(height) {
+    var h = Math.ceil(Math.max(height, 40));
+    try {
+      parent.postMessage({
+        type: ${JSON.stringify(NOTE_WIDGET_MESSAGE_TYPE)},
+        id: id,
+        height: h,
+        fullPage: fullPage
+      }, '*');
+    } catch (e) {}
+  }
+
+  function fitFullPage() {
+    var doc = document.documentElement;
+    var body = document.body;
+    var h = Math.max(
+      doc ? doc.scrollHeight : 0,
+      doc ? doc.offsetHeight : 0,
+      body ? body.scrollHeight : 0,
+      body ? body.offsetHeight : 0,
+      40
+    );
+    reportHeight(h + BUFFER);
+  }
+
+  function fitEmbedded() {
+    var root = document.getElementById('bm-widget-root');
+    var slot = document.getElementById('bm-widget-slot');
+    var stage = document.getElementById('bm-widget-stage');
+    if (!root || !slot || !stage) return;
+
+    var avail = Math.max(root.clientWidth || document.documentElement.clientWidth || 0, 1);
+    stage.style.transform = 'none';
+    slot.style.width = '100%';
+    slot.style.height = 'auto';
+
+    stage.style.width = avail + 'px';
+    void stage.offsetWidth;
+
+    if (stage.scrollWidth <= avail + 2) {
+      lastScale = 1;
+      var hFluid = Math.max(stage.scrollHeight, stage.offsetHeight);
+      slot.style.height = Math.ceil(hFluid + BUFFER) + 'px';
+      reportHeight(hFluid + BUFFER);
+      return;
+    }
+
+    stage.style.width = 'max-content';
+    void stage.offsetWidth;
+    var naturalWidth = Math.max(stage.scrollWidth, stage.offsetWidth, 1);
+    var naturalHeight = Math.max(stage.scrollHeight, stage.offsetHeight, 1);
+    var scale = Math.min(1, avail / naturalWidth);
+
+    if (Math.abs(scale - lastScale) < 0.004) scale = lastScale;
+    else lastScale = scale;
+
+    if (scale < 0.9995) {
+      stage.style.transform = 'scale(' + scale + ')';
+      slot.style.height = Math.ceil(naturalHeight * scale + BUFFER) + 'px';
+      reportHeight(naturalHeight * scale + BUFFER);
+    } else {
+      stage.style.transform = 'none';
+      slot.style.height = Math.ceil(naturalHeight + BUFFER) + 'px';
+      reportHeight(naturalHeight + BUFFER);
+    }
+  }
+
+  function fit() {
+    if (fullPage) fitFullPage();
+    else fitEmbedded();
+  }
+
+  function scheduleFit() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(function () {
+      scheduled = false;
+      fit();
+      requestAnimationFrame(fit);
+    });
+  }
+
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(scheduleFit).observe(document.documentElement);
+    if (document.body) new ResizeObserver(scheduleFit).observe(document.body);
+    var root = document.getElementById('bm-widget-root');
+    var stage = document.getElementById('bm-widget-stage');
+    if (root) new ResizeObserver(scheduleFit).observe(root);
+    if (stage) new ResizeObserver(scheduleFit).observe(stage);
+  }
+  window.addEventListener('load', scheduleFit);
+  window.addEventListener('resize', scheduleFit);
+  window.addEventListener('message', function (event) {
+    if (event.data && event.data.type === 'bm-notes-widget-refit') scheduleFit();
+  });
+  document.addEventListener('click', function () { setTimeout(scheduleFit, 30); });
+  setTimeout(scheduleFit, 0);
+  setTimeout(scheduleFit, 100);
+  setTimeout(scheduleFit, 300);
+  setTimeout(scheduleFit, 700);
+})();
+<\/script>`
+}
+
+/**
+ * Injecte CSP + reporter de hauteur dans un document HTML complet.
+ * @param {string} source
+ * @param {{ widgetId?: string }} [options]
+ */
+function buildFullPageSrcdoc(source, options = {}) {
+  const widgetId = String(options.widgetId ?? '')
+  let html = String(source ?? '')
+  if (html.length > MAX_WIDGET_CHARS) {
+    html = `${html.slice(0, MAX_WIDGET_CHARS)}\n<!-- tronqué -->`
+  }
+
+  const cspTag = `<meta http-equiv="Content-Security-Policy" content="${WIDGET_CSP}">`
+  const reporter = buildResizeReporterScript(widgetId, true)
+
+  if (/<head[^>]*>/i.test(html)) {
+    html = html.replace(/<head([^>]*)>/i, `<head$1>\n${cspTag}\n`)
+  } else if (/<html[^>]*>/i.test(html)) {
+    html = html.replace(/<html([^>]*)>/i, `<html$1><head>${cspTag}</head>`)
+  } else {
+    html = `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">${cspTag}</head><body>${html}</body></html>`
+  }
+
+  if (/<\/body>/i.test(html)) {
+    html = html.replace(/<\/body>/i, `${reporter}\n</body>`)
+  } else {
+    html = `${html}\n${reporter}`
+  }
+
+  return html
+}
+
+/**
  * Document iframe isolé (scripts OK, pas d’accès à l’app parent).
  * 1) Remplit la largeur disponible (layouts fluides lisibles)
  * 2) Scale uniquement si le contenu fixe déborde encore
+ * Documents HTML complets : rendus tels quels (CSS/layout natifs).
  * @param {string} source
  * @param {{ widgetId?: string }} [options]
  */
@@ -126,12 +291,16 @@ export function buildWidgetSrcdoc(source, options = {}) {
   const widgetId = String(options.widgetId ?? '')
   const body = String(source ?? '')
 
+  if (isCompleteHtmlDocument(body)) {
+    return buildFullPageSrcdoc(body, options)
+  }
+
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https: http: blob:; font-src data: https: http:; media-src data: https: http: blob:; connect-src 'none'; base-uri 'none'; form-action 'none';">
+<meta http-equiv="Content-Security-Policy" content="${WIDGET_CSP}">
 <style>
   html, body {
     margin: 0;
@@ -178,95 +347,7 @@ ${body}
     </div>
   </div>
 </div>
-<script>
-(function () {
-  var id = ${JSON.stringify(widgetId)};
-  var root = document.getElementById('bm-widget-root');
-  var slot = document.getElementById('bm-widget-slot');
-  var stage = document.getElementById('bm-widget-stage');
-  var scheduled = false;
-  var BUFFER = ${HEIGHT_BUFFER_PX};
-  var lastScale = 1;
-
-  function reportHeight(height) {
-    var h = Math.ceil(Math.max(height, 40));
-    try {
-      parent.postMessage({
-        type: ${JSON.stringify(NOTE_WIDGET_MESSAGE_TYPE)},
-        id: id,
-        height: h
-      }, '*');
-    } catch (e) {}
-  }
-
-  function fit() {
-    if (!root || !slot || !stage) return;
-
-    var avail = Math.max(root.clientWidth || document.documentElement.clientWidth || 0, 1);
-    stage.style.transform = 'none';
-    slot.style.width = '100%';
-    slot.style.height = 'auto';
-
-    // 1) Remplir la largeur : les grilles en fr / % deviennent lisibles
-    stage.style.width = avail + 'px';
-    void stage.offsetWidth;
-
-    if (stage.scrollWidth <= avail + 2) {
-      lastScale = 1;
-      var hFluid = Math.max(stage.scrollHeight, stage.offsetHeight);
-      slot.style.height = Math.ceil(hFluid + BUFFER) + 'px';
-      reportHeight(hFluid + BUFFER);
-      return;
-    }
-
-    // 2) Contenu à largeur fixe : scale pour tout faire tenir (sans scroll)
-    stage.style.width = 'max-content';
-    void stage.offsetWidth;
-    var naturalWidth = Math.max(stage.scrollWidth, stage.offsetWidth, 1);
-    var naturalHeight = Math.max(stage.scrollHeight, stage.offsetHeight, 1);
-    var scale = Math.min(1, avail / naturalWidth);
-
-    if (Math.abs(scale - lastScale) < 0.004) scale = lastScale;
-    else lastScale = scale;
-
-    if (scale < 0.9995) {
-      stage.style.transform = 'scale(' + scale + ')';
-      slot.style.height = Math.ceil(naturalHeight * scale + BUFFER) + 'px';
-      reportHeight(naturalHeight * scale + BUFFER);
-    } else {
-      stage.style.transform = 'none';
-      slot.style.height = Math.ceil(naturalHeight + BUFFER) + 'px';
-      reportHeight(naturalHeight + BUFFER);
-    }
-  }
-
-  function scheduleFit() {
-    if (scheduled) return;
-    scheduled = true;
-    requestAnimationFrame(function () {
-      scheduled = false;
-      fit();
-      requestAnimationFrame(fit);
-    });
-  }
-
-  if (typeof ResizeObserver !== 'undefined') {
-    new ResizeObserver(scheduleFit).observe(document.documentElement);
-    new ResizeObserver(scheduleFit).observe(root);
-    new ResizeObserver(scheduleFit).observe(stage);
-  }
-  window.addEventListener('load', scheduleFit);
-  window.addEventListener('resize', scheduleFit);
-  window.addEventListener('message', function (event) {
-    if (event.data && event.data.type === 'bm-notes-widget-refit') scheduleFit();
-  });
-  document.addEventListener('click', function () { setTimeout(scheduleFit, 30); });
-  setTimeout(scheduleFit, 0);
-  setTimeout(scheduleFit, 100);
-  setTimeout(scheduleFit, 300);
-  setTimeout(scheduleFit, 700);
-})();
-<\/script>
+${buildResizeReporterScript(widgetId, false)}
 </body>
 </html>`
 }
@@ -309,8 +390,15 @@ export function mountNoteWidgets(container, widgets = []) {
     }
 
     const source = widgets[index]
+    const fullPage =
+      host.getAttribute(NOTE_WIDGET_FULL_PAGE_ATTR) === '1' || isCompleteHtmlDocument(source)
     const srcdoc = buildWidgetSrcdoc(source, { widgetId: String(index) })
     const existing = host.querySelector('iframe.notes-html-widget__frame')
+
+    if (fullPage) {
+      host.classList.add('notes-html-widget--full-page')
+      host.setAttribute(NOTE_WIDGET_FULL_PAGE_ATTR, '1')
+    }
 
     // Même placeholder HTML (v-html inchangé) mais source widget modifiée :
     // il faut rafraîchir srcdoc, sinon la vue Dashboard reste figée.
@@ -328,13 +416,13 @@ export function mountNoteWidgets(container, widgets = []) {
     iframe.setAttribute('sandbox', 'allow-scripts')
     iframe.setAttribute('referrerpolicy', 'no-referrer')
     iframe.setAttribute('loading', 'lazy')
-    iframe.title = 'Widget interactif'
+    iframe.title = fullPage ? 'Page HTML' : 'Widget interactif'
     iframe.style.width = '100%'
     iframe.style.maxWidth = '100%'
     iframe.style.border = '0'
     iframe.style.display = 'block'
-    iframe.style.minHeight = '80px'
-    iframe.style.height = '120px'
+    iframe.style.minHeight = fullPage ? '240px' : '80px'
+    iframe.style.height = fullPage ? '60vh' : '120px'
     iframe.dataset.bmWidgetSource = source
     iframe.srcdoc = srcdoc
     host.replaceChildren(iframe)
@@ -350,7 +438,8 @@ export function mountNoteWidgets(container, widgets = []) {
     for (const frame of frames) {
       if (!(frame instanceof HTMLIFrameElement)) continue
       if (frame.contentWindow !== event.source) continue
-      const height = Math.min(Math.max(Number(data.height) || 80, 40) + 2, 8000)
+      const maxH = data.fullPage ? 24000 : 8000
+      const height = Math.min(Math.max(Number(data.height) || 80, 40) + 2, maxH)
       frame.style.height = `${height}px`
       break
     }

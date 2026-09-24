@@ -70,10 +70,10 @@ export const NOTES_EXTENSIONS = [
   },
   {
     id: 'html-widgets',
-    name: 'Widgets interactifs',
-    description: 'Exécute des blocs HTML/JS dans l’aperçu (tableaux cliquables, etc.).',
+    name: 'HTML & widgets',
+    description: 'Affiche du HTML/CSS (pages complètes ou blocs) et des widgets interactifs.',
     details:
-      'Ajoute des programmes interactifs dans tes notes via un bloc de code spécial :\n\n```widget\n<!-- ton HTML + CSS + JS -->\n```\n\n• Langages reconnus : widget, interactive, html-run\n• Affiché dans l’aperçu dans une iframe isolée (sans accès à ton compte BetterMe)\n• Les blocs ```js / ```html classiques restent du code non exécuté\n\nExemple : grille de cases colorées, clics, surbrillance…',
+      'Rend correctement le HTML et le CSS dans l’aperçu (iframe isolée) :\n\n• Colle un document HTML complet (`<!DOCTYPE html>…`) comme contenu de la note : l’aperçu affiche la page telle quelle\n• Ou utilise un bloc de code :\n```html\n<!-- ton HTML + CSS -->\n```\n• Pour du JS interactif : langages `widget`, `interactive`, `html-run` ou `html`\n• Sans accès à ton compte BetterMe (sandbox)\n\nLes blocs ```js / ```css seuls restent du code non exécuté.',
     defaultEnabled: true,
   },
   {

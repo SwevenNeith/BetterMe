@@ -6,7 +6,7 @@ export const MARKDOWN_TUTORIAL_SYSTEM_KEY = 'markdown-tutorial'
 export const MARKDOWN_TUTORIAL_TITLE = 'Tutoriel Markdown'
 
 /** Titre de section Widgets (détecte une version à jour du tutoriel). */
-export const MARKDOWN_TUTORIAL_WIDGETS_SECTION_MARKER = '## 12. Widgets interactifs'
+export const MARKDOWN_TUTORIAL_WIDGETS_SECTION_MARKER = '## 12. HTML, CSS & widgets interactifs'
 
 export const MARKDOWN_TUTORIAL_TEMPLATE_SECTION_MARKER = '## 14. Templates'
 
@@ -280,13 +280,16 @@ Exemple : H<sub>2</sub>O et x<sup>2</sup>
 
 ---
 
-## 12. Widgets interactifs (HTML + JS)
+## 12. HTML, CSS & widgets interactifs
 
-Pour un **vrai programme** dans la note (grille cliquable, quiz, etc.), utilise un bloc de code dont le langage est \`widget\` (extension **Widgets interactifs**).
+Avec l’extension **HTML & widgets** :
+
+• Colle un **document HTML complet** (\`<!DOCTYPE html>…\` avec \`<style>\`) comme contenu de la note : l’aperçu affiche la page telle quelle (mise en page, CSS, etc.).
+• Ou utilise un bloc \`\`\`html / \`\`\`widget pour un fragment HTML/CSS/JS.
 
 Le contenu s’exécute dans l’**aperçu**, dans une iframe isolée (sans accès à ton compte BetterMe).
 
-Langages reconnus : \`widget\`, \`interactive\`, \`html-run\`.
+Langages reconnus : \`html\`, \`widget\`, \`interactive\`, \`html-run\`.
 
 ### Exemple interactif
 
@@ -363,7 +366,7 @@ Astuce : regarde le résultat en mode **Aperçu** ou **Split**. Un bloc \`js\` c
 3. Organise tes notes dans des **dossiers** (arborescence à gauche).
 4. Les dossiers et notes sont triés **par ordre alphabétique** (dossiers d’abord, puis notes).
 5. Utilise \`[[Titre de la note]]\` pour créer des hyperliens entre tes notes.
-6. Utilise un bloc langage \`widget\` pour des programmes interactifs dans l’aperçu.
+6. Colle un document HTML complet, ou un bloc \`html\` / \`widget\`, pour un rendu riche dans l’aperçu.
 
 ---
 
