@@ -10,6 +10,7 @@ import {
 import { supabase } from '../lib/supabase.js'
 import { getTmdbDetails, getTmdbSeason, searchTmdbAllPages, tmdbPosterUrl } from '../services/television/tmdb.js'
 import {
+  TELEVISION_COLLECTION_A_REGARDER,
   TELEVISION_COLLECTION_EN_COURS,
   TELEVISION_COLLECTION_TERMINE,
   listTelevisionCollections,
@@ -21,6 +22,7 @@ import {
 import {
   listTelevisionMedia,
   updateTelevisionMedia,
+  upsertTelevisionMediaFromTmdb,
 } from '../services/television/televisionMedia.js'
 import {
   resolveNextEpisode,
@@ -222,6 +224,83 @@ function openMediaFiche(item) {
 }
 
 const favoriteBusyId = ref(null)
+/** Clé `${media_type}:${tmdb_id}` en cours d’ajout rapide depuis le catalogue. */
+const addingCatalogKey = ref('')
+const catalogAddError = ref('')
+
+function catalogResultKey(item) {
+  const mediaType =
+    item?.media_type === 'tv' ? 'tv' : item?.media_type === 'movie' ? 'movie' : ''
+  const tmdbId = Number.parseInt(String(item?.tmdb_id ?? item?.id ?? ''), 10)
+  if (!mediaType || !Number.isFinite(tmdbId) || tmdbId <= 0) return ''
+  return `${mediaType}:${tmdbId}`
+}
+
+function findLibraryItemForCatalogResult(item) {
+  const key = catalogResultKey(item)
+  if (!key) return null
+  return (
+    libraryItems.value.find((row) => catalogResultKey(row) === key) || null
+  )
+}
+
+function isInLibrary(item) {
+  return Boolean(findLibraryItemForCatalogResult(item))
+}
+
+async function ensureLibraryLoadedForCatalog() {
+  if (!userId.value) return
+  if (libraryItems.value.length || isLibraryLoading.value) return
+  try {
+    libraryItems.value = await listTelevisionMedia(supabase, userId.value)
+  } catch (err) {
+    console.warn('ensureLibraryLoadedForCatalog:', err)
+  }
+}
+
+async function quickAddToLibrary(item) {
+  if (!userId.value || !item || addingCatalogKey.value) return
+  if (isInLibrary(item)) return
+
+  const key = catalogResultKey(item)
+  if (!key) return
+
+  addingCatalogKey.value = key
+  catalogAddError.value = ''
+
+  try {
+    const mediaType = item.media_type === 'tv' ? 'tv' : 'movie'
+    const tmdbId = item.tmdb_id ?? item.id
+    // Détails TMDB pour dates / overview (le résultat search est partiel)
+    let doc = { ...item, media_type: mediaType, id: tmdbId }
+    try {
+      const details = await getTmdbDetails(mediaType, tmdbId, 'fr-FR')
+      doc = { ...details, media_type: mediaType }
+    } catch (detailsErr) {
+      console.warn('quickAdd details fallback search doc:', detailsErr)
+    }
+
+    await upsertTelevisionMediaFromTmdb(supabase, userId.value, doc, {
+      collection: TELEVISION_COLLECTION_A_REGARDER,
+    })
+
+    libraryItems.value = await listTelevisionMedia(supabase, userId.value)
+
+    try {
+      const { syncTelevisionReleaseNotificationsAfterMediaChange } = await import(
+        '../services/television/televisionReleaseNotifications.js'
+      )
+      void syncTelevisionReleaseNotificationsAfterMediaChange(userId.value)
+    } catch (syncErr) {
+      console.warn('syncTelevisionReleaseNotifications:', syncErr)
+    }
+  } catch (err) {
+    console.error(err)
+    catalogAddError.value = err?.message || 'Impossible d’ajouter ce titre.'
+  } finally {
+    addingCatalogKey.value = ''
+  }
+}
 
 async function onToggleFavorite(item) {
   if (!userId.value || !item?.id || favoriteBusyId.value) return
@@ -598,6 +677,7 @@ watch(libraryMode, async (mode) => {
   await nextTick()
   bindGridResizeObserver()
   if (mode === 'catalog') {
+    await ensureLibraryLoadedForCatalog()
     const q = String(searchQuery.value ?? '').trim()
     if (q.length >= MIN_SEARCH_LENGTH && !searchPayload.value) {
       await runSearch(q, { keepPage: true })
@@ -623,6 +703,7 @@ onMounted(async () => {
   if (libraryMode.value === 'mine') {
     await loadLibrary()
   } else {
+    await ensureLibraryLoadedForCatalog()
     const q = String(searchQuery.value ?? '').trim()
     if (q.length >= MIN_SEARCH_LENGTH) {
       await runSearch(q, { keepPage: true })
@@ -943,6 +1024,7 @@ onUnmounted(() => {
 
         <p v-if="isLoading" class="television-status">{{ progressLabel || 'Recherche…' }}</p>
         <p v-else-if="loadError" class="television-error">{{ loadError }}</p>
+        <p v-if="catalogAddError" class="television-error">{{ catalogAddError }}</p>
 
         <template v-if="searchPayload && !loadError">
           <p v-if="!isLoading" class="television-count">
@@ -968,28 +1050,50 @@ onUnmounted(() => {
                 :key="resultKey(item)"
                 class="television-poster"
               >
-                <button
-                  type="button"
-                  class="television-poster__btn"
-                  :title="resultAriaLabel(item)"
-                  :aria-label="resultAriaLabel(item)"
-                  @click="openMediaFiche(item)"
-                >
-                  <img
-                    v-if="resultPoster(item)"
-                    :src="resultPoster(item)"
-                    :alt="resultTitle(item)"
-                    class="television-poster__cover"
-                    loading="lazy"
-                  />
-                  <div
-                    v-else
-                    class="television-poster__cover television-poster__cover--placeholder"
-                    aria-hidden="true"
+                <div class="television-poster__wrap">
+                  <button
+                    type="button"
+                    class="television-poster__btn"
+                    :title="resultAriaLabel(item)"
+                    :aria-label="resultAriaLabel(item)"
+                    @click="openMediaFiche(item)"
                   >
-                    <span>🎬</span>
-                  </div>
-                </button>
+                    <img
+                      v-if="resultPoster(item)"
+                      :src="resultPoster(item)"
+                      :alt="resultTitle(item)"
+                      class="television-poster__cover"
+                      loading="lazy"
+                    />
+                    <div
+                      v-else
+                      class="television-poster__cover television-poster__cover--placeholder"
+                      aria-hidden="true"
+                    >
+                      <span>🎬</span>
+                    </div>
+                    <span
+                      v-if="isInLibrary(item)"
+                      class="television-poster__badge"
+                    >
+                      Dans ma télé
+                    </span>
+                  </button>
+
+                  <button
+                    v-if="!isInLibrary(item)"
+                    type="button"
+                    class="television-poster__add"
+                    :disabled="!userId || addingCatalogKey === catalogResultKey(item)"
+                    :aria-label="`Ajouter « ${resultTitle(item)} » à ma télé`"
+                    :title="userId ? 'Ajouter à ma télé (À regarder)' : 'Connecte-toi pour ajouter'"
+                    @click="quickAddToLibrary(item)"
+                  >
+                    <span aria-hidden="true">
+                      {{ addingCatalogKey === catalogResultKey(item) ? '…' : '+' }}
+                    </span>
+                  </button>
+                </div>
               </article>
             </div>
 
@@ -1320,7 +1424,66 @@ onUnmounted(() => {
   z-index: 2;
 }
 
+.television-poster__add {
+  position: absolute;
+  top: 0.28rem;
+  right: 0.28rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(20, 16, 28, 0.55);
+  color: #fff;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease;
+}
+
+.television-poster__add:hover:not(:disabled) {
+  transform: scale(1.08);
+  background: rgba(173, 129, 190, 0.92);
+}
+
+.television-poster__add:focus-visible {
+  outline: 2px solid rgba(173, 129, 190, 0.75);
+  outline-offset: 2px;
+}
+
+.television-poster__add:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.television-poster__badge {
+  position: absolute;
+  left: 0.3rem;
+  right: 0.3rem;
+  bottom: 0.3rem;
+  z-index: 1;
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(20, 16, 28, 0.72);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  pointer-events: none;
+}
+
 .television-poster__btn {
+  position: relative;
   display: block;
   width: 100%;
   padding: 0;
@@ -1328,6 +1491,7 @@ onUnmounted(() => {
   background: transparent;
   cursor: pointer;
   border-radius: 5px;
+  overflow: hidden;
   transition:
     transform 0.15s ease,
     box-shadow 0.15s ease;
