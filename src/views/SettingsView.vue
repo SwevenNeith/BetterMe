@@ -1981,7 +1981,8 @@ onUnmounted(() => {
         >
         <p class="card-body__desc">
           Prévoyance (anticipation) et alarmes (symptômes intenses ou inhabituels). Les alertes du
-          jour sont envoyées le soir à l’heure choisie, pas à la saisie.
+          jour sont envoyées le soir à l’heure choisie, pas à la saisie. Les écarts de durée
+          restent visibles dans le panneau Patterns, sans notification quotidienne.
         </p>
 
         <div class="reminder-row">
@@ -1998,13 +1999,6 @@ onUnmounted(() => {
               type="checkbox"
             />
             <span>Pattern d’intensité</span>
-          </label>
-          <label class="choice-check choice-check--card">
-            <input
-              v-model="menstruationNotifSettings.menstruation_notify_patterns_duree"
-              type="checkbox"
-            />
-            <span>Pattern de durée</span>
           </label>
           <label class="choice-check choice-check--card">
             <input

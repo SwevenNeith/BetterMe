@@ -54,6 +54,8 @@ function resolveNotifSettings(settings) {
     resolved.menstruation_pattern_notification_time ||
       defaults.menstruation_pattern_notification_time,
   ).slice(0, 5)
+  // Plus de notifications push pour les patterns de durée
+  resolved.menstruation_notify_patterns_duree = false
 
   return resolved
 }
@@ -85,7 +87,7 @@ export function createDefaultMenstruationNotifSettings() {
     menstruation_notification_time: '09:00',
     menstruation_notify_patterns_simple: true,
     menstruation_notify_patterns_intensite: true,
-    menstruation_notify_patterns_duree: true,
+    menstruation_notify_patterns_duree: false,
     menstruation_notify_patterns_combine: true,
     menstruation_pattern_notification_time: '20:00',
   }
@@ -174,7 +176,8 @@ export async function saveMenstruationNotifSettings(userId, settings) {
     ).slice(0, 5),
     menstruation_notify_patterns_simple: Boolean(settings.menstruation_notify_patterns_simple),
     menstruation_notify_patterns_intensite: Boolean(settings.menstruation_notify_patterns_intensite),
-    menstruation_notify_patterns_duree: Boolean(settings.menstruation_notify_patterns_duree),
+    // Durée : plus de push (patterns UI uniquement)
+    menstruation_notify_patterns_duree: false,
     menstruation_notify_patterns_combine: Boolean(settings.menstruation_notify_patterns_combine),
     menstruation_pattern_notification_time: String(
       settings.menstruation_pattern_notification_time || '20:00',

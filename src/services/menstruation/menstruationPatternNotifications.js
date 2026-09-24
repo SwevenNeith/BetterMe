@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase.js'
-import { addDaysToISODate, daysBetweenISO } from './menstruationCycles.js'
+import { addDaysToISODate } from './menstruationCycles.js'
 import {
   dateTimeLocalToDate,
   deletePendingByKindPrefix,
@@ -15,13 +15,11 @@ import {
   PATTERN_TYPE,
   PREDEFINED_CLUSTERS,
   CLUSTER_DAY_RATIO_MIN,
-  meetsThreshold,
 } from './menstruationPatternThresholds.js'
 import {
   buildDailySymptomTimeline,
   getCurrentCycle,
   getCycleStartDate,
-  getCycleLength,
 } from './menstruationSymptomEnrichment.js'
 
 export const PATTERN_NOTIF_TYPE = {
@@ -94,20 +92,6 @@ function isClusterActiveDay(day, clusterKeys) {
   return active / clusterKeys.length >= CLUSTER_DAY_RATIO_MIN
 }
 
-function episodeLengthSoFar(sortedDays, symptomKey, todayISO) {
-  const days = sortedDays.filter(
-    (d) => d.dateJour <= todayISO && d.symptoms[symptomKey]?.above,
-  )
-  if (!days.length) return 0
-  let len = 1
-  for (let i = 1; i < days.length; i += 1) {
-    const gap = daysBetweenISO(days[i - 1].dateJour, days[i].dateJour)
-    if (gap != null && gap <= 2) len += 1
-    else len = 1
-  }
-  return len
-}
-
 function computeIntensityBaselines(timeline, currentCycleId, symptomKey) {
   const cycleIds = [...new Set(timeline.map((d) => d.cycleId))].filter((id) => id !== currentCycleId)
   const vals = []
@@ -119,28 +103,6 @@ function computeIntensityBaselines(timeline, currentCycleId, symptomKey) {
   }
   if (vals.length < CYCLES_MIN) return null
   return { baseline: mean(vals), std: stdDev(vals) }
-}
-
-function computeDurationBaselines(timeline, currentCycleId, symptomKey) {
-  const cycleIds = [...new Set(timeline.map((d) => d.cycleId))].filter((id) => id !== currentCycleId)
-  const durations = []
-  for (const cid of cycleIds) {
-    const days = timelineForCycle(timeline, cid).sort((a, b) => a.dateJour.localeCompare(b.dateJour))
-    let len = 0
-    let streak = 0
-    let prev = null
-    for (const d of days) {
-      if (d.symptoms[symptomKey]?.above) {
-        const gap = prev ? daysBetweenISO(prev, d.dateJour) : 0
-        streak = prev && gap != null && gap <= 2 ? streak + 1 : 1
-        len = Math.max(len, streak)
-        prev = d.dateJour
-      }
-    }
-    if (len > 0) durations.push(len)
-  }
-  if (durations.length < CYCLES_MIN) return null
-  return { baseline: mean(durations), std: stdDev(durations) }
 }
 
 /**
@@ -272,44 +234,8 @@ export function buildPatternNotificationCandidates({
     }
   }
 
-  // —— Durée ——
-  if (settings.menstruation_notify_patterns_duree) {
-    for (const symptomKey of ANALYZED_SYMPTOM_KEYS) {
-      const stats = computeDurationBaselines(timeline, currentId, symptomKey)
-      if (!stats) continue
-
-      const days = timelineForCycle(timeline, currentId).sort((a, b) =>
-        a.dateJour.localeCompare(b.dateJour),
-      )
-      const currentLen = episodeLengthSoFar(days, symptomKey, todayISO)
-      if (!currentLen) continue
-
-      const label = SYMPTOM_LABELS[symptomKey] ?? symptomKey
-      const baselineRounded = Math.round(stats.baseline)
-
-      if (currentLen > stats.baseline + stats.std) {
-        push({
-          kind: buildKind('duree', symptomKey, PATTERN_NOTIF_TYPE.ALARME),
-          patternKey: `duree:${symptomKey}`,
-          notifType: PATTERN_NOTIF_TYPE.ALARME,
-          dateKey: todayISO,
-          title: 'BetterMe — Durée',
-          body: `⚠️ ${label} dure plus longtemps que d’habitude (${currentLen} j).`,
-          scheduled_at: scheduleAt(todayISO, hhmm).toISOString(),
-        })
-      } else if (currentLen >= baselineRounded - 1 && currentLen < baselineRounded + stats.std) {
-        push({
-          kind: buildKind('duree', symptomKey, PATTERN_NOTIF_TYPE.PREVOYANCE),
-          patternKey: `duree:${symptomKey}`,
-          notifType: PATTERN_NOTIF_TYPE.PREVOYANCE,
-          dateKey: todayISO,
-          title: 'BetterMe — Durée',
-          body: `🔮 ${label} approche de sa durée habituelle (~${baselineRounded} j) : ça peut continuer.`,
-          scheduled_at: scheduleAt(todayISO, hhmm).toISOString(),
-        })
-      }
-    }
-  }
+  // Pattern de durée : plus de notification quotidienne (affichage dans le panneau Patterns uniquement).
+  // Les anciennes planifications `menstruation_pattern:duree:` sont purgées à la resync.
 
   // —— Combiné ——
   if (settings.menstruation_notify_patterns_combine) {
@@ -387,7 +313,6 @@ const PATTERN_KIND_PREFIX = {
 const PATTERN_SETTING_BY_PREFIX = {
   [PATTERN_KIND_PREFIX.simple]: 'menstruation_notify_patterns_simple',
   [PATTERN_KIND_PREFIX.intensite]: 'menstruation_notify_patterns_intensite',
-  [PATTERN_KIND_PREFIX.duree]: 'menstruation_notify_patterns_duree',
   [PATTERN_KIND_PREFIX.combine]: 'menstruation_notify_patterns_combine',
 }
 
@@ -434,6 +359,9 @@ export async function rescheduleMenstruationPatternNotifications(
     settings,
   })
   const candidates = dedupePatternCandidates(raw)
+
+  // Purge définitive des notifs « durée » (désormais réservées au panneau Patterns)
+  await deletePendingByKindPrefix(supabase, userId, PATTERN_KIND_PREFIX.duree)
 
   for (const [prefix, settingKey] of Object.entries(PATTERN_SETTING_BY_PREFIX)) {
     await syncPatternPrefixNotifications(userId, prefix, settings[settingKey], candidates)
