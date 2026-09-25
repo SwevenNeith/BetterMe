@@ -116,4 +116,35 @@ function onClose(event, tab) {
   background: rgba(60, 40, 80, 0.08);
   color: #3b2a4a;
 }
+
+@media (prefers-color-scheme: dark) {
+  .notes-tabs {
+    background: #221a2e;
+    border-bottom-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .notes-tabs__tab {
+    color: #b8a8c8;
+  }
+
+  .notes-tabs__tab:hover {
+    background: rgba(213, 181, 234, 0.12);
+    color: #f0e8f8;
+  }
+
+  .notes-tabs__tab--active {
+    background: #1f1a2c;
+    border-color: rgba(213, 181, 234, 0.22);
+    color: #f0e8f8;
+  }
+
+  .notes-tabs__close {
+    color: #a895bc;
+  }
+
+  .notes-tabs__close:hover {
+    background: rgba(213, 181, 234, 0.22);
+    color: #f0e8f8;
+  }
+}
 </style>

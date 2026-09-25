@@ -276,4 +276,32 @@ defineEmits([
 .notes-tree-node__children {
   display: grid;
 }
+
+@media (prefers-color-scheme: dark) {
+  .notes-tree-node__row:hover {
+    background: rgba(213, 181, 234, 0.12);
+  }
+
+  .notes-tree-node__row--active {
+    background: rgba(173, 129, 190, 0.35);
+  }
+
+  .notes-tree-node__main {
+    color: #f0e8f8;
+  }
+
+  .notes-tree-node__chevron,
+  .notes-tree-node__icon {
+    color: #b8a8c8;
+  }
+
+  .notes-tree-node__actions button {
+    color: #b8a8c8;
+  }
+
+  .notes-tree-node__actions button:hover {
+    background: rgba(213, 181, 234, 0.18);
+    color: #f0e8f8;
+  }
+}
 </style>

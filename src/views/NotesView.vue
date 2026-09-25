@@ -3078,6 +3078,21 @@ watch(draftFolderId, (value) => {
   color: var(--notes-vault-icon, #ad81be);
 }
 
+.notes-page--in-vault .notes-page__editor {
+  background: var(--notes-vault-input-bg, #fff);
+  color: var(--notes-vault-text, #2f243a);
+  border-right-color: var(--notes-vault-border, #e6ddf2);
+}
+
+.notes-page--in-vault .notes-page__preview {
+  background: var(--notes-vault-main-bg, #faf7fd);
+  color: var(--notes-vault-text, #2f243a);
+}
+
+.notes-page--in-vault .notes-page__empty {
+  color: var(--notes-vault-text-muted, #6d5a7e);
+}
+
 .notes-page__vault-nav {
   display: flex;
   align-items: center;
@@ -3958,6 +3973,259 @@ watch(draftFolderId, (value) => {
 
   .notes-page__editor {
     border-right: none;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .notes-page {
+    background: #1a1524;
+    border-color: rgba(213, 181, 234, 0.22);
+  }
+
+  .notes-page__sidebar {
+    background: #221a2e;
+    border-right-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .notes-page__sidebar-header {
+    border-bottom-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .notes-page__title,
+  .notes-page__toc-title {
+    color: #f0e8f8;
+  }
+
+  .notes-page__sidebar-toggle {
+    background: #2a2438;
+    border-color: rgba(173, 129, 190, 0.4);
+    color: #e8dcf5;
+  }
+
+  .notes-page__sidebar-toggle:hover {
+    background: #342c44;
+  }
+
+  .notes-page__sidebar-rail {
+    background: #221a2e;
+    border-right-color: rgba(213, 181, 234, 0.18);
+    color: #c5b8d2;
+  }
+
+  .notes-page__sidebar-rail:hover {
+    background: #2a2438;
+  }
+
+  .notes-page__meta,
+  .notes-page__folder-label,
+  .notes-page__save-msg,
+  .notes-page__tree-status,
+  .notes-page__tree-empty,
+  .notes-page__vaults-empty,
+  .notes-page__section-label,
+  .notes-page__toc-empty,
+  .notes-page__empty {
+    color: #b8a8c8;
+  }
+
+  .notes-page__main {
+    background: #1f1a2c;
+  }
+
+  .notes-page__editor-header {
+    background: #241c30;
+    border-bottom-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .notes-page__title-input {
+    color: #f0e8f8;
+  }
+
+  .notes-page__search,
+  .notes-page__folder-select,
+  .notes-page__btn {
+    background: #2a2438;
+    border-color: rgba(173, 129, 190, 0.4);
+    color: #f0e8f8;
+  }
+
+  .notes-page__mode-switch {
+    background: #2a2438;
+    border-color: rgba(114, 160, 152, 0.45);
+  }
+
+  .notes-page__mode {
+    color: #c5d8d2;
+  }
+
+  .notes-page__mode--active {
+    background: rgba(149, 209, 170, 0.35);
+    color: #e8f6ee;
+  }
+
+  .notes-page__btn--primary {
+    background: #ad81be;
+    border-color: #9b6fb3;
+    color: #fff;
+  }
+
+  .notes-page__btn--danger {
+    color: #f0b4b4;
+    border-color: rgba(192, 57, 43, 0.45);
+    background: rgba(80, 30, 30, 0.45);
+  }
+
+  .notes-page__editor {
+    background: #1a1524;
+    color: #f0e8f8;
+    border-right-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .notes-page__preview {
+    background: #1f1a2c;
+    color: #f0e8f8;
+  }
+
+  .notes-page__sidebar-footer {
+    border-top-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .notes-page__icon-btn {
+    color: #9ec4bc;
+  }
+
+  .notes-page__icon-btn:hover,
+  .notes-page__icon-btn--active {
+    color: #b8e0c8;
+  }
+
+  .notes-page__vault-card {
+    color: #f0e8f8;
+  }
+
+  .notes-page__vault-card-name {
+    color: #f0e8f8;
+  }
+
+  .notes-page__vault-card-meta {
+    color: #b8a8c8;
+  }
+
+  .notes-page__vault-card-delete:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #f07070;
+  }
+
+  .notes-page__back-btn {
+    background: #2a2438;
+    border-color: rgba(173, 129, 190, 0.4);
+    color: #e8dcf5;
+  }
+
+  .notes-page--in-vault .notes-page__vault-badge {
+    color: var(--notes-vault-text, #f0e8f8);
+    background: color-mix(in srgb, var(--notes-vault-accent, #d5b5ea) 35%, #2a2438);
+  }
+
+  .notes-page--in-vault .notes-page__mode--active {
+    color: #1a1524;
+  }
+
+  :deep(.markdown-body h1),
+  :deep(.markdown-body h2),
+  :deep(.markdown-body h3),
+  :deep(.markdown-body h4),
+  :deep(.markdown-body h5),
+  :deep(.markdown-body h6) {
+    color: #f0e8f8;
+  }
+
+  :deep(.markdown-body h1) {
+    border-bottom-color: rgba(213, 181, 234, 0.22);
+  }
+
+  :deep(.markdown-body blockquote) {
+    color: #c5b8d2;
+    background: rgba(61, 47, 74, 0.45);
+  }
+
+  :deep(.markdown-body code) {
+    background: #2a2438;
+    color: #e8dcf5;
+  }
+
+  :deep(.markdown-body a),
+  :deep(.markdown-body a.note-wikilink) {
+    color: #d5b5ea;
+  }
+
+  :deep(.markdown-body a.note-wikilink--missing) {
+    color: #f0a0a0;
+  }
+
+  :deep(.markdown-body th),
+  :deep(.markdown-body td) {
+    border-color: rgba(213, 181, 234, 0.25);
+  }
+
+  :deep(.markdown-body th) {
+    background: #2a2438;
+  }
+
+  :deep(.markdown-body .notes-html-widget:not(.notes-html-widget--full-page)) {
+    border-color: rgba(213, 181, 234, 0.28);
+    background: #241c30;
+  }
+
+  .notes-prompt__overlay {
+    background: rgba(10, 8, 16, 0.65);
+  }
+
+  .notes-prompt__card {
+    background: #241c30;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  }
+
+  .notes-prompt__title {
+    color: #f0e8f8;
+  }
+
+  .notes-prompt__input {
+    background: #2a2438;
+    border-color: rgba(173, 129, 190, 0.4);
+    color: #f0e8f8;
+  }
+
+  .notes-dict-context {
+    background: #241c30;
+    border-color: rgba(213, 181, 234, 0.28);
+  }
+
+  .notes-dict-context__hint {
+    color: #b8a8c8;
+  }
+
+  .notes-dict-context__item {
+    color: #f0e8f8;
+  }
+
+  .notes-dict-tooltip {
+    background: #2a2438;
+    color: #f0e8f8;
+  }
+
+  @media (max-width: 900px) {
+    .notes-page__sidebar-rail {
+      background: rgba(34, 26, 46, 0.75);
+      border-color: rgba(213, 181, 234, 0.25);
+      color: rgba(232, 220, 245, 0.8);
+    }
+
+    .notes-page__sidebar-rail:hover,
+    .notes-page__sidebar-rail:focus-visible {
+      background: rgba(42, 36, 56, 0.95);
+      color: #f0e8f8;
+    }
   }
 }
 </style>
