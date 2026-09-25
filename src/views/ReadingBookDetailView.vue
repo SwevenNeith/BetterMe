@@ -857,10 +857,12 @@ watch(bookId, () => {
 .reading-book-page {
   flex: 1;
   width: 100%;
-  max-width: none;
+  max-width: 100%;
+  min-width: 0;
   margin: 0;
   padding: 1.5rem 1.25rem 3rem;
   box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .reading-book-page__header {

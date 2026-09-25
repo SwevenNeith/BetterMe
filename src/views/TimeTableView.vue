@@ -65,6 +65,7 @@ const newEventTimerHours = ref(0)
 const newEventTimerMinutes = ref(30)
 const addToTodo = ref(false)
 const isSavingEvent = ref(false)
+const eventFormError = ref('')
 const todoLinkedForm = reactive(createDefaultTodoLinkedForm())
 const todoPromesseLimits = ref({ perDay: 3, perWeek: 3 })
 const userId = ref(null)
@@ -226,6 +227,7 @@ function resetEventForm() {
   newEventCategory.value = 'Travail'
   newEventDateEnd.value = ''
   newEventAllDay.value = false
+  eventFormError.value = ''
   resetReminderFields()
   resetTimerFields()
   resetTodoLinkedForm()
@@ -648,47 +650,19 @@ onMounted(() => {
   fetchEvents({ silent: cached })
 })
 
-// Watch to automatically maintain end time > start time (with a 1 hour default buffer)
-watch(newEventStartTime, (newStart) => {
-  if (!newStart) return
-  if (newEventTimerEnabled.value) {
-    syncEndTimeFromTimer()
-    return
-  }
-  const [startH, startM] = newStart.split(':').map(Number)
-  const [endH, endM] = newEventEndTime.value.split(':').map(Number)
-
-  const startMin = startH * 60 + startM
-  const endMin = endH * 60 + endM
-
-  if (endMin <= startMin) {
-    let newEndH = startH + 1
-    let newEndM = startM
-    if (newEndH >= 24) {
-      newEndH = 23
-      newEndM = 59
-    }
-    newEventEndTime.value = `${String(newEndH).padStart(2, '0')}:${String(newEndM).padStart(2, '0')}`
-  }
+// Timer : recalcule la fin ; sinon on ne touche plus aux horaires pendant la saisie
+// (évite le 18h→20h qui passe par 02h et décale le début). Validation à la soumission.
+watch(newEventStartTime, () => {
+  eventFormError.value = ''
+  if (newEventTimerEnabled.value) syncEndTimeFromTimer()
 })
 
-watch(newEventEndTime, (newEnd) => {
-  if (!newEnd || newEventTimerEnabled.value) return
-  const [startH, startM] = newEventStartTime.value.split(':').map(Number)
-  const [endH, endM] = newEnd.split(':').map(Number)
+watch(newEventEndTime, () => {
+  eventFormError.value = ''
+})
 
-  const startMin = startH * 60 + startM
-  const endMin = endH * 60 + endM
-
-  if (endMin <= startMin) {
-    let newStartH = endH - 1
-    let newStartM = endM
-    if (newStartH < 0) {
-      newStartH = 0
-      newStartM = 0
-    }
-    newEventStartTime.value = `${String(newStartH).padStart(2, '0')}:${String(newStartM).padStart(2, '0')}`
-  }
+watch([newEventDay, newEventDateEnd, newEventAllDay], () => {
+  eventFormError.value = ''
 })
 
 // Navigation handlers
@@ -793,7 +767,7 @@ const handleAddEvent = async () => {
     const startD = new Date(startDStr + 'T00:00:00')
     const endD = new Date(endDStr + 'T00:00:00')
     if (endD < startD) {
-      alert("La date de fin ne peut pas être antérieure à la date de début !")
+      eventFormError.value = 'La date de fin ne peut pas être antérieure à la date de début.'
       return
     }
   }
@@ -803,34 +777,49 @@ const handleAddEvent = async () => {
 
   // Validate hours if not an all-day event
   if (!newEventAllDay.value) {
+    if (!newEventStartTime.value || (!timerActive && !newEventEndTime.value)) {
+      eventFormError.value = 'Indique un créneau horaire complet (début et fin).'
+      return
+    }
     if (timerActive) {
       if (timerMinutes <= 0) {
-        alert('Indique une durée de timer (au moins 1 minute) ou désactive le timer.')
+        eventFormError.value =
+          'Indique une durée de timer (au moins 1 minute) ou désactive le timer.'
         return
       }
       syncEndTimeFromTimer()
       const endTime = addMinutesToTimeString(newEventStartTime.value, timerMinutes)
       if (!endTime) {
-        alert('Le timer dépasse minuit. Réduis la durée ou choisis un début plus tôt.')
+        eventFormError.value =
+          'Le timer dépasse minuit. Réduis la durée ou choisis un début plus tôt.'
         return
       }
     } else {
       const [startH, startM] = newEventStartTime.value.split(':').map(Number)
       const [endH, endM] = newEventEndTime.value.split(':').map(Number)
+      if (
+        [startH, startM, endH, endM].some((n) => Number.isNaN(n))
+      ) {
+        eventFormError.value = 'Horaires invalides. Vérifie le début et la fin.'
+        return
+      }
       const startMin = startH * 60 + startM
       const endMin = endH * 60 + endM
 
       const isSameDay = !endDStr || endDStr === startDStr
       if (isSameDay && endMin <= startMin) {
-        alert("L'heure de fin doit être strictement supérieure à l'heure de début !")
+        eventFormError.value =
+          "L'heure de fin doit être strictement après l'heure de début."
         return
       }
     }
   }
 
+  eventFormError.value = ''
+
   if (newEventReminderEnabled.value && !newEventAllDay.value) {
     if (getReminderMinutesBefore() < 0) {
-      alert('Indique un délai de rappel valide ou désactive le rappel.')
+      eventFormError.value = 'Indique un délai de rappel valide ou désactive le rappel.'
       return
     }
   }
@@ -1268,6 +1257,24 @@ const parseEventHours = (timeRangeStr) => {
   return { start, end }
 }
 
+function formatDecimalHour(decimal) {
+  const h = Math.floor(decimal)
+  const m = Math.round((decimal - h) * 60) % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+/** Heure de début seule (petits blocs). */
+function formatEventStartLabel(timeRangeStr) {
+  const { start } = parseEventHours(timeRangeStr)
+  return formatDecimalHour(start)
+}
+
+/** Plage compacte sans espaces (grands blocs). */
+function formatEventRangeLabel(timeRangeStr) {
+  const { start, end } = parseEventHours(timeRangeStr)
+  return `${formatDecimalHour(start)}–${formatDecimalHour(end)}`
+}
+
 // Compute overlapping groups and absolute layout variables for a day column
 const getPositionedEventsForDay = (dayIdx) => {
   const events = getEventsForDay(dayIdx)
@@ -1276,11 +1283,15 @@ const getPositionedEventsForDay = (dayIdx) => {
   // 1. Map each event with its start/end decimal hours
   const mappedEvents = events.map((ev) => {
     const { start, end } = parseEventHours(ev.time)
+    const duration = end - start
     return {
       ...ev,
       start,
       end,
-      duration: end - start,
+      duration,
+      isShort: duration <= 1,
+      timeStartLabel: formatEventStartLabel(ev.time),
+      timeRangeLabel: formatEventRangeLabel(ev.time),
     }
   })
 
@@ -1333,7 +1344,7 @@ const getPositionedEventsForDay = (dayIdx) => {
       const leftPercent = ev.colIndex * (100 / totalCols)
 
       const top = ev.start * hourHeight
-      const height = ev.duration * hourHeight
+      const height = Math.max(ev.duration * hourHeight, 22)
 
       ev.positionStyle = {
         position: 'absolute',
@@ -1529,10 +1540,18 @@ const getPositionedEventsForDay = (dayIdx) => {
                     v-for="event in getPositionedEventsForDay(idx)"
                     :key="event.id"
                     class="event-block"
+                    :class="event.isShort ? 'event-block--short' : 'event-block--tall'"
                     :style="[getCategoryStyle(event.category), event.positionStyle]"
                     role="button"
                     tabindex="0"
-                    :title="`Modifier « ${event.title} »`"
+                    :title="[
+                      event.timeRangeLabel || event.time,
+                      event.title,
+                      event.category ? getCategoryName(event.category) : '',
+                      event.detail || '',
+                    ]
+                      .filter(Boolean)
+                      .join(' — ')"
                     @click="openEventForEdit(event)"
                     @keydown.enter="openEventForEdit(event)"
                   >
@@ -1544,17 +1563,24 @@ const getPositionedEventsForDay = (dayIdx) => {
                       ✕
                     </button>
                     <div class="event-content">
-                      <div class="event-header">
-                        <span class="event-icon">{{ getCategoryIcon(event.category) }}</span>
-                        <span class="event-time">{{ event.time }}</span>
+                      <!-- Petit bloc (≤1h) : une ligne = heure + titre (couleur = catégorie) -->
+                      <div v-if="event.isShort" class="event-main-line">
+                        <span class="event-time">{{ event.timeStartLabel }}</span>
+                        <h4 class="event-title">{{ event.title }}</h4>
                       </div>
-                      <h4 class="event-title">{{ event.title }}</h4>
+                      <!-- Grand bloc (>1h) : plusieurs lignes -->
+                      <template v-else>
+                        <div class="event-meta-row">
+                          <span class="event-time">{{ event.timeRangeLabel }}</span>
+                        </div>
+                        <h4 class="event-title">{{ event.title }}</h4>
+                        <span class="event-category-tag" v-if="event.category">
+                          {{ getCategoryName(event.category) }}
+                        </span>
+                      </template>
                       <p class="event-description" v-if="event.detail">
                         {{ event.detail }}
                       </p>
-                      <span class="event-category-tag" v-if="event.category">
-                        {{ getCategoryName(event.category) }}
-                      </span>
                     </div>
                   </div>
                 </div>
@@ -1637,10 +1663,18 @@ const getPositionedEventsForDay = (dayIdx) => {
                     v-for="event in getPositionedEventsForDay(selectedDayIndex)"
                     :key="event.id"
                     class="event-block event-block--mobile"
+                    :class="event.isShort ? 'event-block--short' : 'event-block--tall'"
                     :style="[getCategoryStyle(event.category), event.positionStyle]"
                     role="button"
                     tabindex="0"
-                    :title="`Modifier « ${event.title} »`"
+                    :title="[
+                      event.timeRangeLabel || event.time,
+                      event.title,
+                      event.category ? getCategoryName(event.category) : '',
+                      event.detail || '',
+                    ]
+                      .filter(Boolean)
+                      .join(' — ')"
                     @click="openEventForEdit(event)"
                     @keydown.enter="openEventForEdit(event)"
                   >
@@ -1652,17 +1686,22 @@ const getPositionedEventsForDay = (dayIdx) => {
                       ✕
                     </button>
                     <div class="event-content">
-                      <div class="event-header">
-                        <span class="event-icon">{{ getCategoryIcon(event.category) }}</span>
-                        <span class="event-time">{{ event.time }}</span>
+                      <div v-if="event.isShort" class="event-main-line">
+                        <span class="event-time">{{ event.timeStartLabel }}</span>
+                        <h4 class="event-title">{{ event.title }}</h4>
                       </div>
-                      <h4 class="event-title">{{ event.title }}</h4>
+                      <template v-else>
+                        <div class="event-meta-row">
+                          <span class="event-time">{{ event.timeRangeLabel }}</span>
+                        </div>
+                        <h4 class="event-title">{{ event.title }}</h4>
+                        <span class="event-category-tag" v-if="event.category">
+                          {{ getCategoryName(event.category) }}
+                        </span>
+                      </template>
                       <p class="event-description" v-if="event.detail">
                         {{ event.detail }}
                       </p>
-                      <span class="event-category-tag" v-if="event.category">
-                        {{ getCategoryName(event.category) }}
-                      </span>
                     </div>
                   </div>
                 </div>
@@ -1899,6 +1938,8 @@ const getPositionedEventsForDay = (dayIdx) => {
             :date-start="newEventDay"
             :promesse-limit-hint="todoPromesseLimitHint"
           />
+
+          <p v-if="eventFormError" class="event-form-error" role="alert">{{ eventFormError }}</p>
 
           <button type="submit" class="modal-submit-btn" :disabled="isSavingEvent">
             {{
@@ -2658,8 +2699,8 @@ const getPositionedEventsForDay = (dayIdx) => {
 .event-block {
   position: absolute;
   box-sizing: border-box;
-  border-radius: 12px;
-  padding: 0.45rem 0.55rem;
+  border-radius: 10px;
+  padding: 0.2rem 0.35rem;
   transition:
     transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
     box-shadow 0.25s ease,
@@ -2669,7 +2710,9 @@ const getPositionedEventsForDay = (dayIdx) => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  justify-content: flex-start;
   pointer-events: auto;
+  min-width: 0;
 }
 
 .event-block:hover {
@@ -2681,7 +2724,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   height: auto !important;
   min-height: var(--event-block-height, 0px) !important;
 
-  padding-right: 1.6rem !important;
+  padding: 0.45rem 1.6rem 0.45rem 0.55rem !important;
   z-index: 50;
   overflow: hidden;
   transform: translateY(-2px) scale(1.05);
@@ -2714,21 +2757,35 @@ const getPositionedEventsForDay = (dayIdx) => {
 .event-content {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  min-width: 0;
   height: 100%;
   position: relative;
-  padding-top: 1rem;
+  gap: 0.1rem;
+  overflow: hidden;
+}
+
+.event-block--short .event-content {
+  justify-content: center;
+}
+
+.event-block--tall .event-content {
+  justify-content: flex-start;
+  padding-top: 0.05rem;
 }
 
 .event-block:hover .event-content {
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
+  justify-content: flex-start;
+  overflow: visible;
 }
 
 .event-delete-btn {
   position: absolute;
-  top: 0.3rem;
-  right: 0.3rem;
+  top: 0.2rem;
+  right: 0.2rem;
   z-index: 30;
   background: rgba(255, 255, 255, 0.92);
   border: none;
@@ -2736,15 +2793,21 @@ const getPositionedEventsForDay = (dayIdx) => {
   font-size: 0.72rem;
   line-height: 1;
   cursor: pointer;
-  opacity: 0.9;
+  opacity: 0;
   transition: opacity 0.2s ease, transform 0.2s ease;
-  width: 1.35rem;
-  height: 1.35rem;
+  width: 1.2rem;
+  height: 1.2rem;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  .event-delete-btn {
+    background: rgba(40, 34, 55, 0.92);
+  }
 }
 
 .event-block:hover .event-delete-btn {
@@ -2756,40 +2819,157 @@ const getPositionedEventsForDay = (dayIdx) => {
   transform: scale(1.05);
 }
 
-.event-header {
+/* Une ligne compacte : heure + titre (catégorie = couleur du bloc) */
+.event-main-line {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  margin-bottom: 0.25rem;
-}
-
-.event-icon {
-  font-size: 0.9rem;
-}
-
-.event-time {
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: -0.1px;
+  gap: 0.3rem;
+  min-width: 0;
+  width: 100%;
   white-space: nowrap;
+  overflow: hidden;
+  font-size: 0.62rem;
+  line-height: 1.15;
 }
 
-.event-title {
-  font-size: 0.76rem;
-  font-weight: 700;
-  line-height: 1.25;
-  margin-top: 0.15rem;
+.event-block--short {
+  padding: 0.12rem 0.3rem 0.12rem 0.35rem;
+  overflow: hidden;
+}
+
+.event-block--short .event-content {
+  overflow: hidden;
+  justify-content: center;
+}
+
+.event-block--short .event-main-line {
+  font-size: clamp(0.55rem, 1.15vw, 0.68rem);
+}
+
+.event-block--short .event-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.event-block--short:not(:hover) .event-description {
+  display: none;
+}
+
+/* Plusieurs lignes pour les créneaux > 1h */
+.event-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  line-height: 1.2;
+}
+
+.event-block--tall .event-title {
+  flex: 0 1 auto;
+  width: 100%;
+  font-size: 0.72rem;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
   word-break: break-word;
 }
 
+.event-block--tall .event-category-tag {
+  flex: 0 0 auto;
+  max-width: 100%;
+  width: fit-content;
+  font-size: 0.58rem;
+  margin-top: 0.05rem;
+}
+
+.event-block:hover .event-main-line {
+  white-space: normal;
+  flex-wrap: wrap;
+  overflow: visible;
+  font-size: 0.72rem;
+  row-gap: 0.2rem;
+}
+
+.event-block--short:hover .event-main-line {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.event-block:hover .event-meta-row {
+  font-size: 0.72rem;
+}
+
+.event-icon {
+  flex-shrink: 0;
+  font-size: 0.95em;
+  line-height: 1;
+}
+
+.event-time {
+  flex-shrink: 0;
+  font-size: 0.95em;
+  font-weight: 700;
+  letter-spacing: -0.15px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.event-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 1em;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-block:hover .event-title {
+  flex: 1 1 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  display: block;
+  -webkit-line-clamp: unset;
+  word-break: break-word;
+}
+
+.event-block--short:hover .event-title {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .event-category-tag {
-  font-size: 0.62rem;
+  flex: 0 1 auto;
+  max-width: 32%;
+  margin: 0;
+  font-size: 0.82em;
   font-weight: 700;
   opacity: 0.75;
   text-transform: uppercase;
-  letter-spacing: 0.3px;
-  margin-top: 0.25rem;
-  display: block;
+  letter-spacing: 0.15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-block:hover .event-category-tag {
+  max-width: none;
+  flex: 1 1 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
 }
 
 .event-category-tag-mobile {
@@ -2845,6 +3025,41 @@ const getPositionedEventsForDay = (dayIdx) => {
   border-top: 1px solid rgba(213, 181, 234, 0.15);
   padding-top: 0.4rem;
   overflow: visible;
+}
+
+.event-block--mobile.event-block--short .event-description {
+  display: none;
+}
+
+.event-block--mobile.event-block--short .event-main-line {
+  white-space: nowrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  font-size: 0.72rem;
+}
+
+.event-block--mobile.event-block--tall .event-meta-row {
+  font-size: 0.68rem;
+}
+
+.event-block--mobile.event-block--tall .event-title {
+  font-size: 0.78rem;
+  white-space: normal;
+  overflow: hidden;
+}
+
+.event-block--mobile .event-category-tag {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.event-block--mobile.event-block--tall .event-category-tag {
+  max-width: 100%;
+}
+
+.event-block--mobile .event-delete-btn {
+  opacity: 0.9;
 }
 
 .empty-col-state {
@@ -2987,6 +3202,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   width: 100%;
   max-width: 430px;
   max-height: calc(100vh - 3rem);
+  overflow-x: hidden;
   overflow-y: auto;
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(16px);
@@ -2997,6 +3213,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -3042,21 +3259,30 @@ const getPositionedEventsForDay = (dayIdx) => {
   display: flex;
   flex-direction: column;
   gap: 0.95rem;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .form-row {
   display: flex;
   gap: 1rem;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .form-row .form-group {
   flex: 1;
+  min-width: 0;
 }
 
 .all-day-toggle-group {
@@ -3244,10 +3470,15 @@ const getPositionedEventsForDay = (dayIdx) => {
   align-items: center;
   gap: 0.5rem;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .time-range-picker input {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  max-width: 100%;
   text-align: center;
 }
 
@@ -3264,15 +3495,39 @@ const getPositionedEventsForDay = (dayIdx) => {
   flex-shrink: 0;
 }
 
+.event-form-error {
+  margin: 0.15rem 0 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  background: rgba(220, 53, 69, 0.1);
+  border: 1px solid rgba(220, 53, 69, 0.28);
+  color: #b02a37;
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+@media (prefers-color-scheme: dark) {
+  .event-form-error {
+    background: rgba(220, 53, 69, 0.18);
+    border-color: rgba(255, 138, 149, 0.35);
+    color: #ff8a95;
+  }
+}
+
 .form-group label {
   font-size: 0.85rem;
   font-weight: 700;
   color: #72a098;
 }
 
-.form-group input,
+.form-group input:not([type='checkbox']):not([type='radio']),
 .form-group select,
 .form-group textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 0.75rem 1rem;
   border-radius: 12px;
   border: 1px solid rgba(213, 181, 234, 0.4);
@@ -3288,7 +3543,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .form-group input,
+  .form-group input:not([type='checkbox']):not([type='radio']),
   .form-group select,
   .form-group textarea {
     background: rgba(0, 0, 0, 0.3);
@@ -3297,7 +3552,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   }
 }
 
-.form-group input:focus,
+.form-group input:not([type='checkbox']):not([type='radio']):focus,
 .form-group select:focus,
 .form-group textarea:focus {
   outline: none;

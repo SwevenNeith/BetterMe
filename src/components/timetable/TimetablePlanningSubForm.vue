@@ -344,6 +344,8 @@ watch(
 
 .planning-subform__input {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   padding: 0.6rem 0.75rem;
   border: 1px solid rgba(213, 181, 234, 0.45);
   border-radius: 10px;
@@ -358,6 +360,13 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.45rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.planning-subform__time-row .planning-subform__input {
+  flex: 1 1 0;
+  width: auto;
 }
 
 .planning-subform__time-sep {

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../../lib/supabase.js'
 import {
@@ -29,6 +29,15 @@ import {
 } from '../../composables/usePersistedPageState.js'
 
 const CATALOG_SEARCH_STORAGE_KEY = 'betterme-bibliotheque-catalog-v2'
+
+/** Même logique de colonnes que Lecture / Télévision. */
+const MIN_BOOK_COL_PX = 96
+
+function computeGridColumnCount(widthPx, gapPx = 7.2) {
+  const width = Math.max(0, Number(widthPx) || 0)
+  const gap = Number.isFinite(gapPx) ? gapPx : 7.2
+  return Math.max(2, Math.floor((width + gap) / (MIN_BOOK_COL_PX + gap)))
+}
 
 const props = defineProps({
   /** Livres Lecture déjà chargés (évite un 2e fetch si le parent les a). */
@@ -76,6 +85,9 @@ const syncProgress = ref(null)
 /** Clé work Open Library en cours d’ajout rapide. */
 const addingWorkKey = ref('')
 const addError = ref('')
+const catalogGridRef = ref(null)
+const gridColumnCount = ref(4)
+let gridResizeObserver = null
 
 let searchDebounceTimer = null
 let searchAbortController = null
@@ -92,9 +104,40 @@ const showPagination = computed(
   () => !isLoading.value && results.value.length > 0 && totalPages.value > 1,
 )
 
+const catalogGridStyle = computed(() => ({
+  '--catalog-cols': String(gridColumnCount.value),
+}))
+
 const linkedCount = computed(
   () => books.value.filter((book) => String(book.open_library_work_key || '').trim()).length,
 )
+
+function updateGridColumnCount() {
+  const el = catalogGridRef.value
+  if (!el) return
+  const styles = getComputedStyle(el)
+  const gap = parseFloat(styles.columnGap || styles.gap) || 7.2
+  const nextCols = computeGridColumnCount(el.clientWidth, gap)
+  if (nextCols !== gridColumnCount.value) {
+    gridColumnCount.value = nextCols
+  }
+}
+
+function bindGridResizeObserver() {
+  gridResizeObserver?.disconnect()
+  gridResizeObserver = null
+
+  const el = catalogGridRef.value
+  if (!el) return
+
+  updateGridColumnCount()
+
+  if (typeof ResizeObserver === 'undefined') return
+  gridResizeObserver = new ResizeObserver(() => {
+    updateGridColumnCount()
+  })
+  gridResizeObserver.observe(el)
+}
 
 async function loadLectureBooks() {
   if (Array.isArray(props.lectureBooks)) return
@@ -280,6 +323,9 @@ function goToPage(page) {
   const next = Math.min(Math.max(page, 1), totalPages.value)
   if (next === currentPage.value && results.value.length) return
   runSearch(searchQuery.value, next)
+  nextTick(() => {
+    catalogGridRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
 }
 
 const failedCoverKeys = ref(new Set())
@@ -300,6 +346,11 @@ function onCoverError(doc) {
   const next = new Set(failedCoverKeys.value)
   next.add(key)
   failedCoverKeys.value = next
+}
+
+function catalogAriaLabel(doc) {
+  const parts = [doc?.title, doc?.authorLabel, doc?.firstPublishYear].filter(Boolean)
+  return parts.join(' — ')
 }
 
 async function syncWithOpenLibrary() {
@@ -381,6 +432,16 @@ function requestAddMissingBook() {
   })
 }
 
+watch(
+  () => results.value.length,
+  async (len) => {
+    if (len > 0) {
+      await nextTick()
+      bindGridResizeObserver()
+    }
+  },
+)
+
 onMounted(async () => {
   const {
     data: { user },
@@ -392,6 +453,8 @@ onMounted(async () => {
   if (q.length >= MIN_SEARCH_LENGTH) {
     await runSearch(q, currentPage.value || 1)
   }
+  await nextTick()
+  bindGridResizeObserver()
 })
 
 onUnmounted(() => {
@@ -401,6 +464,8 @@ onUnmounted(() => {
   searchAbortController = null
   syncAbortController?.abort()
   syncAbortController = null
+  gridResizeObserver?.disconnect()
+  gridResizeObserver = null
 })
 </script>
 
@@ -542,13 +607,18 @@ onUnmounted(() => {
         <span v-if="totalPages > 1">· page {{ currentPage }} / {{ totalPages }}</span>
       </p>
 
-      <div class="catalog-panel__grid">
+      <div
+        ref="catalogGridRef"
+        class="catalog-panel__grid"
+        :style="catalogGridStyle"
+      >
         <article v-for="doc in results" :key="resultKey(doc)" class="catalog-book">
-          <div class="catalog-book__cover-area">
+          <div class="catalog-book__wrap">
             <button
               type="button"
               class="catalog-book__cover-btn"
-              :aria-label="`Ouvrir la fiche de ${doc.title}`"
+              :title="catalogAriaLabel(doc)"
+              :aria-label="`Ouvrir la fiche de ${catalogAriaLabel(doc)}`"
               @click="openBook(doc)"
             >
               <img
@@ -581,23 +651,6 @@ onUnmounted(() => {
               <span aria-hidden="true">{{ addingWorkKey === docWorkKey(doc) ? '…' : '+' }}</span>
             </button>
           </div>
-
-          <button
-            type="button"
-            class="catalog-book__meta-btn"
-            :aria-label="`${doc.title} — ${doc.authorLabel}`"
-            @click="openBook(doc)"
-          >
-            <h3 class="catalog-book__title">{{ doc.title }}</h3>
-            <p v-if="doc.subtitle" class="catalog-book__subtitle">{{ doc.subtitle }}</p>
-            <p class="catalog-book__author">{{ doc.authorLabel }}</p>
-            <p class="catalog-book__details">
-              <span v-if="doc.firstPublishYear">{{ doc.firstPublishYear }}</span>
-              <span v-if="doc.editionCount">
-                · {{ doc.editionCount }} édition{{ doc.editionCount > 1 ? 's' : '' }}
-              </span>
-            </p>
-          </button>
         </article>
       </div>
 
@@ -843,18 +896,16 @@ onUnmounted(() => {
 
 .catalog-panel__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(var(--catalog-cols, 4), minmax(0, 1fr));
+  gap: 0.45rem;
+  scroll-margin-top: 1rem;
 }
 
 .catalog-book {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
 }
 
-.catalog-book__cover-area {
+.catalog-book__wrap {
   position: relative;
 }
 
@@ -864,22 +915,29 @@ onUnmounted(() => {
   width: 100%;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: 5px;
   cursor: pointer;
   overflow: hidden;
-  background: linear-gradient(145deg, #f4eef8, #e8d9f0);
-  border: 1px solid rgba(213, 181, 234, 0.25);
-  transition: transform 0.15s ease;
+  background: transparent;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .catalog-book__cover-btn:hover {
   transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(173, 129, 190, 0.25);
+}
+
+.catalog-book__cover-btn:focus-visible {
+  outline: 2px solid rgba(173, 129, 190, 0.65);
+  outline-offset: 2px;
 }
 
 .catalog-book__add {
   position: absolute;
-  top: 0.35rem;
-  right: 0.35rem;
+  top: 0.28rem;
+  right: 0.28rem;
   z-index: 2;
   display: inline-flex;
   align-items: center;
@@ -917,75 +975,39 @@ onUnmounted(() => {
   transform: none;
 }
 
-.catalog-book__meta-btn {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  border-radius: 8px;
-}
-
-.catalog-book__meta-btn:focus-visible {
-  outline: 2px solid rgba(173, 129, 190, 0.65);
-  outline-offset: 2px;
-}
-
 .catalog-book__cover {
   display: block;
   width: 100%;
   aspect-ratio: 2 / 3;
   object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid rgba(213, 181, 234, 0.2);
 }
 
 .catalog-book__cover--placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: linear-gradient(145deg, #f4eef8, #e8d9f0);
   color: #ad81be;
   font-size: 1.5rem;
 }
 
 .catalog-book__badge {
   position: absolute;
-  left: 0.4rem;
-  bottom: 0.4rem;
-  padding: 0.2rem 0.45rem;
-  border-radius: 999px;
-  background: rgba(114, 160, 152, 0.95);
+  left: 0.3rem;
+  right: 0.3rem;
+  bottom: 0.3rem;
+  z-index: 1;
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(20, 16, 28, 0.72);
   color: #fff;
-  font-size: 0.68rem;
-  font-weight: 800;
-}
-
-.catalog-book__title {
-  margin: 0;
-  font-size: 0.92rem;
-  font-weight: 800;
-  color: #2c3e50;
-  line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.catalog-book__subtitle,
-.catalog-book__details {
-  margin: 0;
-  font-size: 0.78rem;
-  color: #6c757d;
-}
-
-.catalog-book__author {
-  margin: 0;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #5a4a68;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  pointer-events: none;
 }
 
 .catalog-panel__pagination {
@@ -1086,13 +1108,6 @@ onUnmounted(() => {
     color: #adb5bd;
   }
 
-  .catalog-book__title {
-    color: #e9ecef;
-  }
-  .catalog-book__author {
-    color: #c9b0d8;
-  }
-  .catalog-book__cover-btn,
   .catalog-book__cover--placeholder {
     background: linear-gradient(145deg, #2a2235, #3a2f48);
   }

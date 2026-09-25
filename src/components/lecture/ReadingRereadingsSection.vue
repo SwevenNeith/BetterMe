@@ -336,8 +336,16 @@ watch(editingKey, async (key) => {
 
 .reading-rereadings__dates {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.5rem 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 720px) {
+  .reading-rereadings__dates {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .reading-rereadings__field {

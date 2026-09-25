@@ -1054,7 +1054,7 @@ onUnmounted(() => {
 
 .field--date input {
   width: 100%;
-  max-width: min(220px, 100%);
+  max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
   padding: 0.6rem 0.75rem;

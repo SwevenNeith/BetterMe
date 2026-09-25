@@ -308,8 +308,16 @@ watch(editingKey, async (key) => {
 
 .tv-rewatches__dates {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 720px) {
+  .tv-rewatches__dates {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .tv-rewatches__field {

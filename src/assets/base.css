@@ -36,13 +36,22 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
 }
 
 /**
- * Champs date/heure : sur mobile le libellé localisé est long
- * et peut faire déborder l’encadré. On force le contenu à rester
- * dans la largeur disponible.
+ * Champs de formulaire : même largeur, jamais plus large que le parent.
+ * Les date/heure mobiles ont une largeur intrinsèque élevée (libellé localisé)
+ * qui fait déborder les cartes — on force le confinement.
  */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']),
+select,
+textarea {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
 input[type='date'],
 input[type='time'],
 input[type='datetime-local'],
@@ -53,7 +62,8 @@ input[type='week'] {
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  overflow: hidden;
+  /* Empêche le chrome WebKit de forcer une largeur min trop large */
+  field-sizing: fixed;
 }
 
 input[type='date']::-webkit-datetime-edit,
@@ -104,6 +114,7 @@ input[type='week']::-webkit-calendar-picker-indicator {
   input[type='datetime-local'],
   input[type='month'],
   input[type='week'] {
-    font-size: 0.9rem;
+    /* ≥16px évite le zoom iOS ; taille homogène avec les autres champs */
+    font-size: 16px;
   }
 }

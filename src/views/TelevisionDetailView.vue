@@ -830,8 +830,10 @@ watch(userId, async (id) => {
 
 .tv-tracking__row {
   display: grid;
-  grid-template-columns: minmax(10rem, 1.4fr) repeat(2, minmax(8rem, 1fr));
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr));
   gap: 0.65rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .tv-tracking__field {
@@ -849,6 +851,8 @@ watch(userId, async (id) => {
 
 .tv-tracking__input {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   padding: 0.5rem 0.6rem;
   border-radius: 10px;

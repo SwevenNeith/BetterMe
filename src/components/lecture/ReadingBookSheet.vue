@@ -121,8 +121,11 @@ defineProps({
 <style>
 .reading-fiche {
   width: min(820px, 100%);
+  max-width: 100%;
+  min-width: 0;
   max-height: min(92vh, 920px);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 1.35rem 1.45rem 1.6rem;
   border: 1px solid rgba(173, 129, 190, 0.45);
   border-radius: 18px;
@@ -235,6 +238,8 @@ defineProps({
   gap: 1rem;
   align-items: start;
   margin-bottom: 1rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .reading-fiche-info {
@@ -245,6 +250,8 @@ defineProps({
   border-radius: 16px;
   background: rgba(244, 234, 252, 0.65);
   border: 1px solid rgba(213, 181, 234, 0.45);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .reading-fiche-polaroid {
@@ -315,12 +322,16 @@ defineProps({
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .reading-fiche-row--dates {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.65rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .reading-fiche-row--collection {
@@ -328,6 +339,8 @@ defineProps({
   flex-direction: row;
   align-items: flex-end;
   gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .reading-fiche-field--collection {
@@ -473,6 +486,8 @@ defineProps({
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .reading-fiche-box {
@@ -533,6 +548,8 @@ defineProps({
 .reading-fiche-input,
 .reading-fiche-select {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   padding: 0.42rem 0.55rem;
   border: 1px solid rgba(173, 129, 190, 0.35);
@@ -646,18 +663,42 @@ defineProps({
 }
 
 @media (max-width: 720px) {
+  .reading-fiche {
+    padding: 1rem 0.85rem 1.25rem;
+  }
+
   .reading-fiche-top,
   .reading-fiche-bottom,
   .reading-fiche-about-grid,
   .reading-fiche-row--dates {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reading-fiche-row--collection {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .reading-fiche-saga-group {
+    width: 100%;
   }
 
   .reading-fiche-polaroid {
     order: -1;
     transform: none;
-    max-width: 220px;
+    max-width: min(220px, 100%);
+    width: 100%;
     margin: 0 auto;
+    box-sizing: border-box;
+  }
+
+  .reading-fiche-header {
+    gap: 0.5rem;
+  }
+
+  .reading-fiche-title {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 }
 
