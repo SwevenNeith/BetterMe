@@ -156,6 +156,46 @@ function formatEpisodeLabel(row) {
 }
 
 /**
+ * Kinds TV déjà envoyés aujourd’hui (évite un 2e push après re-sync / rattrapage).
+ * @param {import('@supabase/supabase-js').SupabaseClient} client
+ * @param {string} userId
+ * @param {string} todayISO
+ * @returns {Promise<Set<string>>}
+ */
+async function listTelevisionKindsSentToday(client, userId, todayISO) {
+  const dayStart = dateTimeLocalToDate(todayISO, '00:00')
+  const dayEndExclusive = dateTimeLocalToDate(todayISO, '00:00')
+  dayEndExclusive.setDate(dayEndExclusive.getDate() + 1)
+
+  const startIso = dayStart.toISOString()
+  const endIso = dayEndExclusive.toISOString()
+
+  /** @type {Set<string>} */
+  const kinds = new Set()
+
+  for (const prefix of [TELEVISION_MOVIE_RELEASE_PREFIX, TELEVISION_EPISODE_AIR_PREFIX]) {
+    const { data, error } = await client
+      .from('scheduled_notifications')
+      .select('kind')
+      .eq('user_id', userId)
+      .eq('sent', true)
+      .like('kind', `${prefix}%`)
+      .gte('scheduled_at', startIso)
+      .lt('scheduled_at', endIso)
+
+    if (error) {
+      console.warn('listTelevisionKindsSentToday:', error.message)
+      continue
+    }
+    for (const row of data ?? []) {
+      if (row?.kind) kinds.add(String(row.kind))
+    }
+  }
+
+  return kinds
+}
+
+/**
  * Rafraîchit les dates TMDB d’un média (détails film/série).
  * @param {import('@supabase/supabase-js').SupabaseClient} client
  * @param {string} userId
@@ -240,6 +280,8 @@ export async function syncTelevisionReleaseNotificationsForUser(userId, options 
     await deletePendingByKindPrefix(client, userId, TELEVISION_MOVIE_RELEASE_PREFIX)
     await deletePendingByKindPrefix(client, userId, TELEVISION_EPISODE_AIR_PREFIX)
 
+    const alreadySentToday = await listTelevisionKindsSentToday(client, userId, today)
+
     /** @type {object[]} */
     const pendingRows = []
 
@@ -249,8 +291,10 @@ export async function syncTelevisionReleaseNotificationsForUser(userId, options 
       if (row.media_type === 'movie') {
         const release = String(row.tmdb_release_date ?? '').slice(0, 10)
         if (!release || release < today) continue
+        const kind = movieReleaseKind(row.id)
+        if (alreadySentToday.has(kind)) continue
         const notif = buildTelevisionNotifRow(userId, {
-          kind: movieReleaseKind(row.id),
+          kind,
           title:
             release === today ? 'Film disponible aujourd’hui' : 'Sortie de film à venir',
           body:
@@ -269,6 +313,8 @@ export async function syncTelevisionReleaseNotificationsForUser(userId, options 
       if (row.media_type === 'tv') {
         const airDate = String(row.tmdb_next_air_date ?? '').slice(0, 10)
         if (!airDate || airDate < today) continue
+        const kind = episodeAirKind(row.id)
+        if (alreadySentToday.has(kind)) continue
         const episodeLabel = formatEpisodeLabel(row)
         const finished = isFinishedCollection(row.collection)
         const looksLikeNewSeason = Number(row.tmdb_next_episode) === 1
@@ -314,7 +360,7 @@ export async function syncTelevisionReleaseNotificationsForUser(userId, options 
         }
 
         const notif = buildTelevisionNotifRow(userId, {
-          kind: episodeAirKind(row.id),
+          kind,
           title,
           body,
           dateKey: airDate,

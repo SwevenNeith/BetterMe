@@ -511,6 +511,14 @@ function notificationPushTag(notif: {
     const day = String(notif.scheduled_at || new Date().toISOString()).slice(0, 10)
     return `betterme-daily_reminder-${dailyId}-${day}`
   }
+  const kind = String(notif.kind ?? '')
+  if (
+    kind.startsWith('television_movie_release:') ||
+    kind.startsWith('television_episode_air:')
+  ) {
+    const day = String(notif.scheduled_at || new Date().toISOString()).slice(0, 10)
+    return `betterme-${kind}-${day}`
+  }
   if (notif.event_id && notif.kind) return `betterme-${notif.kind}-${notif.event_id}`
   if (notif.kind) return `betterme-${notif.kind}-${notif.id ?? 'x'}`
   return `betterme-${notif.id ?? 'default'}`
