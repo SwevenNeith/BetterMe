@@ -1193,7 +1193,13 @@ function confirmEventDeleteWithLinked() {
 
 const gridViewport = ref(null)
 const mobileGridViewport = ref(null)
-const hourHeight = 65 // Height of 1 hour in pixels
+/** Hauteur d’1 heure en px — 30 min ≈ 70 px pour horaire + titre + catégorie sans coupe. */
+const HOUR_HEIGHT_PX = 140
+const hourHeight = HOUR_HEIGHT_PX
+const dayGridStyle = {
+  '--hour-height': `${HOUR_HEIGHT_PX}px`,
+  '--day-grid-height': `${HOUR_HEIGHT_PX * 24}px`,
+}
 
 // Format single hour value to string HH:00
 const formatHour = (hour) => {
@@ -1289,7 +1295,8 @@ const getPositionedEventsForDay = (dayIdx) => {
       start,
       end,
       duration,
-      isShort: duration <= 1,
+      // < 30 min : une ligne ; sinon empilé (horaire / titre / catégorie)
+      isShort: duration < 0.5,
       timeStartLabel: formatEventStartLabel(ev.time),
       timeRangeLabel: formatEventRangeLabel(ev.time),
     }
@@ -1344,7 +1351,7 @@ const getPositionedEventsForDay = (dayIdx) => {
       const leftPercent = ev.colIndex * (100 / totalCols)
 
       const top = ev.start * hourHeight
-      const height = Math.max(ev.duration * hourHeight, 22)
+      const height = Math.max(ev.duration * hourHeight, 26)
 
       ev.positionStyle = {
         position: 'absolute',
@@ -1506,7 +1513,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 
         <!-- Scrollable Grid Body -->
         <div class="grid-scroll-viewport" ref="gridViewport">
-          <div class="weekly-timetable-grid">
+          <div class="weekly-timetable-grid" :style="dayGridStyle">
             <!-- Time Axis Column -->
             <div class="time-axis">
               <div class="time-hour-slot" v-for="hour in 24" :key="hour">
@@ -1563,12 +1570,12 @@ const getPositionedEventsForDay = (dayIdx) => {
                       ✕
                     </button>
                     <div class="event-content">
-                      <!-- Petit bloc (≤1h) : une ligne = heure + titre (couleur = catégorie) -->
+                      <!-- Très court (<30 min) : une ligne -->
                       <div v-if="event.isShort" class="event-main-line">
                         <span class="event-time">{{ event.timeStartLabel }}</span>
                         <h4 class="event-title">{{ event.title }}</h4>
                       </div>
-                      <!-- Grand bloc (>1h) : plusieurs lignes -->
+                      <!-- Sinon : horaire, titre, catégorie empilés -->
                       <template v-else>
                         <div class="event-meta-row">
                           <span class="event-time">{{ event.timeRangeLabel }}</span>
@@ -1631,7 +1638,7 @@ const getPositionedEventsForDay = (dayIdx) => {
           class="grid-scroll-viewport grid-scroll-viewport--mobile"
           ref="mobileGridViewport"
         >
-          <div class="weekly-timetable-grid">
+          <div class="weekly-timetable-grid" :style="dayGridStyle">
             <!-- Time Axis Column -->
             <div class="time-axis">
               <div class="time-hour-slot" v-for="hour in 24" :key="hour">
@@ -2623,7 +2630,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   display: flex;
   position: relative;
   width: 100%;
-  height: 1560px; /* 24 hours * 65px */
+  height: var(--day-grid-height, 3360px);
 }
 
 .time-axis {
@@ -2636,7 +2643,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .time-hour-slot {
-  height: 65px;
+  height: var(--hour-height, 140px);
   position: relative;
   display: flex;
   align-items: flex-start;
@@ -2682,7 +2689,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .grid-hour-line {
-  height: 65px;
+  height: var(--hour-height, 140px);
   border-bottom: 1px dashed rgba(213, 181, 234, 0.08);
   box-sizing: border-box;
   pointer-events: auto;
@@ -2855,7 +2862,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   display: none;
 }
 
-/* Plusieurs lignes pour les créneaux > 1h */
+/* Empilé : horaire / titre / catégorie (créneaux ≥ 30 min) */
 .event-meta-row {
   display: flex;
   align-items: center;
@@ -2863,14 +2870,30 @@ const getPositionedEventsForDay = (dayIdx) => {
   min-width: 0;
   width: 100%;
   flex-shrink: 0;
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   line-height: 1.2;
+}
+
+.event-block--tall {
+  padding: 0.22rem 0.35rem 0.25rem 0.4rem;
+  overflow: hidden;
+}
+
+.event-block--tall .event-content {
+  justify-content: flex-start;
+  gap: 0.08rem;
+}
+
+.event-block--tall .event-meta-row {
+  font-size: 0.64rem;
+  line-height: 1.15;
 }
 
 .event-block--tall .event-title {
   flex: 0 1 auto;
   width: 100%;
-  font-size: 0.72rem;
+  font-size: 0.74rem;
+  line-height: 1.2;
   white-space: normal;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -2886,7 +2909,12 @@ const getPositionedEventsForDay = (dayIdx) => {
   max-width: 100%;
   width: fit-content;
   font-size: 0.58rem;
-  margin-top: 0.05rem;
+  line-height: 1.15;
+  margin-top: 0;
+}
+
+.event-block--tall:not(:hover) .event-description {
+  display: none;
 }
 
 .event-block:hover .event-main-line {
@@ -2903,7 +2931,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .event-block:hover .event-meta-row {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 
 .event-icon {
@@ -3019,15 +3047,6 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .event-block--mobile .event-description {
-  max-height: none;
-  opacity: 1;
-  margin-top: 0.4rem;
-  border-top: 1px solid rgba(213, 181, 234, 0.15);
-  padding-top: 0.4rem;
-  overflow: visible;
-}
-
-.event-block--mobile.event-block--short .event-description {
   display: none;
 }
 
@@ -3039,11 +3058,11 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .event-block--mobile.event-block--tall .event-meta-row {
-  font-size: 0.68rem;
+  font-size: 0.72rem;
 }
 
 .event-block--mobile.event-block--tall .event-title {
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   white-space: normal;
   overflow: hidden;
 }
@@ -3056,6 +3075,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 
 .event-block--mobile.event-block--tall .event-category-tag {
   max-width: 100%;
+  font-size: 0.68rem;
 }
 
 .event-block--mobile .event-delete-btn {
