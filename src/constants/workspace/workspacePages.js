@@ -60,6 +60,19 @@ export const WORKSPACE_PAGE_OPTIONS = [
     icon: 'wishlist',
   },
   {
+    id: APP_PAGE_IDS.CREATION,
+    path: '/creation',
+    defaultLabel: 'Création',
+    icon: 'creation',
+  },
+  {
+    id: 'points-de-croix',
+    path: '/points-de-croix',
+    defaultLabel: 'Points de Croix',
+    visibilityId: APP_PAGE_IDS.CREATION,
+    icon: 'creation',
+  },
+  {
     id: APP_PAGE_IDS.FINANCES,
     path: '/finances',
     defaultLabel: 'Finances',

@@ -19,6 +19,7 @@ export const APP_PAGE_IDS = {
   DICTIONNAIRE: 'dictionnaire',
   MENSTRUATION: 'menstruation',
   EXERCICES_GROUP: 'exercices-group',
+  CREATION: 'creation',
 }
 
 /** @typedef {{ id: string, defaultLabel: string }} AppMainPage */

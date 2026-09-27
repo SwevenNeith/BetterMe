@@ -1,0 +1,3658 @@
+{
+  "_meta": {
+    "source": "https://github.com/cheshire137/cross-stitch-color-conversion",
+    "file": "src/assets/dmc-color-codes-names.json",
+    "description": "DMC embroidery floss reference (code, name, RGB/hex). Not authored for BetterMe — imported from open-source data.",
+    "count": 456
+  },
+  "colors": [
+    {
+      "code": "150",
+      "name": "Red - BRIGHT",
+      "hex": "#cf0053",
+      "r": 207,
+      "g": 0,
+      "b": 83
+    },
+    {
+      "code": "151",
+      "name": "Pink",
+      "hex": "#ffcbd7",
+      "r": 255,
+      "g": 203,
+      "b": 215
+    },
+    {
+      "code": "152",
+      "name": "Tawny - DK",
+      "hex": "#e1a1a1",
+      "r": 225,
+      "g": 161,
+      "b": 161
+    },
+    {
+      "code": "153",
+      "name": "Lilac",
+      "hex": "#eac5eb",
+      "r": 234,
+      "g": 197,
+      "b": 235
+    },
+    {
+      "code": "154",
+      "name": "Red - VY DK",
+      "hex": "#4b233a",
+      "r": 75,
+      "g": 35,
+      "b": 58
+    },
+    {
+      "code": "155",
+      "name": "Forget-me-not Blue",
+      "hex": "#9774b6",
+      "r": 151,
+      "g": 116,
+      "b": 182
+    },
+    {
+      "code": "156",
+      "name": "Blue - MED",
+      "hex": "#8577b4",
+      "r": 133,
+      "g": 119,
+      "b": 180
+    },
+    {
+      "code": "157",
+      "name": "Blue - LT",
+      "hex": "#b5b8ea",
+      "r": 181,
+      "g": 184,
+      "b": 234
+    },
+    {
+      "code": "158",
+      "name": "Blue - DK",
+      "hex": "#393068",
+      "r": 57,
+      "g": 48,
+      "b": 104
+    },
+    {
+      "code": "159",
+      "name": "Petrol Blue - LT",
+      "hex": "#bcb5de",
+      "r": 188,
+      "g": 181,
+      "b": 222
+    },
+    {
+      "code": "160",
+      "name": "Petrol Blue - MED",
+      "hex": "#8178a9",
+      "r": 129,
+      "g": 120,
+      "b": 169
+    },
+    {
+      "code": "161",
+      "name": "Petrol Blue - DK",
+      "hex": "#60568b",
+      "r": 96,
+      "g": 86,
+      "b": 139
+    },
+    {
+      "code": "162",
+      "name": "Baby Blue - LT",
+      "hex": "#cae7f0",
+      "r": 202,
+      "g": 231,
+      "b": 240
+    },
+    {
+      "code": "163",
+      "name": "Green",
+      "hex": "#557a60",
+      "r": 85,
+      "g": 122,
+      "b": 96
+    },
+    {
+      "code": "164",
+      "name": "Green - LT",
+      "hex": "#bae4b6",
+      "r": 186,
+      "g": 228,
+      "b": 182
+    },
+    {
+      "code": "165",
+      "name": "Green - BRIGHT",
+      "hex": "#e1f477",
+      "r": 225,
+      "g": 244,
+      "b": 119
+    },
+    {
+      "code": "166",
+      "name": "Lime Green",
+      "hex": "#adc238",
+      "r": 173,
+      "g": 194,
+      "b": 56
+    },
+    {
+      "code": "167",
+      "name": "Khaki Brown",
+      "hex": "#855d31",
+      "r": 133,
+      "g": 93,
+      "b": 49
+    },
+    {
+      "code": "168",
+      "name": "Silver Gray",
+      "hex": "#b1aeb7",
+      "r": 177,
+      "g": 174,
+      "b": 183
+    },
+    {
+      "code": "169",
+      "name": "Pewter Gray",
+      "hex": "#827d7d",
+      "r": 130,
+      "g": 125,
+      "b": 125
+    },
+    {
+      "code": "208",
+      "name": "Lavender - VY DK",
+      "hex": "#9442a7",
+      "r": 148,
+      "g": 66,
+      "b": 167
+    },
+    {
+      "code": "209",
+      "name": "Lavender - DK",
+      "hex": "#ba72c6",
+      "r": 186,
+      "g": 114,
+      "b": 198
+    },
+    {
+      "code": "210",
+      "name": "Lavender - MED",
+      "hex": "#d49fe1",
+      "r": 212,
+      "g": 159,
+      "b": 225
+    },
+    {
+      "code": "211",
+      "name": "Lavender - LT",
+      "hex": "#e5bded",
+      "r": 229,
+      "g": 189,
+      "b": 237
+    },
+    {
+      "code": "221",
+      "name": "Shell Pink - VY DK",
+      "hex": "#792631",
+      "r": 121,
+      "g": 38,
+      "b": 49
+    },
+    {
+      "code": "223",
+      "name": "Shell Pink - LT",
+      "hex": "#bb6864",
+      "r": 187,
+      "g": 104,
+      "b": 100
+    },
+    {
+      "code": "224",
+      "name": "Shell Pink - VY LT",
+      "hex": "#e2a598",
+      "r": 226,
+      "g": 165,
+      "b": 152
+    },
+    {
+      "code": "225",
+      "name": "Shell Pink - ULT VY LT",
+      "hex": "#f8d9cd",
+      "r": 248,
+      "g": 217,
+      "b": 205
+    },
+    {
+      "code": "300",
+      "name": "Mahogany - VY DK",
+      "hex": "#6c3116",
+      "r": 108,
+      "g": 49,
+      "b": 22
+    },
+    {
+      "code": "301",
+      "name": "Mahogany - MED",
+      "hex": "#aa5237",
+      "r": 170,
+      "g": 82,
+      "b": 55
+    },
+    {
+      "code": "304",
+      "name": "Red - MED",
+      "hex": "#a10c39",
+      "r": 161,
+      "g": 12,
+      "b": 57
+    },
+    {
+      "code": "307",
+      "name": "Lemon",
+      "hex": "#fde949",
+      "r": 253,
+      "g": 233,
+      "b": 73
+    },
+    {
+      "code": "309",
+      "name": "Rose - DK",
+      "hex": "#ba2044",
+      "r": 186,
+      "g": 32,
+      "b": 68
+    },
+    {
+      "code": "310",
+      "name": "Black",
+      "hex": "#000000",
+      "r": 0,
+      "g": 0,
+      "b": 0
+    },
+    {
+      "code": "311",
+      "name": "Blue - MED",
+      "hex": "#002a64",
+      "r": 0,
+      "g": 42,
+      "b": 100
+    },
+    {
+      "code": "312",
+      "name": "Baby Blue - VY DK",
+      "hex": "#1f3279",
+      "r": 31,
+      "g": 50,
+      "b": 121
+    },
+    {
+      "code": "315",
+      "name": "Antique Mauve - MED DK",
+      "hex": "#7d4246",
+      "r": 125,
+      "g": 66,
+      "b": 70
+    },
+    {
+      "code": "316",
+      "name": "Antique Mauve - MED",
+      "hex": "#bc757f",
+      "r": 188,
+      "g": 117,
+      "b": 127
+    },
+    {
+      "code": "317",
+      "name": "Pewter Gray",
+      "hex": "#6d6469",
+      "r": 109,
+      "g": 100,
+      "b": 105
+    },
+    {
+      "code": "318",
+      "name": "Steel Gray - LT",
+      "hex": "#999b9d",
+      "r": 153,
+      "g": 155,
+      "b": 157
+    },
+    {
+      "code": "319",
+      "name": "Pistachio Green - VY DK",
+      "hex": "#3a553b",
+      "r": 58,
+      "g": 85,
+      "b": 59
+    },
+    {
+      "code": "320",
+      "name": "Pistachio Green - MED",
+      "hex": "#608c59",
+      "r": 96,
+      "g": 140,
+      "b": 89
+    },
+    {
+      "code": "321",
+      "name": "Red",
+      "hex": "#bd1136",
+      "r": 189,
+      "g": 17,
+      "b": 54
+    },
+    {
+      "code": "322",
+      "name": "Baby Blue",
+      "hex": "#3a609d",
+      "r": 58,
+      "g": 96,
+      "b": 157
+    },
+    {
+      "code": "326",
+      "name": "Rose - VY DK",
+      "hex": "#ac1c37",
+      "r": 172,
+      "g": 28,
+      "b": 55
+    },
+    {
+      "code": "327",
+      "name": "Violet",
+      "hex": "#5e0f77",
+      "r": 94,
+      "g": 15,
+      "b": 119
+    },
+    {
+      "code": "333",
+      "name": "Blue Violet - VY DK",
+      "hex": "#6e2e9b",
+      "r": 110,
+      "g": 46,
+      "b": 155
+    },
+    {
+      "code": "334",
+      "name": "Baby Blue - MED",
+      "hex": "#6085b8",
+      "r": 96,
+      "g": 133,
+      "b": 184
+    },
+    {
+      "code": "335",
+      "name": "Rose",
+      "hex": "#d63d57",
+      "r": 214,
+      "g": 61,
+      "b": 87
+    },
+    {
+      "code": "336",
+      "name": "Blue",
+      "hex": "#0c275e",
+      "r": 12,
+      "g": 39,
+      "b": 94
+    },
+    {
+      "code": "340",
+      "name": "Blue Violet - MED",
+      "hex": "#996dc3",
+      "r": 153,
+      "g": 109,
+      "b": 195
+    },
+    {
+      "code": "341",
+      "name": "Blue Violet - LT",
+      "hex": "#a39ad7",
+      "r": 163,
+      "g": 154,
+      "b": 215
+    },
+    {
+      "code": "347",
+      "name": "Salmon - VY DK",
+      "hex": "#ab1b33",
+      "r": 171,
+      "g": 27,
+      "b": 51
+    },
+    {
+      "code": "349",
+      "name": "Coral - DK",
+      "hex": "#c62c38",
+      "r": 198,
+      "g": 44,
+      "b": 56
+    },
+    {
+      "code": "350",
+      "name": "Coral - MED",
+      "hex": "#de3f40",
+      "r": 222,
+      "g": 63,
+      "b": 64
+    },
+    {
+      "code": "351",
+      "name": "Coral",
+      "hex": "#ed625b",
+      "r": 237,
+      "g": 98,
+      "b": 91
+    },
+    {
+      "code": "352",
+      "name": "Coral - LT",
+      "hex": "#f78372",
+      "r": 247,
+      "g": 131,
+      "b": 114
+    },
+    {
+      "code": "353",
+      "name": "Peach",
+      "hex": "#fdb4a1",
+      "r": 253,
+      "g": 180,
+      "b": 161
+    },
+    {
+      "code": "355",
+      "name": "Terra Cotta - DK",
+      "hex": "#97382b",
+      "r": 151,
+      "g": 56,
+      "b": 43
+    },
+    {
+      "code": "356",
+      "name": "Terra Cotta - MED",
+      "hex": "#be5c4b",
+      "r": 190,
+      "g": 92,
+      "b": 75
+    },
+    {
+      "code": "367",
+      "name": "Pistachio Green - DK",
+      "hex": "#446b45",
+      "r": 68,
+      "g": 107,
+      "b": 69
+    },
+    {
+      "code": "368",
+      "name": "Pistachio Green - LT",
+      "hex": "#7fc66d",
+      "r": 127,
+      "g": 198,
+      "b": 109
+    },
+    {
+      "code": "369",
+      "name": "Pistachio Green - VY LT",
+      "hex": "#cdefa6",
+      "r": 205,
+      "g": 239,
+      "b": 166
+    },
+    {
+      "code": "370",
+      "name": "Mustard - MED",
+      "hex": "#917245",
+      "r": 145,
+      "g": 114,
+      "b": 69
+    },
+    {
+      "code": "371",
+      "name": "Mustard",
+      "hex": "#9f8352",
+      "r": 159,
+      "g": 131,
+      "b": 82
+    },
+    {
+      "code": "372",
+      "name": "Mustard - LT",
+      "hex": "#ad9564",
+      "r": 173,
+      "g": 149,
+      "b": 100
+    },
+    {
+      "code": "400",
+      "name": "Mahogany - DK",
+      "hex": "#813718",
+      "r": 129,
+      "g": 55,
+      "b": 24
+    },
+    {
+      "code": "402",
+      "name": "Mahogany - VY LT",
+      "hex": "#ef9e74",
+      "r": 239,
+      "g": 158,
+      "b": 116
+    },
+    {
+      "code": "407",
+      "name": "Desert Sand - DK",
+      "hex": "#b77159",
+      "r": 183,
+      "g": 113,
+      "b": 89
+    },
+    {
+      "code": "413",
+      "name": "Pewter Gray - DK",
+      "hex": "#4a4749",
+      "r": 74,
+      "g": 71,
+      "b": 73
+    },
+    {
+      "code": "414",
+      "name": "Steel Gray - DK",
+      "hex": "#766e72",
+      "r": 118,
+      "g": 110,
+      "b": 114
+    },
+    {
+      "code": "415",
+      "name": "Pearl Gray",
+      "hex": "#b8b9bd",
+      "r": 184,
+      "g": 185,
+      "b": 189
+    },
+    {
+      "code": "420",
+      "name": "Hazelnut Brown - DK",
+      "hex": "#855a30",
+      "r": 133,
+      "g": 90,
+      "b": 48
+    },
+    {
+      "code": "422",
+      "name": "Hazelnut Brown - LT",
+      "hex": "#c99a67",
+      "r": 201,
+      "g": 154,
+      "b": 103
+    },
+    {
+      "code": "433",
+      "name": "Brown - MED",
+      "hex": "#73421e",
+      "r": 115,
+      "g": 66,
+      "b": 30
+    },
+    {
+      "code": "434",
+      "name": "Brown - LT",
+      "hex": "#8f5332",
+      "r": 143,
+      "g": 83,
+      "b": 50
+    },
+    {
+      "code": "435",
+      "name": "Brown - VY LT",
+      "hex": "#a96538",
+      "r": 169,
+      "g": 101,
+      "b": 56
+    },
+    {
+      "code": "436",
+      "name": "Tan",
+      "hex": "#c78559",
+      "r": 199,
+      "g": 133,
+      "b": 89
+    },
+    {
+      "code": "437",
+      "name": "Tan - LT",
+      "hex": "#daa26f",
+      "r": 218,
+      "g": 162,
+      "b": 111
+    },
+    {
+      "code": "444",
+      "name": "Lemon - DK",
+      "hex": "#f5bc13",
+      "r": 245,
+      "g": 188,
+      "b": 19
+    },
+    {
+      "code": "445",
+      "name": "Lemon - LT",
+      "hex": "#fcf999",
+      "r": 252,
+      "g": 249,
+      "b": 153
+    },
+    {
+      "code": "451",
+      "name": "Shell Gray - DK",
+      "hex": "#887773",
+      "r": 136,
+      "g": 119,
+      "b": 115
+    },
+    {
+      "code": "452",
+      "name": "Shell Gray - MED",
+      "hex": "#ad9994",
+      "r": 173,
+      "g": 153,
+      "b": 148
+    },
+    {
+      "code": "453",
+      "name": "Shell Gray - LT",
+      "hex": "#ccb8aa",
+      "r": 204,
+      "g": 184,
+      "b": 170
+    },
+    {
+      "code": "469",
+      "name": "Avocado Green",
+      "hex": "#5b6533",
+      "r": 91,
+      "g": 101,
+      "b": 51
+    },
+    {
+      "code": "470",
+      "name": "Avocado Green - LT",
+      "hex": "#72813e",
+      "r": 114,
+      "g": 129,
+      "b": 62
+    },
+    {
+      "code": "471",
+      "name": "Avocado Green - VY LT",
+      "hex": "#9eb357",
+      "r": 158,
+      "g": 179,
+      "b": 87
+    },
+    {
+      "code": "472",
+      "name": "Avocado Green - ULT LT",
+      "hex": "#d1de75",
+      "r": 209,
+      "g": 222,
+      "b": 117
+    },
+    {
+      "code": "498",
+      "name": "Red - DK",
+      "hex": "#970b2c",
+      "r": 151,
+      "g": 11,
+      "b": 44
+    },
+    {
+      "code": "500",
+      "name": "Blue Green - VY DK",
+      "hex": "#1d362a",
+      "r": 29,
+      "g": 54,
+      "b": 42
+    },
+    {
+      "code": "501",
+      "name": "Blue Green - DK",
+      "hex": "#2f5446",
+      "r": 47,
+      "g": 84,
+      "b": 70
+    },
+    {
+      "code": "502",
+      "name": "Blue Green",
+      "hex": "#57826e",
+      "r": 87,
+      "g": 130,
+      "b": 110
+    },
+    {
+      "code": "503",
+      "name": "Blue Green - MED",
+      "hex": "#89b89f",
+      "r": 137,
+      "g": 184,
+      "b": 159
+    },
+    {
+      "code": "504",
+      "name": "Blue Green - VY LT",
+      "hex": "#acdac1",
+      "r": 172,
+      "g": 218,
+      "b": 193
+    },
+    {
+      "code": "505",
+      "name": "Grass Green - DK",
+      "hex": "#ceddc1",
+      "r": 206,
+      "g": 221,
+      "b": 193
+    },
+    {
+      "code": "517",
+      "name": "Wedgewood - DK",
+      "hex": "#216285",
+      "r": 33,
+      "g": 98,
+      "b": 133
+    },
+    {
+      "code": "518",
+      "name": "Wedgewood - LT",
+      "hex": "#50819c",
+      "r": 80,
+      "g": 129,
+      "b": 156
+    },
+    {
+      "code": "519",
+      "name": "Sky Blue",
+      "hex": "#94b7cb",
+      "r": 148,
+      "g": 183,
+      "b": 203
+    },
+    {
+      "code": "520",
+      "name": "Fern Green - DK",
+      "hex": "#384526",
+      "r": 56,
+      "g": 69,
+      "b": 38
+    },
+    {
+      "code": "522",
+      "name": "Fern Green",
+      "hex": "#808b6e",
+      "r": 128,
+      "g": 139,
+      "b": 110
+    },
+    {
+      "code": "523",
+      "name": "Fern Green - LT",
+      "hex": "#959f7a",
+      "r": 149,
+      "g": 159,
+      "b": 122
+    },
+    {
+      "code": "524",
+      "name": "Fern Green - VY LT",
+      "hex": "#aea78e",
+      "r": 174,
+      "g": 167,
+      "b": 142
+    },
+    {
+      "code": "535",
+      "name": "Ash Gray - VY LT",
+      "hex": "#4b4b49",
+      "r": 75,
+      "g": 75,
+      "b": 73
+    },
+    {
+      "code": "543",
+      "name": "Beige Brown - ULT VY LT",
+      "hex": "#ead0b5",
+      "r": 234,
+      "g": 208,
+      "b": 181
+    },
+    {
+      "code": "550",
+      "name": "Violet - VY DK",
+      "hex": "#580e5c",
+      "r": 88,
+      "g": 14,
+      "b": 92
+    },
+    {
+      "code": "552",
+      "name": "Violet - MED",
+      "hex": "#902f99",
+      "r": 144,
+      "g": 47,
+      "b": 153
+    },
+    {
+      "code": "553",
+      "name": "Violet",
+      "hex": "#a449ac",
+      "r": 164,
+      "g": 73,
+      "b": 172
+    },
+    {
+      "code": "554",
+      "name": "Violet - LT",
+      "hex": "#dc9cde",
+      "r": 220,
+      "g": 156,
+      "b": 222
+    },
+    {
+      "code": "561",
+      "name": "Jade - VY DK",
+      "hex": "#285e48",
+      "r": 40,
+      "g": 94,
+      "b": 72
+    },
+    {
+      "code": "562",
+      "name": "Jade - MED",
+      "hex": "#3b8c5a",
+      "r": 59,
+      "g": 140,
+      "b": 90
+    },
+    {
+      "code": "563",
+      "name": "Jade - LT",
+      "hex": "#6ed39a",
+      "r": 110,
+      "g": 211,
+      "b": 154
+    },
+    {
+      "code": "564",
+      "name": "Jade - VY LT",
+      "hex": "#95e4af",
+      "r": 149,
+      "g": 228,
+      "b": 175
+    },
+    {
+      "code": "580",
+      "name": "Moss Green - DK",
+      "hex": "#355f0b",
+      "r": 53,
+      "g": 95,
+      "b": 11
+    },
+    {
+      "code": "581",
+      "name": "Moss Green",
+      "hex": "#838a29",
+      "r": 131,
+      "g": 138,
+      "b": 41
+    },
+    {
+      "code": "597",
+      "name": "Turquoise",
+      "hex": "#52adab",
+      "r": 82,
+      "g": 173,
+      "b": 171
+    },
+    {
+      "code": "598",
+      "name": "Turquoise - LT",
+      "hex": "#97d8d3",
+      "r": 151,
+      "g": 216,
+      "b": 211
+    },
+    {
+      "code": "600",
+      "name": "Cranberry - VY DK",
+      "hex": "#bf1c48",
+      "r": 191,
+      "g": 28,
+      "b": 72
+    },
+    {
+      "code": "601",
+      "name": "Cranberry - DK",
+      "hex": "#c62a53",
+      "r": 198,
+      "g": 42,
+      "b": 83
+    },
+    {
+      "code": "602",
+      "name": "Cranberry - MED",
+      "hex": "#d63f68",
+      "r": 214,
+      "g": 63,
+      "b": 104
+    },
+    {
+      "code": "603",
+      "name": "Cranberry",
+      "hex": "#ed5d84",
+      "r": 237,
+      "g": 93,
+      "b": 132
+    },
+    {
+      "code": "604",
+      "name": "Cranberry - LT",
+      "hex": "#f793b2",
+      "r": 247,
+      "g": 147,
+      "b": 178
+    },
+    {
+      "code": "605",
+      "name": "Cranberry - VY LT",
+      "hex": "#fbacc4",
+      "r": 251,
+      "g": 172,
+      "b": 196
+    },
+    {
+      "code": "606",
+      "name": "Orange-red - BRIGHT",
+      "hex": "#f70f00",
+      "r": 247,
+      "g": 15,
+      "b": 0
+    },
+    {
+      "code": "608",
+      "name": "Orange - BRIGHT",
+      "hex": "#fd480c",
+      "r": 253,
+      "g": 72,
+      "b": 12
+    },
+    {
+      "code": "610",
+      "name": "Drab Brown - DK",
+      "hex": "#6b5039",
+      "r": 107,
+      "g": 80,
+      "b": 57
+    },
+    {
+      "code": "611",
+      "name": "Drab Brown",
+      "hex": "#7c5f46",
+      "r": 124,
+      "g": 95,
+      "b": 70
+    },
+    {
+      "code": "612",
+      "name": "Drab Brown - LT",
+      "hex": "#a6885e",
+      "r": 166,
+      "g": 136,
+      "b": 94
+    },
+    {
+      "code": "613",
+      "name": "Drab Brown - VY LT",
+      "hex": "#b99f72",
+      "r": 185,
+      "g": 159,
+      "b": 114
+    },
+    {
+      "code": "632",
+      "name": "Desert Sand - ULT VY DK",
+      "hex": "#7f4232",
+      "r": 127,
+      "g": 66,
+      "b": 50
+    },
+    {
+      "code": "640",
+      "name": "Beige Gray - VY DK",
+      "hex": "#817868",
+      "r": 129,
+      "g": 120,
+      "b": 104
+    },
+    {
+      "code": "642",
+      "name": "Beige Gray - DK",
+      "hex": "#958d79",
+      "r": 149,
+      "g": 141,
+      "b": 121
+    },
+    {
+      "code": "644",
+      "name": "Beige Gray - MED",
+      "hex": "#c4bea6",
+      "r": 196,
+      "g": 190,
+      "b": 166
+    },
+    {
+      "code": "645",
+      "name": "Beaver Gray - VY DK",
+      "hex": "#5d5d54",
+      "r": 93,
+      "g": 93,
+      "b": 84
+    },
+    {
+      "code": "646",
+      "name": "Beaver Gray - DK",
+      "hex": "#6b6860",
+      "r": 107,
+      "g": 104,
+      "b": 96
+    },
+    {
+      "code": "647",
+      "name": "Beaver Gray - MED",
+      "hex": "#908e85",
+      "r": 144,
+      "g": 142,
+      "b": 133
+    },
+    {
+      "code": "648",
+      "name": "Beaver Gray - LT",
+      "hex": "#a7a69f",
+      "r": 167,
+      "g": 166,
+      "b": 159
+    },
+    {
+      "code": "666",
+      "name": "Red - BRIGHT",
+      "hex": "#ce1b33",
+      "r": 206,
+      "g": 27,
+      "b": 51
+    },
+    {
+      "code": "676",
+      "name": "Old Gold - LT",
+      "hex": "#ecbf7d",
+      "r": 236,
+      "g": 191,
+      "b": 125
+    },
+    {
+      "code": "677",
+      "name": "Old Gold - VY LT",
+      "hex": "#f2dc9f",
+      "r": 242,
+      "g": 220,
+      "b": 159
+    },
+    {
+      "code": "680",
+      "name": "Old Gold - DK",
+      "hex": "#b07b46",
+      "r": 176,
+      "g": 123,
+      "b": 70
+    },
+    {
+      "code": "699",
+      "name": "Green",
+      "hex": "#075b26",
+      "r": 7,
+      "g": 91,
+      "b": 38
+    },
+    {
+      "code": "700",
+      "name": "Green - BRIGHT",
+      "hex": "#076c34",
+      "r": 7,
+      "g": 108,
+      "b": 52
+    },
+    {
+      "code": "701",
+      "name": "Green - LT",
+      "hex": "#217c36",
+      "r": 33,
+      "g": 124,
+      "b": 54
+    },
+    {
+      "code": "702",
+      "name": "Kelly Green",
+      "hex": "#379130",
+      "r": 55,
+      "g": 145,
+      "b": 48
+    },
+    {
+      "code": "703",
+      "name": "Chartreuse",
+      "hex": "#63b330",
+      "r": 99,
+      "g": 179,
+      "b": 48
+    },
+    {
+      "code": "704",
+      "name": "Chartreuse - BRIGHT",
+      "hex": "#88c53a",
+      "r": 136,
+      "g": 197,
+      "b": 58
+    },
+    {
+      "code": "712",
+      "name": "Cream",
+      "hex": "#f6efda",
+      "r": 246,
+      "g": 239,
+      "b": 218
+    },
+    {
+      "code": "718",
+      "name": "Plum",
+      "hex": "#cb2089",
+      "r": 203,
+      "g": 32,
+      "b": 137
+    },
+    {
+      "code": "720",
+      "name": "Orange Spice - DK",
+      "hex": "#c83a24",
+      "r": 200,
+      "g": 58,
+      "b": 36
+    },
+    {
+      "code": "721",
+      "name": "Orange Spice - MED",
+      "hex": "#f46440",
+      "r": 244,
+      "g": 100,
+      "b": 64
+    },
+    {
+      "code": "722",
+      "name": "Orange Spice - LT",
+      "hex": "#f98756",
+      "r": 249,
+      "g": 135,
+      "b": 86
+    },
+    {
+      "code": "725",
+      "name": "Topaz",
+      "hex": "#f9c15b",
+      "r": 249,
+      "g": 193,
+      "b": 91
+    },
+    {
+      "code": "726",
+      "name": "Topaz - LT",
+      "hex": "#fddb63",
+      "r": 253,
+      "g": 219,
+      "b": 99
+    },
+    {
+      "code": "727",
+      "name": "Topaz - VY LT",
+      "hex": "#fde98b",
+      "r": 253,
+      "g": 233,
+      "b": 139
+    },
+    {
+      "code": "728",
+      "name": "Golden Yellow",
+      "hex": "#f2ae3f",
+      "r": 242,
+      "g": 174,
+      "b": 63
+    },
+    {
+      "code": "729",
+      "name": "Old Gold - MED",
+      "hex": "#ce9657",
+      "r": 206,
+      "g": 150,
+      "b": 87
+    },
+    {
+      "code": "730",
+      "name": "Olive Green - VY DK",
+      "hex": "#63520b",
+      "r": 99,
+      "g": 82,
+      "b": 11
+    },
+    {
+      "code": "731",
+      "name": "Olive Green - DK",
+      "hex": "#6b580b",
+      "r": 107,
+      "g": 88,
+      "b": 11
+    },
+    {
+      "code": "732",
+      "name": "Olive Green",
+      "hex": "#725c0c",
+      "r": 114,
+      "g": 92,
+      "b": 12
+    },
+    {
+      "code": "733",
+      "name": "Olive Green - MED",
+      "hex": "#a78a44",
+      "r": 167,
+      "g": 138,
+      "b": 68
+    },
+    {
+      "code": "734",
+      "name": "Olive Green - LT",
+      "hex": "#bb9c54",
+      "r": 187,
+      "g": 156,
+      "b": 84
+    },
+    {
+      "code": "738",
+      "name": "Tan - VY LT",
+      "hex": "#e2b783",
+      "r": 226,
+      "g": 183,
+      "b": 131
+    },
+    {
+      "code": "739",
+      "name": "Tan - ULT VY LT",
+      "hex": "#f2deb9",
+      "r": 242,
+      "g": 222,
+      "b": 185
+    },
+    {
+      "code": "740",
+      "name": "Tangerine",
+      "hex": "#fd6f1a",
+      "r": 253,
+      "g": 111,
+      "b": 26
+    },
+    {
+      "code": "741",
+      "name": "Tangerine - MED",
+      "hex": "#fc8b10",
+      "r": 252,
+      "g": 139,
+      "b": 16
+    },
+    {
+      "code": "742",
+      "name": "Tangerine - LT",
+      "hex": "#fdae3c",
+      "r": 253,
+      "g": 174,
+      "b": 60
+    },
+    {
+      "code": "743",
+      "name": "Yellow - MED",
+      "hex": "#fdd769",
+      "r": 253,
+      "g": 215,
+      "b": 105
+    },
+    {
+      "code": "744",
+      "name": "Yellow - PALE",
+      "hex": "#fee88d",
+      "r": 254,
+      "g": 232,
+      "b": 141
+    },
+    {
+      "code": "745",
+      "name": "Yellow - LT PALE",
+      "hex": "#feeba5",
+      "r": 254,
+      "g": 235,
+      "b": 165
+    },
+    {
+      "code": "746",
+      "name": "Off White",
+      "hex": "#faf2d5",
+      "r": 250,
+      "g": 242,
+      "b": 213
+    },
+    {
+      "code": "747",
+      "name": "Sky Blue - VY LT",
+      "hex": "#cee9ea",
+      "r": 206,
+      "g": 233,
+      "b": 234
+    },
+    {
+      "code": "754",
+      "name": "Peach - LT",
+      "hex": "#f7c9b0",
+      "r": 247,
+      "g": 201,
+      "b": 176
+    },
+    {
+      "code": "758",
+      "name": "Terra Cotta - VY LT",
+      "hex": "#e99f83",
+      "r": 233,
+      "g": 159,
+      "b": 131
+    },
+    {
+      "code": "760",
+      "name": "Salmon",
+      "hex": "#ec8880",
+      "r": 236,
+      "g": 136,
+      "b": 128
+    },
+    {
+      "code": "761",
+      "name": "Salmon - LT",
+      "hex": "#f8b4ad",
+      "r": 248,
+      "g": 180,
+      "b": 173
+    },
+    {
+      "code": "762",
+      "name": "Pearl Gray - VY LT",
+      "hex": "#d1d0d2",
+      "r": 209,
+      "g": 208,
+      "b": 210
+    },
+    {
+      "code": "772",
+      "name": "Yellow Green - VY LT",
+      "hex": "#d7efa7",
+      "r": 215,
+      "g": 239,
+      "b": 167
+    },
+    {
+      "code": "775",
+      "name": "Baby Blue - VY LT",
+      "hex": "#d4e3ef",
+      "r": 212,
+      "g": 227,
+      "b": 239
+    },
+    {
+      "code": "776",
+      "name": "Pink - MED",
+      "hex": "#fca8ad",
+      "r": 252,
+      "g": 168,
+      "b": 173
+    },
+    {
+      "code": "777",
+      "name": "Red - DEEP",
+      "hex": "#9b0042",
+      "r": 155,
+      "g": 0,
+      "b": 66
+    },
+    {
+      "code": "778",
+      "name": "Antique Mauve - VY LT",
+      "hex": "#dca6a4",
+      "r": 220,
+      "g": 166,
+      "b": 164
+    },
+    {
+      "code": "779",
+      "name": "Brown",
+      "hex": "#53332d",
+      "r": 83,
+      "g": 51,
+      "b": 45
+    },
+    {
+      "code": "780",
+      "name": "Topaz - ULT VY DK",
+      "hex": "#945026",
+      "r": 148,
+      "g": 80,
+      "b": 38
+    },
+    {
+      "code": "781",
+      "name": "Topaz - VY DK",
+      "hex": "#a25f1f",
+      "r": 162,
+      "g": 95,
+      "b": 31
+    },
+    {
+      "code": "782",
+      "name": "Topaz - DK",
+      "hex": "#b26923",
+      "r": 178,
+      "g": 105,
+      "b": 35
+    },
+    {
+      "code": "783",
+      "name": "Topaz - MED",
+      "hex": "#d0883d",
+      "r": 208,
+      "g": 136,
+      "b": 61
+    },
+    {
+      "code": "791",
+      "name": "Cornflower Blue - VY DK",
+      "hex": "#2d2068",
+      "r": 45,
+      "g": 32,
+      "b": 104
+    },
+    {
+      "code": "792",
+      "name": "Cornflower Blue - DK",
+      "hex": "#454b8b",
+      "r": 69,
+      "g": 75,
+      "b": 139
+    },
+    {
+      "code": "793",
+      "name": "Cornflower Blue - MED",
+      "hex": "#7c82b5",
+      "r": 124,
+      "g": 130,
+      "b": 181
+    },
+    {
+      "code": "794",
+      "name": "Cornflower Blue - LT",
+      "hex": "#a0b2d7",
+      "r": 160,
+      "g": 178,
+      "b": 215
+    },
+    {
+      "code": "796",
+      "name": "Royal Blue - DK",
+      "hex": "#272276",
+      "r": 39,
+      "g": 34,
+      "b": 118
+    },
+    {
+      "code": "797",
+      "name": "Royal Blue",
+      "hex": "#2b3288",
+      "r": 43,
+      "g": 50,
+      "b": 136
+    },
+    {
+      "code": "798",
+      "name": "Delft Blue - DK",
+      "hex": "#4e5ca7",
+      "r": 78,
+      "g": 92,
+      "b": 167
+    },
+    {
+      "code": "799",
+      "name": "Delft Blue - MED",
+      "hex": "#6b7fc0",
+      "r": 107,
+      "g": 127,
+      "b": 192
+    },
+    {
+      "code": "800",
+      "name": "Delft Blue - PALE",
+      "hex": "#b5c7e9",
+      "r": 181,
+      "g": 199,
+      "b": 233
+    },
+    {
+      "code": "801",
+      "name": "Coffee Brown - DK",
+      "hex": "#60391d",
+      "r": 96,
+      "g": 57,
+      "b": 29
+    },
+    {
+      "code": "803",
+      "name": "Blue - DEEP",
+      "hex": "#202754",
+      "r": 32,
+      "g": 39,
+      "b": 84
+    },
+    {
+      "code": "806",
+      "name": "Peacock Blue - DK",
+      "hex": "#1d6c87",
+      "r": 29,
+      "g": 108,
+      "b": 135
+    },
+    {
+      "code": "807",
+      "name": "Peacock Blue",
+      "hex": "#558b9e",
+      "r": 85,
+      "g": 139,
+      "b": 158
+    },
+    {
+      "code": "809",
+      "name": "Delft Blue",
+      "hex": "#919fd5",
+      "r": 145,
+      "g": 159,
+      "b": 213
+    },
+    {
+      "code": "813",
+      "name": "Blue - LT",
+      "hex": "#7fa0c6",
+      "r": 127,
+      "g": 160,
+      "b": 198
+    },
+    {
+      "code": "814",
+      "name": "Garnet - DK",
+      "hex": "#711033",
+      "r": 113,
+      "g": 16,
+      "b": 51
+    },
+    {
+      "code": "815",
+      "name": "Garnet - MED",
+      "hex": "#800b34",
+      "r": 128,
+      "g": 11,
+      "b": 52
+    },
+    {
+      "code": "816",
+      "name": "Garnet",
+      "hex": "#921238",
+      "r": 146,
+      "g": 18,
+      "b": 56
+    },
+    {
+      "code": "817",
+      "name": "Coral Red - VY DK",
+      "hex": "#bb1630",
+      "r": 187,
+      "g": 22,
+      "b": 48
+    },
+    {
+      "code": "818",
+      "name": "Baby Pink",
+      "hex": "#fededd",
+      "r": 254,
+      "g": 222,
+      "b": 221
+    },
+    {
+      "code": "819",
+      "name": "Baby Pink - LT",
+      "hex": "#fcebde",
+      "r": 252,
+      "g": 235,
+      "b": 222
+    },
+    {
+      "code": "820",
+      "name": "Royal Blue - VY DK",
+      "hex": "#151264",
+      "r": 21,
+      "g": 18,
+      "b": 100
+    },
+    {
+      "code": "822",
+      "name": "Beige Gray - LT",
+      "hex": "#e8dfc7",
+      "r": 232,
+      "g": 223,
+      "b": 199
+    },
+    {
+      "code": "823",
+      "name": "Blue - DK",
+      "hex": "#000b44",
+      "r": 0,
+      "g": 11,
+      "b": 68
+    },
+    {
+      "code": "824",
+      "name": "Blue - VY DK",
+      "hex": "#284779",
+      "r": 40,
+      "g": 71,
+      "b": 121
+    },
+    {
+      "code": "825",
+      "name": "Blue - DK",
+      "hex": "#34588f",
+      "r": 52,
+      "g": 88,
+      "b": 143
+    },
+    {
+      "code": "826",
+      "name": "Blue - MED",
+      "hex": "#5075a7",
+      "r": 80,
+      "g": 117,
+      "b": 167
+    },
+    {
+      "code": "827",
+      "name": "Blue - VY LT",
+      "hex": "#a4c1de",
+      "r": 164,
+      "g": 193,
+      "b": 222
+    },
+    {
+      "code": "828",
+      "name": "Blue - ULT VY LT",
+      "hex": "#c3d7e6",
+      "r": 195,
+      "g": 215,
+      "b": 230
+    },
+    {
+      "code": "829",
+      "name": "Golden Olive - VY DK",
+      "hex": "#64480c",
+      "r": 100,
+      "g": 72,
+      "b": 12
+    },
+    {
+      "code": "830",
+      "name": "Golden Olive - DK",
+      "hex": "#6e501d",
+      "r": 110,
+      "g": 80,
+      "b": 29
+    },
+    {
+      "code": "831",
+      "name": "Golden Olive - MED",
+      "hex": "#7c5f20",
+      "r": 124,
+      "g": 95,
+      "b": 32
+    },
+    {
+      "code": "832",
+      "name": "Golden Olive",
+      "hex": "#9c7230",
+      "r": 156,
+      "g": 114,
+      "b": 48
+    },
+    {
+      "code": "833",
+      "name": "Golden Olive - LT",
+      "hex": "#b99956",
+      "r": 185,
+      "g": 153,
+      "b": 86
+    },
+    {
+      "code": "834",
+      "name": "Golden Olive - VY LT",
+      "hex": "#d2b468",
+      "r": 210,
+      "g": 180,
+      "b": 104
+    },
+    {
+      "code": "838",
+      "name": "Beige Brown - VY DK",
+      "hex": "#4a3021",
+      "r": 74,
+      "g": 48,
+      "b": 33
+    },
+    {
+      "code": "839",
+      "name": "Beige Brown - DK",
+      "hex": "#5a3c2d",
+      "r": 90,
+      "g": 60,
+      "b": 45
+    },
+    {
+      "code": "840",
+      "name": "Beige Brown - MED",
+      "hex": "#7a5939",
+      "r": 122,
+      "g": 89,
+      "b": 57
+    },
+    {
+      "code": "841",
+      "name": "Beige Brown - LT",
+      "hex": "#a37d64",
+      "r": 163,
+      "g": 125,
+      "b": 100
+    },
+    {
+      "code": "842",
+      "name": "Beige Brown - VY LT",
+      "hex": "#cbb094",
+      "r": 203,
+      "g": 176,
+      "b": 148
+    },
+    {
+      "code": "844",
+      "name": "Beaver Gray - ULT DK",
+      "hex": "#494842",
+      "r": 73,
+      "g": 72,
+      "b": 66
+    },
+    {
+      "code": "868",
+      "name": "Hazel Nut Brown",
+      "hex": "#995c30",
+      "r": 153,
+      "g": 92,
+      "b": 48
+    },
+    {
+      "code": "869",
+      "name": "Hazelnut Brown - VY DK",
+      "hex": "#784c28",
+      "r": 120,
+      "g": 76,
+      "b": 40
+    },
+    {
+      "code": "890",
+      "name": "Pistachio Green - ULT DK",
+      "hex": "#324233",
+      "r": 50,
+      "g": 66,
+      "b": 51
+    },
+    {
+      "code": "891",
+      "name": "Carnation - DK",
+      "hex": "#ee3246",
+      "r": 238,
+      "g": 50,
+      "b": 70
+    },
+    {
+      "code": "892",
+      "name": "Carnation - MED",
+      "hex": "#f44753",
+      "r": 244,
+      "g": 71,
+      "b": 83
+    },
+    {
+      "code": "893",
+      "name": "Carnation - LT",
+      "hex": "#f66879",
+      "r": 246,
+      "g": 104,
+      "b": 121
+    },
+    {
+      "code": "894",
+      "name": "Carnation - VY LT",
+      "hex": "#fd95a3",
+      "r": 253,
+      "g": 149,
+      "b": 163
+    },
+    {
+      "code": "895",
+      "name": "Hunter Green - VY DK",
+      "hex": "#344b2e",
+      "r": 52,
+      "g": 75,
+      "b": 46
+    },
+    {
+      "code": "898",
+      "name": "Coffee Brown - VY DK",
+      "hex": "#532f1b",
+      "r": 83,
+      "g": 47,
+      "b": 27
+    },
+    {
+      "code": "899",
+      "name": "Rose - MED",
+      "hex": "#ea6b78",
+      "r": 234,
+      "g": 107,
+      "b": 120
+    },
+    {
+      "code": "900",
+      "name": "Burnt Orange - DK",
+      "hex": "#c63117",
+      "r": 198,
+      "g": 49,
+      "b": 23
+    },
+    {
+      "code": "902",
+      "name": "Garnet - VY DK",
+      "hex": "#651329",
+      "r": 101,
+      "g": 19,
+      "b": 41
+    },
+    {
+      "code": "904",
+      "name": "Parrot Green - VY DK",
+      "hex": "#386324",
+      "r": 56,
+      "g": 99,
+      "b": 36
+    },
+    {
+      "code": "905",
+      "name": "Parrot Green - DK",
+      "hex": "#467924",
+      "r": 70,
+      "g": 121,
+      "b": 36
+    },
+    {
+      "code": "906",
+      "name": "Parrot Green - MED",
+      "hex": "#6c9e29",
+      "r": 108,
+      "g": 158,
+      "b": 41
+    },
+    {
+      "code": "907",
+      "name": "Parrot Green - LT",
+      "hex": "#9dc72d",
+      "r": 157,
+      "g": 199,
+      "b": 45
+    },
+    {
+      "code": "909",
+      "name": "Emerald Green - VY DK",
+      "hex": "#106b43",
+      "r": 16,
+      "g": 107,
+      "b": 67
+    },
+    {
+      "code": "910",
+      "name": "Emerald Green - DK",
+      "hex": "#10814e",
+      "r": 16,
+      "g": 129,
+      "b": 78
+    },
+    {
+      "code": "911",
+      "name": "Emerald Green - MED",
+      "hex": "#109256",
+      "r": 16,
+      "g": 146,
+      "b": 86
+    },
+    {
+      "code": "912",
+      "name": "Emerald Green - LT",
+      "hex": "#36b26b",
+      "r": 54,
+      "g": 178,
+      "b": 107
+    },
+    {
+      "code": "913",
+      "name": "Nile Green - MED",
+      "hex": "#55ca7d",
+      "r": 85,
+      "g": 202,
+      "b": 125
+    },
+    {
+      "code": "915",
+      "name": "Plum - DK",
+      "hex": "#95085a",
+      "r": 149,
+      "g": 8,
+      "b": 90
+    },
+    {
+      "code": "917",
+      "name": "Plum - MED",
+      "hex": "#ac1071",
+      "r": 172,
+      "g": 16,
+      "b": 113
+    },
+    {
+      "code": "918",
+      "name": "Red Copper - DK",
+      "hex": "#883630",
+      "r": 136,
+      "g": 54,
+      "b": 48
+    },
+    {
+      "code": "919",
+      "name": "Red Copper",
+      "hex": "#9b371b",
+      "r": 155,
+      "g": 55,
+      "b": 27
+    },
+    {
+      "code": "920",
+      "name": "Copper - MED",
+      "hex": "#ab4836",
+      "r": 171,
+      "g": 72,
+      "b": 54
+    },
+    {
+      "code": "921",
+      "name": "Copper",
+      "hex": "#c0573d",
+      "r": 192,
+      "g": 87,
+      "b": 61
+    },
+    {
+      "code": "922",
+      "name": "Copper - LT",
+      "hex": "#dd6e4c",
+      "r": 221,
+      "g": 110,
+      "b": 76
+    },
+    {
+      "code": "924",
+      "name": "Gray Green - VY DK",
+      "hex": "#384a4a",
+      "r": 56,
+      "g": 74,
+      "b": 74
+    },
+    {
+      "code": "926",
+      "name": "Gray Green - MED",
+      "hex": "#617674",
+      "r": 97,
+      "g": 118,
+      "b": 116
+    },
+    {
+      "code": "927",
+      "name": "Gray Green - LT",
+      "hex": "#9fa8a5",
+      "r": 159,
+      "g": 168,
+      "b": 165
+    },
+    {
+      "code": "928",
+      "name": "Gray Green - VY LT",
+      "hex": "#c0c6c0",
+      "r": 192,
+      "g": 198,
+      "b": 192
+    },
+    {
+      "code": "930",
+      "name": "Antique Blue - DK",
+      "hex": "#495c6b",
+      "r": 73,
+      "g": 92,
+      "b": 107
+    },
+    {
+      "code": "931",
+      "name": "Antique Blue - MED",
+      "hex": "#667684",
+      "r": 102,
+      "g": 118,
+      "b": 132
+    },
+    {
+      "code": "932",
+      "name": "Antique Blue - LT",
+      "hex": "#93a0af",
+      "r": 147,
+      "g": 160,
+      "b": 175
+    },
+    {
+      "code": "934",
+      "name": "Avocado Green - BLACK",
+      "hex": "#323324",
+      "r": 50,
+      "g": 51,
+      "b": 36
+    },
+    {
+      "code": "935",
+      "name": "Avocado Green - DK",
+      "hex": "#383a2a",
+      "r": 56,
+      "g": 58,
+      "b": 42
+    },
+    {
+      "code": "936",
+      "name": "Avocado Green - VY DK",
+      "hex": "#3f4227",
+      "r": 63,
+      "g": 66,
+      "b": 39
+    },
+    {
+      "code": "937",
+      "name": "Avocado Green - MED",
+      "hex": "#434f2c",
+      "r": 67,
+      "g": 79,
+      "b": 44
+    },
+    {
+      "code": "938",
+      "name": "Coffee Brown - ULT DK",
+      "hex": "#45271a",
+      "r": 69,
+      "g": 39,
+      "b": 26
+    },
+    {
+      "code": "939",
+      "name": "Blue - VY DK",
+      "hex": "#09092f",
+      "r": 9,
+      "g": 9,
+      "b": 47
+    },
+    {
+      "code": "943",
+      "name": "Aquamarine - MED",
+      "hex": "#009a77",
+      "r": 0,
+      "g": 154,
+      "b": 119
+    },
+    {
+      "code": "945",
+      "name": "Tawny",
+      "hex": "#f6c19a",
+      "r": 246,
+      "g": 193,
+      "b": 154
+    },
+    {
+      "code": "946",
+      "name": "Burnt Orange - MED",
+      "hex": "#ed4115",
+      "r": 237,
+      "g": 65,
+      "b": 21
+    },
+    {
+      "code": "947",
+      "name": "Burnt Orange",
+      "hex": "#fc4f16",
+      "r": 252,
+      "g": 79,
+      "b": 22
+    },
+    {
+      "code": "948",
+      "name": "Peach - VY LT",
+      "hex": "#fde6d3",
+      "r": 253,
+      "g": 230,
+      "b": 211
+    },
+    {
+      "code": "950",
+      "name": "Desert Sand - LT",
+      "hex": "#e5ac8d",
+      "r": 229,
+      "g": 172,
+      "b": 141
+    },
+    {
+      "code": "951",
+      "name": "Tawny - LT",
+      "hex": "#faddb6",
+      "r": 250,
+      "g": 221,
+      "b": 182
+    },
+    {
+      "code": "954",
+      "name": "Nile Green",
+      "hex": "#6fda8a",
+      "r": 111,
+      "g": 218,
+      "b": 138
+    },
+    {
+      "code": "955",
+      "name": "Nile Green - LT",
+      "hex": "#a8ebad",
+      "r": 168,
+      "g": 235,
+      "b": 173
+    },
+    {
+      "code": "956",
+      "name": "Geranium",
+      "hex": "#f7566d",
+      "r": 247,
+      "g": 86,
+      "b": 109
+    },
+    {
+      "code": "957",
+      "name": "Geranium - PALE",
+      "hex": "#fd99af",
+      "r": 253,
+      "g": 153,
+      "b": 175
+    },
+    {
+      "code": "958",
+      "name": "Seagreen - DK",
+      "hex": "#0db294",
+      "r": 13,
+      "g": 178,
+      "b": 148
+    },
+    {
+      "code": "959",
+      "name": "Seagreen - MED",
+      "hex": "#72d0b7",
+      "r": 114,
+      "g": 208,
+      "b": 183
+    },
+    {
+      "code": "961",
+      "name": "Dusty Rose - DK",
+      "hex": "#de586c",
+      "r": 222,
+      "g": 88,
+      "b": 108
+    },
+    {
+      "code": "962",
+      "name": "Dusty Rose - MED",
+      "hex": "#eb7183",
+      "r": 235,
+      "g": 113,
+      "b": 131
+    },
+    {
+      "code": "963",
+      "name": "Dusty Rose - ULT VY LT",
+      "hex": "#fdccd1",
+      "r": 253,
+      "g": 204,
+      "b": 209
+    },
+    {
+      "code": "964",
+      "name": "Seagreen - LT",
+      "hex": "#a5e4d4",
+      "r": 165,
+      "g": 228,
+      "b": 212
+    },
+    {
+      "code": "966",
+      "name": "Baby Green - MED",
+      "hex": "#94d28a",
+      "r": 148,
+      "g": 210,
+      "b": 138
+    },
+    {
+      "code": "967",
+      "name": "Peach - LT",
+      "hex": "#ffc2ac",
+      "r": 255,
+      "g": 194,
+      "b": 172
+    },
+    {
+      "code": "970",
+      "name": "Pumpkin - LT",
+      "hex": "#fb6721",
+      "r": 251,
+      "g": 103,
+      "b": 33
+    },
+    {
+      "code": "971",
+      "name": "Pumpkin",
+      "hex": "#fc670d",
+      "r": 252,
+      "g": 103,
+      "b": 13
+    },
+    {
+      "code": "972",
+      "name": "Canary - DEEP",
+      "hex": "#fb9f11",
+      "r": 251,
+      "g": 159,
+      "b": 17
+    },
+    {
+      "code": "973",
+      "name": "Canary - BRIGHT",
+      "hex": "#fccd2d",
+      "r": 252,
+      "g": 205,
+      "b": 45
+    },
+    {
+      "code": "975",
+      "name": "Golden Brown - DK",
+      "hex": "#813c11",
+      "r": 129,
+      "g": 60,
+      "b": 17
+    },
+    {
+      "code": "976",
+      "name": "Golden Brown - MED",
+      "hex": "#cf7532",
+      "r": 207,
+      "g": 117,
+      "b": 50
+    },
+    {
+      "code": "977",
+      "name": "Golden Brown - LT",
+      "hex": "#ec8f43",
+      "r": 236,
+      "g": 143,
+      "b": 67
+    },
+    {
+      "code": "986",
+      "name": "Forest Green - VY DK",
+      "hex": "#2e5230",
+      "r": 46,
+      "g": 82,
+      "b": 48
+    },
+    {
+      "code": "987",
+      "name": "Forest Green - DK",
+      "hex": "#436838",
+      "r": 67,
+      "g": 104,
+      "b": 56
+    },
+    {
+      "code": "988",
+      "name": "Forest Green - MED",
+      "hex": "#66924a",
+      "r": 102,
+      "g": 146,
+      "b": 74
+    },
+    {
+      "code": "989",
+      "name": "Forest Green",
+      "hex": "#71a74e",
+      "r": 113,
+      "g": 167,
+      "b": 78
+    },
+    {
+      "code": "991",
+      "name": "Aquamarine - DK",
+      "hex": "#135f55",
+      "r": 19,
+      "g": 95,
+      "b": 85
+    },
+    {
+      "code": "992",
+      "name": "Aquamarine - LT",
+      "hex": "#42b59e",
+      "r": 66,
+      "g": 181,
+      "b": 158
+    },
+    {
+      "code": "993",
+      "name": "Aquamarine - VY LT",
+      "hex": "#62d8b6",
+      "r": 98,
+      "g": 216,
+      "b": 182
+    },
+    {
+      "code": "995",
+      "name": "Electric Blue - DK",
+      "hex": "#0061b0",
+      "r": 0,
+      "g": 97,
+      "b": 176
+    },
+    {
+      "code": "996",
+      "name": "Electric Blue - MED",
+      "hex": "#49a8eb",
+      "r": 73,
+      "g": 168,
+      "b": 235
+    },
+    {
+      "code": "3011",
+      "name": "Khaki Green - DK",
+      "hex": "#655935",
+      "r": 101,
+      "g": 89,
+      "b": 53
+    },
+    {
+      "code": "3012",
+      "name": "Khaki Green - MED",
+      "hex": "#8b7b4e",
+      "r": 139,
+      "g": 123,
+      "b": 78
+    },
+    {
+      "code": "3013",
+      "name": "Khaki Green - LT",
+      "hex": "#afa97b",
+      "r": 175,
+      "g": 169,
+      "b": 123
+    },
+    {
+      "code": "3021",
+      "name": "Brown Gray - VY DK",
+      "hex": "#50403b",
+      "r": 80,
+      "g": 64,
+      "b": 59
+    },
+    {
+      "code": "3022",
+      "name": "Brown Gray - MED",
+      "hex": "#848274",
+      "r": 132,
+      "g": 130,
+      "b": 116
+    },
+    {
+      "code": "3023",
+      "name": "Brown Gray - LT",
+      "hex": "#a29b86",
+      "r": 162,
+      "g": 155,
+      "b": 134
+    },
+    {
+      "code": "3024",
+      "name": "Brown Gray - VY LT",
+      "hex": "#beb8ac",
+      "r": 190,
+      "g": 184,
+      "b": 172
+    },
+    {
+      "code": "3031",
+      "name": "Mocha Brown - VY DK",
+      "hex": "#423014",
+      "r": 66,
+      "g": 48,
+      "b": 20
+    },
+    {
+      "code": "3032",
+      "name": "Mocha Brown - MED",
+      "hex": "#9d8868",
+      "r": 157,
+      "g": 136,
+      "b": 104
+    },
+    {
+      "code": "3033",
+      "name": "Mocha Brown - VY LT",
+      "hex": "#dbc7ad",
+      "r": 219,
+      "g": 199,
+      "b": 173
+    },
+    {
+      "code": "3041",
+      "name": "Antique Violet - MED",
+      "hex": "#866a76",
+      "r": 134,
+      "g": 106,
+      "b": 118
+    },
+    {
+      "code": "3042",
+      "name": "Antique Violet - LT",
+      "hex": "#af98a0",
+      "r": 175,
+      "g": 152,
+      "b": 160
+    },
+    {
+      "code": "3045",
+      "name": "Yellow Beige - DK",
+      "hex": "#af8152",
+      "r": 175,
+      "g": 129,
+      "b": 82
+    },
+    {
+      "code": "3046",
+      "name": "Yellow Beige - MED",
+      "hex": "#ceb074",
+      "r": 206,
+      "g": 176,
+      "b": 116
+    },
+    {
+      "code": "3047",
+      "name": "Yellow Beige - LT",
+      "hex": "#ead8ab",
+      "r": 234,
+      "g": 216,
+      "b": 171
+    },
+    {
+      "code": "3051",
+      "name": "Green Gray - DK",
+      "hex": "#4c4c1e",
+      "r": 76,
+      "g": 76,
+      "b": 30
+    },
+    {
+      "code": "3052",
+      "name": "Green Gray - MED",
+      "hex": "#787e5c",
+      "r": 120,
+      "g": 126,
+      "b": 92
+    },
+    {
+      "code": "3053",
+      "name": "Green Gray",
+      "hex": "#999d75",
+      "r": 153,
+      "g": 157,
+      "b": 117
+    },
+    {
+      "code": "3064",
+      "name": "Desert Sand",
+      "hex": "#ba7056",
+      "r": 186,
+      "g": 112,
+      "b": 86
+    },
+    {
+      "code": "3072",
+      "name": "Beaver Gray - VY LT",
+      "hex": "#d2d2ca",
+      "r": 210,
+      "g": 210,
+      "b": 202
+    },
+    {
+      "code": "3078",
+      "name": "Golden Yellow - VY LT",
+      "hex": "#fcf6b6",
+      "r": 252,
+      "g": 246,
+      "b": 182
+    },
+    {
+      "code": "3325",
+      "name": "Baby Blue - LT",
+      "hex": "#adcde7",
+      "r": 173,
+      "g": 205,
+      "b": 231
+    },
+    {
+      "code": "3326",
+      "name": "Rose - LT",
+      "hex": "#f9979c",
+      "r": 249,
+      "g": 151,
+      "b": 156
+    },
+    {
+      "code": "3328",
+      "name": "Salmon - DK",
+      "hex": "#be444a",
+      "r": 190,
+      "g": 68,
+      "b": 74
+    },
+    {
+      "code": "3340",
+      "name": "Apricot - MED",
+      "hex": "#fd6b4f",
+      "r": 253,
+      "g": 107,
+      "b": 79
+    },
+    {
+      "code": "3341",
+      "name": "Apricot",
+      "hex": "#fd8e78",
+      "r": 253,
+      "g": 142,
+      "b": 120
+    },
+    {
+      "code": "3345",
+      "name": "Hunter Green - DK",
+      "hex": "#40552e",
+      "r": 64,
+      "g": 85,
+      "b": 46
+    },
+    {
+      "code": "3346",
+      "name": "Hunter Green",
+      "hex": "#56743b",
+      "r": 86,
+      "g": 116,
+      "b": 59
+    },
+    {
+      "code": "3347",
+      "name": "Yellow Green - MED",
+      "hex": "#6d9646",
+      "r": 109,
+      "g": 150,
+      "b": 70
+    },
+    {
+      "code": "3348",
+      "name": "Yellow Green - LT",
+      "hex": "#bedf74",
+      "r": 190,
+      "g": 223,
+      "b": 116
+    },
+    {
+      "code": "3350",
+      "name": "Dusty Rose - ULT DK",
+      "hex": "#aa3949",
+      "r": 170,
+      "g": 57,
+      "b": 73
+    },
+    {
+      "code": "3354",
+      "name": "Dusty Rose - LT",
+      "hex": "#efa5ac",
+      "r": 239,
+      "g": 165,
+      "b": 172
+    },
+    {
+      "code": "3362",
+      "name": "Pine Green - DK",
+      "hex": "#49523c",
+      "r": 73,
+      "g": 82,
+      "b": 60
+    },
+    {
+      "code": "3363",
+      "name": "Pine Green - MED",
+      "hex": "#617451",
+      "r": 97,
+      "g": 116,
+      "b": 81
+    },
+    {
+      "code": "3364",
+      "name": "Pine Green",
+      "hex": "#8e9b6d",
+      "r": 142,
+      "g": 155,
+      "b": 109
+    },
+    {
+      "code": "3371",
+      "name": "Black Brown",
+      "hex": "#36220e",
+      "r": 54,
+      "g": 34,
+      "b": 14
+    },
+    {
+      "code": "3607",
+      "name": "Plum - LT",
+      "hex": "#d94c9d",
+      "r": 217,
+      "g": 76,
+      "b": 157
+    },
+    {
+      "code": "3608",
+      "name": "Plum - VY LT",
+      "hex": "#ec81be",
+      "r": 236,
+      "g": 129,
+      "b": 190
+    },
+    {
+      "code": "3609",
+      "name": "Plum - ULT LT",
+      "hex": "#f6b0df",
+      "r": 246,
+      "g": 176,
+      "b": 223
+    },
+    {
+      "code": "3685",
+      "name": "Mauve - VY DK",
+      "hex": "#79263b",
+      "r": 121,
+      "g": 38,
+      "b": 59
+    },
+    {
+      "code": "3687",
+      "name": "Mauve",
+      "hex": "#b5455d",
+      "r": 181,
+      "g": 69,
+      "b": 93
+    },
+    {
+      "code": "3688",
+      "name": "Mauve - MED",
+      "hex": "#dc7c86",
+      "r": 220,
+      "g": 124,
+      "b": 134
+    },
+    {
+      "code": "3689",
+      "name": "Mauve - LT",
+      "hex": "#f8bbc8",
+      "r": 248,
+      "g": 187,
+      "b": 200
+    },
+    {
+      "code": "3705",
+      "name": "Melon - DK",
+      "hex": "#f2494f",
+      "r": 242,
+      "g": 73,
+      "b": 79
+    },
+    {
+      "code": "3706",
+      "name": "Melon - MED",
+      "hex": "#fd6e70",
+      "r": 253,
+      "g": 110,
+      "b": 112
+    },
+    {
+      "code": "3708",
+      "name": "Melon - LT",
+      "hex": "#fda0ae",
+      "r": 253,
+      "g": 160,
+      "b": 174
+    },
+    {
+      "code": "3712",
+      "name": "Salmon - MED",
+      "hex": "#d95d5d",
+      "r": 217,
+      "g": 93,
+      "b": 93
+    },
+    {
+      "code": "3713",
+      "name": "Salmon - VY LT",
+      "hex": "#fdd5d0",
+      "r": 253,
+      "g": 213,
+      "b": 208
+    },
+    {
+      "code": "3716",
+      "name": "Dusty Rose - VY LT",
+      "hex": "#fcafb9",
+      "r": 252,
+      "g": 175,
+      "b": 185
+    },
+    {
+      "code": "3721",
+      "name": "Shell Pink - DK",
+      "hex": "#933b3d",
+      "r": 147,
+      "g": 59,
+      "b": 61
+    },
+    {
+      "code": "3722",
+      "name": "Shell Pink - MED",
+      "hex": "#a04b4c",
+      "r": 160,
+      "g": 75,
+      "b": 76
+    },
+    {
+      "code": "3726",
+      "name": "Antique Mauve - DK",
+      "hex": "#95565c",
+      "r": 149,
+      "g": 86,
+      "b": 92
+    },
+    {
+      "code": "3727",
+      "name": "Antique Mauve - LT",
+      "hex": "#da9ea6",
+      "r": 218,
+      "g": 158,
+      "b": 166
+    },
+    {
+      "code": "3731",
+      "name": "Dusty Rose - VY DK",
+      "hex": "#c34c5c",
+      "r": 195,
+      "g": 76,
+      "b": 92
+    },
+    {
+      "code": "3733",
+      "name": "Dusty Rose",
+      "hex": "#ea7e86",
+      "r": 234,
+      "g": 126,
+      "b": 134
+    },
+    {
+      "code": "3740",
+      "name": "Antique Violet - DK",
+      "hex": "#71535d",
+      "r": 113,
+      "g": 83,
+      "b": 93
+    },
+    {
+      "code": "3743",
+      "name": "Antique Violet - VY LT",
+      "hex": "#cfc2c9",
+      "r": 207,
+      "g": 194,
+      "b": 201
+    },
+    {
+      "code": "3746",
+      "name": "Blue Violet - DK",
+      "hex": "#844ab5",
+      "r": 132,
+      "g": 74,
+      "b": 181
+    },
+    {
+      "code": "3747",
+      "name": "Blue Violet - VY LT",
+      "hex": "#d0c5ec",
+      "r": 208,
+      "g": 197,
+      "b": 236
+    },
+    {
+      "code": "3750",
+      "name": "Antique Blue - VY DK",
+      "hex": "#1d4552",
+      "r": 29,
+      "g": 69,
+      "b": 82
+    },
+    {
+      "code": "3752",
+      "name": "Antique Blue - VY LT",
+      "hex": "#bac9cc",
+      "r": 186,
+      "g": 201,
+      "b": 204
+    },
+    {
+      "code": "3753",
+      "name": "Antique Blue - ULT VY LT",
+      "hex": "#d9e6ec",
+      "r": 217,
+      "g": 230,
+      "b": 236
+    },
+    {
+      "code": "3755",
+      "name": "Baby Blue (?)",
+      "hex": "#81a5d8",
+      "r": 129,
+      "g": 165,
+      "b": 216
+    },
+    {
+      "code": "3756",
+      "name": "Baby Blue",
+      "hex": "#e9f4fa",
+      "r": 233,
+      "g": 244,
+      "b": 250
+    },
+    {
+      "code": "3760",
+      "name": "Wedgewood - MED",
+      "hex": "#467293",
+      "r": 70,
+      "g": 114,
+      "b": 147
+    },
+    {
+      "code": "3761",
+      "name": "Sky Blue - LT",
+      "hex": "#b1d0df",
+      "r": 177,
+      "g": 208,
+      "b": 223
+    },
+    {
+      "code": "3765",
+      "name": "Peacock Blue - VY DK",
+      "hex": "#175e78",
+      "r": 23,
+      "g": 94,
+      "b": 120
+    },
+    {
+      "code": "3766",
+      "name": "Peacock Blue - LT",
+      "hex": "#4b8aa1",
+      "r": 75,
+      "g": 138,
+      "b": 161
+    },
+    {
+      "code": "3768",
+      "name": "Gray Green - DK",
+      "hex": "#4c605f",
+      "r": 76,
+      "g": 96,
+      "b": 95
+    },
+    {
+      "code": "3770",
+      "name": "Tawny - VY LT",
+      "hex": "#fef1d8",
+      "r": 254,
+      "g": 241,
+      "b": 216
+    },
+    {
+      "code": "3771",
+      "name": "Peach - DK",
+      "hex": "#e8ac9b",
+      "r": 232,
+      "g": 172,
+      "b": 155
+    },
+    {
+      "code": "3772",
+      "name": "Desert Sand - VY DK",
+      "hex": "#995744",
+      "r": 153,
+      "g": 87,
+      "b": 68
+    },
+    {
+      "code": "3773",
+      "name": "Desert Sand - MED",
+      "hex": "#cf866d",
+      "r": 207,
+      "g": 134,
+      "b": 109
+    },
+    {
+      "code": "3774",
+      "name": "Desert Sand - VY LT",
+      "hex": "#f3cfb4",
+      "r": 243,
+      "g": 207,
+      "b": 180
+    },
+    {
+      "code": "3776",
+      "name": "Mahogany - LT",
+      "hex": "#c96444",
+      "r": 201,
+      "g": 100,
+      "b": 68
+    },
+    {
+      "code": "3777",
+      "name": "Terra Cotta - VY DK",
+      "hex": "#922f25",
+      "r": 146,
+      "g": 47,
+      "b": 37
+    },
+    {
+      "code": "3778",
+      "name": "Terra Cotta - LT",
+      "hex": "#d2705c",
+      "r": 210,
+      "g": 112,
+      "b": 92
+    },
+    {
+      "code": "3779",
+      "name": "Terra Cotta - ULT VY LT",
+      "hex": "#f2ab95",
+      "r": 242,
+      "g": 171,
+      "b": 149
+    },
+    {
+      "code": "3781",
+      "name": "Mocha Brown - DK",
+      "hex": "#593f2b",
+      "r": 89,
+      "g": 63,
+      "b": 43
+    },
+    {
+      "code": "3782",
+      "name": "Mocha Brown - LT",
+      "hex": "#b69d80",
+      "r": 182,
+      "g": 157,
+      "b": 128
+    },
+    {
+      "code": "3787",
+      "name": "Brown Gray - DK",
+      "hex": "#62524c",
+      "r": 98,
+      "g": 82,
+      "b": 76
+    },
+    {
+      "code": "3790",
+      "name": "Beige Gray - ULT DK",
+      "hex": "#6d5a4b",
+      "r": 109,
+      "g": 90,
+      "b": 75
+    },
+    {
+      "code": "3799",
+      "name": "Pewter Gray - VY DK",
+      "hex": "#39393d",
+      "r": 57,
+      "g": 57,
+      "b": 61
+    },
+    {
+      "code": "3801",
+      "name": "Melon - VY DK",
+      "hex": "#e4353d",
+      "r": 228,
+      "g": 53,
+      "b": 61
+    },
+    {
+      "code": "3802",
+      "name": "Antique Mauve - VY DK",
+      "hex": "#672a33",
+      "r": 103,
+      "g": 42,
+      "b": 51
+    },
+    {
+      "code": "3803",
+      "name": "Mauve - DK",
+      "hex": "#872a43",
+      "r": 135,
+      "g": 42,
+      "b": 67
+    },
+    {
+      "code": "3804",
+      "name": "Cyclamen Pink - DK",
+      "hex": "#ce2b63",
+      "r": 206,
+      "g": 43,
+      "b": 99
+    },
+    {
+      "code": "3805",
+      "name": "Cyclamen Pink",
+      "hex": "#df3c73",
+      "r": 223,
+      "g": 60,
+      "b": 115
+    },
+    {
+      "code": "3806",
+      "name": "Cyclamen Pink - LT",
+      "hex": "#f15a91",
+      "r": 241,
+      "g": 90,
+      "b": 145
+    },
+    {
+      "code": "3807",
+      "name": "Cornflower Blue",
+      "hex": "#4b599e",
+      "r": 75,
+      "g": 89,
+      "b": 158
+    },
+    {
+      "code": "3808",
+      "name": "Turquoise - ULT VY DK",
+      "hex": "#03535c",
+      "r": 3,
+      "g": 83,
+      "b": 92
+    },
+    {
+      "code": "3809",
+      "name": "Turquoise - VY DK",
+      "hex": "#136a75",
+      "r": 19,
+      "g": 106,
+      "b": 117
+    },
+    {
+      "code": "3810",
+      "name": "Turquoise - DK",
+      "hex": "#2d8d98",
+      "r": 45,
+      "g": 141,
+      "b": 152
+    },
+    {
+      "code": "3811",
+      "name": "Turquoise - VY LT",
+      "hex": "#a8e2e5",
+      "r": 168,
+      "g": 226,
+      "b": 229
+    },
+    {
+      "code": "3812",
+      "name": "Seagreen - VY DK",
+      "hex": "#07a184",
+      "r": 7,
+      "g": 161,
+      "b": 132
+    },
+    {
+      "code": "3813",
+      "name": "Blue Green - LT",
+      "hex": "#86c3ab",
+      "r": 134,
+      "g": 195,
+      "b": 171
+    },
+    {
+      "code": "3814",
+      "name": "Aquamarine",
+      "hex": "#0b8673",
+      "r": 11,
+      "g": 134,
+      "b": 115
+    },
+    {
+      "code": "3815",
+      "name": "Celadon Green - DK",
+      "hex": "#437259",
+      "r": 67,
+      "g": 114,
+      "b": 89
+    },
+    {
+      "code": "3816",
+      "name": "Celadon Green",
+      "hex": "#60937a",
+      "r": 96,
+      "g": 147,
+      "b": 122
+    },
+    {
+      "code": "3817",
+      "name": "Celadon Green - LT",
+      "hex": "#81c6a4",
+      "r": 129,
+      "g": 198,
+      "b": 164
+    },
+    {
+      "code": "3818",
+      "name": "Emerald Green - ULT VY DK",
+      "hex": "#005d2e",
+      "r": 0,
+      "g": 93,
+      "b": 46
+    },
+    {
+      "code": "3819",
+      "name": "Moss Green - LT",
+      "hex": "#ccc959",
+      "r": 204,
+      "g": 201,
+      "b": 89
+    },
+    {
+      "code": "3820",
+      "name": "Straw - DK",
+      "hex": "#dba53e",
+      "r": 219,
+      "g": 165,
+      "b": 62
+    },
+    {
+      "code": "3821",
+      "name": "Straw",
+      "hex": "#ebbb52",
+      "r": 235,
+      "g": 187,
+      "b": 82
+    },
+    {
+      "code": "3822",
+      "name": "Straw - LT",
+      "hex": "#f7d169",
+      "r": 247,
+      "g": 209,
+      "b": 105
+    },
+    {
+      "code": "3823",
+      "name": "Yellow - ULT PALE",
+      "hex": "#fef5cd",
+      "r": 254,
+      "g": 245,
+      "b": 205
+    },
+    {
+      "code": "3824",
+      "name": "Apricot - LT",
+      "hex": "#fcae99",
+      "r": 252,
+      "g": 174,
+      "b": 153
+    },
+    {
+      "code": "3825",
+      "name": "Pumpkin - PALE",
+      "hex": "#fea370",
+      "r": 254,
+      "g": 163,
+      "b": 112
+    },
+    {
+      "code": "3826",
+      "name": "Golden Brown",
+      "hex": "#b16633",
+      "r": 177,
+      "g": 102,
+      "b": 51
+    },
+    {
+      "code": "3827",
+      "name": "Golden Brown - PALE",
+      "hex": "#eaa664",
+      "r": 234,
+      "g": 166,
+      "b": 100
+    },
+    {
+      "code": "3828",
+      "name": "Hazelnut Brown",
+      "hex": "#aa7c43",
+      "r": 170,
+      "g": 124,
+      "b": 67
+    },
+    {
+      "code": "3829",
+      "name": "Old Gold - VY DK",
+      "hex": "#a7671d",
+      "r": 167,
+      "g": 103,
+      "b": 29
+    },
+    {
+      "code": "3830",
+      "name": "Terra Cotta",
+      "hex": "#a94138",
+      "r": 169,
+      "g": 65,
+      "b": 56
+    },
+    {
+      "code": "3831",
+      "name": "Raspberry - DK",
+      "hex": "#c12b52",
+      "r": 193,
+      "g": 43,
+      "b": 82
+    },
+    {
+      "code": "3832",
+      "name": "Raspberry - MED",
+      "hex": "#e36370",
+      "r": 227,
+      "g": 99,
+      "b": 112
+    },
+    {
+      "code": "3833",
+      "name": "Raspberry - LT",
+      "hex": "#ea8b96",
+      "r": 234,
+      "g": 139,
+      "b": 150
+    },
+    {
+      "code": "3834",
+      "name": "Grape - DK",
+      "hex": "#6a2258",
+      "r": 106,
+      "g": 34,
+      "b": 88
+    },
+    {
+      "code": "3835",
+      "name": "Grape - MED",
+      "hex": "#924d78",
+      "r": 146,
+      "g": 77,
+      "b": 120
+    },
+    {
+      "code": "3836",
+      "name": "Grape - LT",
+      "hex": "#c597b9",
+      "r": 197,
+      "g": 151,
+      "b": 185
+    },
+    {
+      "code": "3837",
+      "name": "Lavender - ULT DK",
+      "hex": "#8a2a8f",
+      "r": 138,
+      "g": 42,
+      "b": 143
+    },
+    {
+      "code": "3838",
+      "name": "Lavender Blue - DK",
+      "hex": "#606bad",
+      "r": 96,
+      "g": 107,
+      "b": 173
+    },
+    {
+      "code": "3839",
+      "name": "Lavender Blue - MED",
+      "hex": "#7a7ec5",
+      "r": 122,
+      "g": 126,
+      "b": 197
+    },
+    {
+      "code": "3840",
+      "name": "Lavender Blue - LT",
+      "hex": "#b2bdea",
+      "r": 178,
+      "g": 189,
+      "b": 234
+    },
+    {
+      "code": "3841",
+      "name": "Baby Blue - PALE",
+      "hex": "#d9eaf2",
+      "r": 217,
+      "g": 234,
+      "b": 242
+    },
+    {
+      "code": "3842",
+      "name": "Wedgewood - DK",
+      "hex": "#06506a",
+      "r": 6,
+      "g": 80,
+      "b": 106
+    },
+    {
+      "code": "3843",
+      "name": "Electric Blue",
+      "hex": "#28a3de",
+      "r": 40,
+      "g": 163,
+      "b": 222
+    },
+    {
+      "code": "3844",
+      "name": "Bright Turquoise - DK",
+      "hex": "#1f7fa0",
+      "r": 31,
+      "g": 127,
+      "b": 160
+    },
+    {
+      "code": "3845",
+      "name": "Bright Turquoise - MED",
+      "hex": "#2badd1",
+      "r": 43,
+      "g": 173,
+      "b": 209
+    },
+    {
+      "code": "3846",
+      "name": "Bright Turquoise - LT",
+      "hex": "#5eccec",
+      "r": 94,
+      "g": 204,
+      "b": 236
+    },
+    {
+      "code": "3847",
+      "name": "Teal Green - DK",
+      "hex": "#186358",
+      "r": 24,
+      "g": 99,
+      "b": 88
+    },
+    {
+      "code": "3848",
+      "name": "Teal Green - MED",
+      "hex": "#207e72",
+      "r": 32,
+      "g": 126,
+      "b": 114
+    },
+    {
+      "code": "3849",
+      "name": "Teal Green - LT",
+      "hex": "#35b193",
+      "r": 53,
+      "g": 177,
+      "b": 147
+    },
+    {
+      "code": "3850",
+      "name": "Bright Green - DK",
+      "hex": "#208b46",
+      "r": 32,
+      "g": 139,
+      "b": 70
+    },
+    {
+      "code": "3851",
+      "name": "Bright Green - LT",
+      "hex": "#61bb84",
+      "r": 97,
+      "g": 187,
+      "b": 132
+    },
+    {
+      "code": "3852",
+      "name": "Straw - VY DK",
+      "hex": "#e3a730",
+      "r": 227,
+      "g": 167,
+      "b": 48
+    },
+    {
+      "code": "3853",
+      "name": "Autumn Gold - DK",
+      "hex": "#ef8125",
+      "r": 239,
+      "g": 129,
+      "b": 37
+    },
+    {
+      "code": "3854",
+      "name": "Autumn Gold - MED",
+      "hex": "#fbac56",
+      "r": 251,
+      "g": 172,
+      "b": 86
+    },
+    {
+      "code": "3855",
+      "name": "Autumn Gold - LT",
+      "hex": "#fddfa0",
+      "r": 253,
+      "g": 223,
+      "b": 160
+    },
+    {
+      "code": "3856",
+      "name": "Mahogany - ULT VY LT",
+      "hex": "#fdbe8e",
+      "r": 253,
+      "g": 190,
+      "b": 142
+    },
+    {
+      "code": "3857",
+      "name": "Rosewood - DK",
+      "hex": "#6a2f26",
+      "r": 106,
+      "g": 47,
+      "b": 38
+    },
+    {
+      "code": "3858",
+      "name": "Rosewood - MED",
+      "hex": "#803a32",
+      "r": 128,
+      "g": 58,
+      "b": 50
+    },
+    {
+      "code": "3859",
+      "name": "Rosewood - LT",
+      "hex": "#ba7a6c",
+      "r": 186,
+      "g": 122,
+      "b": 108
+    },
+    {
+      "code": "3860",
+      "name": "Cocoa",
+      "hex": "#896362",
+      "r": 137,
+      "g": 99,
+      "b": 98
+    },
+    {
+      "code": "3861",
+      "name": "Cocoa - LT",
+      "hex": "#ac8583",
+      "r": 172,
+      "g": 133,
+      "b": 131
+    },
+    {
+      "code": "3862",
+      "name": "Mocha Beige - DK",
+      "hex": "#6e492a",
+      "r": 110,
+      "g": 73,
+      "b": 42
+    },
+    {
+      "code": "3863",
+      "name": "Mocha Beige - MED",
+      "hex": "#94725d",
+      "r": 148,
+      "g": 114,
+      "b": 93
+    },
+    {
+      "code": "3864",
+      "name": "Mocha Beige - LT",
+      "hex": "#c9aa92",
+      "r": 201,
+      "g": 170,
+      "b": 146
+    },
+    {
+      "code": "3865",
+      "name": "Winter White",
+      "hex": "#fffdf9",
+      "r": 255,
+      "g": 253,
+      "b": 249
+    },
+    {
+      "code": "3866",
+      "name": "Mocha Brown - ULT VY LT",
+      "hex": "#f0e6d7",
+      "r": 240,
+      "g": 230,
+      "b": 215
+    },
+    {
+      "code": "B5200",
+      "name": "Snow White",
+      "hex": "#fcfcff",
+      "r": 252,
+      "g": 252,
+      "b": 255
+    },
+    {
+      "code": "Blanc",
+      "name": "White",
+      "hex": "#eeeeee",
+      "r": 238,
+      "g": 238,
+      "b": 238
+    },
+    {
+      "code": "Ecru",
+      "name": "Ecru/off-white",
+      "hex": "#fff7e7",
+      "r": 255,
+      "g": 247,
+      "b": 231
+    },
+    {
+      "code": "White",
+      "name": "White",
+      "hex": "#ffffff",
+      "r": 255,
+      "g": 255,
+      "b": 255
+    }
+  ]
+}

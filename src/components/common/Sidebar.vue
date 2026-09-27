@@ -85,6 +85,12 @@ const wishlistLink = {
   icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>`,
 }
 
+const creationLink = {
+  name: 'Création',
+  path: '/creation',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3 2.12 2.12 0 0 1 0 3L7 19l-4 1 1-4Z"></path></svg>`,
+}
+
 const financesLink = {
   name: 'Finances',
   path: '/finances',
@@ -166,6 +172,14 @@ const isActive = (path) => {
   if (path === '/jeux') return route.path === path || route.path.startsWith('/jeux/')
   if (path === '/sport') return route.path === path || route.path.startsWith('/sport/')
   if (path === '/wishlist') return route.path === path || route.path.startsWith('/wishlist/')
+  if (path === '/creation') {
+    return (
+      route.path === path ||
+      route.path.startsWith('/creation/') ||
+      route.path === '/points-de-croix' ||
+      route.path.startsWith('/points-de-croix/')
+    )
+  }
   if (path === '/finances') return route.path === path || route.path.startsWith('/finances/')
   if (path === '/ressources') return route.path === path || route.path.startsWith('/ressources/')
   if (path === '/journal') return route.path === path || route.path.startsWith('/journal/')
@@ -226,6 +240,7 @@ const defaultSidebarOrder = [
   SIDEBAR_ITEM_IDS.JEUX,
   SIDEBAR_ITEM_IDS.SPORT,
   SIDEBAR_ITEM_IDS.WISHLIST,
+  SIDEBAR_ITEM_IDS.CREATION,
   SIDEBAR_ITEM_IDS.FINANCES,
   SIDEBAR_ITEM_IDS.RESSOURCES,
   SIDEBAR_ITEM_IDS.JOURNAL,
@@ -245,6 +260,7 @@ const sidebarItemsById = {
   [SIDEBAR_ITEM_IDS.JEUX]: jeuxLink,
   [SIDEBAR_ITEM_IDS.SPORT]: sportLink,
   [SIDEBAR_ITEM_IDS.WISHLIST]: wishlistLink,
+  [SIDEBAR_ITEM_IDS.CREATION]: creationLink,
   [SIDEBAR_ITEM_IDS.FINANCES]: financesLink,
   [SIDEBAR_ITEM_IDS.RESSOURCES]: ressourcesLink,
   [SIDEBAR_ITEM_IDS.JOURNAL]: journalLink,
