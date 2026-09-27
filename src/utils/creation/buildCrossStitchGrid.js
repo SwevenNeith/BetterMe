@@ -41,9 +41,13 @@ export function symbolForIndex(index) {
 }
 
 /**
- * Construit la grille 2D + légende + ImageData remappée DMC.
+ * Construit la grille 2D + légende + ImageData à partir d’une ImageData
+ * déjà échantillonnée (1 pixel = 1 case). Matching DMC uniquement — pas de K-means.
  *
- * @param {ImageData} imageData image quantifiée (ou quelconque)
+ * @param {ImageData} imageData image quantifiée / échantillonnée
+ * @param {{ preserveSourceRgb?: boolean }} [options]
+ *   preserveSourceRgb : garde les RGB source pour l’affichage (pixel art) ;
+ *   la légende utilise quand même les teintes DMC pour l’achat des fils.
  * @returns {{
  *   grid: Array<Array<{ dmcCode: string, rgb: { r: number, g: number, b: number }, symbol: string } | null>>,
  *   legend: Array<{ dmcCode: string, dmcName: string, rgb: { r: number, g: number, b: number }, hex: string, symbol: string, count: number }>,
@@ -52,7 +56,8 @@ export function symbolForIndex(index) {
  *   imageData: ImageData,
  * }}
  */
-export function buildCrossStitchGrid(imageData) {
+export function buildCrossStitchGrid(imageData, options = {}) {
+  const preserveSourceRgb = Boolean(options.preserveSourceRgb)
   const { data, width, height } = imageData
   /** @type {Map<string, { dmcCode: string, dmcName: string, rgb: { r: number, g: number, b: number }, hex: string, count: number }>} */
   const used = new Map()
@@ -75,14 +80,13 @@ export function buildCrossStitchGrid(imageData) {
         continue
       }
 
-      const key = (data[o] << 16) | (data[o + 1] << 8) | data[o + 2]
+      const sr = data[o]
+      const sg = data[o + 1]
+      const sb = data[o + 2]
+      const key = (sr << 16) | (sg << 8) | sb
       let entry = pixelCache.get(key)
       if (!entry) {
-        const { dmc } = matchRgbToClosestDmc({
-          r: data[o],
-          g: data[o + 1],
-          b: data[o + 2],
-        })
+        const { dmc } = matchRgbToClosestDmc({ r: sr, g: sg, b: sb })
         entry = {
           dmcCode: dmc.code,
           dmcName: dmc.name,
@@ -105,16 +109,19 @@ export function buildCrossStitchGrid(imageData) {
         })
       }
 
-      // symbole provisoire — réécrit après légende triée
+      const displayRgb = preserveSourceRgb
+        ? { r: sr, g: sg, b: sb }
+        : entry.rgb
+
       row.push({
         dmcCode: entry.dmcCode,
-        rgb: entry.rgb,
+        rgb: displayRgb,
         symbol: '',
       })
 
-      out.data[o] = entry.rgb.r
-      out.data[o + 1] = entry.rgb.g
-      out.data[o + 2] = entry.rgb.b
+      out.data[o] = displayRgb.r
+      out.data[o + 1] = displayRgb.g
+      out.data[o + 2] = displayRgb.b
       out.data[o + 3] = 255
     }
     rows.push(row)

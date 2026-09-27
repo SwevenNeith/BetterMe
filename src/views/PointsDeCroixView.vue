@@ -13,8 +13,8 @@ import {
   listCrossStitchPatterns,
   saveCrossStitchPattern,
 } from '../services/creation/crossStitchPatterns.js'
-import { quantizeImageLabKMeans } from '../utils/creation/kmeansLab.js'
 import { buildCrossStitchGrid } from '../utils/creation/buildCrossStitchGrid.js'
+import { prepareSampledColors } from '../utils/creation/prepareSampledColors.js'
 import {
   AIDA_COUNTS,
   DMC_SKEIN_LENGTH_M,
@@ -29,8 +29,8 @@ import {
 import {
   computeTargetSize,
   loadImageFromFile,
-  resizeImageProgressive,
 } from '../utils/creation/progressiveResize.js'
+import PixelGridAligner from '../components/creation/PixelGridAligner.vue'
 
 usePageDisplayLabel(APP_PAGE_IDS.CREATION, 'Points de Croix', {
   setDocumentTitle: true,
@@ -52,6 +52,12 @@ const sourceName = ref('')
 const sourcePreviewUrl = ref('')
 const targetWidth = ref(80)
 const colorCount = ref(16)
+/** Image déjà en pixel art → échantillonnage par blocs (mode), sans K-means. */
+const isPixelArt = ref(false)
+/** Alignement validé (cols, rows, offsetX, offsetY) — conservé tant que l’image ne change pas. */
+const pixelArtAlignment = ref(null)
+const alignmentValidated = ref(false)
+const sourceFingerprint = ref('')
 
 /** Motif courant en BDD (null = nouveau). */
 const currentPatternId = ref(null)
@@ -133,7 +139,7 @@ function formatSkeinsExact(n) {
   return n.toFixed(2).replace('.', ',')
 }
 
-const targetHeight = computed(() => {
+const autoTargetHeight = computed(() => {
   if (!sourceImage.value) return 0
   const { height } = computeTargetSize(
     sourceImage.value.naturalWidth,
@@ -142,6 +148,14 @@ const targetHeight = computed(() => {
   )
   return height
 })
+
+const needsPixelArtAlignment = computed(
+  () => isPixelArt.value && Boolean(sourceImage.value) && !alignmentValidated.value,
+)
+
+const canRunPixelArtPipeline = computed(
+  () => !isPixelArt.value || (alignmentValidated.value && pixelArtAlignment.value),
+)
 
 const canSave = computed(
   () =>
@@ -250,6 +264,7 @@ function cancelLiveDebounce() {
 function scheduleLivePreview() {
   cancelLiveDebounce()
   if (!sourceImage.value || suppressLivePreview || paramsLocked.value) return
+  if (isPixelArt.value && !canRunPixelArtPipeline.value) return
   liveDebounceTimer = setTimeout(() => {
     liveDebounceTimer = null
     runPipeline()
@@ -259,7 +274,7 @@ function scheduleLivePreview() {
 function unlockModelParams() {
   if (!paramsLocked.value) return
   const ok = window.confirm(
-    'Modifier les paramètres (largeur / couleurs / image) régénèrera le motif. Continuer ?',
+    'Modifier les paramètres (image / grille / couleurs) régénèrera le motif. Continuer ?',
   )
   if (!ok) return
   paramsLocked.value = false
@@ -268,6 +283,39 @@ function unlockModelParams() {
 
 function lockModelParams() {
   paramsLocked.value = true
+}
+
+function fingerprintFor(img, file) {
+  return [
+    file?.name || '',
+    file?.size || 0,
+    file?.lastModified || 0,
+    img?.naturalWidth || 0,
+    img?.naturalHeight || 0,
+  ].join('|')
+}
+
+function clearPixelArtAlignment() {
+  pixelArtAlignment.value = null
+  alignmentValidated.value = false
+}
+
+function onPixelArtAlignmentValidate(alignment) {
+  pixelArtAlignment.value = {
+    cols: alignment.cols,
+    rows: alignment.rows,
+    offsetX: alignment.offsetX,
+    offsetY: alignment.offsetY,
+  }
+  alignmentValidated.value = true
+  targetWidth.value = alignment.cols
+  saveMessage.value = 'Alignement validé — génération du motif…'
+  runPipeline()
+}
+
+function reajustPixelArtAlignment() {
+  if (paramsLocked.value) return
+  alignmentValidated.value = false
 }
 
 function onFilePickerOpen() {
@@ -309,6 +357,7 @@ async function onFileChange(event) {
   savedSourcePath.value = null
   sourceDirty.value = true
   paramsLocked.value = false
+  clearPixelArtAlignment()
   if (!patternTitle.value.trim()) {
     patternTitle.value = file.name.replace(/\.[^.]+$/, '') || 'Sans titre'
   }
@@ -317,7 +366,14 @@ async function onFileChange(event) {
     const img = await loadImageFromFile(file)
     sourceImage.value = img
     sourcePreviewUrl.value = URL.createObjectURL(file)
-    await runPipeline()
+    sourceFingerprint.value = fingerprintFor(img, file)
+    if (isPixelArt.value) {
+      // Alignement obligatoire avant échantillonnage
+      processStatus.value = ''
+      saveMessage.value = 'Aligne la grille sur l’image, puis valide.'
+    } else {
+      await runPipeline()
+    }
   } catch (err) {
     processError.value = err?.message || 'Impossible de charger l’image.'
     sourceName.value = ''
@@ -329,41 +385,45 @@ async function onFileChange(event) {
 
 async function runPipeline() {
   if (!sourceImage.value) return
+  if (isPixelArt.value && !canRunPixelArtPipeline.value) return
 
   const generation = ++pipelineGeneration
   isProcessing.value = true
   processError.value = ''
 
   try {
-    processStatus.value = 'Redimensionnement…'
+    processStatus.value = isPixelArt.value
+      ? 'Sélection des couleurs + équivalents DMC…'
+      : 'Resize + K-means LAB…'
     await new Promise((r) => requestAnimationFrame(r))
     if (generation !== pipelineGeneration) return
 
-    const { width, height } = computeTargetSize(
-      sourceImage.value.naturalWidth,
-      sourceImage.value.naturalHeight,
-      targetWidth.value,
-    )
-    const canvas = resizeImageProgressive(sourceImage.value, width, height)
+    const sampled = prepareSampledColors(sourceImage.value, {
+      isPixelArt: isPixelArt.value,
+      targetWidth: targetWidth.value,
+      colorCount: colorCount.value,
+      alignment: isPixelArt.value ? pixelArtAlignment.value : null,
+    })
 
-    processStatus.value = 'K-means LAB…'
-    await new Promise((r) => requestAnimationFrame(r))
+    if (!isPixelArt.value) {
+      processStatus.value = 'Matching DMC…'
+      await new Promise((r) => requestAnimationFrame(r))
+      if (generation !== pipelineGeneration) return
+    }
+
+    const stitch = buildCrossStitchGrid(sampled.imageData, {
+      // Pixel art : on garde les teintes de l’image ; DMC sert à la légende / fils
+      preserveSourceRgb: isPixelArt.value,
+    })
     if (generation !== pipelineGeneration) return
 
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })
-    const imageData = ctx.getImageData(0, 0, width, height)
-    const result = quantizeImageLabKMeans(imageData, colorCount.value)
-
-    processStatus.value = 'Matching DMC…'
-    await new Promise((r) => requestAnimationFrame(r))
-    if (generation !== pipelineGeneration) return
-
-    const stitch = buildCrossStitchGrid(result.imageData)
-    if (generation !== pipelineGeneration) return
-
-    gridSize.value = { width, height }
+    gridSize.value = { width: sampled.width, height: sampled.height }
     stitchGrid.value = stitch.grid
     stitchLegend.value = stitch.legend
+    if (sampled.alignment) {
+      pixelArtAlignment.value = sampled.alignment
+      targetWidth.value = sampled.alignment.cols
+    }
 
     processStatus.value = ''
     await nextTick()
@@ -411,15 +471,23 @@ async function saveCurrentPattern() {
       sourceNaturalHeight: sourceImage.value?.naturalHeight || null,
       renderMode: renderMode.value,
       dmcCatalogCount,
+      isPixelArt: isPixelArt.value,
+      alignment: isPixelArt.value ? pixelArtAlignment.value : null,
+      sourceFingerprint: sourceFingerprint.value,
     }
+    const colorCountForDb = isPixelArt.value
+      ? Math.max(COLORS_MIN, Math.min(COLORS_MAX, stitchLegend.value.length || COLORS_MIN))
+      : colorCount.value
     const row = await saveCrossStitchPattern(supabase, userId.value, {
       id: currentPatternId.value,
       title: patternTitle.value,
       sourceFile: sourceDirty.value ? sourceFile.value : null,
       keepSourcePath: savedSourcePath.value,
       keepSourceName: sourceName.value,
-      targetWidth: targetWidth.value,
-      colorCount: colorCount.value,
+      targetWidth: isPixelArt.value
+        ? pixelArtAlignment.value?.cols || targetWidth.value
+        : targetWidth.value,
+      colorCount: colorCountForDb,
       aidaCount: aidaCount.value,
       strandCount: strandCount.value,
       grid: stitchGrid.value,
@@ -455,6 +523,9 @@ function startNewPattern() {
   savedSourcePath.value = null
   sourceDirty.value = false
   paramsLocked.value = false
+  isPixelArt.value = false
+  clearPixelArtAlignment()
+  sourceFingerprint.value = ''
   patternTitle.value = ''
   saveMessage.value = ''
   processError.value = ''
@@ -494,6 +565,28 @@ async function openSavedPattern(patternId) {
     colorCount.value = row.color_count
     aidaCount.value = row.aida_count
     strandCount.value = row.strand_count
+    isPixelArt.value = Boolean(row.metadata?.isPixelArt)
+    if (row.metadata?.alignment?.cols && row.metadata?.alignment?.rows) {
+      pixelArtAlignment.value = {
+        cols: row.metadata.alignment.cols,
+        rows: row.metadata.alignment.rows,
+        offsetX: row.metadata.alignment.offsetX || 0,
+        offsetY: row.metadata.alignment.offsetY || 0,
+      }
+      alignmentValidated.value = true
+    } else if (isPixelArt.value) {
+      // Anciens motifs : déduire un alignement depuis la grille stockée
+      pixelArtAlignment.value = {
+        cols: row.grid_width || row.target_width,
+        rows: row.grid_height || row.target_width,
+        offsetX: 0,
+        offsetY: 0,
+      }
+      alignmentValidated.value = true
+    } else {
+      clearPixelArtAlignment()
+    }
+    sourceFingerprint.value = fingerprintFor(img, file)
 
     const paletteRows = Array.isArray(row.palette) ? row.palette : []
     stitchLegend.value = paletteRows
@@ -544,6 +637,21 @@ async function removeSavedPattern(patternId) {
 
 watch([targetWidth, colorCount], () => {
   if (!sourceImage.value) return
+  if (isPixelArt.value) return // grille pilotée par l’alignement validé
+  scheduleLivePreview()
+})
+
+watch(isPixelArt, (enabled) => {
+  if (!sourceImage.value || suppressLivePreview || paramsLocked.value) return
+  if (enabled) {
+    if (alignmentValidated.value && pixelArtAlignment.value) {
+      scheduleLivePreview()
+    } else {
+      clearResults()
+      saveMessage.value = 'Aligne la grille sur l’image, puis valide.'
+    }
+    return
+  }
   scheduleLivePreview()
 })
 
@@ -636,7 +744,7 @@ onBeforeUnmount(() => {
 
       <div v-if="paramsLocked" class="pdc-lock-banner">
         <p class="pdc-hint pdc-hint--tight">
-          Motif verrouillé — image, largeur et couleurs protégées contre les changements accidentels.
+          Motif verrouillé — image et paramètres de grille protégés contre les changements accidentels.
         </p>
         <button
           type="button"
@@ -679,53 +787,101 @@ onBeforeUnmount(() => {
         </figure>
       </div>
 
-      <label class="pdc-slider">
-        <span class="pdc-slider__label">
-          Largeur cible :
-          <strong>{{ targetWidth }}</strong> croix
-          <template v-if="sourceImage">
-            → grille {{ targetWidth }} × {{ targetHeight }}
-          </template>
-        </span>
+      <label class="pdc-check">
         <input
-          v-model.number="targetWidth"
-          type="range"
-          :min="WIDTH_MIN"
-          :max="WIDTH_MAX"
-          step="1"
-          class="pdc-range"
+          v-model="isPixelArt"
+          type="checkbox"
+          class="pdc-check__input"
           :disabled="!paramsEditable"
         />
-        <span class="pdc-slider__hints">
-          <span>{{ WIDTH_MIN }}</span>
-          <span>{{ WIDTH_MAX }}</span>
-        </span>
+        <span class="pdc-check__label">Cette image est déjà en pixel art</span>
       </label>
+      <p v-if="isPixelArt" class="pdc-hint pdc-hint--tight">
+        Pas de K-means ni de recalcul de palette : chaque case reprend la couleur déjà
+        présente au centre du carré, puis on trouve seulement l’équivalent DMC pour la légende.
+      </p>
 
-      <label class="pdc-slider">
-        <span class="pdc-slider__label">
-          Nombre de couleurs : <strong>{{ colorCount }}</strong>
-        </span>
-        <input
-          v-model.number="colorCount"
-          type="range"
-          :min="COLORS_MIN"
-          :max="COLORS_MAX"
-          step="1"
-          class="pdc-range"
+      <template v-if="!isPixelArt">
+        <label class="pdc-slider">
+          <span class="pdc-slider__label">
+            Largeur cible :
+            <strong>{{ targetWidth }}</strong> croix
+            <template v-if="sourceImage">
+              → grille {{ targetWidth }} × {{ autoTargetHeight }}
+            </template>
+          </span>
+          <input
+            v-model.number="targetWidth"
+            type="range"
+            :min="WIDTH_MIN"
+            :max="WIDTH_MAX"
+            step="1"
+            class="pdc-range"
+            :disabled="!paramsEditable"
+          />
+          <span class="pdc-slider__hints">
+            <span>{{ WIDTH_MIN }}</span>
+            <span>{{ WIDTH_MAX }}</span>
+          </span>
+        </label>
+
+        <label class="pdc-slider">
+          <span class="pdc-slider__label">
+            Nombre de couleurs : <strong>{{ colorCount }}</strong>
+          </span>
+          <input
+            v-model.number="colorCount"
+            type="range"
+            :min="COLORS_MIN"
+            :max="COLORS_MAX"
+            step="1"
+            class="pdc-range"
+            :disabled="!paramsEditable"
+          />
+          <span class="pdc-slider__hints">
+            <span>{{ COLORS_MIN }}</span>
+            <span>{{ COLORS_MAX }}</span>
+          </span>
+        </label>
+      </template>
+
+      <div v-else-if="sourceImage" class="pdc-align-block">
+        <div v-if="alignmentValidated && pixelArtAlignment" class="pdc-align-summary">
+          <p class="pdc-live-status pdc-live-status--ok">
+            Alignement validé :
+            {{ pixelArtAlignment.cols }}×{{ pixelArtAlignment.rows }}
+            · offset ({{ pixelArtAlignment.offsetX }}, {{ pixelArtAlignment.offsetY }})
+          </p>
+          <button
+            type="button"
+            class="pdc-btn pdc-btn--secondary pdc-btn--sm"
+            :disabled="!paramsEditable"
+            @click="reajustPixelArtAlignment"
+          >
+            Réajuster l’alignement
+          </button>
+        </div>
+
+        <PixelGridAligner
+          v-else
+          :image="sourceImage"
+          :image-url="sourcePreviewUrl"
+          :initial-alignment="pixelArtAlignment"
+          :min-cells="1"
+          :max-cells="WIDTH_MAX"
           :disabled="!paramsEditable"
+          @validate="onPixelArtAlignmentValidate"
         />
-        <span class="pdc-slider__hints">
-          <span>{{ COLORS_MIN }}</span>
-          <span>{{ COLORS_MAX }}</span>
-        </span>
-      </label>
+      </div>
 
       <p v-if="isProcessing" class="pdc-live-status" aria-live="polite">
         {{ processStatus || 'Mise à jour…' }}
       </p>
       <p v-else-if="sourceImage && stitchGrid" class="pdc-live-status pdc-live-status--ok">
         Aperçu à jour · {{ stitchSummary }}
+      </p>
+      <p v-else-if="needsPixelArtAlignment" class="pdc-live-status">
+        Valide l’alignement pour lancer l’échantillonnage.
       </p>
       <p v-else-if="sourceImage && !paramsLocked" class="pdc-live-status">
         Déplacez un slider pour recalculer (après {{ LIVE_DEBOUNCE_MS }}&nbsp;ms).
@@ -1152,6 +1308,61 @@ onBeforeUnmount(() => {
   gap: 0.35rem;
   margin-bottom: 1rem;
   min-width: 0;
+}
+
+.pdc-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-bottom: 0.65rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pdc-check__input {
+  margin-top: 0.2rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: #ad81be;
+  flex-shrink: 0;
+}
+
+.pdc-check__input:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.pdc-check__label {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #5a4a68;
+  line-height: 1.35;
+}
+
+.pdc-grid-dims {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.pdc-align-block {
+  margin-bottom: 1rem;
+}
+
+.pdc-align-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(173, 129, 190, 0.35);
+  background: rgba(213, 181, 234, 0.12);
+}
+
+.pdc-align-summary .pdc-live-status {
+  margin: 0;
 }
 
 .pdc-slider__label {
@@ -1601,6 +1812,7 @@ onBeforeUnmount(() => {
   .pdc-live-status--ok,
   .pdc-step-title,
   .pdc-slider__label,
+  .pdc-check__label,
   .pdc-back,
   .pdc-details__summary,
   .pdc-legend__title,
