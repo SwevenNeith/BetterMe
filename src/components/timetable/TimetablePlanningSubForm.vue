@@ -354,6 +354,7 @@ watch(
   color: #2c3e50;
   background: rgba(255, 255, 255, 0.9);
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .planning-subform__time-row {

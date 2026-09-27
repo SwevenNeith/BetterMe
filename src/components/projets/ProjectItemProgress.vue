@@ -1295,6 +1295,7 @@ function goToHistoryPage(page) {
   font-weight: 650;
   background: rgba(255, 255, 255, 0.95);
   color: #2c3e50;
+  overflow: hidden;
 }
 
 .project-history-modal__filter-actions {
@@ -1361,7 +1362,7 @@ function goToHistoryPage(page) {
   color: #2c3e50;
 }
 
-@media (max-width: 520px) {
+@media (max-width: 768px) {
   .project-progress__reset {
     display: none;
   }
@@ -1369,6 +1370,11 @@ function goToHistoryPage(page) {
   .project-history-modal__panel {
     width: 100%;
     min-height: min(80vh, 24rem);
+  }
+
+  .project-history-modal__filter-range,
+  .project-history-modal__filter-grid {
+    grid-template-columns: 1fr;
   }
 }
 

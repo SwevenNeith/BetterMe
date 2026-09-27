@@ -3556,6 +3556,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   color: #2c3e50;
   font-family: inherit;
   transition: all 0.2s ease;
+  overflow: hidden;
 }
 
 .form-group textarea {

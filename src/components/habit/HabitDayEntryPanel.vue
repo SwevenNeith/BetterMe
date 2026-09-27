@@ -1549,7 +1549,9 @@ watch(canShowDetails, (visible) => {
   color: #2c3e50;
   width: 100%;
   max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .habit-entry__date-label {
@@ -2130,6 +2132,7 @@ watch(canShowDetails, (visible) => {
   font-weight: 650;
   background: rgba(255, 255, 255, 0.95);
   color: #2c3e50;
+  overflow: hidden;
 }
 
 .habit-history-modal__select:disabled {
@@ -2362,7 +2365,7 @@ watch(canShowDetails, (visible) => {
   font-weight: 650;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .habit-history-modal__filter-grid {
     grid-template-columns: 1fr;
   }

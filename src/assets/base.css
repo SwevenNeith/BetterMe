@@ -29,8 +29,14 @@
   padding: 0;
 }
 
+html {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
 body {
   min-height: 100vh;
+  max-width: 100%;
   color: var(--color-text);
   background: var(--color-background);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -40,9 +46,10 @@ body {
 }
 
 /**
- * Champs de formulaire : même largeur, jamais plus large que le parent.
- * Les date/heure mobiles ont une largeur intrinsèque élevée (libellé localisé)
- * qui fait déborder les cartes — on force le confinement.
+ * Champs de formulaire : jamais plus larges que le parent.
+ * Sur Safari iOS, les date/heure ont une largeur intrinsèque élevée
+ * (libellé localisé) — overflow + appearance sont indispensables
+ * (field-sizing seul ne suffit pas hors Blink).
  */
 input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']),
 select,
@@ -62,8 +69,10 @@ input[type='week'] {
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  /* Empêche le chrome WebKit de forcer une largeur min trop large */
+  overflow: hidden;
   field-sizing: fixed;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 input[type='date']::-webkit-datetime-edit,
@@ -106,6 +115,7 @@ input[type='month']::-webkit-calendar-picker-indicator,
 input[type='week']::-webkit-calendar-picker-indicator {
   flex-shrink: 0;
   margin-left: 0.15rem;
+  opacity: 0.75;
 }
 
 @media (max-width: 768px) {
@@ -113,8 +123,11 @@ input[type='week']::-webkit-calendar-picker-indicator {
   input[type='time'],
   input[type='datetime-local'],
   input[type='month'],
-  input[type='week'] {
-    /* ≥16px évite le zoom iOS ; taille homogène avec les autres champs */
+  input[type='week'],
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']),
+  select,
+  textarea {
+    /* ≥16px évite le zoom iOS au focus */
     font-size: 16px;
   }
 }

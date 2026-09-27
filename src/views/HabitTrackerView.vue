@@ -1201,9 +1201,11 @@ onUnmounted(() => {
 
 .habits-details__row {
   display: grid;
-  grid-template-columns: 6.5rem 1fr;
+  grid-template-columns: minmax(0, 6.5rem) minmax(0, 1fr);
   gap: 0.5rem;
   align-items: start;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .habits-details__row dt {
@@ -1395,6 +1397,11 @@ onUnmounted(() => {
     box-sizing: border-box;
   }
 
+  .habits-details__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.2rem;
+  }
+
   .habits-carousel-indicators {
     display: flex;
     justify-content: center;
@@ -1502,6 +1509,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .field--full {
@@ -1536,6 +1545,7 @@ onUnmounted(() => {
   font-size: 0.95rem;
   background: rgba(255, 255, 255, 0.9);
   color: #2c3e50;
+  overflow: hidden;
 }
 
 .habits-select {
