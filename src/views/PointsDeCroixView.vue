@@ -11,7 +11,9 @@ import {
   expandStitchGrid,
   getCrossStitchPattern,
   listCrossStitchPatterns,
+  normalizeStitchProgress,
   saveCrossStitchPattern,
+  saveStitchProgress,
 } from '../services/creation/crossStitchPatterns.js'
 import { buildCrossStitchGrid } from '../utils/creation/buildCrossStitchGrid.js'
 import { prepareSampledColors } from '../utils/creation/prepareSampledColors.js'
@@ -22,7 +24,6 @@ import {
   metersPerCross,
   summarizeFlossLegend,
 } from '../utils/creation/estimateFloss.js'
-import { renderCrossStitchCanvas, pickCellSize } from '../utils/creation/renderCrossStitchCanvas.js'
 import {
   DMC_FLOSS,
 } from '../utils/creation/matchDmc.js'
@@ -31,6 +32,7 @@ import {
   loadImageFromFile,
 } from '../utils/creation/progressiveResize.js'
 import PixelGridAligner from '../components/creation/PixelGridAligner.vue'
+import CrossStitchChart from '../components/creation/CrossStitchChart.vue'
 
 usePageDisplayLabel(APP_PAGE_IDS.CREATION, 'Points de Croix', {
   setDocumentTitle: true,
@@ -75,6 +77,8 @@ const libraryError = ref('')
 
 /** @type {import('vue').Ref<'color' | 'symbols' | 'both'>} */
 const renderMode = ref('color')
+/** @type {import('vue').Ref<'preview' | 'stitching'>} */
+const chartViewMode = ref('preview')
 
 /** Brins utilisés pour broder (1–6). */
 const strandCount = ref(2)
@@ -89,6 +93,11 @@ const chartZoom = ref(1)
 const ZOOM_MIN = 1
 const ZOOM_MAX = 5
 
+/** Indices linéaires des cases brodées (faites). */
+const stitchDoneIndices = ref([])
+const progressSaveError = ref('')
+const chartRef = ref(null)
+
 const isProcessing = ref(false)
 const processError = ref('')
 const processStatus = ref('')
@@ -97,14 +106,15 @@ const gridSize = ref({ width: 0, height: 0 })
 
 const stitchGrid = ref(null)
 const stitchLegend = ref([])
-const chartCanvasRef = ref(null)
-const chartScrollRef = ref(null)
 const dmcCatalogCount = DMC_FLOSS.length
 
 let liveDebounceTimer = null
+let progressDebounceTimer = null
 let pipelineGeneration = 0
 /** Empêche le watch sliders de recalculer pendant un chargement BDD. */
 let suppressLivePreview = false
+
+const PROGRESS_DEBOUNCE_MS = 650
 
 const stitchSummary = computed(() => {
   if (!stitchGrid.value?.length) return ''
@@ -189,31 +199,16 @@ function clearResults() {
   gridSize.value = { width: 0, height: 0 }
   stitchGrid.value = null
   stitchLegend.value = []
+  stitchDoneIndices.value = []
+  progressSaveError.value = ''
+  chartViewMode.value = 'preview'
   processError.value = ''
   processStatus.value = ''
   chartZoom.value = 1
-  if (chartCanvasRef.value) {
-    const c = chartCanvasRef.value
-    c.width = 0
-    c.height = 0
-  }
-}
-
-function paintChart() {
-  if (!chartCanvasRef.value || !stitchGrid.value?.length) return
-  const h = stitchGrid.value.length
-  const w = stitchGrid.value[0]?.length || 0
-  const base = pickCellSize(w, h, 12)
-  const cellSize = Math.max(6, Math.round(base * chartZoom.value))
-  renderCrossStitchCanvas(chartCanvasRef.value, stitchGrid.value, {
-    mode: renderMode.value,
-    cellSize,
-  })
 }
 
 function setChartZoom(level) {
   chartZoom.value = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, level))
-  paintChart()
 }
 
 function zoomIn() {
@@ -224,9 +219,10 @@ function zoomOut() {
   setChartZoom(chartZoom.value - 1)
 }
 
-function onChartClick(event) {
-  const canvas = chartCanvasRef.value
-  const scroll = chartScrollRef.value
+function onChartPreviewClick(event) {
+  const chart = chartRef.value
+  const canvas = chart?.canvasRef
+  const scroll = chart?.scrollRef
   if (!canvas || !scroll || !stitchGrid.value?.length) return
 
   const rect = canvas.getBoundingClientRect()
@@ -235,16 +231,14 @@ function onChartClick(event) {
   const px = (event.clientX - rect.left) * scaleX
   const py = (event.clientY - rect.top) * scaleY
 
-  // Centre la zone cliquée dans le conteneur scrollable
   scroll.scrollLeft = Math.max(0, px - scroll.clientWidth / 2)
   scroll.scrollTop = Math.max(0, py - scroll.clientHeight / 2)
 
-  // Si pas encore zoomé, un clic augmente le zoom pour mieux lire
   if (chartZoom.value < 2) {
     setChartZoom(2)
     nextTick(() => {
-      const c = chartCanvasRef.value
-      const s = chartScrollRef.value
+      const c = chartRef.value?.canvasRef
+      const s = chartRef.value?.scrollRef
       if (!c || !s) return
       const ratioX = px / canvas.width
       const ratioY = py / canvas.height
@@ -252,6 +246,43 @@ function onChartClick(event) {
       s.scrollTop = Math.max(0, ratioY * c.height - s.clientHeight / 2)
     })
   }
+}
+
+function cancelProgressDebounce() {
+  if (progressDebounceTimer != null) {
+    clearTimeout(progressDebounceTimer)
+    progressDebounceTimer = null
+  }
+}
+
+function scheduleProgressSave() {
+  cancelProgressDebounce()
+  if (!currentPatternId.value || !userId.value) return
+  progressDebounceTimer = setTimeout(() => {
+    progressDebounceTimer = null
+    persistProgressNow()
+  }, PROGRESS_DEBOUNCE_MS)
+}
+
+async function persistProgressNow() {
+  if (!currentPatternId.value || !userId.value) return
+  progressSaveError.value = ''
+  try {
+    await saveStitchProgress(
+      supabase,
+      userId.value,
+      currentPatternId.value,
+      stitchDoneIndices.value,
+    )
+  } catch (err) {
+    console.error(err)
+    progressSaveError.value = err?.message || 'Sauvegarde de la progression impossible.'
+  }
+}
+
+function onDoneIndicesUpdate(indices) {
+  stitchDoneIndices.value = indices
+  scheduleProgressSave()
 }
 
 function cancelLiveDebounce() {
@@ -420,6 +451,8 @@ async function runPipeline() {
     gridSize.value = { width: sampled.width, height: sampled.height }
     stitchGrid.value = stitch.grid
     stitchLegend.value = stitch.legend
+    // Nouvelle grille → reset progression locale (sauf si mêmes dims et déjà en cours)
+    stitchDoneIndices.value = []
     if (sampled.alignment) {
       pixelArtAlignment.value = sampled.alignment
       targetWidth.value = sampled.alignment.cols
@@ -428,7 +461,6 @@ async function runPipeline() {
     processStatus.value = ''
     await nextTick()
     if (generation !== pipelineGeneration) return
-    paintChart()
   } catch (err) {
     if (generation !== pipelineGeneration) return
     console.error(err)
@@ -501,6 +533,9 @@ async function saveCurrentPattern() {
     lockModelParams()
     saveMessage.value = 'Motif enregistré — paramètres verrouillés.'
     await refreshLibrary()
+    if (stitchDoneIndices.value.length) {
+      await persistProgressNow()
+    }
   } catch (err) {
     console.error(err)
     processError.value = err?.message || 'Échec de la sauvegarde.'
@@ -595,6 +630,7 @@ async function openSavedPattern(patternId) {
       width: row.grid_width || stitchGrid.value[0]?.length || 0,
       height: row.grid_height || stitchGrid.value.length || 0,
     }
+    stitchDoneIndices.value = normalizeStitchProgress(row.stitch_progress)
 
     if (
       row.metadata?.renderMode === 'symbols' ||
@@ -605,8 +641,8 @@ async function openSavedPattern(patternId) {
     }
 
     lockModelParams()
+    chartViewMode.value = stitchDoneIndices.value.length ? 'stitching' : 'preview'
     await nextTick()
-    paintChart()
     saveMessage.value = 'Motif chargé — paramètres verrouillés.'
   } catch (err) {
     console.error(err)
@@ -655,11 +691,6 @@ watch(isPixelArt, (enabled) => {
   scheduleLivePreview()
 })
 
-watch(renderMode, async () => {
-  await nextTick()
-  paintChart()
-})
-
 onMounted(async () => {
   const {
     data: { user },
@@ -672,6 +703,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   cancelLiveDebounce()
+  cancelProgressDebounce()
+  if (currentPatternId.value && userId.value && stitchDoneIndices.value) {
+    persistProgressNow()
+  }
   pipelineGeneration += 1
   setFilePickerActive(false)
   setFileUploadInProgress(false)
@@ -953,6 +988,25 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+      <div class="pdc-view-toggle" role="group" aria-label="Mode d’utilisation">
+        <button
+          type="button"
+          class="pdc-mode-btn"
+          :class="{ 'is-active': chartViewMode === 'preview' }"
+          @click="chartViewMode = 'preview'"
+        >
+          Prévisualisation
+        </button>
+        <button
+          type="button"
+          class="pdc-mode-btn"
+          :class="{ 'is-active': chartViewMode === 'stitching' }"
+          @click="chartViewMode = 'stitching'"
+        >
+          Broderie
+        </button>
+      </div>
+
       <div class="pdc-zoom-bar">
         <span class="pdc-zoom-bar__label">Zoom {{ chartZoom }}×</span>
         <button
@@ -979,35 +1033,45 @@ onBeforeUnmount(() => {
         >
           Réinit.
         </button>
-        <span class="pdc-zoom-bar__hint">Clique une zone pour centrer / zoomer</span>
+        <span class="pdc-zoom-bar__hint">
+          <template v-if="chartViewMode === 'stitching'">
+            Clique ou glisse pour cocher / décocher
+          </template>
+          <template v-else>Clique une zone pour centrer / zoomer</template>
+        </span>
       </div>
 
-      <p class="pdc-hint">
+      <p v-if="chartViewMode === 'stitching' && !currentPatternId" class="pdc-hint">
+        Progression locale uniquement — sauvegarde le motif pour la conserver sur Supabase.
+      </p>
+      <p v-else-if="chartViewMode === 'stitching'" class="pdc-hint">
+        Mode broderie : les cases faites restent colorées sous un voile clair + marque verte.
+        Progression enregistrée automatiquement.
+      </p>
+      <p v-else class="pdc-hint">
         <template v-if="renderMode === 'color'">
-          Cases remplies avec les RGB DMC, grille fine + traits épais toutes les 10 croix.
+          Cases remplies avec les RGB, grille fine + traits épais toutes les 10 croix.
         </template>
         <template v-else-if="renderMode === 'symbols'">
           Symboles N&amp;B + grille type toile Aida (ligne plus épaisse toutes les 10 cases).
         </template>
         <template v-else>
-          Couleurs DMC avec le symbole de chaque fil superposé (encre contrastée).
+          Couleurs avec le symbole de chaque fil superposé (encre contrastée).
         </template>
       </p>
 
-      <div ref="chartScrollRef" class="pdc-chart-scroll">
-        <canvas
-          ref="chartCanvasRef"
-          class="pdc-chart-canvas"
-          :aria-label="
-            renderMode === 'color'
-              ? 'Diagramme couleur de la grille'
-              : renderMode === 'symbols'
-                ? 'Diagramme symboles avec grille Aida'
-                : 'Diagramme couleur avec symboles'
-          "
-          @click="onChartClick"
-        />
-      </div>
+      <p v-if="progressSaveError" class="pdc-error" role="alert">{{ progressSaveError }}</p>
+
+      <CrossStitchChart
+        ref="chartRef"
+        :grid="stitchGrid"
+        :render-mode="renderMode"
+        :view-mode="chartViewMode"
+        :zoom="chartZoom"
+        :done-indices="stitchDoneIndices"
+        @update:done-indices="onDoneIndicesUpdate"
+        @preview-click="onChartPreviewClick"
+      />
 
       <div v-if="flossLegend.length" class="pdc-legend">
         <div class="pdc-legend__head">
@@ -1468,6 +1532,15 @@ onBeforeUnmount(() => {
 
 .pdc-mode-toggle {
   display: inline-flex;
+  border-radius: 10px;
+  border: 1px solid rgba(173, 129, 190, 0.4);
+  overflow: hidden;
+  background: rgba(213, 181, 234, 0.12);
+}
+
+.pdc-view-toggle {
+  display: inline-flex;
+  margin: 0.55rem 0 0.75rem;
   border-radius: 10px;
   border: 1px solid rgba(173, 129, 190, 0.4);
   overflow: hidden;

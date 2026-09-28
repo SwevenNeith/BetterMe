@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS public.cross_stitch_patterns (
   palette jsonb NOT NULL DEFAULT '[]'::jsonb,
   -- Métadonnées libres (dims source, mode rendu, etc.)
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  -- Progression broderie : indices linéaires des cases faites
+  stitch_progress jsonb NOT NULL DEFAULT '{"done":[]}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
   updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
@@ -51,6 +53,8 @@ COMMENT ON COLUMN public.cross_stitch_patterns.grid IS
   'Tableau 2D de codes DMC (string) ou null.';
 COMMENT ON COLUMN public.cross_stitch_patterns.palette IS
   'Légende DMC utilisée (symbole, code, nom, rgb, count).';
+COMMENT ON COLUMN public.cross_stitch_patterns.stitch_progress IS
+  'Progression broderie : { "done": [indices linéaires y*width+x, …] }.';
 
 ALTER TABLE public.cross_stitch_patterns ENABLE ROW LEVEL SECURITY;
 

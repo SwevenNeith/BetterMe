@@ -130,6 +130,7 @@ function drawSymbols(ctx, grid, width, height, cellSize, inkMode) {
  *   mode?: CrossStitchRenderMode,
  *   cellSize?: number,
  *   aidaEvery?: number,
+ *   doneSet?: Set<number>|null,
  * }} [options]
  */
 export function renderCrossStitchCanvas(canvas, grid, options = {}) {
@@ -170,6 +171,7 @@ export function renderCrossStitchCanvas(canvas, grid, options = {}) {
   if (mode === 'symbols') {
     drawSymbols(ctx, grid, width, height, cellSize, 'plain')
     drawAidaGrid(ctx, width, height, cellSize, { every: aidaEvery })
+    drawDoneOverlay(ctx, grid, width, height, cellSize, options.doneSet)
     return
   }
 
@@ -180,6 +182,7 @@ export function renderCrossStitchCanvas(canvas, grid, options = {}) {
       bold: 'rgba(0, 0, 0, 0.4)',
       every: aidaEvery,
     })
+    drawDoneOverlay(ctx, grid, width, height, cellSize, options.doneSet)
     return
   }
 
@@ -189,4 +192,47 @@ export function renderCrossStitchCanvas(canvas, grid, options = {}) {
     bold: 'rgba(0, 0, 0, 0.28)',
     every: aidaEvery,
   })
+
+  drawDoneOverlay(ctx, grid, width, height, cellSize, options.doneSet)
+}
+
+/**
+ * Overlay semi-transparent sur les cases faites (couleur/symbole restent visibles).
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Array<Array<CrossStitchCell | null>>} grid
+ * @param {number} width
+ * @param {number} height
+ * @param {number} cellSize
+ * @param {Set<number>|null|undefined} doneSet indices linéaires
+ */
+function drawDoneOverlay(ctx, grid, width, height, cellSize, doneSet) {
+  if (!doneSet?.size) return
+
+  ctx.save()
+  for (let y = 0; y < height; y++) {
+    const row = grid[y]
+    for (let x = 0; x < width; x++) {
+      if (!row[x]) continue
+      const idx = y * width + x
+      if (!doneSet.has(idx)) continue
+
+      const px = x * cellSize
+      const py = y * cellSize
+
+      // Voile clair : désaturation visuelle sans masquer la teinte
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.55)'
+      ctx.fillRect(px, py, cellSize, cellSize)
+
+      // Marque discrète (coin)
+      const m = Math.max(2, cellSize * 0.22)
+      ctx.fillStyle = 'rgba(30, 120, 70, 0.85)'
+      ctx.beginPath()
+      ctx.moveTo(px + cellSize - m - 1, py + 1)
+      ctx.lineTo(px + cellSize - 1, py + 1)
+      ctx.lineTo(px + cellSize - 1, py + m + 1)
+      ctx.closePath()
+      ctx.fill()
+    }
+  }
+  ctx.restore()
 }

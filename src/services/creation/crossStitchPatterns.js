@@ -12,7 +12,7 @@ const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gi
 const LIST_SELECT =
   'id, title, source_storage_path, source_file_name, target_width, color_count, aida_count, strand_count, grid_width, grid_height, metadata, created_at, updated_at'
 
-const FULL_SELECT = `${LIST_SELECT}, grid, palette`
+const FULL_SELECT = `${LIST_SELECT}, grid, palette, stitch_progress`
 
 /**
  * Compacte la grille cellules → codes DMC (ou null).
@@ -195,12 +195,22 @@ export async function listCrossStitchPatterns(supabase, userId) {
  */
 export async function getCrossStitchPattern(supabase, userId, patternId) {
   if (!userId || !patternId) return null
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from(TABLE)
     .select(FULL_SELECT)
     .eq('id', patternId)
     .eq('user_id', userId)
     .maybeSingle()
+
+  if (error && String(error.message || '').includes('stitch_progress')) {
+    ;({ data, error } = await supabase
+      .from(TABLE)
+      .select(`${LIST_SELECT}, grid, palette`)
+      .eq('id', patternId)
+      .eq('user_id', userId)
+      .maybeSingle())
+    if (data) data = { ...data, stitch_progress: { done: [] } }
+  }
 
   if (error) {
     throw new Error(storageMissingMessage(error) || error.message || 'Chargement du motif impossible.')
@@ -377,6 +387,103 @@ export async function deleteCrossStitchPattern(supabase, userId, patternId) {
   if (row.source_storage_path) {
     await supabase.storage.from(BUCKET).remove([row.source_storage_path]).catch(() => {})
   }
+}
+
+/**
+ * Normalise stitch_progress jsonb → tableau d’indices uniques triés.
+ * @param {unknown} raw
+ * @returns {number[]}
+ */
+export function normalizeStitchProgress(raw) {
+  const done = Array.isArray(raw?.done)
+    ? raw.done
+    : Array.isArray(raw)
+      ? raw
+      : []
+  const out = []
+  const seen = new Set()
+  for (const v of done) {
+    const n = Math.floor(Number(v))
+    if (!Number.isFinite(n) || n < 0 || seen.has(n)) continue
+    seen.add(n)
+    out.push(n)
+  }
+  out.sort((a, b) => a - b)
+  return out
+}
+
+/**
+ * Charge la progression broderie d’un motif.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} patternId
+ * @returns {Promise<number[]>}
+ */
+export async function getStitchProgress(supabase, userId, patternId) {
+  if (!userId || !patternId) return []
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select('stitch_progress')
+    .eq('id', patternId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) {
+    if (String(error.message || '').includes('stitch_progress')) {
+      throw new Error(
+        'Colonne stitch_progress absente. Exécute scripts/migrate-cross-stitch-progress.sql dans Supabase.',
+      )
+    }
+    throw new Error(storageMissingMessage(error) || error.message)
+  }
+  return normalizeStitchProgress(data?.stitch_progress)
+}
+
+/**
+ * Sauvegarde la progression broderie (debounce côté UI).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} patternId
+ * @param {number[]|Set<number>} doneIndices
+ */
+export async function saveStitchProgress(supabase, userId, patternId, doneIndices) {
+  if (!userId || !patternId) return
+  const done = normalizeStitchProgress({
+    done: doneIndices instanceof Set ? [...doneIndices] : doneIndices,
+  })
+  const payload = {
+    stitch_progress: { done, updated_at: new Date().toISOString() },
+    updated_at: new Date().toISOString(),
+  }
+  const { error } = await supabase
+    .from(TABLE)
+    .update(payload)
+    .eq('id', patternId)
+    .eq('user_id', userId)
+
+  if (error) {
+    if (String(error.message || '').includes('stitch_progress')) {
+      throw new Error(
+        'Colonne stitch_progress absente. Exécute scripts/migrate-cross-stitch-progress.sql dans Supabase.',
+      )
+    }
+    throw new Error(storageMissingMessage(error) || error.message || 'Sauvegarde progression impossible.')
+  }
+}
+
+/**
+ * Compte les cases brodables (non null) d’une grille.
+ * @param {Array<Array<unknown|null>>} grid
+ */
+export function countStitchableCells(grid) {
+  let n = 0
+  if (!Array.isArray(grid)) return 0
+  for (const row of grid) {
+    for (const cell of row || []) {
+      if (cell) n += 1
+    }
+  }
+  return n
 }
 
 export { TABLE as CROSS_STITCH_TABLE, BUCKET as CROSS_STITCH_BUCKET }
