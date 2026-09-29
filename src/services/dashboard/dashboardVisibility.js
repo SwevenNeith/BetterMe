@@ -130,7 +130,9 @@ export function normalizeMobileGroups(rawGroups, mobileOrder, extraIds = new Set
 
   if (!Array.isArray(rawGroups) || !rawGroups.length) {
     return upgradeMobileOrderPreferences(
-      upgradeTimetableReadingPage(upgradeLegacyDefaultFirstPage(createDefaultMobileGroups(order))),
+      upgradeDailyNoteFinancesPage(
+        upgradeTimetableReadingPage(upgradeLegacyDefaultFirstPage(createDefaultMobileGroups(order))),
+      ),
     )
   }
 
@@ -179,7 +181,9 @@ export function normalizeMobileGroups(rawGroups, mobileOrder, extraIds = new Set
 
   if (!groups.length) {
     return upgradeMobileOrderPreferences(
-      upgradeTimetableReadingPage(upgradeLegacyDefaultFirstPage(createDefaultMobileGroups(order))),
+      upgradeDailyNoteFinancesPage(
+        upgradeTimetableReadingPage(upgradeLegacyDefaultFirstPage(createDefaultMobileGroups(order))),
+      ),
     )
   }
 
@@ -194,7 +198,9 @@ export function normalizeMobileGroups(rawGroups, mobileOrder, extraIds = new Set
   }
 
   return upgradeMobileOrderPreferences(
-    upgradeTimetableReadingPage(upgradeLegacyDefaultFirstPage(groups)),
+    upgradeDailyNoteFinancesPage(
+      upgradeTimetableReadingPage(upgradeLegacyDefaultFirstPage(groups)),
+    ),
   )
 }
 
@@ -255,6 +261,37 @@ function upgradeMobileOrderPreferences(groups) {
 
 function syncMobileFromGroups(groups, extraIds = new Set()) {
   return pinComfortFirstInMobileOrder(groups.flat(), extraIds)
+}
+
+/**
+ * Place Finances juste sous la note du jour (même page mobile).
+ * @param {string[][]} groups
+ * @returns {string[][]}
+ */
+function upgradeDailyNoteFinancesPage(groups) {
+  const dailyId = DASHBOARD_WIDGET_IDS.DAILY_NOTE
+  const financesId = DASHBOARD_WIDGET_IDS.FINANCES
+  if (!financesId) return groups
+
+  const next = groups.map((group) => [...group])
+  const financesAloneIndex = next.findIndex(
+    (group) => group.length === 1 && group[0] === financesId,
+  )
+  const dailyGroupIndex = next.findIndex(
+    (group) => group.includes(dailyId) && !group.includes(financesId),
+  )
+
+  if (financesAloneIndex >= 0 && dailyGroupIndex >= 0) {
+    const dailyPos = next[dailyGroupIndex].indexOf(dailyId)
+    next[dailyGroupIndex] = [
+      ...next[dailyGroupIndex].slice(0, dailyPos + 1),
+      financesId,
+      ...next[dailyGroupIndex].slice(dailyPos + 1),
+    ]
+    next.splice(financesAloneIndex, 1)
+  }
+
+  return next
 }
 
 /**

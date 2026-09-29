@@ -12,6 +12,7 @@ import DashboardPinnedNote from './DashboardPinnedNote.vue'
 import DashboardReadingInProgress from './DashboardReadingInProgress.vue'
 import DashboardTelevisionInProgress from './DashboardTelevisionInProgress.vue'
 import DashboardActiveProjects from './DashboardActiveProjects.vue'
+import DashboardFinancesBreakdown from './DashboardFinancesBreakdown.vue'
 import { DASHBOARD_WIDGET_IDS } from '../../constants/dashboard/dashboardWidgets.js'
 import { isPinnedNoteWidgetId } from '../../constants/dashboard/dashboardPinnedNotes.js'
 
@@ -114,6 +115,7 @@ const COLUMN_CLASS_BY_ID = {
   [IDS.CHECKIN]: 'checkin-column',
   [IDS.DAILY_NOTE]: 'daily-note-column',
   [IDS.MENSTRUATION]: 'menstruation-column right-column',
+  [IDS.FINANCES]: 'finances-column right-column',
   [IDS.HABITS]: 'habits-column',
   [IDS.NOTES_GRAPH]: 'notes-graph-column',
   [IDS.READING_IN_PROGRESS]: 'reading-column',
@@ -208,6 +210,8 @@ function rootClass(widgetId, asColumn) {
 
     <DashboardDailyNote v-else-if="widgetId === IDS.DAILY_NOTE" :user-id="userId" />
 
+    <DashboardFinancesBreakdown v-else-if="widgetId === IDS.FINANCES" :user-id="userId" />
+
     <DashboardHabitsAnnual v-else-if="widgetId === IDS.HABITS" :user-id="userId" />
 
     <DashboardNotesGraph v-else-if="widgetId === IDS.NOTES_GRAPH" :user-id="userId" />
@@ -286,6 +290,7 @@ function rootClass(widgetId, asColumn) {
 .comfort-column,
 .daily-note-column,
 .pinned-note-column,
+.finances-column,
 .checkin-column {
   gap: 1rem;
 }

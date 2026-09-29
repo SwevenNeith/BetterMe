@@ -7,6 +7,7 @@ export const DASHBOARD_WIDGET_IDS = {
   CHECKIN: 'checkin',
   DAILY_NOTE: 'daily-note',
   MENSTRUATION: 'menstruation',
+  FINANCES: 'finances',
   HABITS: 'habits',
   NOTES_GRAPH: 'notes-graph',
   READING_IN_PROGRESS: 'reading-in-progress',
@@ -33,6 +34,7 @@ export const DASHBOARD_WIDGETS = [
   { id: DASHBOARD_WIDGET_IDS.CHECKIN, defaultLabel: 'Check-in émotionnel' },
   { id: DASHBOARD_WIDGET_IDS.DAILY_NOTE, defaultLabel: 'Note du jour' },
   { id: DASHBOARD_WIDGET_IDS.MENSTRUATION, defaultLabel: 'Menstruation' },
+  { id: DASHBOARD_WIDGET_IDS.FINANCES, defaultLabel: 'Finances' },
   { id: DASHBOARD_WIDGET_IDS.HABITS, defaultLabel: 'Habitudes (vue mensuelle)' },
   { id: DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS, defaultLabel: 'Lectures en cours' },
   { id: DASHBOARD_WIDGET_IDS.TELEVISION_IN_PROGRESS, defaultLabel: 'Télévision en cours' },
@@ -51,6 +53,7 @@ export const DASHBOARD_WIDGET_MOBILE_ORDER = [
   DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS,
   DASHBOARD_WIDGET_IDS.TELEVISION_IN_PROGRESS,
   DASHBOARD_WIDGET_IDS.DAILY_NOTE,
+  DASHBOARD_WIDGET_IDS.FINANCES,
   DASHBOARD_WIDGET_IDS.HABITS,
   DASHBOARD_WIDGET_IDS.PROJECTS,
   DASHBOARD_WIDGET_IDS.NOTES_GRAPH,
@@ -74,6 +77,7 @@ export const DASHBOARD_WIDGET_DESKTOP_LEFT = [
 export const DASHBOARD_WIDGET_DESKTOP_RIGHT = [
   DASHBOARD_WIDGET_IDS.DAILY_NOTE,
   DASHBOARD_WIDGET_IDS.MENSTRUATION,
+  DASHBOARD_WIDGET_IDS.FINANCES,
   DASHBOARD_WIDGET_IDS.HABITS,
 ]
 
@@ -118,6 +122,11 @@ export const DASHBOARD_MOBILE_FIRST_PAGE_COMPANIONS = [
   DASHBOARD_WIDGET_IDS.TODO,
 ]
 
+/** Widgets regroupés sur la page Note du jour (mobile). */
+export const DASHBOARD_MOBILE_DAILY_NOTE_PAGE_COMPANIONS = [
+  DASHBOARD_WIDGET_IDS.FINANCES,
+]
+
 /** Widgets regroupés sur la page Emploi du temps (mobile). */
 export const DASHBOARD_MOBILE_TIMETABLE_PAGE_COMPANIONS = [
   DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS,
@@ -140,6 +149,19 @@ function buildMobileGroupsFromRest(rest) {
     if (id === DASHBOARD_WIDGET_IDS.TIMETABLE) {
       const page = [id]
       for (const companionId of DASHBOARD_MOBILE_TIMETABLE_PAGE_COMPANIONS) {
+        if (rest.includes(companionId) && !used.has(companionId)) {
+          page.push(companionId)
+          used.add(companionId)
+        }
+      }
+      used.add(id)
+      groups.push(page)
+      continue
+    }
+
+    if (id === DASHBOARD_WIDGET_IDS.DAILY_NOTE) {
+      const page = [id]
+      for (const companionId of DASHBOARD_MOBILE_DAILY_NOTE_PAGE_COMPANIONS) {
         if (rest.includes(companionId) && !used.has(companionId)) {
           page.push(companionId)
           used.add(companionId)
