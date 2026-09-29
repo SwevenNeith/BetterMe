@@ -272,22 +272,33 @@ const lineChart = computed(() => {
   const h = 240
   const left = 8
   const right = 8
-  const top = 30
+  const top = 36
   const bottom = 28
   const innerW = w - left - right
   const innerH = h - top - bottom
+  const focusMonth =
+    selectedYear.value === now.getFullYear() ? now.getMonth() + 1 : selectedMonth.value
   const coords = points.map((p, i) => {
     const x = left + (innerW * i) / Math.max(points.length - 1, 1)
     const t = (p.balance - yMin) / (yMax - yMin || 1)
     const y = top + innerH * (1 - t)
-    return { ...p, x, y }
+    const labelAbove = i % 2 === 0
+    return {
+      ...p,
+      x,
+      y,
+      isFocus: p.month === focusMonth,
+      labelAbove,
+      labelY: labelAbove ? y - 12 : y + 18,
+      labelBgY: labelAbove ? y - 26 : y + 6,
+    }
   })
   const line = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x} ${c.y}`).join(' ')
   const area =
     coords.length > 0
       ? `${line} L ${coords[coords.length - 1].x} ${top + innerH} L ${coords[0].x} ${top + innerH} Z`
       : ''
-  return { w, h, coords, line, area }
+  return { w, h, coords, line, area, focusMonth }
 })
 
 const accountTabs = computed(() => {
@@ -810,6 +821,19 @@ onMounted(async () => {
               <h2 class="section-title">{{ pageTitle }}</h2>
               <p class="section-hint">Vue centrée sur le compte courant.</p>
               <div class="period-layout">
+                <label class="period-year-mobile">
+                  <span class="period-year-mobile__label">Année</span>
+                  <select
+                    class="period-year-mobile__select"
+                    :value="selectedYear"
+                    aria-label="Année"
+                    @change="selectedYear = Number($event.target.value)"
+                  >
+                    <option v-for="y in availableYears" :key="'mob-y-' + y" :value="y">
+                      {{ y }}
+                    </option>
+                  </select>
+                </label>
                 <div class="year-list" role="listbox" aria-label="Année">
                   <button
                     v-for="y in availableYears"
@@ -892,43 +916,57 @@ onMounted(async () => {
                 :aria-label="`Évolution du solde en ${selectedYear}`"
               >
                 <defs>
-                <linearGradient id="finAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="color-mix(in srgb, var(--color-primary-dark) 42%, transparent)" />
-                  <stop offset="100%" stop-color="color-mix(in srgb, var(--color-primary-dark) 0%, transparent)" />
-                </linearGradient>
-              </defs>
-              <path v-if="lineChart.area" :d="lineChart.area" fill="url(#finAreaGrad)" />
-              <path
-                v-if="lineChart.line"
-                :d="lineChart.line"
-                fill="none"
-                stroke="var(--color-primary-dark)"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-              <g v-for="c in lineChart.coords" :key="c.month">
-                <circle
-                  :cx="c.x"
-                  :cy="c.y"
-                  r="4"
-                  fill="#fff"
-                  stroke="var(--color-primary-dark)"
-                  stroke-width="2"
+                  <linearGradient id="finAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="var(--fin-chart-area)" />
+                    <stop offset="100%" stop-color="transparent" />
+                  </linearGradient>
+                </defs>
+                <path v-if="lineChart.area" class="chart-area" :d="lineChart.area" fill="url(#finAreaGrad)" />
+                <path
+                  v-if="lineChart.line"
+                  class="chart-line"
+                  :d="lineChart.line"
+                  fill="none"
+                  stroke="var(--fin-chart-stroke)"
+                  stroke-width="2.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
                 />
-                <rect
-                  :x="c.x - 28"
-                  :y="c.y - 22"
-                  width="56"
-                  height="16"
-                  rx="4"
-                  fill="rgba(255,255,255,0.92)"
-                  stroke="color-mix(in srgb, var(--color-primary-dark) 35%, transparent)"
-                />
-                  <text :x="c.x" :y="c.y - 10" text-anchor="middle" class="chart-label">
+                <g
+                  v-for="c in lineChart.coords"
+                  :key="c.month"
+                  class="chart-point"
+                  :class="{ 'is-focus': c.isFocus, 'is-below': !c.labelAbove }"
+                >
+                  <circle
+                    class="chart-dot"
+                    :cx="c.x"
+                    :cy="c.y"
+                    :r="c.isFocus ? 5.5 : 4"
+                    fill="var(--fin-chart-dot-fill)"
+                    stroke="var(--fin-chart-stroke)"
+                    :stroke-width="c.isFocus ? 2.5 : 2"
+                  />
+                  <rect
+                    class="chart-label-bg"
+                    :x="c.x - 26"
+                    :y="c.labelBgY"
+                    width="52"
+                    height="15"
+                    rx="4"
+                    fill="var(--fin-chart-label-bg)"
+                    stroke="var(--fin-chart-label-stroke)"
+                  />
+                  <text :x="c.x" :y="c.labelY" text-anchor="middle" class="chart-label">
                     {{ formatEuro(c.balance) }}
                   </text>
-                  <text :x="c.x" :y="lineChart.h - 8" text-anchor="middle" class="chart-axis">
+                  <text
+                    :x="c.x"
+                    :y="lineChart.h - 8"
+                    text-anchor="middle"
+                    class="chart-axis"
+                    :class="{ 'is-focus': c.isFocus }"
+                  >
                     {{ c.short }}
                   </text>
                 </g>
@@ -1496,6 +1534,58 @@ onMounted(async () => {
               </tbody>
             </table>
           </div>
+          <ul v-if="visibleTransactions.length" class="tx-cards">
+            <li
+              v-for="tx in visibleTransactions"
+              :key="'card-' + tx.id"
+              class="tx-card"
+              :class="{
+                provisional: !tx.applied,
+                'is-savings-cat': isSavingsCategory(tx.category),
+                [typeClass(tx.tx_type)]: true,
+              }"
+            >
+              <div class="tx-card__head">
+                <label class="tx-card__realized">
+                  <input
+                    type="checkbox"
+                    :checked="tx.applied"
+                    :disabled="isTogglingId === tx.id"
+                    :aria-label="tx.applied ? 'Marquer comme prévisionnel' : 'Marquer comme réalisé'"
+                    @change="toggleApplied(tx)"
+                  />
+                  <span class="status-pill" :class="tx.applied ? 'is-realized' : 'is-planned'">
+                    {{ tx.applied ? 'Réalisé' : 'Prévisionnel' }}
+                  </span>
+                </label>
+                <p class="tx-card__amount" :class="typeClass(tx.tx_type)">
+                  <template v-if="tx.tx_type === TX_TYPES.INCOME"
+                    >+{{ formatEuro(tx.amount) }}</template
+                  >
+                  <template v-else>−{{ formatEuro(tx.amount) }}</template>
+                </p>
+              </div>
+              <p class="tx-card__date">{{ tx.occurred_on }}</p>
+              <div class="tx-card__tags">
+                <span class="type-pill" :class="typeClass(tx.tx_type)">
+                  {{ typeLabel(tx.tx_type) }}
+                </span>
+                <span class="tx-card__cat">{{ tx.category }}</span>
+              </div>
+              <p v-if="tx.detail" class="tx-card__detail">{{ tx.detail }}</p>
+              <div class="tx-card__actions">
+                <button type="button" class="btn-link" @click="openEditForm(tx)">Modifier</button>
+                <button
+                  type="button"
+                  class="btn-link danger"
+                  :disabled="isDeletingId === tx.id"
+                  @click="requestDelete(tx)"
+                >
+                  Supprimer
+                </button>
+              </div>
+            </li>
+          </ul>
         </section>
       </template>
     </template>
@@ -1555,6 +1645,22 @@ onMounted(async () => {
   margin: 0;
   padding: 1.5rem 1.25rem 3rem;
   box-sizing: border-box;
+  --fin-chart-stroke: var(--color-primary-dark);
+  --fin-chart-area: color-mix(in srgb, var(--color-primary-dark) 42%, transparent);
+  --fin-chart-dot-fill: #ffffff;
+  --fin-chart-label-bg: rgba(255, 255, 255, 0.94);
+  --fin-chart-label-stroke: color-mix(in srgb, var(--color-primary-dark) 35%, transparent);
+}
+
+.period-year-mobile {
+  display: none;
+}
+
+.tx-cards {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .finances-header {
@@ -1940,14 +2046,19 @@ onMounted(async () => {
 }
 
 .chart-label {
-  font-size: 8px;
-  fill: var(--color-text-light);
+  font-size: 7.5px;
+  fill: var(--color-text);
   font-weight: 700;
 }
 
 .chart-axis {
   font-size: 9px;
-  fill: #6c757d;
+  fill: var(--color-text-light);
+}
+
+.chart-axis.is-focus {
+  fill: var(--color-text);
+  font-weight: 800;
 }
 
 .breakdown-grid {
@@ -2575,6 +2686,15 @@ onMounted(async () => {
   color: #8a4a5a;
 }
 
+.tx-card__amount.is-income {
+  color: #2d6a4f;
+}
+
+.tx-card__amount.is-fixed,
+.tx-card__amount.is-variable {
+  color: #8a4a5a;
+}
+
 .cc-table tr.is-savings-cat {
   background: color-mix(in srgb, var(--color-tertiary) 22%, transparent);
 }
@@ -2642,36 +2762,104 @@ onMounted(async () => {
 }
 
 @media (max-width: 700px) {
+  .finances-wrapper {
+    padding: 1rem 0.85rem 2.5rem;
+  }
+
+  .finances-title {
+    font-size: 1.55rem;
+  }
+
+  .finances-card,
+  .kpi-card {
+    padding: 1rem 0.95rem;
+    border-radius: 14px;
+  }
+
   .period-layout {
     flex-direction: column;
+    gap: 0.65rem;
   }
 
+  .period-year-mobile {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-primary-dark) 28%, transparent);
+  }
+
+  .period-year-mobile__label {
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--color-text-light);
+  }
+
+  .period-year-mobile__select {
+    border: none;
+    background: transparent;
+    color: var(--color-text);
+    font-weight: 800;
+    font-size: 1rem;
+    text-align: right;
+    cursor: pointer;
+  }
+
+  .year-list,
   .period-separator {
-    width: 100%;
-    height: 1px;
-    align-self: stretch;
-  }
-
-  .year-list {
-    flex-direction: row;
-    flex-wrap: nowrap;
-    max-height: none;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding-right: 0;
-    padding-bottom: 0.15rem;
-  }
-
-  .year-list .year-btn {
-    flex: 0 0 auto;
+    display: none;
   }
 
   .month-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+
+  .month-btn {
+    padding: 0.55rem 0.2rem;
+    font-size: 0.78rem;
   }
 
   .kpi-stack {
     grid-template-columns: 1fr;
+    gap: 0.55rem;
+  }
+
+  .line-chart-wrap {
+    overflow: visible;
+  }
+
+  .line-chart {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .chart-label {
+    font-size: 7px;
+    font-weight: 800;
+  }
+
+  .chart-label-bg {
+    opacity: 0.92;
+  }
+
+  .chart-point.is-focus .chart-label {
+    font-size: 8px;
+  }
+
+  .chart-axis {
+    font-size: 7.5px;
+  }
+
+  .chart-axis.is-focus {
+    font-size: 8.5px;
+    font-weight: 800;
+    fill: var(--color-text);
   }
 
   .amount-form {
@@ -2679,26 +2867,186 @@ onMounted(async () => {
   }
 
   .recap-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .cc-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .account-section-actions {
+    justify-content: stretch;
+  }
+
+  .account-section-actions .btn-primary,
+  .account-section-actions .btn-secondary {
+    flex: 1;
+    text-align: center;
   }
 
   .account-tabs {
-    display: flex;
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+    overflow: visible;
+    padding: 0.4rem;
   }
 
   .account-tab {
-    flex: 1 0 auto;
-    padding: 0.5rem 0.65rem;
+    flex: none;
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.7rem 0.85rem;
+    border-radius: 12px;
   }
 
   .account-tab__label {
-    font-size: 0.78rem;
-    max-width: 8rem;
+    max-width: none;
+    font-size: 0.92rem;
+  }
+
+  .account-tab__balance {
+    font-size: 0.85rem;
+  }
+
+  .account-period-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+  }
+
+  .account-year-field {
+    justify-content: space-between;
+    padding: 0.5rem 0.7rem;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-primary-dark) 25%, transparent);
+  }
+
+  .account-year-select {
+    border: none;
+    background: transparent;
+    font-size: 1rem;
+    text-align: right;
+  }
+
+  .month-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.35rem;
+    overflow: visible;
+    padding: 0.4rem;
+  }
+
+  .month-tab {
+    flex: none;
+    min-width: 0;
+    padding: 0.5rem 0.15rem;
+    font-size: 0.74rem;
+  }
+
+  .cc-table-wrap {
+    display: none;
+  }
+
+  .tx-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .tx-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.85rem 0.9rem;
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--color-primary) 10%, rgba(255, 255, 255, 0.72));
+    border: 1px solid color-mix(in srgb, var(--color-primary-dark) 20%, transparent);
+  }
+
+  .tx-card.is-savings-cat {
+    background: color-mix(in srgb, var(--color-tertiary) 20%, rgba(255, 255, 255, 0.7));
+    border-color: color-mix(in srgb, var(--color-tertiary) 40%, transparent);
+  }
+
+  .tx-card.provisional {
+    opacity: 0.9;
+  }
+
+  .tx-card__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .tx-card__realized {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+  }
+
+  .tx-card__amount {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .tx-card__date {
+    margin: 0;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--color-text-light);
+  }
+
+  .tx-card__tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .tx-card__cat {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--color-text);
+  }
+
+  .tx-card__detail {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--color-text-light);
+  }
+
+  .tx-card__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding-top: 0.25rem;
+  }
+
+  .donut-detail-panel {
+    max-width: none;
   }
 }
 
 @media (prefers-color-scheme: dark) {
+  .finances-wrapper {
+    --fin-chart-stroke: var(--color-primary);
+    --fin-chart-area: color-mix(in srgb, var(--color-primary) 55%, transparent);
+    --fin-chart-dot-fill: var(--color-background);
+    --fin-chart-label-bg: color-mix(in srgb, var(--color-background) 88%, var(--color-primary));
+    --fin-chart-label-stroke: color-mix(in srgb, var(--color-primary) 45%, transparent);
+  }
+
   .finances-title,
   .section-title,
   .kpi-value,
@@ -2718,20 +3066,28 @@ onMounted(async () => {
   .recap-minus,
   .chart-axis,
   .confirm-message {
-    color: #adb5bd;
+    color: #c5c0d0;
+  }
+
+  .chart-label {
+    fill: var(--color-text);
+  }
+
+  .chart-axis {
+    fill: #c5c0d0;
   }
 
   .finances-card,
   .kpi-card,
   .confirm-dialog {
-    background: color-mix(in srgb, var(--color-background) 92%, var(--color-primary));
-    border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+    background: color-mix(in srgb, var(--color-background) 88%, var(--color-primary));
+    border-color: color-mix(in srgb, var(--color-primary) 32%, transparent);
   }
 
   .kpi-balance {
     background: linear-gradient(
       135deg,
-      color-mix(in srgb, var(--color-primary-dark) 40%, transparent),
+      color-mix(in srgb, var(--color-primary) 45%, transparent),
       color-mix(in srgb, var(--color-secondary) 35%, transparent)
     );
   }
@@ -2741,27 +3097,29 @@ onMounted(async () => {
   .field input,
   .field select,
   .recap-item {
-    background: color-mix(in srgb, var(--color-background) 80%, var(--color-primary));
+    background: color-mix(in srgb, var(--color-background) 75%, var(--color-primary));
     color: var(--color-text);
-    border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+    border-color: color-mix(in srgb, var(--color-primary) 32%, transparent);
   }
 
   .year-btn.active,
   .month-btn.active {
-    background: color-mix(in srgb, var(--color-primary-dark) 40%, transparent);
+    background: color-mix(in srgb, var(--color-primary) 55%, transparent);
     color: #fff;
+    border-color: var(--color-primary);
   }
 
   .btn-ghost {
     color: var(--color-text);
   }
 
-  .chart-label {
-    fill: var(--color-text);
-  }
-
   .cc-table th {
     color: var(--color-text);
+  }
+
+  .cc-table th,
+  .cc-table td {
+    border-bottom-color: color-mix(in srgb, var(--color-primary) 18%, transparent);
   }
 
   .field {
@@ -2773,9 +3131,16 @@ onMounted(async () => {
     border-color: color-mix(in srgb, var(--color-primary) 22%, transparent);
   }
 
-  .account-year-select {
+  .account-year-select,
+  .period-year-mobile__select {
     background: color-mix(in srgb, var(--color-background) 80%, var(--color-primary));
     color: var(--color-text);
+    border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+  }
+
+  .period-year-mobile,
+  .account-year-field {
+    background: color-mix(in srgb, var(--color-background) 72%, var(--color-primary));
     border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
   }
 
@@ -2838,6 +3203,31 @@ onMounted(async () => {
   .status-pill.is-planned {
     background: color-mix(in srgb, var(--color-primary) 22%, var(--color-background));
     color: var(--color-primary);
+  }
+
+  .type-pill.is-income {
+    background: color-mix(in srgb, var(--color-secondary) 35%, var(--color-background));
+    color: #c5d4f5;
+  }
+
+  .type-pill.is-fixed {
+    background: color-mix(in srgb, var(--color-tertiary) 35%, var(--color-background));
+    color: #b5e0d4;
+  }
+
+  .type-pill.is-variable {
+    background: color-mix(in srgb, #e8a0c0 32%, var(--color-background));
+    color: #f5c4d8;
+  }
+
+  .tx-card {
+    background: color-mix(in srgb, var(--color-background) 82%, var(--color-primary));
+    border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+  }
+
+  .tx-card.is-savings-cat {
+    background: color-mix(in srgb, var(--color-background) 78%, var(--color-tertiary));
+    border-color: color-mix(in srgb, var(--color-tertiary) 40%, transparent);
   }
 
   .account-balance-line {
