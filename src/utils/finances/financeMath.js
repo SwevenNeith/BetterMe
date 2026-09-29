@@ -40,7 +40,7 @@ export function formatEuro(n) {
   const v = Number(n) || 0
   return (
     new Intl.NumberFormat('fr-FR', {
-      minimumFractionDigits: 0,
+      minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(v) + ' €'
   )
