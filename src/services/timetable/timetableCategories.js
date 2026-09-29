@@ -114,3 +114,96 @@ export async function loadTimetableMeta(supabase, userId) {
   const hobbyPicks = await loadHobbyEventTitles(supabase, userId, categories)
   return { categories, hobbyPicks }
 }
+
+/**
+ * Crée ou met à jour une catégorie EDT (nom, couleur, icône).
+ * Les catégories temporaires (temp-*) sont créées en base.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {{ id?: string, name: string, color: string, icon: string, is_temp?: boolean }} input
+ */
+export async function saveTimetableCategory(supabase, userId, input) {
+  if (!userId) throw new Error('Utilisateur non connecté.')
+
+  const name = String(input?.name || '').trim()
+  if (!name) throw new Error('Le nom de la catégorie est obligatoire.')
+
+  const color = String(input?.color || '').trim() || 'hsl(280, 65%, 72%)'
+  const icon = String(input?.icon || '').trim() || '📌'
+  const id = String(input?.id || '').trim()
+  const isTemp = Boolean(input?.is_temp) || id.startsWith('temp-')
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from('timetable_categories')
+    .select('id, name')
+    .eq('user_id', userId)
+
+  if (existingError) throw existingError
+
+  const duplicate = (existingRows ?? []).find(
+    (row) =>
+      String(row.name || '').trim().toLowerCase() === name.toLowerCase() &&
+      (isTemp || row.id !== id),
+  )
+  if (duplicate) {
+    throw new Error('Une catégorie avec ce nom existe déjà.')
+  }
+
+  if (!isTemp && id) {
+    const { data, error } = await supabase
+      .from('timetable_categories')
+      .update({ name, color, icon })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select('id, user_id, name, color, icon')
+      .single()
+
+    if (error) throw error
+    return normalizeCategory(data)
+  }
+
+  const { data, error } = await supabase
+    .from('timetable_categories')
+    .insert({
+      user_id: userId,
+      name,
+      color,
+      icon,
+    })
+    .select('id, user_id, name, color, icon')
+    .single()
+
+  if (error) throw error
+  return normalizeCategory(data)
+}
+
+/**
+ * Supprime une catégorie EDT persistée et détache les activités qui y font référence.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} categoryId
+ */
+export async function deleteTimetableCategory(supabase, userId, categoryId) {
+  if (!userId) throw new Error('Utilisateur non connecté.')
+  const id = String(categoryId || '').trim()
+  if (!id || id.startsWith('temp-')) {
+    throw new Error('Cette catégorie ne peut pas être supprimée.')
+  }
+
+  // La colonne category est un uuid : on détache uniquement via l'id.
+  const { error: eventsError } = await supabase
+    .from('timetable_events')
+    .update({ category: null })
+    .eq('user_id', userId)
+    .eq('category', id)
+
+  if (eventsError) throw eventsError
+
+  const { error } = await supabase
+    .from('timetable_categories')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId)
+
+  if (error) throw error
+}

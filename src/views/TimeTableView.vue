@@ -18,12 +18,16 @@ import {
   loadTimetableMeta,
   loadUserCategories,
   normalizeCategory,
+  deleteTimetableCategory,
+  saveTimetableCategory,
 } from '../services/timetable/timetableCategories.js'
 import { createTodoItem, listTodoItems, deleteTodoItem } from '../services/todo/todoItems.js'
 import { loadTodoPromesseLimits } from '../services/todo/todoPromesseSettings.js'
 import { TODO_FREQUENCY } from '../constants/todo/todoOptions.js'
 import { assertPromesseLimits } from '../utils/todo/todoCalendar.js'
 import TodoLinkedSubForm from '../components/todo/TodoLinkedSubForm.vue'
+import EmojiPickerField from '../components/common/EmojiPickerField.vue'
+import ColorPickerField from '../components/common/ColorPickerField.vue'
 import {
   buildTodoPayloadFromTimetable,
   createDefaultTodoLinkedForm,
@@ -145,7 +149,17 @@ const editingEventHasTodoLink = computed(() => {
 })
 
 const pendingDeleteEvent = ref(null)
+const pendingDeleteCategory = ref(null)
+const isDeletingCategory = ref(false)
 const isDeletingEvent = ref(false)
+const editingCategorySource = ref(null)
+const isSavingCategory = ref(false)
+const categoryEditForm = reactive({
+  name: '',
+  color: '#d5b5ea',
+  icon: '📌',
+})
+const categoryEditError = ref('')
 
 function resetTodoLinkedForm() {
   Object.assign(todoLinkedForm, createDefaultTodoLinkedForm())
@@ -512,7 +526,8 @@ const getCategoryStyle = (categoryIdOrName) => {
 const getPillStyle = (cat) => {
   if (!cat) return {}
   const color = cat.color || '#d5b5ea'
-  const isActive = newEventCategory.value.toLowerCase() === cat.name.toLowerCase()
+  const catName = String(cat.name || '').toLowerCase()
+  const isActive = Boolean(catName) && newEventCategory.value.toLowerCase() === catName
 
   let bg = ''
   if (color.startsWith('hsl')) {
@@ -1187,6 +1202,173 @@ function confirmEventDeleteOnly() {
 
 function confirmEventDeleteWithLinked() {
   void confirmEventDelete(true)
+}
+
+function canDeleteCategory(cat) {
+  if (!cat?.id) return false
+  if (cat.is_temp) return false
+  return !String(cat.id).startsWith('temp-')
+}
+
+function canEditCategory(cat) {
+  return Boolean(cat?.name)
+}
+
+function hslToHex(h, s, l) {
+  const sat = s / 100
+  const light = l / 100
+  const a = sat * Math.min(light, 1 - light)
+  const f = (n) => {
+    const k = (n + h / 30) % 12
+    const color = light - a * Math.max(Math.min(k - 3, 9 - k, 1), -1)
+    return Math.round(255 * color)
+      .toString(16)
+      .padStart(2, '0')
+  }
+  return `#${f(0)}${f(8)}${f(4)}`
+}
+
+function categoryColorToHex(color) {
+  const raw = String(color || '').trim()
+  if (/^#[0-9a-fA-F]{6}$/i.test(raw)) return raw.toLowerCase()
+  if (/^#[0-9a-fA-F]{3}$/i.test(raw)) {
+    const h = raw.slice(1)
+    return `#${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}`.toLowerCase()
+  }
+  const hsl = raw.match(/hsla?\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%/i)
+  if (hsl) {
+    return hslToHex(Number(hsl[1]), Number(hsl[2]), Number(hsl[3]))
+  }
+  return '#d5b5ea'
+}
+
+function requestEditCategory(cat, event) {
+  event?.stopPropagation?.()
+  event?.preventDefault?.()
+  if (!canEditCategory(cat) || isSavingCategory.value) return
+  editingCategorySource.value = cat
+  categoryEditForm.name = cat.name || ''
+  categoryEditForm.color = categoryColorToHex(cat.color)
+  categoryEditForm.icon = cat.icon || '📌'
+  categoryEditError.value = ''
+}
+
+function cancelCategoryEdit() {
+  if (isSavingCategory.value) return
+  editingCategorySource.value = null
+  categoryEditError.value = ''
+}
+
+async function confirmCategoryEdit() {
+  const source = editingCategorySource.value
+  if (!canEditCategory(source) || isSavingCategory.value) return
+
+  const name = categoryEditForm.name.trim()
+  if (!name) {
+    categoryEditError.value = 'Le nom est obligatoire.'
+    return
+  }
+
+  isSavingCategory.value = true
+  categoryEditError.value = ''
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      categoryEditError.value = 'Veuillez vous connecter pour modifier une catégorie.'
+      return
+    }
+
+    const previousName = String(source.name || '').trim()
+    await saveTimetableCategory(supabase, user.id, {
+      id: source.id,
+      name,
+      color: categoryEditForm.color,
+      icon: categoryEditForm.icon || '📌',
+      is_temp: source.is_temp || String(source.id || '').startsWith('temp-'),
+    })
+
+    userCategories.value = await loadUserCategories(supabase, user.id)
+
+    if (
+      previousName &&
+      newEventCategory.value.trim().toLowerCase() === previousName.toLowerCase()
+    ) {
+      newEventCategory.value = name
+    }
+
+    editingCategorySource.value = null
+    timetableCache.publish({
+      userEvents: userEvents.value,
+      userCategories: userCategories.value,
+      hobbyQuickPicks: hobbyQuickPicks.value,
+    })
+  } catch (err) {
+    console.error('Error saving category:', err)
+    categoryEditError.value = err?.message || 'Erreur lors de l’enregistrement de la catégorie.'
+  } finally {
+    isSavingCategory.value = false
+  }
+}
+
+function requestDeleteCategory(cat, event) {
+  event?.stopPropagation?.()
+  event?.preventDefault?.()
+  if (!canDeleteCategory(cat) || isDeletingCategory.value) return
+  pendingDeleteCategory.value = cat
+}
+
+function cancelCategoryDelete() {
+  if (isDeletingCategory.value) return
+  pendingDeleteCategory.value = null
+}
+
+async function confirmCategoryDelete() {
+  const cat = pendingDeleteCategory.value
+  if (!canDeleteCategory(cat) || isDeletingCategory.value) return
+
+  isDeletingCategory.value = true
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      alert('Veuillez vous connecter pour supprimer une catégorie.')
+      return
+    }
+
+    await deleteTimetableCategory(supabase, user.id, cat.id)
+
+    const catId = cat.id
+    const catName = String(cat.name || '').toLowerCase()
+
+    userCategories.value = await loadUserCategories(supabase, user.id)
+    userEvents.value = userEvents.value.map((entry) => {
+      if (!entry?.category) return entry
+      if (entry.category === catId) return { ...entry, category: null }
+      if (String(entry.category).toLowerCase() === catName) {
+        return { ...entry, category: null }
+      }
+      return entry
+    })
+
+    if (newEventCategory.value.trim().toLowerCase() === catName) {
+      newEventCategory.value = ''
+    }
+
+    pendingDeleteCategory.value = null
+    timetableCache.publish({
+      userEvents: userEvents.value,
+      userCategories: userCategories.value,
+      hobbyQuickPicks: hobbyQuickPicks.value,
+    })
+  } catch (err) {
+    console.error('Error deleting category:', err)
+    alert(err?.message || 'Erreur lors de la suppression de la catégorie.')
+  } finally {
+    isDeletingCategory.value = false
+  }
 }
 
 // ─── Real Google-Calendar style Hourly Grid Layout Algorithm ───
@@ -1898,18 +2080,45 @@ const getPositionedEventsForDay = (dayIdx) => {
             <!-- Pills depuis timetable_categories -->
             <div v-if="isMetaLoading" class="category-loading">Chargement des catégories…</div>
             <div v-else class="category-selectors">
-              <button
+              <div
                 v-for="cat in categoriesForPills"
                 :key="cat.id"
-                type="button"
-                class="category-pill-btn"
-                :class="{ 'category-pill-btn--active': newEventCategory.toLowerCase() === cat.name.toLowerCase() }"
-                :style="getPillStyle(cat)"
-                @click="newEventCategory = cat.name"
+                class="category-pill"
+                :class="{ 'category-pill--active': newEventCategory.toLowerCase() === cat.name.toLowerCase() }"
               >
-                <span class="category-pill-icon">{{ cat.icon || '📌' }}</span>
-                {{ cat.name }}
-              </button>
+                <button
+                  type="button"
+                  class="category-pill-btn"
+                  :class="{ 'category-pill-btn--active': newEventCategory.toLowerCase() === cat.name.toLowerCase() }"
+                  :style="getPillStyle(cat)"
+                  @click="newEventCategory = cat.name"
+                >
+                  <span class="category-pill-icon">{{ cat.icon || '📌' }}</span>
+                  {{ cat.name }}
+                </button>
+                <button
+                  v-if="canEditCategory(cat)"
+                  type="button"
+                  class="category-pill-edit"
+                  :style="getPillStyle(cat)"
+                  :aria-label="`Modifier la catégorie ${cat.name}`"
+                  title="Modifier la catégorie"
+                  @click="requestEditCategory(cat, $event)"
+                >
+                  ✎
+                </button>
+                <button
+                  v-if="canDeleteCategory(cat)"
+                  type="button"
+                  class="category-pill-delete"
+                  :style="getPillStyle(cat)"
+                  :aria-label="`Supprimer la catégorie ${cat.name}`"
+                  title="Supprimer la catégorie"
+                  @click="requestDeleteCategory(cat, $event)"
+                >
+                  ×
+                </button>
+              </div>
             </div>
 
             <input
@@ -2031,6 +2240,123 @@ const getPositionedEventsForDay = (dayIdx) => {
               {{ isDeletingEvent ? 'Suppression…' : 'Supprimer' }}
             </button>
           </template>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="pendingDeleteCategory"
+      class="timetable-delete-overlay"
+      @click.self="cancelCategoryDelete"
+      @keydown.escape="cancelCategoryDelete"
+    >
+      <div
+        class="timetable-delete-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="timetable-category-delete-title"
+        aria-describedby="timetable-category-delete-message"
+      >
+        <h2 id="timetable-category-delete-title" class="timetable-delete-dialog__title">
+          Supprimer cette catégorie ?
+        </h2>
+        <p id="timetable-category-delete-message" class="timetable-delete-dialog__message">
+          « {{ pendingDeleteCategory.icon || '📌' }} {{ pendingDeleteCategory.name }} » sera
+          définitivement supprimée. Les activités associées resteront, sans catégorie.
+        </p>
+        <div class="timetable-delete-dialog__actions">
+          <button
+            type="button"
+            class="timetable-delete-dialog__cancel"
+            :disabled="isDeletingCategory"
+            @click="cancelCategoryDelete"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            class="timetable-delete-dialog__confirm"
+            :disabled="isDeletingCategory"
+            @click="confirmCategoryDelete"
+          >
+            {{ isDeletingCategory ? 'Suppression…' : 'Supprimer' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="editingCategorySource"
+      class="timetable-delete-overlay"
+      @click.self="cancelCategoryEdit"
+      @keydown.escape="cancelCategoryEdit"
+    >
+      <div
+        class="timetable-delete-dialog timetable-category-edit-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="timetable-category-edit-title"
+      >
+        <h2 id="timetable-category-edit-title" class="timetable-delete-dialog__title">
+          Modifier la catégorie
+        </h2>
+
+        <label class="category-edit-field">
+          <span class="category-edit-label">Nom</span>
+          <input
+            v-model="categoryEditForm.name"
+            type="text"
+            class="category-edit-input"
+            maxlength="80"
+            placeholder="Nom de la catégorie"
+            required
+          />
+        </label>
+
+        <div class="category-edit-appearance">
+          <div class="category-edit-field">
+            <span class="category-edit-label">Icône</span>
+            <EmojiPickerField
+              v-model="categoryEditForm.icon"
+              compact
+              :clearable="false"
+              label="Choisir une icône"
+            />
+          </div>
+          <div class="category-edit-field">
+            <span class="category-edit-label">Couleur</span>
+            <ColorPickerField v-model="categoryEditForm.color" compact />
+          </div>
+        </div>
+
+        <div class="category-edit-preview" :style="getPillStyle({
+          name: categoryEditForm.name,
+          color: categoryEditForm.color,
+          icon: categoryEditForm.icon,
+        })">
+          <span class="category-pill-icon">{{ categoryEditForm.icon || '📌' }}</span>
+          {{ categoryEditForm.name || 'Aperçu' }}
+        </div>
+
+        <p v-if="categoryEditError" class="event-form-error" role="alert">{{ categoryEditError }}</p>
+
+        <div class="timetable-delete-dialog__actions">
+          <button
+            type="button"
+            class="timetable-delete-dialog__cancel"
+            :disabled="isSavingCategory"
+            @click="cancelCategoryEdit"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            class="timetable-delete-dialog__confirm"
+            :disabled="isSavingCategory"
+            @click="confirmCategoryEdit"
+          >
+            {{ isSavingCategory ? 'Enregistrement…' : 'Enregistrer' }}
+          </button>
         </div>
       </div>
     </div>
@@ -3595,6 +3921,17 @@ const getPositionedEventsForDay = (dayIdx) => {
   min-height: 2.25rem;
 }
 
+.category-pill {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.category-pill--active {
+  box-shadow: 0 0 0 2px rgba(173, 129, 190, 0.45);
+}
+
 .category-pill-btn {
   display: flex;
   align-items: center;
@@ -3610,9 +3947,20 @@ const getPositionedEventsForDay = (dayIdx) => {
   user-select: none;
 }
 
+.category-pill:has(.category-pill-edit) .category-pill-btn,
+.category-pill:has(.category-pill-delete) .category-pill-btn {
+  border-radius: 12px 0 0 12px;
+  padding-right: 0.7rem;
+}
+
 .category-pill-btn:hover {
   transform: translateY(-2px);
   filter: brightness(1.08);
+}
+
+.category-pill:has(.category-pill-edit) .category-pill-btn:hover,
+.category-pill:has(.category-pill-delete) .category-pill-btn:hover {
+  transform: none;
 }
 
 .category-pill-btn:active {
@@ -3623,8 +3971,112 @@ const getPositionedEventsForDay = (dayIdx) => {
   transform: translateY(-1px);
 }
 
+.category-pill:has(.category-pill-edit) .category-pill-btn--active,
+.category-pill:has(.category-pill-delete) .category-pill-btn--active {
+  transform: none;
+}
+
 .category-pill-icon {
   font-size: 0.95rem;
+}
+
+.category-pill-edit,
+.category-pill-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.7rem;
+  padding: 0 0.35rem;
+  border: none;
+  border-left: 1px solid rgba(0, 0, 0, 0.12);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.category-pill-edit {
+  border-radius: 0;
+}
+
+.category-pill-delete,
+.category-pill:not(:has(.category-pill-delete)) .category-pill-edit {
+  border-radius: 0 12px 12px 0;
+}
+
+.category-pill-edit:hover,
+.category-pill-delete:hover {
+  opacity: 1;
+  filter: brightness(0.92);
+}
+
+.timetable-category-edit-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  max-width: min(420px, 92vw);
+}
+
+.category-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.category-edit-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #72a098;
+}
+
+.category-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.7rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.4);
+  background: white;
+  font-size: 0.95rem;
+  color: #2c3e50;
+  font-family: inherit;
+}
+
+.category-edit-input:focus {
+  outline: none;
+  border-color: #d5b5ea;
+  box-shadow: 0 0 0 3px rgba(213, 181, 234, 0.3);
+}
+
+.category-edit-appearance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.category-edit-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: flex-start;
+  padding: 0.5rem 0.95rem;
+  border-radius: 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+@media (prefers-color-scheme: dark) {
+  .category-edit-label {
+    color: #9ec5be;
+  }
+
+  .category-edit-input {
+    background: rgba(0, 0, 0, 0.3);
+    border-color: rgba(213, 181, 234, 0.2);
+    color: #f0e8f8;
+  }
 }
 
 .modal-submit-btn {
@@ -3773,7 +4225,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 .timetable-delete-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  z-index: 3000;
   display: flex;
   align-items: center;
   justify-content: center;

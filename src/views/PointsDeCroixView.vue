@@ -41,7 +41,7 @@ usePageDisplayLabel(APP_PAGE_IDS.CREATION, 'Points de Croix', {
 const router = useRouter()
 
 const WIDTH_MIN = 20
-const WIDTH_MAX = 200
+const WIDTH_MAX = 400
 const COLORS_MIN = 8
 const COLORS_MAX = 40
 const LIVE_DEBOUNCE_MS = 380
@@ -52,6 +52,10 @@ const sourceImage = ref(null)
 const sourceFile = ref(null)
 const sourceName = ref('')
 const sourcePreviewUrl = ref('')
+/** @type {import('vue').Ref<'upload' | 'url'>} */
+const sourceImageMode = ref('upload')
+const sourceImageUrl = ref('')
+const isLoadingSourceUrl = ref(false)
 const targetWidth = ref(80)
 const colorCount = ref(16)
 /** Image déjà en pixel art → échantillonnage par blocs (mode), sans K-means. */
@@ -363,17 +367,62 @@ function triggerFilePicker() {
   fileInputRef.value?.click()
 }
 
-async function onFileChange(event) {
-  const file = event.target?.files?.[0]
-  event.target.value = ''
-  if (!file) {
-    onFilePickerClose()
-    return
+function assertSourceImageUrl(url) {
+  const trimmed = String(url ?? '').trim()
+  if (!trimmed) throw new Error('Indique l’URL de l’image.')
+  try {
+    const parsed = new URL(trimmed)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('L’URL de l’image doit commencer par http:// ou https://')
+    }
+    return trimmed
+  } catch (err) {
+    if (err?.message?.includes('http') || err?.message?.includes('URL')) throw err
+    throw new Error('URL de l’image invalide.')
   }
-  if (paramsLocked.value) {
-    onFilePickerClose()
-    return
+}
+
+function filenameFromUrl(url) {
+  try {
+    const path = new URL(url).pathname
+    const base = path.split('/').filter(Boolean).pop() || ''
+    const clean = decodeURIComponent(base).replace(/[^\w.\-()+ ]+/g, '')
+    if (clean && /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(clean)) return clean
+    if (clean) return `${clean}.jpg`
+  } catch {
+    /* ignore */
   }
+  return 'image-url.jpg'
+}
+
+async function fileFromImageUrl(url) {
+  const safeUrl = assertSourceImageUrl(url)
+  try {
+    const response = await fetch(safeUrl, { mode: 'cors' })
+    if (!response.ok) {
+      throw new Error(`Téléchargement impossible (${response.status}).`)
+    }
+    const blob = await response.blob()
+    if (!blob.type.startsWith('image/') && blob.type !== 'application/octet-stream') {
+      throw new Error('Le lien ne pointe pas vers une image.')
+    }
+    const type = blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
+    return new File([blob], filenameFromUrl(safeUrl), { type })
+  } catch (err) {
+    if (err?.message?.includes('URL') || err?.message?.includes('http')) throw err
+    if (err?.message?.includes('Téléchargement') || err?.message?.includes('lien')) throw err
+    throw new Error(
+      'Impossible de récupérer l’image (CORS ou lien inaccessible). Essaie de la télécharger puis de la téléverser.',
+    )
+  }
+}
+
+/**
+ * @param {File} file
+ * @param {{ fromUrl?: boolean }} [options]
+ */
+async function applySourceFile(file, options = {}) {
+  if (!file || paramsLocked.value) return
 
   cancelLiveDebounce()
   processError.value = ''
@@ -399,7 +448,6 @@ async function onFileChange(event) {
     sourcePreviewUrl.value = URL.createObjectURL(file)
     sourceFingerprint.value = fingerprintFor(img, file)
     if (isPixelArt.value) {
-      // Alignement obligatoire avant échantillonnage
       processStatus.value = ''
       saveMessage.value = 'Aligne la grille sur l’image, puis valide.'
     } else {
@@ -409,9 +457,47 @@ async function onFileChange(event) {
     processError.value = err?.message || 'Impossible de charger l’image.'
     sourceName.value = ''
     sourceFile.value = null
+    if (options.fromUrl) sourcePreviewUrl.value = ''
+  }
+}
+
+async function onFileChange(event) {
+  const file = event.target?.files?.[0]
+  event.target.value = ''
+  if (!file) {
+    onFilePickerClose()
+    return
+  }
+  if (paramsLocked.value) {
+    onFilePickerClose()
+    return
+  }
+
+  try {
+    await applySourceFile(file)
   } finally {
     onFilePickerClose()
   }
+}
+
+async function loadSourceFromUrl() {
+  if (paramsLocked.value || isSaving.value || isLoadingSourceUrl.value) return
+  isLoadingSourceUrl.value = true
+  processError.value = ''
+  saveMessage.value = ''
+  try {
+    const file = await fileFromImageUrl(sourceImageUrl.value)
+    await applySourceFile(file, { fromUrl: true })
+  } catch (err) {
+    processError.value = err?.message || 'Impossible de charger l’image depuis l’URL.'
+  } finally {
+    isLoadingSourceUrl.value = false
+  }
+}
+
+function setSourceImageMode(mode) {
+  if (paramsLocked.value || isSaving.value) return
+  sourceImageMode.value = mode === 'url' ? 'url' : 'upload'
 }
 
 async function runPipeline() {
@@ -554,6 +640,9 @@ function startNewPattern() {
   sourceImage.value = null
   sourceFile.value = null
   sourceName.value = ''
+  sourceImageMode.value = 'upload'
+  sourceImageUrl.value = ''
+  isLoadingSourceUrl.value = false
   currentPatternId.value = null
   savedSourcePath.value = null
   sourceDirty.value = false
@@ -592,6 +681,8 @@ async function openSavedPattern(patternId) {
     sourceImage.value = img
     sourceName.value = row.source_file_name || file.name
     sourcePreviewUrl.value = URL.createObjectURL(file)
+    sourceImageMode.value = 'upload'
+    sourceImageUrl.value = ''
     currentPatternId.value = row.id
     savedSourcePath.value = row.source_storage_path
     patternTitle.value = row.title || ''
@@ -791,26 +882,68 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="pdc-upload">
-        <input
-          ref="fileInputRef"
-          type="file"
-          accept="image/*"
-          class="pdc-file"
-          :disabled="paramsLocked"
-          @pointerdown="onFilePickerOpen"
-          @click="onFilePickerOpen"
-          @change="onFileChange"
-          @cancel="onFilePickerClose"
-        />
-        <button
-          type="button"
-          class="pdc-btn pdc-btn--secondary"
-          :disabled="paramsLocked || isSaving"
-          @click="triggerFilePicker"
-        >
-          Choisir une image
-        </button>
-        <span v-if="sourceName" class="pdc-filename">{{ sourceName }}</span>
+        <div class="pdc-image-mode" role="group" aria-label="Source de l’image">
+          <button
+            type="button"
+            class="pdc-mode-btn"
+            :class="{ 'pdc-mode-btn--active': sourceImageMode === 'upload' }"
+            :disabled="paramsLocked || isSaving"
+            @click="setSourceImageMode('upload')"
+          >
+            Téléverser
+          </button>
+          <button
+            type="button"
+            class="pdc-mode-btn"
+            :class="{ 'pdc-mode-btn--active': sourceImageMode === 'url' }"
+            :disabled="paramsLocked || isSaving"
+            @click="setSourceImageMode('url')"
+          >
+            URL
+          </button>
+        </div>
+
+        <template v-if="sourceImageMode === 'upload'">
+          <input
+            ref="fileInputRef"
+            type="file"
+            accept="image/*"
+            class="pdc-file"
+            :disabled="paramsLocked"
+            @pointerdown="onFilePickerOpen"
+            @click="onFilePickerOpen"
+            @change="onFileChange"
+            @cancel="onFilePickerClose"
+          />
+          <button
+            type="button"
+            class="pdc-btn pdc-btn--secondary"
+            :disabled="paramsLocked || isSaving"
+            @click="triggerFilePicker"
+          >
+            Choisir une image
+          </button>
+          <span v-if="sourceName" class="pdc-filename">{{ sourceName }}</span>
+        </template>
+
+        <div v-else class="pdc-url-row">
+          <input
+            v-model="sourceImageUrl"
+            type="url"
+            class="pdc-url-input"
+            placeholder="https://exemple.com/motif.png"
+            :disabled="paramsLocked || isSaving || isLoadingSourceUrl"
+            @keydown.enter.prevent="loadSourceFromUrl"
+          />
+          <button
+            type="button"
+            class="pdc-btn pdc-btn--secondary"
+            :disabled="paramsLocked || isSaving || isLoadingSourceUrl || !sourceImageUrl.trim()"
+            @click="loadSourceFromUrl"
+          >
+            {{ isLoadingSourceUrl ? 'Chargement…' : 'Charger' }}
+          </button>
+        </div>
       </div>
 
       <div v-if="sourceImage" class="pdc-preview-row">
@@ -1233,6 +1366,57 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.65rem;
   margin-bottom: 1rem;
+}
+
+.pdc-image-mode {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+}
+
+.pdc-mode-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 0.4rem 0.75rem;
+  background: transparent;
+  color: #6c757d;
+  font-weight: 750;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.pdc-mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pdc-mode-btn--active {
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--color-primary-dark, #ad81be);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-primary-dark, #ad81be) 18%, transparent);
+}
+
+.pdc-url-row {
+  display: flex;
+  flex: 1;
+  min-width: min(100%, 16rem);
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.pdc-url-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--color-primary-dark, #ad81be) 35%, transparent);
+  border-radius: 12px;
+  padding: 0.6rem 0.75rem;
+  background: rgba(255, 255, 255, 0.8);
+  color: #2c3e50;
+  font-weight: 650;
+  font-size: 0.9rem;
 }
 
 .pdc-file {
@@ -1871,6 +2055,22 @@ onBeforeUnmount(() => {
   .pdc-figure figcaption,
   .pdc-live-status {
     color: #adb5bd;
+  }
+  .pdc-image-mode {
+    background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+    border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+  }
+  .pdc-mode-btn {
+    color: #adb5bd;
+  }
+  .pdc-mode-btn--active {
+    background: color-mix(in srgb, var(--color-background) 85%, var(--color-primary));
+    color: var(--color-primary);
+  }
+  .pdc-url-input {
+    background: rgba(35, 30, 48, 0.9);
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.35);
   }
   .pdc-zoom-bar__label {
     color: #d5b5ea;
