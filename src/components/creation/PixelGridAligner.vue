@@ -11,7 +11,7 @@ const props = defineProps({
     type: Object,
     required: true,
   },
-  /** URL affichable (blob/http) — obligatoire si image.src a été révoqué après chargement. */
+  /** URL affichable (blob/http) — secours si drawImage échoue. */
   imageUrl: {
     type: String,
     default: '',
@@ -27,7 +27,7 @@ const props = defineProps({
   },
   maxCells: {
     type: Number,
-    default: 200,
+    default: 8192,
   },
   disabled: {
     type: Boolean,
@@ -44,10 +44,11 @@ const offsetY = ref(0)
 const zoom = ref(1)
 
 const ZOOM_MIN = 0.5
-const ZOOM_MAX = 8
+const ZOOM_MAX = 24
 const stageRef = ref(null)
-const overlayCanvasRef = ref(null)
-const displaySrc = ref('')
+const stageCanvasRef = ref(null)
+/** @type {import('vue').Ref<HTMLImageElement|null>} */
+const fallbackImg = ref(null)
 
 const imageWidth = computed(() => props.image?.naturalWidth || props.image?.width || 0)
 const imageHeight = computed(() => props.image?.naturalHeight || props.image?.height || 0)
@@ -87,32 +88,6 @@ function applyAlignment(a) {
   offsetY.value = clampOffset(a.offsetY, imageHeight.value)
 }
 
-function resolveDisplaySrc() {
-  if (props.imageUrl) {
-    displaySrc.value = props.imageUrl
-    return
-  }
-  // Fallback : redessine l’HTMLImageElement déjà décodé (src blob souvent révoqué)
-  try {
-    const img = props.image
-    const w = img?.naturalWidth || img?.width
-    const h = img?.naturalHeight || img?.height
-    if (!img || !w || !h) {
-      displaySrc.value = ''
-      return
-    }
-    const canvas = document.createElement('canvas')
-    canvas.width = w
-    canvas.height = h
-    const ctx = canvas.getContext('2d')
-    ctx.drawImage(img, 0, 0)
-    displaySrc.value = canvas.toDataURL('image/png')
-  } catch (err) {
-    console.error(err)
-    displaySrc.value = props.image?.src || ''
-  }
-}
-
 function detectAndApply() {
   if (!props.image || props.disabled) return
   try {
@@ -131,37 +106,126 @@ function bump(field, delta) {
   else if (field === 'offsetY') offsetY.value = clampOffset(offsetY.value + delta, imageHeight.value)
 }
 
-function setZoom(level) {
-  zoom.value = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(level * 20) / 20))
-  nextTick(paintOverlay)
+/** Taille cible d’une case en pixels source (met à jour cols/rows). */
+function setCellPx(axis, px) {
+  if (props.disabled) return
+  const size = Math.max(1, Math.round(Number(px)) || 1)
+  if (axis === 'x' || axis === 'both') {
+    const usable = Math.max(1, imageWidth.value - offsetX.value)
+    cols.value = clampCells(Math.max(1, Math.round(usable / size)))
+  }
+  if (axis === 'y' || axis === 'both') {
+    const usable = Math.max(1, imageHeight.value - offsetY.value)
+    rows.value = clampCells(Math.max(1, Math.round(usable / size)))
+  }
 }
 
-function paintOverlay() {
-  const canvas = overlayCanvasRef.value
+function bumpCellPx(axis, delta) {
+  if (props.disabled) return
+  const current = Math.max(1, Math.round(axis === 'x' ? metrics.value.cellW : metrics.value.cellH))
+  setCellPx(axis, current + delta)
+}
+
+/** ÷2 = cases plus petites (plus de colonnes/lignes), ×2 = cases plus grandes. */
+function scaleCellSize(factor) {
+  if (props.disabled) return
+  if (factor === 0.5) {
+    cols.value = clampCells(cols.value * 2)
+    rows.value = clampCells(rows.value * 2)
+  } else if (factor === 2) {
+    cols.value = clampCells(Math.max(1, Math.round(cols.value / 2)))
+    rows.value = clampCells(Math.max(1, Math.round(rows.value / 2)))
+  }
+}
+
+function setZoom(level) {
+  zoom.value = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(level * 20) / 20))
+  nextTick(paintStage)
+}
+
+function paintCheckerboard(ctx, w, h, zoomLevel) {
+  const tile = Math.max(6, Math.round(10 * zoomLevel))
+  for (let y = 0; y < h; y += tile) {
+    for (let x = 0; x < w; x += tile) {
+      const even = (Math.floor(x / tile) + Math.floor(y / tile)) % 2 === 0
+      ctx.fillStyle = even ? '#3a3348' : '#2a2436'
+      ctx.fillRect(x, y, tile, tile)
+    }
+  }
+}
+
+function loadFallbackFromUrl() {
+  const url = String(props.imageUrl || '').trim()
+  if (!url) {
+    fallbackImg.value = null
+    return Promise.resolve(null)
+  }
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      fallbackImg.value = img
+      resolve(img)
+    }
+    img.onerror = () => {
+      fallbackImg.value = null
+      resolve(null)
+    }
+    img.src = url
+  })
+}
+
+function drawableSource() {
+  const primary = props.image
+  const pw = primary?.naturalWidth || primary?.width || 0
+  const ph = primary?.naturalHeight || primary?.height || 0
+  if (primary && pw > 0 && ph > 0) return primary
+  return fallbackImg.value
+}
+
+/**
+ * Dessine l’image + la grille sur un seul canvas
+ * (pas de dépendance à un <img> blob éventuellement cassé).
+ */
+function paintStage() {
+  const canvas = stageCanvasRef.value
   if (!canvas || !imageWidth.value || !imageHeight.value) return
 
   const w = displayWidth.value
   const h = displayHeight.value
+  if (w < 1 || h < 1) return
+
   canvas.width = w
   canvas.height = h
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  ctx.clearRect(0, 0, w, h)
+  paintCheckerboard(ctx, w, h, zoom.value)
+
+  ctx.imageSmoothingEnabled = false
+  const source = drawableSource()
+  if (source) {
+    try {
+      ctx.drawImage(source, 0, 0, w, h)
+    } catch (err) {
+      console.error('PixelGridAligner drawImage:', err)
+    }
+  }
+
   const { cols: c, rows: r, offsetX: ox, offsetY: oy, cellW, cellH } = metrics.value
   const z = zoom.value
+  const cellPx = Math.min(cellW, cellH) * z
+  const outerW = cellPx < 8 ? 1 : Math.max(1.5, z * 0.3)
+  const innerW = cellPx < 8 ? 0.6 : Math.max(0.8, z * 0.18)
 
   const drawLine = (x1, y1, x2, y2) => {
-    // Contour noir
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)'
-    ctx.lineWidth = Math.max(2, z * 0.35)
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)'
+    ctx.lineWidth = outerW
     ctx.beginPath()
     ctx.moveTo(x1, y1)
     ctx.lineTo(x2, y2)
     ctx.stroke()
-    // Trait contrasté
-    ctx.strokeStyle = 'rgba(255, 60, 60, 0.75)'
-    ctx.lineWidth = Math.max(1, z * 0.2)
+    ctx.strokeStyle = 'rgba(255, 80, 80, 0.85)'
+    ctx.lineWidth = innerW
     ctx.beginPath()
     ctx.moveTo(x1, y1)
     ctx.lineTo(x2, y2)
@@ -178,6 +242,14 @@ function paintOverlay() {
   }
 }
 
+async function refreshStage() {
+  if (props.initialAlignment) applyAlignment(props.initialAlignment)
+  else detectAndApply()
+  await loadFallbackFromUrl()
+  await nextTick()
+  paintStage()
+}
+
 function onValidate() {
   if (props.disabled) return
   emit('validate', { ...currentAlignment.value })
@@ -187,13 +259,15 @@ function emitChange() {
   emit('change', { ...currentAlignment.value })
 }
 
+function onRedetect() {
+  detectAndApply()
+  nextTick(paintStage)
+}
+
 watch(
-  () => [props.image, props.imageUrl],
+  () => [props.image, props.imageUrl, imageWidth.value, imageHeight.value],
   () => {
-    resolveDisplaySrc()
-    if (props.initialAlignment) applyAlignment(props.initialAlignment)
-    else detectAndApply()
-    nextTick(paintOverlay)
+    void refreshStage()
   },
 )
 
@@ -202,21 +276,18 @@ watch(
   (val) => {
     if (val) {
       applyAlignment(val)
-      nextTick(paintOverlay)
+      nextTick(paintStage)
     }
   },
 )
 
 watch([cols, rows, offsetX, offsetY, zoom], () => {
   emitChange()
-  paintOverlay()
+  paintStage()
 })
 
 onMounted(() => {
-  resolveDisplaySrc()
-  if (props.initialAlignment) applyAlignment(props.initialAlignment)
-  else detectAndApply()
-  nextTick(paintOverlay)
+  void refreshStage()
 })
 
 defineExpose({
@@ -265,6 +336,42 @@ defineExpose({
       </div>
 
       <div class="pga-stepper">
+        <span class="pga-stepper__label">Case X (px)</span>
+        <button type="button" class="pga-stepper__btn" :disabled="disabled" @click="bumpCellPx('x', -1)">
+          −
+        </button>
+        <input
+          type="number"
+          class="pga-stepper__input"
+          :value="Math.round(metrics.cellW)"
+          min="1"
+          :disabled="disabled"
+          @change="setCellPx('x', $event.target.value)"
+        />
+        <button type="button" class="pga-stepper__btn" :disabled="disabled" @click="bumpCellPx('x', 1)">
+          +
+        </button>
+      </div>
+
+      <div class="pga-stepper">
+        <span class="pga-stepper__label">Case Y (px)</span>
+        <button type="button" class="pga-stepper__btn" :disabled="disabled" @click="bumpCellPx('y', -1)">
+          −
+        </button>
+        <input
+          type="number"
+          class="pga-stepper__input"
+          :value="Math.round(metrics.cellH)"
+          min="1"
+          :disabled="disabled"
+          @change="setCellPx('y', $event.target.value)"
+        />
+        <button type="button" class="pga-stepper__btn" :disabled="disabled" @click="bumpCellPx('y', 1)">
+          +
+        </button>
+      </div>
+
+      <div class="pga-stepper">
         <span class="pga-stepper__label">Offset X</span>
         <button type="button" class="pga-stepper__btn" :disabled="disabled" @click="bump('offsetX', -1)">
           −
@@ -299,9 +406,45 @@ defineExpose({
       </div>
     </div>
 
+    <div class="pga-quick">
+      <span class="pga-quick__label">Taille case</span>
+      <button
+        type="button"
+        class="pga-quick__btn"
+        title="Cases deux fois plus petites (si 4 pixels image = 1 case)"
+        :disabled="disabled"
+        @click="scaleCellSize(0.5)"
+      >
+        ÷2
+      </button>
+      <button
+        type="button"
+        class="pga-quick__btn"
+        title="Cases deux fois plus grandes"
+        :disabled="disabled"
+        @click="scaleCellSize(2)"
+      >
+        ×2
+      </button>
+      <button
+        type="button"
+        class="pga-quick__btn"
+        title="1 pixel image = 1 case"
+        :disabled="disabled"
+        @click="setCellPx('both', 1)"
+      >
+        1×1 px
+      </button>
+    </div>
+
     <div class="pga-zoom">
       <span class="pga-zoom__label">Zoom {{ zoom.toFixed(1) }}×</span>
-      <button type="button" class="pga-stepper__btn" :disabled="disabled || zoom <= ZOOM_MIN" @click="setZoom(zoom - 0.25)">
+      <button
+        type="button"
+        class="pga-stepper__btn"
+        :disabled="disabled || zoom <= ZOOM_MIN"
+        @click="setZoom(zoom - 0.25)"
+      >
         −
       </button>
       <input
@@ -312,12 +455,17 @@ defineExpose({
         :max="ZOOM_MAX"
         step="0.25"
         :disabled="disabled"
-        @input="paintOverlay"
+        @input="paintStage"
       />
-      <button type="button" class="pga-stepper__btn" :disabled="disabled || zoom >= ZOOM_MAX" @click="setZoom(zoom + 0.25)">
+      <button
+        type="button"
+        class="pga-stepper__btn"
+        :disabled="disabled || zoom >= ZOOM_MAX"
+        @click="setZoom(zoom + 0.25)"
+      >
         +
       </button>
-      <button type="button" class="pga-link" :disabled="disabled" @click="detectAndApply">
+      <button type="button" class="pga-link" :disabled="disabled" @click="onRedetect">
         Redétecter
       </button>
     </div>
@@ -325,19 +473,13 @@ defineExpose({
     <p class="pga-hint">
       Ajuste jusqu’à ce que chaque case couvre exactement un carré du dessin
       (~{{ metrics.cellW.toFixed(1) }}×{{ metrics.cellH.toFixed(1) }} px / case).
+      Si plusieurs pixels image tiennent dans une case, utilise
+      <strong>÷2</strong> ou descends Case X/Y jusqu’à 1.
     </p>
 
-    <div ref="stageRef" class="pga-stage">
+    <div ref="stageRef" class="pga-stage" role="img" aria-label="Image pixel art à aligner">
       <div class="pga-stage__inner" :style="{ width: displayWidth + 'px', height: displayHeight + 'px' }">
-        <img
-          class="pga-stage__img"
-          :src="displaySrc"
-          :width="displayWidth"
-          :height="displayHeight"
-          alt="Image pixel art à aligner"
-          draggable="false"
-        />
-        <canvas ref="overlayCanvasRef" class="pga-stage__overlay" />
+        <canvas ref="stageCanvasRef" class="pga-stage__canvas" />
       </div>
     </div>
 
@@ -374,7 +516,37 @@ defineExpose({
   font-size: 0.75rem;
   font-weight: 750;
   color: #5a4a68;
-  min-width: 4.2rem;
+  min-width: 4.8rem;
+}
+
+.pga-quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.pga-quick__label {
+  font-size: 0.75rem;
+  font-weight: 750;
+  color: #5a4a68;
+  margin-right: 0.2rem;
+}
+
+.pga-quick__btn {
+  border-radius: 8px;
+  border: 1px solid rgba(173, 129, 190, 0.45);
+  background: rgba(213, 181, 234, 0.2);
+  color: #5a4a68;
+  font-weight: 800;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.65rem;
+  cursor: pointer;
+}
+
+.pga-quick__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .pga-stepper__btn {
@@ -461,20 +633,12 @@ defineExpose({
   line-height: 0;
 }
 
-.pga-stage__img {
+.pga-stage__canvas {
   display: block;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-  user-select: none;
-  pointer-events: none;
-}
-
-.pga-stage__overlay {
-  position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
-  pointer-events: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .pga-validate {
@@ -495,7 +659,8 @@ defineExpose({
 
 @media (prefers-color-scheme: dark) {
   .pga-stepper__label,
-  .pga-zoom__label {
+  .pga-zoom__label,
+  .pga-quick__label {
     color: #d5b5ea;
   }
   .pga-hint {
@@ -504,6 +669,11 @@ defineExpose({
   .pga-stepper__input {
     background: rgba(35, 30, 48, 0.95);
     color: #f0e8f8;
+  }
+  .pga-quick__btn {
+    color: #e8d8f5;
+    border-color: rgba(213, 181, 234, 0.35);
+    background: rgba(90, 70, 110, 0.35);
   }
 }
 </style>

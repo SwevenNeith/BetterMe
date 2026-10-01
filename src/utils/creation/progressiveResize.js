@@ -73,6 +73,8 @@ export function resizeImageProgressive(source, targetWidth, targetHeight) {
 
 /**
  * Charge un File image → HTMLImageElement.
+ * L’URL blob reste attachée à l’image jusqu’à `revokeLoadedImage` :
+ * la révoquer dans onload casse l’affichage (preview / alignement pixel art).
  * @param {File} file
  * @returns {Promise<HTMLImageElement>}
  */
@@ -85,7 +87,7 @@ export function loadImageFromFile(file) {
     const url = URL.createObjectURL(file)
     const img = new Image()
     img.onload = () => {
-      URL.revokeObjectURL(url)
+      img.dataset.objectUrl = url
       resolve(img)
     }
     img.onerror = () => {
@@ -94,4 +96,16 @@ export function loadImageFromFile(file) {
     }
     img.src = url
   })
+}
+
+/**
+ * Libère l’URL blob associée à une image chargée via `loadImageFromFile`.
+ * @param {HTMLImageElement|null|undefined} img
+ */
+export function revokeLoadedImage(img) {
+  const url = img?.dataset?.objectUrl
+  if (url && String(url).startsWith('blob:')) {
+    URL.revokeObjectURL(url)
+    delete img.dataset.objectUrl
+  }
 }

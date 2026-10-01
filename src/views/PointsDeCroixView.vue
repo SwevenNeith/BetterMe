@@ -31,6 +31,7 @@ import {
 import {
   computeTargetSize,
   loadImageFromFile,
+  revokeLoadedImage,
 } from '../utils/creation/progressiveResize.js'
 import PixelGridAligner from '../components/creation/PixelGridAligner.vue'
 import CrossStitchChart from '../components/creation/CrossStitchChart.vue'
@@ -43,6 +44,8 @@ const router = useRouter()
 
 const WIDTH_MIN = 20
 const WIDTH_MAX = 400
+/** Plafond mémoire / JSON (pas une limite métier) — l’alignement pixel art va jusqu’à la taille native. */
+const GRID_HARD_MAX = 8192
 const COLORS_MIN = 8
 const COLORS_MAX = 40
 const LIVE_DEBOUNCE_MS = 380
@@ -168,6 +171,15 @@ const needsPixelArtAlignment = computed(
   () => isPixelArt.value && Boolean(sourceImage.value) && !alignmentValidated.value,
 )
 
+/** Max colonnes/lignes = taille native de l’image (1 px = 1 case), plafonné pour la mémoire. */
+const alignmentMaxCells = computed(() => {
+  const img = sourceImage.value
+  if (!img) return GRID_HARD_MAX
+  const w = img.naturalWidth || img.width || 0
+  const h = img.naturalHeight || img.height || 0
+  return Math.min(GRID_HARD_MAX, Math.max(1, w, h))
+})
+
 const canRunPixelArtPipeline = computed(
   () => !isPixelArt.value || (alignmentValidated.value && pixelArtAlignment.value),
 )
@@ -198,6 +210,15 @@ function formatUpdatedAt(iso) {
 
 function revokeUrl(url) {
   if (url && String(url).startsWith('blob:')) URL.revokeObjectURL(url)
+}
+
+function clearSourceImage() {
+  const shared = sourceImage.value?.dataset?.objectUrl || ''
+  const preview = sourcePreviewUrl.value
+  revokeLoadedImage(sourceImage.value)
+  sourceImage.value = null
+  if (preview && preview !== shared) revokeUrl(preview)
+  sourcePreviewUrl.value = ''
 }
 
 function clearResults() {
@@ -425,9 +446,7 @@ async function applySourceFile(file, options = {}) {
   processError.value = ''
   saveMessage.value = ''
   clearResults()
-  revokeUrl(sourcePreviewUrl.value)
-  sourcePreviewUrl.value = ''
-  sourceImage.value = null
+  clearSourceImage()
   sourceFile.value = file
   sourceName.value = file.name
   currentPatternId.value = null
@@ -442,7 +461,8 @@ async function applySourceFile(file, options = {}) {
   try {
     const img = await loadImageFromFile(file)
     sourceImage.value = img
-    sourcePreviewUrl.value = URL.createObjectURL(file)
+    // Préfère l’URL encore liée à l’élément (évite un 2e blob révoqué trop tôt)
+    sourcePreviewUrl.value = img.dataset.objectUrl || URL.createObjectURL(file)
     sourceFingerprint.value = fingerprintFor(img, file)
     if (isPixelArt.value) {
       processStatus.value = ''
@@ -454,7 +474,7 @@ async function applySourceFile(file, options = {}) {
     processError.value = err?.message || 'Impossible de charger l’image.'
     sourceName.value = ''
     sourceFile.value = null
-    if (options.fromUrl) sourcePreviewUrl.value = ''
+    clearSourceImage()
   }
 }
 
@@ -632,9 +652,7 @@ function startNewPattern() {
   cancelLiveDebounce()
   pipelineGeneration += 1
   clearResults()
-  revokeUrl(sourcePreviewUrl.value)
-  sourcePreviewUrl.value = ''
-  sourceImage.value = null
+  clearSourceImage()
   sourceFile.value = null
   sourceName.value = ''
   sourceImageMode.value = 'upload'
@@ -672,12 +690,12 @@ async function openSavedPattern(patternId) {
     const img = await loadImageFromFile(file)
 
     clearResults()
-    revokeUrl(sourcePreviewUrl.value)
+    clearSourceImage()
 
     sourceFile.value = file
     sourceImage.value = img
     sourceName.value = row.source_file_name || file.name
-    sourcePreviewUrl.value = URL.createObjectURL(file)
+    sourcePreviewUrl.value = img.dataset.objectUrl || URL.createObjectURL(file)
     sourceImageMode.value = 'upload'
     sourceImageUrl.value = ''
     currentPatternId.value = row.id
@@ -798,7 +816,7 @@ onBeforeUnmount(() => {
   pipelineGeneration += 1
   setFilePickerActive(false)
   setFileUploadInProgress(false)
-  revokeUrl(sourcePreviewUrl.value)
+  clearSourceImage()
 })
 </script>
 
@@ -1033,7 +1051,7 @@ onBeforeUnmount(() => {
           :image-url="sourcePreviewUrl"
           :initial-alignment="pixelArtAlignment"
           :min-cells="1"
-          :max-cells="WIDTH_MAX"
+          :max-cells="alignmentMaxCells"
           :disabled="!paramsEditable"
           @validate="onPixelArtAlignmentValidate"
         />

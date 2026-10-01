@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS public.cross_stitch_patterns (
     CHECK (char_length(trim(source_storage_path)) > 0),
   source_file_name text NOT NULL DEFAULT '',
   target_width integer NOT NULL DEFAULT 80
-    CHECK (target_width >= 20 AND target_width <= 200),
+    CHECK (target_width >= 1 AND target_width <= 8192),
   color_count integer NOT NULL DEFAULT 16
     CHECK (color_count >= 8 AND color_count <= 40),
   aida_count integer NOT NULL DEFAULT 14

@@ -179,9 +179,9 @@ export function detectPixelArtBlockSize(source, options = {}) {
     vGaps.push(...successiveGaps(t))
   }
 
-  // Filtre les gaps aberrants (trop petits = bruit, trop grands = bords)
+  // Filtre les gaps aberrants (trop grands = bords). 1 px / case est valide.
   const filterGaps = (gaps, dim) =>
-    gaps.filter((g) => g >= 2 && g <= Math.max(4, Math.floor(dim / 2)))
+    gaps.filter((g) => g >= 1 && g <= Math.max(4, Math.floor(dim / 2)))
 
   let blockSizeX = modeOfInts(filterGaps(hGaps, width))
   let blockSizeY = modeOfInts(filterGaps(vGaps, height))
