@@ -12,6 +12,12 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 )
 
+/** Logs verbeux : activer avec SEND_NOTIFICATION_VERBOSE=1 (off en prod par défaut). */
+const VERBOSE_LOGS = Deno.env.get('SEND_NOTIFICATION_VERBOSE') === '1'
+function logDebug(...args: unknown[]) {
+  if (VERBOSE_LOGS) console.log(...args)
+}
+
 // Headers CORS pour autoriser les requêtes depuis ton app
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -274,11 +280,86 @@ async function ensureTodoPromesseReminders() {
     return
   }
 
+  const rows = (settingsRows ?? []).filter((row) => Boolean(row?.user_id))
+  if (!rows.length) return
+
+  const userIds = [...new Set(rows.map((row) => String(row.user_id)))]
   const nowMs = Date.now()
 
-  for (const row of settingsRows ?? []) {
-    const userId = row.user_id
-    if (!userId) continue
+  // Lectures batchées (O(1) requêtes) au lieu de O(N) par utilisateur
+  const { data: allItems, error: itemsError } = await supabase
+    .from('todo_items')
+    .select('user_id, frequence, jour_semaine, date_echeance, is_promesse')
+    .in('user_id', userIds)
+    .eq('is_promesse', true)
+
+  if (itemsError) {
+    console.error('Erreur lecture promesses TODO :', itemsError)
+    return
+  }
+
+  /** Fenêtre UTC large pour couvrir « aujourd’hui local » quel que soit le fuseau. */
+  const windowStartMs = nowMs - 48 * 60 * 60 * 1000
+  const windowEndMs = nowMs + 48 * 60 * 60 * 1000
+
+  // Une seule lecture scheduled_notifications du kind (volume faible : app perso + purge 30j)
+  const { data: scheduledRows, error: scheduledError } = await supabase
+    .from('scheduled_notifications')
+    .select('id, user_id, sent, scheduled_at')
+    .in('user_id', userIds)
+    .eq('kind', TODO_PROMESSE_KIND)
+
+  if (scheduledError) {
+    console.error('Lecture rappels promesses TODO :', scheduledError)
+    return
+  }
+
+  /** @type {Map<string, Array<{ frequence?: string, jour_semaine?: number|null, date_echeance?: string, is_promesse?: boolean }>>} */
+  const itemsByUser = new Map()
+  for (const item of allItems ?? []) {
+    const uid = String(item.user_id || '')
+    if (!uid) continue
+    const list = itemsByUser.get(uid) || []
+    list.push(item)
+    itemsByUser.set(uid, list)
+  }
+
+  /** @type {Map<string, Array<{ id: string, scheduled_at: string }>>} */
+  const pendingByUser = new Map()
+  /** @type {Map<string, Array<{ id: string, scheduled_at: string }>>} */
+  const sentByUser = new Map()
+  for (const row of scheduledRows ?? []) {
+    const uid = String(row.user_id || '')
+    if (!uid) continue
+    if (row.sent) {
+      const t = new Date(row.scheduled_at).getTime()
+      if (!Number.isFinite(t) || t < windowStartMs || t > windowEndMs) continue
+      const list = sentByUser.get(uid) || []
+      list.push(row)
+      sentByUser.set(uid, list)
+    } else {
+      const list = pendingByUser.get(uid) || []
+      list.push(row)
+      pendingByUser.set(uid, list)
+    }
+  }
+
+  const userIdsToCancel: string[] = []
+  const inserts: Array<{
+    user_id: string
+    event_id: null
+    kind: string
+    title: string
+    body: string
+    scheduled_at: string
+    sent: false
+  }> = []
+  const processedUsers = new Set<string>()
+
+  for (const row of rows) {
+    const userId = String(row.user_id)
+    if (processedUsers.has(userId)) continue
+    processedUsers.add(userId)
 
     const userNow = getNowInTimeZone(
       row.notification_timezone,
@@ -297,6 +378,8 @@ async function ensureTodoPromesseReminders() {
       userNow.timeZone,
       userNow.utcOffsetMinutes,
     )
+    const dayStartMs = new Date(dayStartISO).getTime()
+    const dayEndMs = new Date(dayEndISO).getTime()
 
     const reminderTime = normalizeTimeHHmm(row.todo_promesse_reminder_time)
     const scheduledAtISO = zonedDateTimeToUtcISO(
@@ -307,80 +390,62 @@ async function ensureTodoPromesseReminders() {
     )
     const scheduledMs = new Date(scheduledAtISO).getTime()
 
-    const { data: items, error: itemsError } = await supabase
-      .from('todo_items')
-      .select('frequence, jour_semaine, date_echeance, is_promesse')
-      .eq('user_id', userId)
-      .eq('is_promesse', true)
+    const items = itemsByUser.get(userId) || []
 
-    if (itemsError) {
-      console.error('Erreur lecture promesses TODO :', itemsError)
+    if (countDayScopedPromessesForDate(items, tomorrowISO) > 0) {
+      if ((pendingByUser.get(userId) || []).length > 0) {
+        userIdsToCancel.push(userId)
+      }
       continue
     }
 
-    if (countDayScopedPromessesForDate(items ?? [], tomorrowISO) > 0) {
-      await supabase
-        .from('scheduled_notifications')
-        .delete()
-        .eq('user_id', userId)
-        .eq('kind', TODO_PROMESSE_KIND)
-        .eq('sent', false)
-      continue
-    }
+    const hasSentToday = (sentByUser.get(userId) || []).some((n) => {
+      const t = new Date(n.scheduled_at).getTime()
+      return t >= dayStartMs && t <= dayEndMs
+    })
+    if (hasSentToday) continue
 
-    const { data: sentRows, error: sentError } = await supabase
-      .from('scheduled_notifications')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('kind', TODO_PROMESSE_KIND)
-      .eq('sent', true)
-      .gte('scheduled_at', dayStartISO)
-      .lte('scheduled_at', dayEndISO)
-      .limit(1)
-
-    if (sentError) {
-      console.error('Lecture rappel promesses envoyé :', sentError)
-      continue
-    }
-    if (sentRows?.length) continue
-
-    const { data: pendingRows, error: pendingError } = await supabase
-      .from('scheduled_notifications')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('kind', TODO_PROMESSE_KIND)
-      .eq('sent', false)
-      .gte('scheduled_at', dayStartISO)
-      .lte('scheduled_at', dayEndISO)
-      .limit(1)
-
-    if (pendingError) {
-      console.error('Lecture rappel promesses en attente :', pendingError)
-      continue
-    }
-    if (pendingRows?.length) continue
+    const hasPendingToday = (pendingByUser.get(userId) || []).some((n) => {
+      const t = new Date(n.scheduled_at).getTime()
+      return t >= dayStartMs && t <= dayEndMs
+    })
+    if (hasPendingToday) continue
 
     // Pas de rattrapage : si l’heure du jour est déjà passée, on attend demain
     // (le cron / l’ouverture de l’app replanifiera pour le prochain créneau).
     if (scheduledMs <= nowMs) continue
 
-    const whenISO = scheduledAtISO
-    const pageLabel = getTodoPageLabel(row.page_visibility)
-
-    const { error: insertError } = await supabase.from('scheduled_notifications').insert({
+    inserts.push({
       user_id: userId,
       event_id: null,
       kind: TODO_PROMESSE_KIND,
-      title: pageLabel,
+      title: getTodoPageLabel(row.page_visibility),
       body: TODO_PROMESSE_BODY,
-      scheduled_at: whenISO,
+      scheduled_at: scheduledAtISO,
       sent: false,
     })
+  }
+
+  if (userIdsToCancel.length) {
+    const { error: deleteError } = await supabase
+      .from('scheduled_notifications')
+      .delete()
+      .in('user_id', userIdsToCancel)
+      .eq('kind', TODO_PROMESSE_KIND)
+      .eq('sent', false)
+
+    if (deleteError) {
+      console.error('Annulation rappel promesses TODO :', deleteError)
+    }
+  }
+
+  if (inserts.length) {
+    const { error: insertError } = await supabase.from('scheduled_notifications').insert(inserts)
 
     if (insertError) {
       console.error('Planification rappel promesses TODO :', insertError)
     } else {
-      console.log('Rappel promesses TODO planifié pour', userId, whenISO, userNow.timeZone)
+      logDebug('Rappels promesses TODO planifiés :', inserts.length)
     }
   }
 }
@@ -499,6 +564,152 @@ function dailyReminderScheduledKind(reminderId: string): string {
   return `${DAILY_REMINDER_KIND_PREFIX}${reminderId}`
 }
 
+type PushSubscriptionRow = {
+  user_id?: string | null
+  subscription: unknown
+  notification_prefs?: unknown
+}
+
+/**
+ * Charge les push_subscriptions.
+ * - userIds omis : toutes (envoi manuel sans user)
+ * - userIds [] : aucune requête
+ * - userIds […] : filtrées
+ */
+async function loadPushSubscriptions(userIds?: string[] | null): Promise<PushSubscriptionRow[]> {
+  if (Array.isArray(userIds) && userIds.length === 0) return []
+
+  let query = supabase
+    .from('push_subscriptions')
+    .select('user_id, subscription, notification_prefs')
+
+  if (Array.isArray(userIds)) {
+    query = query.in('user_id', userIds)
+  }
+
+  let { data, error } = await query
+
+  if (error && String(error.message || '').toLowerCase().includes('notification_prefs')) {
+    let fallback = supabase.from('push_subscriptions').select('user_id, subscription')
+    if (Array.isArray(userIds)) {
+      fallback = fallback.in('user_id', userIds)
+    }
+    ;({ data, error } = await fallback)
+  }
+
+  if (error) throw error
+  return (data ?? []) as PushSubscriptionRow[]
+}
+
+const DUE_NOTIFICATION_COLUMNS =
+  'id, user_id, event_id, kind, title, body, scheduled_at, reconfort_id'
+const DUE_NOTIFICATION_COLUMNS_FALLBACK =
+  'id, user_id, event_id, kind, title, body, scheduled_at'
+
+type DueNotificationRow = {
+  id: string
+  user_id?: string | null
+  event_id?: string | null
+  kind?: string | null
+  title?: string | null
+  body?: string | null
+  scheduled_at: string
+  reconfort_id?: string | null
+  sent?: boolean
+}
+
+/**
+ * Notifications dues pour le cron (lecture seule — fallback legacy).
+ * Colonnes : id, user_id, event_id, kind, title, body, scheduled_at, reconfort_id
+ */
+async function fetchDueScheduledNotifications(nowISO: string) {
+  let { data, error } = await supabase
+    .from('scheduled_notifications')
+    .select(DUE_NOTIFICATION_COLUMNS)
+    .eq('sent', false)
+    .lte('scheduled_at', nowISO)
+
+  if (error && String(error.message || '').toLowerCase().includes('reconfort_id')) {
+    ;({ data, error } = await supabase
+      .from('scheduled_notifications')
+      .select(DUE_NOTIFICATION_COLUMNS_FALLBACK)
+      .eq('sent', false)
+      .lte('scheduled_at', nowISO))
+  }
+
+  return { data: data as DueNotificationRow[] | null, error }
+}
+
+function isMissingClaimRpcError(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false
+  const msg = String(error.message || '').toLowerCase()
+  const code = String(error.code || '')
+  return (
+    code === 'PGRST202' ||
+    msg.includes('could not find the function') ||
+    msg.includes('claim_due_scheduled_notifications') ||
+    msg.includes('does not exist')
+  )
+}
+
+/**
+ * Claim atomique des dues via RPC (1 appel = SELECT+UPDATE).
+ * Fallback : SELECT puis claim unitaire si la RPC n’est pas encore déployée.
+ * scripts/rpc-claim-due-scheduled-notifications.sql
+ */
+async function claimDueScheduledNotifications(nowISO: string): Promise<{
+  data: DueNotificationRow[] | null
+  error: { message: string } | null
+}> {
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'claim_due_scheduled_notifications',
+    { p_now: nowISO },
+  )
+
+  if (!rpcError) {
+    return { data: (rpcData ?? []) as DueNotificationRow[], error: null }
+  }
+
+  if (!isMissingClaimRpcError(rpcError)) {
+    console.error('RPC claim_due_scheduled_notifications :', rpcError)
+    return { data: null, error: rpcError }
+  }
+
+  // Fallback legacy (avant application du script SQL)
+  const { data: due, error: fetchError } = await fetchDueScheduledNotifications(nowISO)
+  if (fetchError) return { data: null, error: fetchError }
+
+  const claimed: DueNotificationRow[] = []
+  for (const notif of due ?? []) {
+    let { data: row, error: claimError } = await supabase
+      .from('scheduled_notifications')
+      .update({ sent: true })
+      .eq('id', notif.id)
+      .eq('sent', false)
+      .select(DUE_NOTIFICATION_COLUMNS)
+      .maybeSingle()
+
+    if (claimError && String(claimError.message || '').toLowerCase().includes('reconfort_id')) {
+      ;({ data: row, error: claimError } = await supabase
+        .from('scheduled_notifications')
+        .update({ sent: true })
+        .eq('id', notif.id)
+        .eq('sent', false)
+        .select(DUE_NOTIFICATION_COLUMNS_FALLBACK)
+        .maybeSingle())
+    }
+
+    if (claimError) {
+      console.error('Erreur claim notification :', claimError)
+      continue
+    }
+    if (!row) continue
+    claimed.push(row as DueNotificationRow)
+  }
+
+  return { data: claimed, error: null }
+}
+
 function notificationPushTag(notif: {
   id?: string | number
   kind?: string | null
@@ -532,7 +743,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json()
-    console.log('Body reçu :', JSON.stringify(body))
+    logDebug('Body reçu :', JSON.stringify(body))
 
     const {
       type,
@@ -547,26 +758,6 @@ Deno.serve(async (req) => {
       reminderId,
       dayISO,
     } = body
-
-    let { data: subscriptions, error } = await supabase
-      .from('push_subscriptions')
-      .select('user_id, subscription, notification_prefs')
-
-    if (error && String(error.message || '').toLowerCase().includes('notification_prefs')) {
-      ;({ data: subscriptions, error } = await supabase
-        .from('push_subscriptions')
-        .select('user_id, subscription'))
-    }
-
-    if (error) {
-      console.error('Erreur récupération subscriptions :', error)
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: corsHeaders,
-      })
-    }
-
-    console.log('Subscriptions trouvées :', subscriptions?.length ?? 0)
 
     const payload = JSON.stringify({
       title,
@@ -583,19 +774,31 @@ Deno.serve(async (req) => {
         })
       }
 
+      let subscriptions: PushSubscriptionRow[] = []
+      try {
+        subscriptions = await loadPushSubscriptions(userId ? [String(userId)] : null)
+      } catch (subErr) {
+        const message = subErr instanceof Error ? subErr.message : String(subErr)
+        console.error('Erreur récupération subscriptions :', subErr)
+        return new Response(JSON.stringify({ error: message }), {
+          status: 500,
+          headers: corsHeaders,
+        })
+      }
+
+      logDebug('Subscriptions trouvées :', subscriptions.length)
+
       const targets = filterSubscriptionsByCategory(
         uniqueSubscriptionsByEndpoint(
           userId
-            ? subscriptionsForUser(subscriptions ?? [], userId)
+            ? subscriptionsForUser(subscriptions, userId)
             : type === 'daily_push'
               ? []
-              : (subscriptions ?? []),
+              : subscriptions,
         ),
         type === 'daily_push' ? 'daily' : null,
       )
 
-      // daily_push : 1 seul appareil max si plusieurs endpoints (anti-doublon agressif)
-      // → non : multi-appareil voulu, mais endpoints dédupliqués ci-dessus
       for (const row of targets) {
         try {
           await webpush.sendNotification(
@@ -610,7 +813,7 @@ Deno.serve(async (req) => {
                 })
               : payload,
           )
-          console.log('Notification envoyée avec succès')
+          logDebug('Notification envoyée avec succès')
         } catch (e) {
           console.error('Erreur envoi notification :', e)
         }
@@ -651,7 +854,7 @@ Deno.serve(async (req) => {
       if (insertError) {
         console.error('Erreur insertion scheduled_notification :', insertError)
       } else {
-        console.log('Notification planifiée à :', scheduledAt)
+        logDebug('Notification planifiée à :', scheduledAt)
       }
     } else if (type === 'quotidien') {
       // Stocke l'heure du rappel quotidien
@@ -662,117 +865,151 @@ Deno.serve(async (req) => {
       if (insertError) {
         console.error('Erreur insertion daily_reminder :', insertError)
       } else {
-        console.log('Rappel quotidien planifié à :', heureRappel)
+        logDebug('Rappel quotidien planifié à :', heureRappel)
       }
     } else if (type === 'cron') {
-      // Appelé automatiquement chaque minute par le cron
+      // Flux idle-first :
+      // 1) RPC claim dues (1 appel = SELECT+UPDATE atomique) — 0 ligne si rien à faire
+      // 2) si vide → pas de subscriptions / settings / todo (sauf filet promesse espacé)
+      // 3) si dues → charger uniquement les user_id / daily ids concernés
       const maintenant = new Date().toISOString()
-      console.log('Cron exécuté à :', maintenant)
+      logDebug('Cron exécuté à :', maintenant)
 
-      // Purge des notifications déjà envoyées (> 30 jours)
-      const purgeBefore = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-      const { error: purgeError, count: purgeCount } = await supabase
-        .from('scheduled_notifications')
-        .delete({ count: 'exact' })
-        .eq('sent', true)
-        .lt('scheduled_at', purgeBefore)
-
-      if (purgeError) {
-        console.error('Purge scheduled_notifications (>30j) :', purgeError)
-      } else if (purgeCount) {
-        console.log('Notifications envoyées purgées (>30j) :', purgeCount)
-      }
-
-      await ensureTodoPromesseReminders()
-
-      // Vérifie les notifications planifiées à envoyer
-      const { data: notificationsAEnvoyer, error: fetchError } = await supabase
-        .from('scheduled_notifications')
-        .select('*')
-        .lte('scheduled_at', maintenant)
-        .eq('sent', false)
+      const { data: notificationsAEnvoyer, error: fetchError } =
+        await claimDueScheduledNotifications(maintenant)
 
       if (fetchError) {
-        console.error('Erreur récupération notifications planifiées :', fetchError)
-      } else {
-        console.log('Notifications à envoyer :', notificationsAEnvoyer?.length ?? 0)
+        console.error('Erreur récupération / claim notifications planifiées :', fetchError)
+        return new Response(JSON.stringify({ error: fetchError.message }), {
+          status: 500,
+          headers: corsHeaders,
+        })
       }
 
-      /** Cache fuseau / offset par user_id */
+      const dueList = notificationsAEnvoyer ?? []
+      logDebug('Notifications à envoyer :', dueList.length)
+
+      if (dueList.length) {
+      const dueUserIds = [
+        ...new Set(
+          dueList.map((n) => n.user_id).filter((id): id is string => Boolean(id)).map(String),
+        ),
+      ]
+
+      const dailyReminderIds = [
+        ...new Set(
+          dueList
+            .map((n) => {
+              const fromKind = parseDailyReminderIdFromKind(n.kind)
+              if (fromKind) return fromKind
+              if (n.kind === 'daily_reminder' && n.event_id) return String(n.event_id)
+              return null
+            })
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ]
+
+      let subscriptions: PushSubscriptionRow[] = []
+      try {
+        subscriptions = await loadPushSubscriptions(dueUserIds)
+      } catch (subErr) {
+        console.error('Erreur récupération subscriptions :', subErr)
+        subscriptions = []
+      }
+
+      /** Cache fuseau / offset par user_id (préchargé) */
       const timeContextByUser = new Map<
         string,
         { timeZone: string; utcOffsetMinutes: number | null }
       >()
 
-      async function getUserTimeContext(userId: string | null | undefined) {
-        if (!userId) {
-          return { timeZone: DEFAULT_NOTIFICATION_TIMEZONE, utcOffsetMinutes: null as number | null }
-        }
-        if (timeContextByUser.has(userId)) return timeContextByUser.get(userId)!
-
-        let data: {
-          notification_timezone?: string | null
-          notification_utc_offset_minutes?: number | null
-        } | null = null
-        let error = null
-        ;({ data, error } = await supabase
+      if (dueUserIds.length) {
+        let settingsData:
+          | Array<{
+              user_id: string
+              notification_timezone?: string | null
+              notification_utc_offset_minutes?: number | null
+            }>
+          | null = null
+        let settingsErr = null
+        ;({ data: settingsData, error: settingsErr } = await supabase
           .from('settings')
-          .select('notification_timezone, notification_utc_offset_minutes')
-          .eq('user_id', userId)
-          .maybeSingle())
+          .select('user_id, notification_timezone, notification_utc_offset_minutes')
+          .in('user_id', dueUserIds))
 
         if (
-          error &&
-          (String(error.message || '').includes('notification_timezone') ||
-            String(error.message || '').includes('notification_utc_offset_minutes'))
+          settingsErr &&
+          (String(settingsErr.message || '').includes('notification_timezone') ||
+            String(settingsErr.message || '').includes('notification_utc_offset_minutes'))
         ) {
-          ;({ data, error } = await supabase
+          ;({ data: settingsData, error: settingsErr } = await supabase
             .from('settings')
-            .select('notification_timezone')
-            .eq('user_id', userId)
-            .maybeSingle())
+            .select('user_id, notification_timezone')
+            .in('user_id', dueUserIds))
         }
 
-        if (error) {
-          console.error('Lecture timezone utilisateur :', error)
+        if (settingsErr) {
+          console.error('Lecture timezone utilisateurs (batch) :', settingsErr)
+        } else {
+          for (const row of settingsData ?? []) {
+            const uid = String(row.user_id || '')
+            if (!uid) continue
+            const offsetRaw = row.notification_utc_offset_minutes
+            const offset = offsetRaw == null ? null : Number(offsetRaw)
+            timeContextByUser.set(uid, {
+              timeZone: normalizeTimeZone(row.notification_timezone),
+              utcOffsetMinutes: Number.isFinite(offset as number) ? (offset as number) : null,
+            })
+          }
         }
-
-        const offsetRaw = data?.notification_utc_offset_minutes
-        const offset = offsetRaw == null ? null : Number(offsetRaw)
-        const ctx = {
-          timeZone: normalizeTimeZone(data?.notification_timezone),
-          utcOffsetMinutes: Number.isFinite(offset as number) ? (offset as number) : null,
-        }
-        timeContextByUser.set(userId, ctx)
-        return ctx
       }
 
-      async function getUserTimezone(userId: string | null | undefined): Promise<string> {
-        return (await getUserTimeContext(userId)).timeZone
+      function getUserTimeContext(uid: string | null | undefined) {
+        if (!uid) {
+          return { timeZone: DEFAULT_NOTIFICATION_TIMEZONE, utcOffsetMinutes: null as number | null }
+        }
+        return (
+          timeContextByUser.get(String(uid)) || {
+            timeZone: DEFAULT_NOTIFICATION_TIMEZONE,
+            utcOffsetMinutes: null as number | null,
+          }
+        )
       }
 
-      for (const notif of notificationsAEnvoyer ?? []) {
-        // Verrou optimiste : un seul cron (pg_cron ou client) envoie la notif
-        const { data: claimed, error: claimError } = await supabase
-          .from('scheduled_notifications')
-          .update({ sent: true })
-          .eq('id', notif.id)
-          .eq('sent', false)
-          .select('id')
-          .maybeSingle()
+      /** Cache daily_reminders (last_sent + replanif) — 1 SELECT pour tout le tick */
+      type DailyReminderCacheRow = {
+        id: string
+        user_id: string
+        last_sent_on?: string | null
+        reminder_time?: string | null
+        title?: string | null
+        body?: string | null
+      }
+      const dailyReminderById = new Map<string, DailyReminderCacheRow>()
 
-        if (claimError) {
-          console.error('Erreur claim notification :', claimError)
-          continue
+      if (dailyReminderIds.length) {
+        const { data: dailyRows, error: dailyErr } = await supabase
+          .from('daily_reminders')
+          .select('id, user_id, last_sent_on, reminder_time, title, body')
+          .in('id', dailyReminderIds)
+
+        if (dailyErr) {
+          console.error('Lecture daily_reminders (batch) :', dailyErr)
+        } else {
+          for (const row of dailyRows ?? []) {
+            dailyReminderById.set(String(row.id), row as DailyReminderCacheRow)
+          }
         }
-        if (!claimed) continue
+      }
 
+      for (const notif of dueList) {
+        // Déjà claimées atomiquement via RPC (ou claim unitaire en fallback)
         const scheduledMs = new Date(notif.scheduled_at).getTime()
         if (
           Number.isFinite(scheduledMs) &&
           Date.now() - scheduledMs > SCHEDULED_SEND_GRACE_MS
         ) {
-          console.log(
+          logDebug(
             'Notification expirée (pas de rattrapage) :',
             notif.id,
             notif.scheduled_at,
@@ -786,19 +1023,17 @@ Deno.serve(async (req) => {
 
         let skipDailyPush = false
         if (isDailyReminderKind(notif.kind) && notif.user_id && dailyReminderId) {
-          const ctxEarly = await getUserTimeContext(notif.user_id)
+          const ctxEarly = getUserTimeContext(notif.user_id)
           const userNowEarly = getNowInTimeZone(ctxEarly.timeZone, ctxEarly.utcOffsetMinutes)
-
-          const { data: currentRow } = await supabase
-            .from('daily_reminders')
-            .select('last_sent_on')
-            .eq('id', dailyReminderId)
-            .eq('user_id', notif.user_id)
-            .maybeSingle()
+          const cachedDaily = dailyReminderById.get(String(dailyReminderId))
+          const currentRow =
+            cachedDaily && String(cachedDaily.user_id) === String(notif.user_id)
+              ? cachedDaily
+              : null
 
           const already = String(currentRow?.last_sent_on ?? '').slice(0, 10)
           if (already === userNowEarly.dateISO) {
-            console.log('Rappel quotidien déjà envoyé aujourd’hui, skip :', dailyReminderId)
+            logDebug('Rappel quotidien déjà envoyé aujourd’hui, skip :', dailyReminderId)
             skipDailyPush = true
           } else {
             const prev = currentRow?.last_sent_on
@@ -815,6 +1050,9 @@ Deno.serve(async (req) => {
             const { data: claimedDay } = await dayQuery.select('id').maybeSingle()
             if (!claimedDay) {
               skipDailyPush = true
+            } else if (currentRow) {
+              // Garde le cache cohérent pour la suite du tick / replanif
+              currentRow.last_sent_on = userNowEarly.dateISO
             }
           }
         }
@@ -823,12 +1061,12 @@ Deno.serve(async (req) => {
           const category = mapNotificationKindToDeviceCategory(notif.kind)
           const targets = filterSubscriptionsByCategory(
             uniqueSubscriptionsByEndpoint(
-              subscriptionsForUser(subscriptions ?? [], notif.user_id),
+              subscriptionsForUser(subscriptions, notif.user_id),
             ),
             category,
           )
           if (!targets.length) {
-            console.log(
+            logDebug(
               'Aucune subscription (ou catégorie désactivée) pour',
               notif.user_id ?? 'inconnu',
               category ?? 'all',
@@ -844,7 +1082,7 @@ Deno.serve(async (req) => {
           for (const row of targets) {
             try {
               await webpush.sendNotification(row.subscription, pushPayload)
-              console.log('Notification planifiée envoyée :', notif.id)
+              logDebug('Notification planifiée envoyée :', notif.id)
             } catch (e) {
               console.error('Erreur envoi notification planifiée :', e)
             }
@@ -852,7 +1090,7 @@ Deno.serve(async (req) => {
         }
 
         if (isDailyReminderKind(notif.kind) && notif.user_id && dailyReminderId) {
-          const ctx = await getUserTimeContext(notif.user_id)
+          const ctx = getUserTimeContext(notif.user_id)
           const userNow = getNowInTimeZone(ctx.timeZone, ctx.utcOffsetMinutes)
 
           // Sans offset fiable, ne pas écraser la prochaine occurrence calculée par le client
@@ -860,13 +1098,11 @@ Deno.serve(async (req) => {
             continue
           }
 
-          const { data: rappelRow } = await supabase
-            .from('daily_reminders')
-            .select('reminder_time, title, body')
-            .eq('id', dailyReminderId)
-            .eq('user_id', notif.user_id)
-            .maybeSingle()
-
+          const rappelRowRaw = dailyReminderById.get(String(dailyReminderId))
+          const rappelRow =
+            rappelRowRaw && String(rappelRowRaw.user_id) === String(notif.user_id)
+              ? rappelRowRaw
+              : null
           const reminderTime = normalizeTimeHHmm(rappelRow?.reminder_time)
           const nextAt = zonedDateTimeToUtcISO(
             addDaysISO(userNow.dateISO, 1),
@@ -874,7 +1110,7 @@ Deno.serve(async (req) => {
             ctx.timeZone,
             ctx.utcOffsetMinutes,
           )
-          const nextKind = dailyReminderScheduledKind(dailyReminderId)
+          const nextKind = dailyReminderScheduledKind(String(dailyReminderId))
 
           await supabase
             .from('scheduled_notifications')
@@ -901,12 +1137,12 @@ Deno.serve(async (req) => {
         }
 
         if (notif.kind === 'reconfort' && notif.user_id) {
-          const userTz = await getUserTimezone(notif.user_id)
-          const ctx = await getUserTimeContext(notif.user_id)
-          const sentDate = ctx.utcOffsetMinutes != null
-            ? getNowFromUtcOffsetMinutes(ctx.utcOffsetMinutes)?.dateISO ??
-              formatDateInTimeZone(notif.scheduled_at, userTz)
-            : formatDateInTimeZone(notif.scheduled_at, userTz)
+          const ctx = getUserTimeContext(notif.user_id)
+          const sentDate =
+            ctx.utcOffsetMinutes != null
+              ? getNowFromUtcOffsetMinutes(ctx.utcOffsetMinutes)?.dateISO ??
+                formatDateInTimeZone(notif.scheduled_at, ctx.timeZone)
+              : formatDateInTimeZone(notif.scheduled_at, ctx.timeZone)
 
           if (notif.reconfort_id) {
             const { error: reconfortError } = await supabase
@@ -946,6 +1182,15 @@ Deno.serve(async (req) => {
             }
           }
         }
+      }
+      } // fin if (dueList.length)
+
+      // Filet « rappel promesses » : crée le pending avant l’heure du rappel.
+      // Pas à chaque minute idle (settings + todo_items) — le client replanifie aussi
+      // à l’ouverture / changement TODO / settings. Toutes les 15 min UTC suffit.
+      const PROMESSE_ENSURE_EVERY_UTC_MINUTES = 15
+      if (new Date().getUTCMinutes() % PROMESSE_ENSURE_EVERY_UTC_MINUTES === 0) {
+        await ensureTodoPromesseReminders()
       }
 
       // Les rappels quotidiens partent UNIQUEMENT via scheduled_notifications

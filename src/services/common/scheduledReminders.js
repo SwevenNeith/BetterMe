@@ -206,6 +206,8 @@ export const SENT_SCHEDULED_NOTIFICATION_RETENTION_DAYS = 30
 
 /**
  * Supprime les scheduled_notifications déjà envoyées depuis plus de 30 jours.
+ * Secours côté client (scoped user) ; la purge globale tourne via pg_cron quotidien
+ * (scripts/schedule-purge-sent-scheduled-notifications-daily.sql).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} [userId] si omis : toutes celles accessibles (RLS)
  */
