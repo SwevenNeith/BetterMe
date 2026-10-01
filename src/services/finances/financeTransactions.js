@@ -119,3 +119,23 @@ export async function deleteFinanceTransaction(supabase, userId, id) {
   const { error } = await supabase.from(TABLE).delete().eq('id', id).eq('user_id', userId)
   if (error) throw error
 }
+
+/**
+ * Supprime plusieurs transactions (ex. toutes les occurrences d’une dépense fixe).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string[]} ids
+ */
+export async function deleteFinanceTransactions(supabase, userId, ids) {
+  if (!userId) throw new Error('Utilisateur non connecté.')
+  const uniqueIds = [...new Set((ids ?? []).map((id) => String(id || '').trim()).filter(Boolean))]
+  if (!uniqueIds.length) return
+
+  const { error } = await supabase
+    .from(TABLE)
+    .delete()
+    .eq('user_id', userId)
+    .in('id', uniqueIds)
+
+  if (error) throw error
+}

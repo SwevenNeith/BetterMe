@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import TelevisionContinueCard from '../television/TelevisionContinueCard.vue'
+import RemoteImg from '../common/RemoteImg.vue'
 import { supabase } from '../../lib/supabase.js'
 import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../../composables/usePageDisplayLabel.js'
@@ -337,7 +338,7 @@ onUnmounted(() => {
         <li v-for="item in inProgressMovies" :key="item.id" class="dashboard-tv__movie-item">
           <RouterLink :to="openMovieRoute(item)" class="dashboard-tv__movie-card">
             <div class="dashboard-tv__cover-wrap">
-              <img
+              <RemoteImg
                 v-if="moviePoster(item)"
                 :src="moviePoster(item)"
                 :alt="`Affiche de ${item.title}`"

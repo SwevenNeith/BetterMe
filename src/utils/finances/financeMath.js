@@ -412,18 +412,39 @@ function monthIndex(year, month) {
   return year * 12 + month
 }
 
-function fixedTemplateKey(tx) {
-  const account = tx.account_id || 'cc'
-  const cat = String(tx.category || '')
+/** Clé de série pour une dépense fixe (compte + catégorie + détail). */
+export function fixedExpenseSeriesKey(tx) {
+  const account = tx?.account_id || 'cc'
+  const cat = String(tx?.category || '')
     .trim()
     .toLowerCase()
-  const detail = String(tx.detail || '')
+  const detail = String(tx?.detail || '')
     .trim()
     .toLowerCase()
   return `${account}|${cat}|${detail}`
 }
 
-function occurredOnForMonth(sourceDate, year, month) {
+function fixedTemplateKey(tx) {
+  return fixedExpenseSeriesKey(tx)
+}
+
+/**
+ * Autres mois de la même dépense fixe (même compte / catégorie / détail).
+ * @param {Array} transactions
+ * @param {object} templateTx
+ */
+export function findFixedExpenseSeries(transactions, templateTx) {
+  if (!templateTx || templateTx.tx_type !== TX_TYPES.FIXED) return []
+  const key = fixedExpenseSeriesKey(templateTx)
+  return (transactions ?? []).filter(
+    (tx) =>
+      tx?.id &&
+      tx.tx_type === TX_TYPES.FIXED &&
+      fixedExpenseSeriesKey(tx) === key,
+  )
+}
+
+export function occurredOnForMonth(sourceDate, year, month) {
   const day = Number(String(sourceDate || '').slice(8, 10)) || 1
   const lastDay = new Date(year, month, 0).getDate()
   const clamped = Math.min(Math.max(day, 1), lastDay)

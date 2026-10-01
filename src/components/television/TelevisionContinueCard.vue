@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { tmdbPosterUrl } from '../../services/television/tmdb.js'
 import { formatNextEpisodeLabel } from '../../utils/television/nextEpisode.js'
 import TelevisionFavoriteStar from './TelevisionFavoriteStar.vue'
+import RemoteImg from '../common/RemoteImg.vue'
 
 const props = defineProps({
   item: {
@@ -79,7 +80,7 @@ function onToggleFavorite() {
   <article class="tv-continue">
     <button type="button" class="tv-continue__main" @click="emit('open', item)">
       <div class="tv-continue__poster-wrap">
-        <img
+        <RemoteImg
           v-if="posterUrl"
           :src="posterUrl"
           :alt="title"

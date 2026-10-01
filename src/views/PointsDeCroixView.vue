@@ -15,6 +15,7 @@ import {
   saveCrossStitchPattern,
   saveStitchProgress,
 } from '../services/creation/crossStitchPatterns.js'
+import { fetchRemoteImageBlob } from '../services/creation/fetchRemoteImage.js'
 import { buildCrossStitchGrid } from '../utils/creation/buildCrossStitchGrid.js'
 import { prepareSampledColors } from '../utils/creation/prepareSampledColors.js'
 import {
@@ -398,21 +399,17 @@ function filenameFromUrl(url) {
 async function fileFromImageUrl(url) {
   const safeUrl = assertSourceImageUrl(url)
   try {
-    const response = await fetch(safeUrl, { mode: 'cors' })
-    if (!response.ok) {
-      throw new Error(`Téléchargement impossible (${response.status}).`)
-    }
-    const blob = await response.blob()
-    if (!blob.type.startsWith('image/') && blob.type !== 'application/octet-stream') {
-      throw new Error('Le lien ne pointe pas vers une image.')
-    }
-    const type = blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
+    const { blob, contentType } = await fetchRemoteImageBlob(safeUrl)
+    const type = contentType.startsWith('image/') ? contentType : 'image/jpeg'
     return new File([blob], filenameFromUrl(safeUrl), { type })
   } catch (err) {
     if (err?.message?.includes('URL') || err?.message?.includes('http')) throw err
     if (err?.message?.includes('Téléchargement') || err?.message?.includes('lien')) throw err
+    if (err?.message?.includes('CORS') || err?.message?.includes('fetch-image')) throw err
+    if (err?.message?.includes('trop lourde') || err?.message?.includes('Image')) throw err
     throw new Error(
-      'Impossible de récupérer l’image (CORS ou lien inaccessible). Essaie de la télécharger puis de la téléverser.',
+      err?.message ||
+        'Impossible de récupérer l’image (CORS ou lien inaccessible). Essaie de la télécharger puis de la téléverser.',
     )
   }
 }

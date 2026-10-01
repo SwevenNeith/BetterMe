@@ -19,6 +19,7 @@ import {
   TX_TYPE_LABELS,
   createFinanceTransaction,
   deleteFinanceTransaction,
+  deleteFinanceTransactions,
   listFinanceTransactions,
   updateFinanceTransaction,
 } from '../services/finances/financeTransactions.js'
@@ -31,9 +32,11 @@ import {
   donutSegments,
   endOfMonthIso,
   filterByAccount,
+  findFixedExpenseSeries,
   formatEuro,
   monthlyBalanceSeries,
   monthlyRecap,
+  occurredOnForMonth,
   periodAggregates,
   planFixedExpenseRolloversThrough,
   savingsAccountsOverview,
@@ -78,6 +81,7 @@ const formCardRef = ref(null)
 const openingBalanceDraft = ref('')
 const livretFormOpen = ref(false)
 const editingLivretId = ref(null)
+const ccOpeningFormOpen = ref(false)
 
 /** @type {import('vue').Ref<null | { kind: 'delete' | 'save-edit' | 'delete-livret', tx?: object, livret?: object }>} */
 const confirmDialog = ref(null)
@@ -377,8 +381,16 @@ const { clearDraft: clearFinanceDraft, restoreDraft: restoreFinanceDraft } = use
 )
 
 const confirmTitle = computed(() => {
-  if (confirmDialog.value?.kind === 'delete') return 'Supprimer ce montant ?'
-  if (confirmDialog.value?.kind === 'save-edit') return 'Enregistrer les modifications ?'
+  if (confirmDialog.value?.kind === 'delete') {
+    return confirmDialog.value?.seriesCount > 1
+      ? 'Supprimer cette dépense fixe ?'
+      : 'Supprimer ce montant ?'
+  }
+  if (confirmDialog.value?.kind === 'save-edit') {
+    return confirmDialog.value?.seriesCount > 1
+      ? 'Modifier cette dépense fixe ?'
+      : 'Enregistrer les modifications ?'
+  }
   if (confirmDialog.value?.kind === 'delete-livret') return 'Supprimer ce compte ?'
   return ''
 })
@@ -386,10 +398,17 @@ const confirmTitle = computed(() => {
 const confirmMessage = computed(() => {
   const tx = confirmDialog.value?.tx
   const livret = confirmDialog.value?.livret
+  const seriesCount = Number(confirmDialog.value?.seriesCount) || 1
   if (confirmDialog.value?.kind === 'delete' && tx) {
+    if (seriesCount > 1) {
+      return `« ${tx.category} » (${formatEuro(tx.amount)}) et ses ${seriesCount} occurrences (tous les mois) seront définitivement supprimées. Les autres montants restent inchangés.`
+    }
     return `« ${tx.category} » (${formatEuro(tx.amount)}) sera définitivement supprimé.`
   }
   if (confirmDialog.value?.kind === 'save-edit') {
+    if (seriesCount > 1) {
+      return `Les changements (montant, catégorie, détail, jour) seront appliqués aux ${seriesCount} occurrences de cette dépense fixe. Le statut « Réalisé » de chaque mois reste indépendant.`
+    }
     return 'Les changements seront appliqués à ce montant.'
   }
   if (confirmDialog.value?.kind === 'delete-livret' && livret) {
@@ -397,6 +416,12 @@ const confirmMessage = computed(() => {
   }
   return ''
 })
+
+function seriesForFixedTx(tx) {
+  if (!tx || tx.tx_type !== TX_TYPES.FIXED) return tx?.id ? [tx] : []
+  const series = findFixedExpenseSeries(transactions.value, tx)
+  return series.length ? series : [tx]
+}
 
 const isRollingFixed = ref(false)
 
@@ -437,7 +462,11 @@ async function loadAll() {
     transactions.value = txs
     categories.value = cats
     savingsAccounts.value = accounts
-    if (s && !s.balance_initialized) openingBalanceDraft.value = ''
+    if (s?.balance_initialized) {
+      openingBalanceDraft.value = String(Number(s.opening_balance) || 0).replace('.', ',')
+    } else {
+      openingBalanceDraft.value = ''
+    }
     await syncFixedExpenseRollovers()
   } catch (err) {
     console.error(err)
@@ -464,12 +493,29 @@ async function saveOpeningBalance() {
   isSavingBalance.value = true
   try {
     settings.value = await setOpeningBalance(supabase, userId.value, amount)
+    openingBalanceDraft.value = String(amount).replace('.', ',')
+    ccOpeningFormOpen.value = false
   } catch (err) {
     console.error(err)
     balanceError.value = err?.message || 'Enregistrement impossible.'
   } finally {
     isSavingBalance.value = false
   }
+}
+
+function openEditCcOpeningBalance() {
+  balanceError.value = ''
+  openingBalanceDraft.value = String(ccOpeningBalance.value).replace('.', ',')
+  ccOpeningFormOpen.value = true
+  livretFormOpen.value = false
+  formOpen.value = false
+}
+
+function closeCcOpeningForm() {
+  if (isSavingBalance.value) return
+  ccOpeningFormOpen.value = false
+  balanceError.value = ''
+  openingBalanceDraft.value = String(ccOpeningBalance.value).replace('.', ',')
 }
 
 function defaultOccurredOn() {
@@ -488,6 +534,8 @@ function openAddForm() {
   Object.assign(amountForm, emptyForm())
   amountForm.occurredOn = defaultOccurredOn()
   formOpen.value = true
+  ccOpeningFormOpen.value = false
+  livretFormOpen.value = false
   nextTick(() => {
     restoreFinanceDraft()
     formCardRef.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -546,7 +594,10 @@ function requestSubmit() {
   const amount = validateForm()
   if (amount == null) return
   if (isEditMode.value) {
-    confirmDialog.value = { kind: 'save-edit' }
+    const existing = transactions.value.find((t) => t.id === editingId.value)
+    const seriesCount =
+      existing?.tx_type === TX_TYPES.FIXED ? seriesForFixedTx(existing).length : 1
+    confirmDialog.value = { kind: 'save-edit', seriesCount }
     return
   }
   void persistAmount(amount)
@@ -554,7 +605,8 @@ function requestSubmit() {
 
 function requestDelete(tx) {
   if (!tx?.id) return
-  confirmDialog.value = { kind: 'delete', tx }
+  const seriesCount = tx.tx_type === TX_TYPES.FIXED ? seriesForFixedTx(tx).length : 1
+  confirmDialog.value = { kind: 'delete', tx, seriesCount }
 }
 
 function requestDeleteLivret(livret) {
@@ -597,15 +649,38 @@ async function persistAmount(amount) {
     const accountId = selectedAccountId.value
     if (editingId.value) {
       const existing = transactions.value.find((t) => t.id === editingId.value)
-      await updateFinanceTransaction(supabase, userId.value, editingId.value, {
-        occurredOn: amountForm.occurredOn,
-        txType: amountForm.txType,
-        category,
-        detail: amountForm.detail,
-        amount,
-        applied: existing?.applied ?? false,
-        accountId: existing?.account_id ?? accountId,
-      })
+      const series =
+        existing?.tx_type === TX_TYPES.FIXED ? seriesForFixedTx(existing) : existing ? [existing] : []
+
+      if (existing?.tx_type === TX_TYPES.FIXED && series.length > 1) {
+        for (const sibling of series) {
+          const y = Number(String(sibling.occurred_on || '').slice(0, 4))
+          const m = Number(String(sibling.occurred_on || '').slice(5, 7))
+          const occurredOn =
+            y && m
+              ? occurredOnForMonth(amountForm.occurredOn, y, m)
+              : amountForm.occurredOn
+          await updateFinanceTransaction(supabase, userId.value, sibling.id, {
+            occurredOn,
+            txType: amountForm.txType,
+            category,
+            detail: amountForm.detail,
+            amount,
+            // Conservé par mois : on ne touche pas à applied
+            accountId: existing.account_id ?? accountId,
+          })
+        }
+      } else {
+        await updateFinanceTransaction(supabase, userId.value, editingId.value, {
+          occurredOn: amountForm.occurredOn,
+          txType: amountForm.txType,
+          category,
+          detail: amountForm.detail,
+          amount,
+          applied: existing?.applied ?? false,
+          accountId: existing?.account_id ?? accountId,
+        })
+      }
     } else {
       await createFinanceTransaction(supabase, userId.value, {
         occurredOn: amountForm.occurredOn,
@@ -649,10 +724,19 @@ async function removeTransaction(tx) {
   if (!userId.value || !tx?.id || isDeletingId.value) return
   isDeletingId.value = tx.id
   try {
-    await deleteFinanceTransaction(supabase, userId.value, tx.id)
-    transactions.value = transactions.value.filter((t) => t.id !== tx.id)
+    if (tx.tx_type === TX_TYPES.FIXED) {
+      const series = seriesForFixedTx(tx)
+      const ids = series.map((entry) => entry.id).filter(Boolean)
+      await deleteFinanceTransactions(supabase, userId.value, ids)
+      const idSet = new Set(ids)
+      transactions.value = transactions.value.filter((t) => !idSet.has(t.id))
+      if (editingId.value && idSet.has(editingId.value)) closeAddForm()
+    } else {
+      await deleteFinanceTransaction(supabase, userId.value, tx.id)
+      transactions.value = transactions.value.filter((t) => t.id !== tx.id)
+      if (editingId.value === tx.id) closeAddForm()
+    }
     categories.value = await listFinanceCategories(supabase, userId.value)
-    if (editingId.value === tx.id) closeAddForm()
     confirmDialog.value = null
   } catch (err) {
     console.error(err)
@@ -667,6 +751,8 @@ function openAddLivretForm() {
   Object.assign(livretForm, emptyLivretForm())
   livretError.value = ''
   livretFormOpen.value = true
+  ccOpeningFormOpen.value = false
+  formOpen.value = false
 }
 
 function openEditLivretForm(livret) {
@@ -678,6 +764,8 @@ function openEditLivretForm(livret) {
   })
   livretError.value = ''
   livretFormOpen.value = true
+  ccOpeningFormOpen.value = false
+  formOpen.value = false
 }
 
 function closeLivretForm() {
@@ -1272,6 +1360,14 @@ onMounted(async () => {
               <button type="button" class="btn-secondary" @click="openAddLivretForm">
                 Ajouter un compte
               </button>
+              <button
+                v-if="isCcTab"
+                type="button"
+                class="btn-link"
+                @click="openEditCcOpeningBalance"
+              >
+                Solde de départ
+              </button>
               <template v-if="!isCcTab">
                 <button
                   type="button"
@@ -1407,6 +1503,37 @@ onMounted(async () => {
                 <button type="button" class="btn-ghost" @click="closeAddForm">Annuler</button>
                 <button type="submit" class="btn-primary" :disabled="isSaving">
                   {{ isSaving ? 'Enregistrement…' : isEditMode ? 'Enregistrer' : 'Ajouter' }}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div v-if="ccOpeningFormOpen && isCcTab" class="form-card account-inline-form">
+            <div class="form-card-head">
+              <h3 class="form-card-title">Solde de départ du compte courant</h3>
+              <button type="button" class="btn-ghost" @click="closeCcOpeningForm">Fermer</button>
+            </div>
+            <p class="form-hint">
+              Corrige uniquement le solde de départ. Tes montants déjà enregistrés sont conservés ;
+              le solde affiché sera recalculé à partir de cette base.
+            </p>
+            <form class="amount-form" @submit.prevent="saveOpeningBalance">
+              <label class="field">
+                <span>Solde de départ (€)</span>
+                <input
+                  v-model="openingBalanceDraft"
+                  type="text"
+                  inputmode="decimal"
+                  placeholder="ex. 1520,50"
+                  required
+                  autocomplete="off"
+                />
+              </label>
+              <p v-if="balanceError" class="field-error">{{ balanceError }}</p>
+              <div class="form-actions">
+                <button type="button" class="btn-ghost" @click="closeCcOpeningForm">Annuler</button>
+                <button type="submit" class="btn-primary" :disabled="isSavingBalance">
+                  {{ isSavingBalance ? 'Enregistrement…' : 'Enregistrer' }}
                 </button>
               </div>
             </form>

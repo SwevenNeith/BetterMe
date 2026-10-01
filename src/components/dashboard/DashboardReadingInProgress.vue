@@ -12,6 +12,7 @@ import {
 } from '../../services/settings/pageVisibility.js'
 import { READING_COLLECTION_EN_COURS } from '../../services/lecture/readingCollections.js'
 import { listReadingBooksWithCovers } from '../../services/lecture/readingBooks.js'
+import RemoteImg from '../common/RemoteImg.vue'
 
 const BOOKS_PER_PAGE = 3
 
@@ -59,6 +60,10 @@ watch(inProgressBooks, () => {
 
 function goToPage(index) {
   currentPage.value = Math.min(Math.max(index, 0), totalPages.value - 1)
+}
+
+function bookCoverFallbacks(book) {
+  return [book?.open_library_cover_url, book?.cover_image_url].filter(Boolean)
 }
 
 async function loadPageVisibilityState() {
@@ -151,9 +156,10 @@ onUnmounted(() => {
             class="dashboard-reading__card"
           >
             <div class="dashboard-reading__cover-wrap">
-              <img
-                v-if="book.coverUrl"
+              <RemoteImg
+                v-if="book.coverUrl || book.open_library_cover_url || book.cover_image_url"
                 :src="book.coverUrl"
+                :fallbacks="bookCoverFallbacks(book)"
                 :alt="`Couverture de ${book.title}`"
                 class="dashboard-reading__cover"
               />

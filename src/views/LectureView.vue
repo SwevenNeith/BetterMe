@@ -701,6 +701,7 @@ watch(booksPerPage, () => {
                     :src="book.coverUrl"
                     :alt="`Couverture de ${book.title}`"
                     class="reading-book-cover"
+                    referrerpolicy="no-referrer"
                   />
                   <div
                     v-else
@@ -730,6 +731,7 @@ watch(booksPerPage, () => {
                     :src="book.coverUrl"
                     :alt="`Couverture de ${book.title}`"
                     class="reading-book-cover"
+                    referrerpolicy="no-referrer"
                   />
                   <div
                     v-else

@@ -195,6 +195,15 @@ function closeEdit() {
   pickRandomDisplayImage()
 }
 
+function onDisplayImageError() {
+  // URL signée / réseau KO : retire l’image cassée et en tente une autre.
+  const brokenId = displayImage.value?.id
+  if (brokenId) {
+    images.value = images.value.filter((img) => img.id !== brokenId)
+  }
+  pickRandomDisplayImage()
+}
+
 watch(
   () => props.userId,
   () => {
@@ -254,7 +263,7 @@ onMounted(() => {
               :disabled="isSaving"
               @click="toggleSelection(img.id)"
             >
-              <img :src="img.url" :alt="img.nom" class="comfort-images__thumb" loading="lazy" />
+              <img :src="img.url" :alt="img.nom" class="comfort-images__thumb" loading="lazy" referrerpolicy="no-referrer" />
               <span v-if="isSelected(img.id)" class="comfort-images__check" aria-hidden="true"
                 >✓</span
               >
@@ -338,6 +347,8 @@ onMounted(() => {
               :alt="displayImage.nom"
               class="comfort-images__hero"
               loading="eager"
+              referrerpolicy="no-referrer"
+              @error="onDisplayImageError"
             />
           </button>
           <button type="button" class="comfort-images__manage-link" @click="openEdit">Gérer</button>

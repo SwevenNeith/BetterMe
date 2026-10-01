@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { betterMeProtectImagesPlugin } from './vite.protectImagesPlugin.js'
 
 /**
  * GitHub Pages : 404.html redirige uniquement les routes SPA (pas les assets manquants).
@@ -70,6 +71,7 @@ export default defineConfig({
         },
       },
     }),
+    betterMeProtectImagesPlugin(),
     ghPagesSpaFallback(),
   ],
   base: '/BetterMe/',

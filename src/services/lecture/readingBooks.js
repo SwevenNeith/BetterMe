@@ -184,7 +184,8 @@ export async function getReadingCoverSignedUrl(supabase, storagePath) {
 export async function resolveReadingCoverUrl(supabase, book) {
   if (book?.cover_storage_path) {
     try {
-      return await getReadingCoverSignedUrl(supabase, book.cover_storage_path)
+      const signed = await getReadingCoverSignedUrl(supabase, book.cover_storage_path)
+      if (signed) return signed
     } catch {
       /* fallback ci-dessous */
     }
