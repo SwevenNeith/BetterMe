@@ -3,6 +3,7 @@ import { rescheduleDailyReminderPushes } from './dailyReminders.js'
 import { rescheduleTodoPromesseReminder } from '../todo/todoPromesseNotifications.js'
 import { rescheduleAllTodoItemReminders } from '../todo/todoItemReminders.js'
 import { maintainRollingTimetableReminders } from './rollingTimetableReminders.js'
+import { maintainAnniversaryReminders } from '../timetable/anniversaryReminders.js'
 
 /**
  * Réaligne toutes les notifications horaires sur l’heure locale de l’appareil
@@ -20,6 +21,7 @@ export async function realignAllDeviceLocalNotifications(supabase, userId) {
     rescheduleTodoPromesseReminder(userId),
     rescheduleAllTodoItemReminders(userId),
     maintainRollingTimetableReminders(supabase, userId),
+    maintainAnniversaryReminders(supabase, userId),
   ])
 
   for (const result of results) {

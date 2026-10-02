@@ -26,7 +26,8 @@ export const DEVICE_NOTIFICATION_CATEGORIES = [
   {
     id: DEVICE_NOTIFICATION_CATEGORY_IDS.ACTIVITE,
     label: 'Emploi du temps',
-    description: 'Rappels avant une activité ou un événement EDT.',
+    description:
+      'Rappels avant une activité, anniversaires (9h le jour J) et marqueur couple mensuel.',
   },
   {
     id: DEVICE_NOTIFICATION_CATEGORY_IDS.TIMER,
@@ -95,7 +96,13 @@ export function mapNotificationKindToDeviceCategory(kind) {
     return DEVICE_NOTIFICATION_CATEGORY_IDS.DAILY
   }
   if (raw === 'ponctuel') return DEVICE_NOTIFICATION_CATEGORY_IDS.PONCTUEL
-  if (raw === 'activite') return DEVICE_NOTIFICATION_CATEGORY_IDS.ACTIVITE
+  if (
+    raw === 'activite' ||
+    raw.startsWith('birthday_reminder:') ||
+    raw.startsWith('couple_anniversary_reminder:')
+  ) {
+    return DEVICE_NOTIFICATION_CATEGORY_IDS.ACTIVITE
+  }
   if (raw === 'timer' || raw === 'timer_start') {
     return DEVICE_NOTIFICATION_CATEGORY_IDS.TIMER
   }

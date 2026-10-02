@@ -41,6 +41,20 @@ import {
 import { isRecurringTodoFrequency } from '../utils/todo/todoPlanningDates.js'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
+import {
+  loadCoupleAnniversarySettings,
+} from '../services/timetable/coupleAnniversarySettings.js'
+import { maintainAnniversaryReminders } from '../services/timetable/anniversaryReminders.js'
+import {
+  TIMETABLE_EVENT_KIND,
+  birthdayOccursOn,
+  coupleMonthlyOccursOn,
+  computeAgeYears,
+  computeAgeMonths,
+  formatAgeYearsLabel,
+  formatAgeMonthsLabel,
+  isFullYearFromMonths,
+} from '../utils/timetable/anniversaryMath.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.TIMETABLE, undefined, {
   setDocumentTitle: true,
@@ -61,6 +75,8 @@ const newEventCategory = ref('Travail')
 const newEventDay = ref(new Date().toISOString().split('T')[0])
 const newEventDateEnd = ref('')
 const newEventAllDay = ref(false)
+const newEventIsBirthday = ref(false)
+const newEventOriginDate = ref('')
 const newEventReminderEnabled = ref(false)
 const newEventReminderHours = ref(0)
 const newEventReminderMinutes = ref(15)
@@ -73,6 +89,10 @@ const eventFormError = ref('')
 const todoLinkedForm = reactive(createDefaultTodoLinkedForm())
 const todoPromesseLimits = ref({ perDay: 3, perWeek: 3 })
 const userId = ref(null)
+const coupleAnniversary = ref({
+  couple_anniversary_enabled: false,
+  couple_anniversary_start_date: '',
+})
 
 const eventDraftKey = computed(() => {
   if (!userId.value || !isModalOpen.value) return null
@@ -90,6 +110,8 @@ const { clearDraft: clearEventDraft, restoreDraft: restoreEventDraft } = useForm
     day: newEventDay.value,
     dateEnd: newEventDateEnd.value,
     allDay: newEventAllDay.value,
+    isBirthday: newEventIsBirthday.value,
+    originDate: newEventOriginDate.value,
     reminderEnabled: newEventReminderEnabled.value,
     reminderHours: newEventReminderHours.value,
     reminderMinutes: newEventReminderMinutes.value,
@@ -109,6 +131,8 @@ const { clearDraft: clearEventDraft, restoreDraft: restoreEventDraft } = useForm
     newEventDay.value = state.day ?? newEventDay.value
     newEventDateEnd.value = state.dateEnd ?? ''
     newEventAllDay.value = Boolean(state.allDay)
+    newEventIsBirthday.value = Boolean(state.isBirthday)
+    newEventOriginDate.value = state.originDate ?? ''
     newEventReminderEnabled.value = Boolean(state.reminderEnabled)
     newEventReminderHours.value = Number(state.reminderHours) || 0
     newEventReminderMinutes.value = Number(state.reminderMinutes) || 0
@@ -241,6 +265,8 @@ function resetEventForm() {
   newEventCategory.value = 'Travail'
   newEventDateEnd.value = ''
   newEventAllDay.value = false
+  newEventIsBirthday.value = false
+  newEventOriginDate.value = ''
   eventFormError.value = ''
   resetReminderFields()
   resetTimerFields()
@@ -264,8 +290,18 @@ async function openEventForEdit(event) {
   newEventDateEnd.value =
     original.date_end && original.date_end !== original.date_start ? original.date_end : ''
   newEventAllDay.value = Boolean(original.all_day)
+  newEventIsBirthday.value = original.event_kind === TIMETABLE_EVENT_KIND.BIRTHDAY
+  newEventOriginDate.value = original.origin_date
+    ? String(original.origin_date).slice(0, 10)
+    : newEventIsBirthday.value
+      ? String(original.date_start || '').slice(0, 10)
+      : ''
+  if (newEventIsBirthday.value) {
+    newEventAllDay.value = true
+    newEventDateEnd.value = ''
+  }
 
-  if (!original.all_day) {
+  if (!original.all_day && !newEventIsBirthday.value) {
     const { start, end } = parseEventTimeRange(original.time)
     newEventStartTime.value = start
     newEventEndTime.value = end
@@ -597,18 +633,49 @@ const fetchWeekEvents = async (gen) => {
     const mondayStr = formatDateToLocalISO(weekDays.value[0].date)
     const sundayStr = formatDateToLocalISO(weekDays.value[6].date)
 
-    const { data, error } = await supabase
+    const weekQuery = supabase
       .from('timetable_events')
       .select('*')
       .eq('user_id', user.id)
       .lte('date_start', sundayStr)
-      // Chevauchement avec la semaine : début avant sa fin et fin après son début.
-      // La première branche conserve les événements sans date_end qui commencent cette semaine.
       .or(`date_start.gte.${mondayStr},date_end.gte.${mondayStr}`)
 
+    // Anniversaires : chargés à part (date_start = année de naissance, hors semaine)
+    let birthdayQuery = supabase
+      .from('timetable_events')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('event_kind', TIMETABLE_EVENT_KIND.BIRTHDAY)
+
+    const [{ data, error }, birthdayResult] = await Promise.all([
+      weekQuery,
+      birthdayQuery,
+    ])
+
     if (error) throw error
+
+    let birthdayRows = birthdayResult.data || []
+    if (
+      birthdayResult.error &&
+      (String(birthdayResult.error.message || '').includes('event_kind') ||
+        birthdayResult.error.code === 'PGRST204')
+    ) {
+      birthdayRows = []
+    } else if (birthdayResult.error) {
+      throw birthdayResult.error
+    }
+
+    const weekRows = (data || []).filter(
+      (e) => e.event_kind !== TIMETABLE_EVENT_KIND.BIRTHDAY,
+    )
+    // Templates birthday + événements de la semaine (sans doublons d’id)
+    const byId = new Map()
+    for (const row of [...weekRows, ...birthdayRows]) {
+      if (row?.id) byId.set(row.id, row)
+    }
+
     if (gen === timetableLoadGen) {
-      userEvents.value = data || []
+      userEvents.value = [...byId.values()]
     }
   } catch (err) {
     console.error('Error fetching events:', err)
@@ -663,6 +730,7 @@ onMounted(() => {
   const cached = timetableCache.applyToView({ userEvents, userCategories, hobbyQuickPicks })
   if (cached) isLoading.value = false
   fetchEvents({ silent: cached })
+  void loadCoupleAnniversaryState()
 })
 
 // Timer : recalcule la fin ; sinon on ne touche plus aux horaires pendant la saisie
@@ -679,6 +747,33 @@ watch(newEventEndTime, () => {
 watch([newEventDay, newEventDateEnd, newEventAllDay], () => {
   eventFormError.value = ''
 })
+
+watch(newEventIsBirthday, (enabled) => {
+  eventFormError.value = ''
+  if (enabled) {
+    newEventAllDay.value = true
+    newEventDateEnd.value = ''
+    resetReminderFields()
+    resetTimerFields()
+    addToTodo.value = false
+    if (!newEventOriginDate.value) {
+      newEventOriginDate.value = newEventDay.value
+    }
+  }
+})
+
+async function loadCoupleAnniversaryState() {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+    userId.value = user.id
+    coupleAnniversary.value = await loadCoupleAnniversarySettings(user.id)
+  } catch (err) {
+    console.error('Chargement anniversaire couple :', err)
+  }
+}
 
 // Navigation handlers
 const nextWeek = () => {
@@ -709,6 +804,7 @@ const getEventsForDay = (dayIdx) => {
 
   for (const event of userEvents.value) {
     if (event.all_day) continue // All day events are handled separately
+    if (event.event_kind === TIMETABLE_EVENT_KIND.BIRTHDAY) continue
 
     const startStr = event.date_start
     if (!startStr) continue
@@ -746,28 +842,92 @@ const getEventsForDay = (dayIdx) => {
 }
 
 const hasAllDayEvents = computed(() => {
-  return userEvents.value.some(e => e.all_day)
+  if (!weekDays.value?.length) return false
+  for (let i = 0; i < weekDays.value.length; i++) {
+    if (getAllDayEventsForDay(i).length) return true
+  }
+  return false
 })
+
+function getBirthdayOrigin(event) {
+  return String(event?.origin_date || event?.date_start || '').slice(0, 10)
+}
+
+function buildBirthdayDisplayEvent(event, dayISO) {
+  const origin = getBirthdayOrigin(event)
+  const years = computeAgeYears(origin, dayISO)
+  const ageLabel = formatAgeYearsLabel(years)
+  const title = `${event.title} (${ageLabel})`
+  return {
+    ...event,
+    date_start: dayISO,
+    date_end: dayISO,
+    all_day: true,
+    _birthdayOccurrence: true,
+    _displayTitle: title,
+    _ageLabel: ageLabel,
+  }
+}
+
+function buildCoupleMarkerForDay(dayISO) {
+  const settings = coupleAnniversary.value
+  if (!settings.couple_anniversary_enabled || !settings.couple_anniversary_start_date) {
+    return null
+  }
+  const start = settings.couple_anniversary_start_date
+  if (!coupleMonthlyOccursOn(start, dayISO)) return null
+
+  const months = computeAgeMonths(start, dayISO)
+  const ageLabel = formatAgeMonthsLabel(months)
+  const fullYear = isFullYearFromMonths(months)
+  return {
+    id: `couple-anniversary-${dayISO}`,
+    title: fullYear ? `💕 Couple — ${ageLabel}` : `Couple — ${ageLabel}`,
+    _displayTitle: fullYear ? `💕 Couple — ${ageLabel}` : `Couple — ${ageLabel}`,
+    detail: fullYear ? 'Anniversaire pile !' : '',
+    all_day: true,
+    date_start: dayISO,
+    date_end: dayISO,
+    category: null,
+    _coupleMarker: true,
+    _coupleHighlight: fullYear,
+    _ageLabel: ageLabel,
+  }
+}
 
 const getAllDayEventsForDay = (dayIdx) => {
   if (!weekDays.value || !weekDays.value[dayIdx]) return []
   const targetDate = weekDays.value[dayIdx].date
-  const targetTime = new Date(formatDateToLocalISO(targetDate) + 'T00:00:00').getTime()
+  const dayISO = formatDateToLocalISO(targetDate)
+  const targetTime = new Date(`${dayISO}T00:00:00`).getTime()
 
-  return userEvents.value.filter(e => {
+  const regular = userEvents.value.filter((e) => {
     if (!e.all_day) return false
+    if (e.event_kind === TIMETABLE_EVENT_KIND.BIRTHDAY) return false
 
     const startStr = e.date_start
     if (!startStr) return false
-    const startD = new Date(startStr + 'T00:00:00')
+    const startD = new Date(`${startStr}T00:00:00`)
     const startTime = startD.getTime()
 
     const endStr = e.date_end || e.date_start
-    const endD = new Date(endStr + 'T23:59:59')
+    const endD = new Date(`${endStr}T23:59:59`)
     const endTime = endD.getTime()
 
     return targetTime >= startTime && targetTime <= endTime
   })
+
+  const birthdays = userEvents.value
+    .filter((e) => e.event_kind === TIMETABLE_EVENT_KIND.BIRTHDAY)
+    .filter((e) => birthdayOccursOn(getBirthdayOrigin(e), dayISO))
+    .map((e) => buildBirthdayDisplayEvent(e, dayISO))
+
+  const couple = buildCoupleMarkerForDay(dayISO)
+  return couple ? [...regular, ...birthdays, couple] : [...regular, ...birthdays]
+}
+
+function eventDisplayTitle(event) {
+  return event?._displayTitle || event?.title || ''
 }
 
 // Add event handler to Supabase (with auto-creating missing categories)
@@ -775,8 +935,23 @@ const handleAddEvent = async () => {
   if (!newEventTitle.value.trim() || isSavingEvent.value) return
 
   // Validate dates
-  const startDStr = newEventDay.value
-  const endDStr = newEventDateEnd.value
+  const isBirthday = newEventIsBirthday.value
+  const wasBirthday = Boolean(
+    editingEventId.value &&
+      userEvents.value.find((ev) => ev.id === editingEventId.value)?.event_kind ===
+        TIMETABLE_EVENT_KIND.BIRTHDAY,
+  )
+  const originDate = String(newEventOriginDate.value || '').slice(0, 10)
+  const startDStr = isBirthday ? originDate || newEventDay.value : newEventDay.value
+  const endDStr = isBirthday ? '' : newEventDateEnd.value
+
+  if (isBirthday) {
+    if (!originDate) {
+      eventFormError.value = 'Indique la date de naissance / de départ pour l’anniversaire.'
+      return
+    }
+    newEventAllDay.value = true
+  }
 
   if (endDStr) {
     const startD = new Date(startDStr + 'T00:00:00')
@@ -787,11 +962,11 @@ const handleAddEvent = async () => {
     }
   }
 
-  const timerActive = newEventTimerEnabled.value && !newEventAllDay.value
+  const timerActive = newEventTimerEnabled.value && !newEventAllDay.value && !isBirthday
   const timerMinutes = timerActive ? getTimerDurationMinutes() : null
 
   // Validate hours if not an all-day event
-  if (!newEventAllDay.value) {
+  if (!newEventAllDay.value && !isBirthday) {
     if (!newEventStartTime.value || (!timerActive && !newEventEndTime.value)) {
       eventFormError.value = 'Indique un créneau horaire complet (début et fin).'
       return
@@ -832,14 +1007,14 @@ const handleAddEvent = async () => {
 
   eventFormError.value = ''
 
-  if (newEventReminderEnabled.value && !newEventAllDay.value) {
+  if (newEventReminderEnabled.value && !newEventAllDay.value && !isBirthday) {
     if (getReminderMinutesBefore() < 0) {
       eventFormError.value = 'Indique un délai de rappel valide ou désactive le rappel.'
       return
     }
   }
 
-  if (addToTodo.value && !editingEventHasTodoLink.value) {
+  if (addToTodo.value && !editingEventHasTodoLink.value && !isBirthday) {
     const todoPayload = buildTodoPayloadFromTimetable(
       {
         title: newEventTitle.value,
@@ -949,13 +1124,14 @@ const handleAddEvent = async () => {
     }
 
     const reminderActive =
-      newEventReminderEnabled.value && !newEventAllDay.value
+      !isBirthday && newEventReminderEnabled.value && !newEventAllDay.value
     const reminderMinutes = reminderActive ? getReminderMinutesBefore() : null
 
     if (
       !editingEventId.value &&
       addToTodo.value &&
-      !editingEventHasTodoLink.value
+      !editingEventHasTodoLink.value &&
+      !isBirthday
     ) {
       const todoPayload = buildTodoPayloadFromTimetable(
         {
@@ -1011,14 +1187,19 @@ const handleAddEvent = async () => {
       title: newEventTitle.value,
       date_start: startDStr,
       date_end: endDStr || null,
-      all_day: newEventAllDay.value,
-      time: newEventAllDay.value ? null : `${newEventStartTime.value} - ${newEventEndTime.value}`,
+      all_day: isBirthday ? true : newEventAllDay.value,
+      time:
+        isBirthday || newEventAllDay.value
+          ? null
+          : `${newEventStartTime.value} - ${newEventEndTime.value}`,
       category: existingCat ? existingCat.id : null,
       detail: newEventDetail.value,
       reminder: reminderActive,
       reminder_time: reminderActive ? reminderMinutes : null,
       timer: timerActive,
       timer_duration: timerActive ? timerMinutes : null,
+      event_kind: isBirthday ? TIMETABLE_EVENT_KIND.BIRTHDAY : null,
+      origin_date: isBirthday ? originDate : null,
     }
 
     let savedEvent
@@ -1034,7 +1215,17 @@ const handleAddEvent = async () => {
         .select()
         .single()
 
-      if (error) throw error
+      if (error) {
+        if (
+          String(error.message || '').includes('event_kind') ||
+          String(error.message || '').includes('origin_date')
+        ) {
+          throw new Error(
+            'Colonnes anniversaire absentes. Exécute scripts/migrate-timetable-birthday-events.sql dans Supabase.',
+          )
+        }
+        throw error
+      }
       savedEvent = data
       userEvents.value = userEvents.value.map((ev) => (ev.id === savedEvent.id ? savedEvent : ev))
     } else {
@@ -1043,7 +1234,17 @@ const handleAddEvent = async () => {
         .insert({ user_id: user.id, ...eventPayload })
         .select()
 
-      if (error) throw error
+      if (error) {
+        if (
+          String(error.message || '').includes('event_kind') ||
+          String(error.message || '').includes('origin_date')
+        ) {
+          throw new Error(
+            'Colonnes anniversaire absentes. Exécute scripts/migrate-timetable-birthday-events.sql dans Supabase.',
+          )
+        }
+        throw error
+      }
       savedEvent = data?.[0]
       if (savedEvent) {
         userEvents.value.push(savedEvent)
@@ -1055,7 +1256,7 @@ const handleAddEvent = async () => {
     }
 
     // Lien TODO d’abord : une seule source de rappel (EDT), jamais de rappel TODO en parallèle
-    if (addToTodo.value && !editingEventHasTodoLink.value) {
+    if (addToTodo.value && !editingEventHasTodoLink.value && !isBirthday) {
       const todoPayload = buildTodoPayloadFromTimetable(
         {
           title: newEventTitle.value,
@@ -1106,6 +1307,12 @@ const handleAddEvent = async () => {
         durationMinutes: timerMinutes,
         eventId: savedEvent.id,
         body: `${newEventTitle.value} : le timer est terminé !`,
+      })
+    }
+
+    if (isBirthday || wasBirthday) {
+      void maintainAnniversaryReminders(supabase, user.id).catch((err) => {
+        console.error('maintainAnniversaryReminders:', err)
       })
     }
 
@@ -1180,6 +1387,12 @@ async function confirmEventDelete(alsoDeleteLinked = false) {
     } else {
       await deleteTimetableEvent(supabase, user.id, event.id)
       userEvents.value = userEvents.value.filter((entry) => entry.id !== event.id)
+    }
+
+    if (event.event_kind === TIMETABLE_EVENT_KIND.BIRTHDAY) {
+      void maintainAnniversaryReminders(supabase, user.id).catch((err) => {
+        console.error('maintainAnniversaryReminders:', err)
+      })
     }
 
     pendingDeleteEvent.value = null
@@ -1668,20 +1881,31 @@ const getPositionedEventsForDay = (dayIdx) => {
             >
               <div
                 v-for="event in getAllDayEventsForDay(idx)"
-                :key="event.id"
+                :key="event.id + (event._birthdayOccurrence ? `-${event.date_start}` : '')"
                 class="all-day-event-bar"
-                :style="getCategoryStyle(event.category)"
+                :class="{
+                  'all-day-event-bar--couple': event._coupleMarker,
+                  'all-day-event-bar--couple-highlight': event._coupleHighlight,
+                  'all-day-event-bar--birthday': event.event_kind === 'birthday' || event._birthdayOccurrence,
+                }"
+                :style="event._coupleMarker ? undefined : getCategoryStyle(event.category)"
                 role="button"
                 tabindex="0"
-                :title="`Modifier « ${event.title} »`"
-                @click="openEventForEdit(event)"
-                @keydown.enter="openEventForEdit(event)"
+                :title="event._coupleMarker ? eventDisplayTitle(event) : `Modifier « ${event.title} »`"
+                @click="event._coupleMarker ? undefined : openEventForEdit(event)"
+                @keydown.enter="event._coupleMarker ? undefined : openEventForEdit(event)"
               >
-                <span class="all-day-event-icon">{{ getCategoryIcon(event.category) }}</span>
-                <span class="all-day-event-title" :title="event.title + (event.detail ? ' - ' + event.detail : '')">
-                  {{ event.title }}
+                <span class="all-day-event-icon">{{
+                  event._coupleMarker ? '💍' : getCategoryIcon(event.category)
+                }}</span>
+                <span
+                  class="all-day-event-title"
+                  :title="eventDisplayTitle(event) + (event.detail ? ' - ' + event.detail : '')"
+                >
+                  {{ eventDisplayTitle(event) }}
                 </span>
                 <button
+                  v-if="!event._coupleMarker"
                   class="all-day-delete-btn"
                   @click.stop="requestDeleteEvent(event.id)"
                   title="Supprimer"
@@ -1792,20 +2016,31 @@ const getPositionedEventsForDay = (dayIdx) => {
         <div class="mobile-all-day-list" v-if="getAllDayEventsForDay(selectedDayIndex).length > 0">
           <div
             v-for="event in getAllDayEventsForDay(selectedDayIndex)"
-            :key="event.id"
+            :key="event.id + (event._birthdayOccurrence ? `-${event.date_start}` : '')"
             class="all-day-event-bar"
-            :style="getCategoryStyle(event.category)"
+            :class="{
+              'all-day-event-bar--couple': event._coupleMarker,
+              'all-day-event-bar--couple-highlight': event._coupleHighlight,
+              'all-day-event-bar--birthday': event.event_kind === 'birthday' || event._birthdayOccurrence,
+            }"
+            :style="event._coupleMarker ? undefined : getCategoryStyle(event.category)"
             role="button"
             tabindex="0"
-            :title="`Modifier « ${event.title} »`"
-            @click="openEventForEdit(event)"
-            @keydown.enter="openEventForEdit(event)"
+            :title="event._coupleMarker ? eventDisplayTitle(event) : `Modifier « ${event.title} »`"
+            @click="event._coupleMarker ? undefined : openEventForEdit(event)"
+            @keydown.enter="event._coupleMarker ? undefined : openEventForEdit(event)"
           >
-            <span class="all-day-event-icon">{{ getCategoryIcon(event.category) }}</span>
-            <span class="all-day-event-title" :title="event.title + (event.detail ? ' - ' + event.detail : '')">
-              {{ event.title }}
+            <span class="all-day-event-icon">{{
+              event._coupleMarker ? '💍' : getCategoryIcon(event.category)
+            }}</span>
+            <span
+              class="all-day-event-title"
+              :title="eventDisplayTitle(event) + (event.detail ? ' - ' + event.detail : '')"
+            >
+              {{ eventDisplayTitle(event) }}
             </span>
             <button
+              v-if="!event._coupleMarker"
               class="all-day-delete-btn"
               @click.stop="requestDeleteEvent(event.id)"
               title="Supprimer"
@@ -1932,7 +2167,7 @@ const getPositionedEventsForDay = (dayIdx) => {
             ></textarea>
           </div>
 
-          <div class="form-row">
+          <div class="form-row" v-if="!newEventIsBirthday">
             <div class="form-group">
               <label for="event-day">Date de début</label>
               <input
@@ -1958,6 +2193,31 @@ const getPositionedEventsForDay = (dayIdx) => {
           <div class="form-group all-day-toggle-group">
             <label class="all-day-toggle-label">
               <input
+                v-model="newEventIsBirthday"
+                type="checkbox"
+                class="all-day-checkbox"
+              />
+              <span class="all-day-toggle-custom"></span>
+              <span>Anniversaire (chaque année) 🎂</span>
+            </label>
+          </div>
+
+          <div v-if="newEventIsBirthday" class="form-group">
+            <label for="event-origin-date">Date de naissance / départ</label>
+            <input
+              v-model="newEventOriginDate"
+              type="date"
+              id="event-origin-date"
+              required
+            />
+            <p class="form-hint">
+              L’âge est calculé et affiché chaque année à cette date (catégorie au choix).
+            </p>
+          </div>
+
+          <div class="form-group all-day-toggle-group" v-if="!newEventIsBirthday">
+            <label class="all-day-toggle-label">
+              <input
                 v-model="newEventAllDay"
                 type="checkbox"
                 class="all-day-checkbox"
@@ -1967,7 +2227,7 @@ const getPositionedEventsForDay = (dayIdx) => {
             </label>
           </div>
 
-          <div class="form-group" v-if="!newEventAllDay">
+          <div class="form-group" v-if="!newEventAllDay && !newEventIsBirthday">
             <label>Créneau horaire</label>
             <div class="time-range-picker" :class="{ 'time-range-picker--timer': newEventTimerEnabled }">
               <input
@@ -1986,7 +2246,7 @@ const getPositionedEventsForDay = (dayIdx) => {
             </div>
           </div>
 
-          <div v-if="!newEventAllDay" class="form-group reminder-section">
+          <div v-if="!newEventAllDay && !newEventIsBirthday" class="form-group reminder-section">
             <label class="all-day-toggle-label reminder-toggle-label">
               <input
                 v-model="newEventReminderEnabled"
@@ -2030,7 +2290,7 @@ const getPositionedEventsForDay = (dayIdx) => {
             </div>
           </div>
 
-          <div v-if="!newEventAllDay" class="form-group reminder-section">
+          <div v-if="!newEventAllDay && !newEventIsBirthday" class="form-group reminder-section">
             <label class="all-day-toggle-label reminder-toggle-label">
               <input
                 v-model="newEventTimerEnabled"
@@ -2134,7 +2394,10 @@ const getPositionedEventsForDay = (dayIdx) => {
             </span>
           </div>
 
-          <label v-if="!editingEventHasTodoLink" class="all-day-toggle-label modal-link-choice">
+          <label
+            v-if="!editingEventHasTodoLink && !newEventIsBirthday"
+            class="all-day-toggle-label modal-link-choice"
+          >
             <input
               type="checkbox"
               class="all-day-checkbox"
@@ -2144,12 +2407,12 @@ const getPositionedEventsForDay = (dayIdx) => {
             <span class="all-day-toggle-custom"></span>
             <span>Ajouter en TODO</span>
           </label>
-          <p v-else-if="editingEventId" class="category-tip category-tip--linked">
+          <p v-else-if="editingEventId && !newEventIsBirthday" class="category-tip category-tip--linked">
             Cette activité est déjà liée à une tâche TODO.
           </p>
 
           <TodoLinkedSubForm
-            v-if="addToTodo && !editingEventHasTodoLink"
+            v-if="addToTodo && !editingEventHasTodoLink && !newEventIsBirthday"
             v-model="todoLinkedForm"
             :date-start="newEventDay"
             :promesse-limit-hint="todoPromesseLimitHint"
@@ -2853,6 +3116,31 @@ const getPositionedEventsForDay = (dayIdx) => {
 .all-day-event-bar:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+}
+
+.all-day-event-bar--birthday {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.all-day-event-bar--couple {
+  background: linear-gradient(135deg, rgba(236, 168, 196, 0.95), rgba(173, 129, 190, 0.9)) !important;
+  border-color: rgba(173, 129, 190, 0.65) !important;
+  color: #3d2a45;
+  cursor: default;
+}
+
+.all-day-event-bar--couple-highlight {
+  background: linear-gradient(135deg, #f7c948, #f0a3c2 45%, #ad81be) !important;
+  border-color: #e8b020 !important;
+  box-shadow: 0 0 0 2px rgba(247, 201, 72, 0.55), 0 4px 14px rgba(173, 129, 190, 0.35);
+  font-weight: 800;
+}
+
+.form-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: #6c757d;
+  font-weight: 600;
 }
 
 .all-day-event-icon {

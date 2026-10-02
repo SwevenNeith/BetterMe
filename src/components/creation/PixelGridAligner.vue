@@ -50,6 +50,12 @@ const stageCanvasRef = ref(null)
 /** @type {import('vue').Ref<HTMLImageElement|null>} */
 const fallbackImg = ref(null)
 
+/** Mode mesure : glisser sur un carré du dessin pour caler la taille de case. */
+const measureMode = ref(false)
+/** @type {import('vue').Ref<{ x0: number, y0: number, x1: number, y1: number } | null>} */
+const measureDrag = ref(null)
+const measureHint = ref('')
+
 const imageWidth = computed(() => props.image?.naturalWidth || props.image?.width || 0)
 const imageHeight = computed(() => props.image?.naturalHeight || props.image?.height || 0)
 
@@ -143,6 +149,109 @@ function setZoom(level) {
   nextTick(paintStage)
 }
 
+function toggleMeasureMode() {
+  if (props.disabled) return
+  measureMode.value = !measureMode.value
+  measureDrag.value = null
+  measureHint.value = measureMode.value
+    ? 'Glisse d’un coin à l’autre d’un carré du dessin, puis relâche.'
+    : ''
+  nextTick(paintStage)
+}
+
+/**
+ * Coordonnées pointeur → pixels source (indépendant du zoom / CSS).
+ * @param {PointerEvent} event
+ */
+function pointerToSource(event) {
+  const canvas = stageCanvasRef.value
+  if (!canvas || !imageWidth.value || !imageHeight.value) return null
+  const rect = canvas.getBoundingClientRect()
+  if (rect.width < 1 || rect.height < 1) return null
+  const scaleX = canvas.width / rect.width
+  const scaleY = canvas.height / rect.height
+  const cx = (event.clientX - rect.left) * scaleX
+  const cy = (event.clientY - rect.top) * scaleY
+  const z = zoom.value || 1
+  const x = Math.max(0, Math.min(imageWidth.value - 1, Math.floor(cx / z)))
+  const y = Math.max(0, Math.min(imageHeight.value - 1, Math.floor(cy / z)))
+  return { x, y }
+}
+
+function onMeasurePointerDown(event) {
+  if (!measureMode.value || props.disabled) return
+  if (event.button != null && event.button !== 0) return
+  const pt = pointerToSource(event)
+  if (!pt) return
+  event.preventDefault()
+  measureDrag.value = { x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y }
+  event.currentTarget?.setPointerCapture?.(event.pointerId)
+  paintStage()
+}
+
+function onMeasurePointerMove(event) {
+  if (!measureDrag.value) return
+  const pt = pointerToSource(event)
+  if (!pt) return
+  measureDrag.value = { ...measureDrag.value, x1: pt.x, y1: pt.y }
+  const w = Math.max(1, Math.abs(measureDrag.value.x1 - measureDrag.value.x0) + 1)
+  const h = Math.max(1, Math.abs(measureDrag.value.y1 - measureDrag.value.y0) + 1)
+  measureHint.value = `Mesure : ${w}×${h} px — relâche pour appliquer`
+  paintStage()
+}
+
+function applyMeasuredCell() {
+  const drag = measureDrag.value
+  if (!drag) return
+
+  const x0 = Math.min(drag.x0, drag.x1)
+  const y0 = Math.min(drag.y0, drag.y1)
+  // Sélection inclusive (coin → coin du carré) : |Δ| + 1
+  let sizeX = Math.max(1, Math.abs(drag.x1 - drag.x0) + 1)
+  let sizeY = Math.max(1, Math.abs(drag.y1 - drag.y0) + 1)
+
+  // Si le glisser est quasi linéaire, on force un carré
+  if (sizeX === 1 && sizeY > 1) sizeX = sizeY
+  if (sizeY === 1 && sizeX > 1) sizeY = sizeX
+
+  offsetX.value = clampOffset(x0, imageWidth.value)
+  offsetY.value = clampOffset(y0, imageHeight.value)
+  setCellPx('x', sizeX)
+  setCellPx('y', sizeY)
+
+  measureHint.value = `Case calée : ${sizeX}×${sizeY} px · offset (${offsetX.value}, ${offsetY.value})`
+  measureMode.value = false
+  measureDrag.value = null
+}
+
+function onMeasurePointerUp(event) {
+  if (!measureDrag.value) return
+  try {
+    event.currentTarget?.releasePointerCapture?.(event.pointerId)
+  } catch {
+    /* ignore */
+  }
+  const pt = pointerToSource(event)
+  if (pt) {
+    measureDrag.value = { ...measureDrag.value, x1: pt.x, y1: pt.y }
+  }
+  applyMeasuredCell()
+  nextTick(paintStage)
+}
+
+function onMeasurePointerCancel(event) {
+  try {
+    event.currentTarget?.releasePointerCapture?.(event.pointerId)
+  } catch {
+    /* ignore */
+  }
+  measureDrag.value = null
+  if (measureMode.value) {
+    measureHint.value = 'Glisse d’un coin à l’autre d’un carré du dessin, puis relâche.'
+  }
+  paintStage()
+}
+
 function paintCheckerboard(ctx, w, h, zoomLevel) {
   const tile = Math.max(6, Math.round(10 * zoomLevel))
   for (let y = 0; y < h; y += tile) {
@@ -213,32 +322,50 @@ function paintStage() {
 
   const { cols: c, rows: r, offsetX: ox, offsetY: oy, cellW, cellH } = metrics.value
   const z = zoom.value
-  const cellPx = Math.min(cellW, cellH) * z
-  const outerW = cellPx < 8 ? 1 : Math.max(1.5, z * 0.3)
-  const innerW = cellPx < 8 ? 0.6 : Math.max(0.8, z * 0.18)
 
-  const drawLine = (x1, y1, x2, y2) => {
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)'
-    ctx.lineWidth = outerW
-    ctx.beginPath()
-    ctx.moveTo(x1, y1)
-    ctx.lineTo(x2, y2)
-    ctx.stroke()
-    ctx.strokeStyle = 'rgba(255, 80, 80, 0.85)'
-    ctx.lineWidth = innerW
-    ctx.beginPath()
-    ctx.moveTo(x1, y1)
-    ctx.lineTo(x2, y2)
-    ctx.stroke()
+  // Pendant la mesure, on masque la grille rouge pour mieux voir les pixels
+  if (!measureMode.value) {
+    const cellPx = Math.min(cellW, cellH) * z
+    const outerW = cellPx < 8 ? 1 : Math.max(1.5, z * 0.3)
+    const innerW = cellPx < 8 ? 0.6 : Math.max(0.8, z * 0.18)
+
+    const drawLine = (x1, y1, x2, y2) => {
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)'
+      ctx.lineWidth = outerW
+      ctx.beginPath()
+      ctx.moveTo(x1, y1)
+      ctx.lineTo(x2, y2)
+      ctx.stroke()
+      ctx.strokeStyle = 'rgba(255, 80, 80, 0.85)'
+      ctx.lineWidth = innerW
+      ctx.beginPath()
+      ctx.moveTo(x1, y1)
+      ctx.lineTo(x2, y2)
+      ctx.stroke()
+    }
+
+    for (let i = 0; i <= c; i++) {
+      const x = (ox + i * cellW) * z
+      drawLine(x, oy * z, x, (oy + r * cellH) * z)
+    }
+    for (let j = 0; j <= r; j++) {
+      const y = (oy + j * cellH) * z
+      drawLine(ox * z, y, (ox + c * cellW) * z, y)
+    }
   }
 
-  for (let i = 0; i <= c; i++) {
-    const x = (ox + i * cellW) * z
-    drawLine(x, oy * z, x, (oy + r * cellH) * z)
-  }
-  for (let j = 0; j <= r; j++) {
-    const y = (oy + j * cellH) * z
-    drawLine(ox * z, y, (ox + c * cellW) * z, y)
+  // Overlay de mesure (rectangle glissé)
+  const drag = measureDrag.value
+  if (drag) {
+    const mx = Math.min(drag.x0, drag.x1)
+    const my = Math.min(drag.y0, drag.y1)
+    const mw = Math.max(1, Math.abs(drag.x1 - drag.x0) + 1)
+    const mh = Math.max(1, Math.abs(drag.y1 - drag.y0) + 1)
+    ctx.fillStyle = 'rgba(80, 180, 255, 0.28)'
+    ctx.fillRect(mx * z, my * z, mw * z, mh * z)
+    ctx.strokeStyle = 'rgba(60, 160, 255, 0.95)'
+    ctx.lineWidth = Math.max(1.5, z * 0.25)
+    ctx.strokeRect(mx * z + 0.5, my * z + 0.5, mw * z, mh * z)
   }
 }
 
@@ -435,6 +562,16 @@ defineExpose({
       >
         1×1 px
       </button>
+      <button
+        type="button"
+        class="pga-quick__btn"
+        :class="{ 'pga-quick__btn--active': measureMode }"
+        title="Glisser sur un carré du dessin pour mesurer la taille d’une case"
+        :disabled="disabled"
+        @click="toggleMeasureMode"
+      >
+        {{ measureMode ? 'Mesure…' : 'Mesurer sur l’image' }}
+      </button>
     </div>
 
     <div class="pga-zoom">
@@ -474,12 +611,31 @@ defineExpose({
       Ajuste jusqu’à ce que chaque case couvre exactement un carré du dessin
       (~{{ metrics.cellW.toFixed(1) }}×{{ metrics.cellH.toFixed(1) }} px / case).
       Si plusieurs pixels image tiennent dans une case, utilise
-      <strong>÷2</strong> ou descends Case X/Y jusqu’à 1.
+      <strong>÷2</strong>, descends Case X/Y, ou
+      <strong>Mesurer sur l’image</strong>
+      (glisse d’un coin à l’autre d’un carré).
+    </p>
+    <p v-if="measureHint" class="pga-hint pga-hint--measure" aria-live="polite">
+      {{ measureHint }}
     </p>
 
-    <div ref="stageRef" class="pga-stage" role="img" aria-label="Image pixel art à aligner">
+    <div
+      ref="stageRef"
+      class="pga-stage"
+      :class="{ 'pga-stage--measure': measureMode }"
+      role="img"
+      aria-label="Image pixel art à aligner"
+    >
       <div class="pga-stage__inner" :style="{ width: displayWidth + 'px', height: displayHeight + 'px' }">
-        <canvas ref="stageCanvasRef" class="pga-stage__canvas" />
+        <canvas
+          ref="stageCanvasRef"
+          class="pga-stage__canvas"
+          :class="{ 'pga-stage__canvas--measure': measureMode }"
+          @pointerdown="onMeasurePointerDown"
+          @pointermove="onMeasurePointerMove"
+          @pointerup="onMeasurePointerUp"
+          @pointercancel="onMeasurePointerCancel"
+        />
       </div>
     </div>
 
@@ -547,6 +703,27 @@ defineExpose({
 .pga-quick__btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.pga-quick__btn--active {
+  background: rgba(80, 160, 230, 0.35);
+  border-color: rgba(60, 140, 210, 0.7);
+  color: #1e4a6e;
+}
+
+.pga-hint--measure {
+  color: #2a6a9a;
+  font-weight: 750;
+}
+
+.pga-stage--measure {
+  outline: 2px solid rgba(60, 160, 255, 0.55);
+  outline-offset: 1px;
+}
+
+.pga-stage__canvas--measure {
+  cursor: crosshair;
+  touch-action: none;
 }
 
 .pga-stepper__btn {
@@ -666,6 +843,9 @@ defineExpose({
   .pga-hint {
     color: #adb5bd;
   }
+  .pga-hint--measure {
+    color: #7ec8f0;
+  }
   .pga-stepper__input {
     background: rgba(35, 30, 48, 0.95);
     color: #f0e8f8;
@@ -674,6 +854,11 @@ defineExpose({
     color: #e8d8f5;
     border-color: rgba(213, 181, 234, 0.35);
     background: rgba(90, 70, 110, 0.35);
+  }
+  .pga-quick__btn--active {
+    color: #d6efff;
+    border-color: rgba(100, 180, 240, 0.55);
+    background: rgba(40, 90, 130, 0.45);
   }
 }
 </style>

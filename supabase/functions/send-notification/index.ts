@@ -508,7 +508,13 @@ function mapNotificationKindToDeviceCategory(kind: unknown): string | null {
   if (!raw) return null
   if (raw === 'daily_reminder' || raw.startsWith('daily_reminder:')) return 'daily'
   if (raw === 'ponctuel') return 'ponctuel'
-  if (raw === 'activite') return 'activite'
+  if (
+    raw === 'activite' ||
+    raw.startsWith('birthday_reminder:') ||
+    raw.startsWith('couple_anniversary_reminder:')
+  ) {
+    return 'activite'
+  }
   if (raw === 'timer' || raw === 'timer_start') return 'timer'
   if (raw === 'todo_item_reminder') return 'todo_item'
   if (raw === 'todo_promesse_reminder') return 'todo_promesse'
@@ -725,7 +731,9 @@ function notificationPushTag(notif: {
   const kind = String(notif.kind ?? '')
   if (
     kind.startsWith('television_movie_release:') ||
-    kind.startsWith('television_episode_air:')
+    kind.startsWith('television_episode_air:') ||
+    kind.startsWith('birthday_reminder:') ||
+    kind.startsWith('couple_anniversary_reminder:')
   ) {
     const day = String(notif.scheduled_at || new Date().toISOString()).slice(0, 10)
     return `betterme-${kind}-${day}`

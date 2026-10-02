@@ -7,6 +7,7 @@
  *   details: string,
  *   defaultEnabled: boolean,
  *   hasSettings?: boolean,
+ *   global?: boolean,
  * }} NotesExtension
  */
 
@@ -94,9 +95,24 @@ export const NOTES_EXTENSIONS = [
     defaultEnabled: false,
     hasSettings: true,
   },
+  {
+    id: 'rabbit-hole',
+    name: 'Rabbit Hole',
+    description:
+      'Capture une sélection de note comme pensée, dans une note dédiée du coffre général.',
+    details:
+      'Sélectionne un passage dans l’éditeur ou l’aperçu, puis clic droit → Ajouter au Rabbit Hole.\n\n• Un formulaire te demande de formuler la pensée\n• La pensée est ajoutée en puce dans la note « Rabbit Hole » (toujours hors coffre / coffre général)\n• Cette note est créée au premier ajout\n• Les pensées s’empilent chronologiquement (la plus ancienne en premier)\n• L’extension est globale : active dans tous les coffres',
+    defaultEnabled: false,
+    global: true,
+  },
 ]
 
 export const NOTES_EXTENSION_IDS = NOTES_EXTENSIONS.map((ext) => ext.id)
+
+/** Extensions partagées entre tous les coffres (prefs lues/écrites sur la racine). */
+export const GLOBAL_NOTES_EXTENSION_IDS = NOTES_EXTENSIONS.filter((ext) => ext.global).map(
+  (ext) => ext.id,
+)
 
 /**
  * @returns {Record<string, boolean>}

@@ -1,5 +1,8 @@
 import { NOTE_VAULT_ROOT_KEY, vaultSettingsKey } from '../../constants/notes/noteVaults.js'
-import { createDefaultNotesExtensionPrefs } from '../../constants/notes/notesExtensions.js'
+import {
+  GLOBAL_NOTES_EXTENSION_IDS,
+  createDefaultNotesExtensionPrefs,
+} from '../../constants/notes/notesExtensions.js'
 import { createDefaultNoteTemplatePrefs } from '../../constants/notes/noteTemplates.js'
 import { mergeNotesExtensionPrefs } from './notesExtensions.js'
 import { mergeNoteTemplatePrefs } from './noteTemplateExtension.js'
@@ -25,6 +28,42 @@ function createDefaultVaultBundle() {
   return {
     extensions: createDefaultNotesExtensionPrefs(),
     templatePrefs: createDefaultNoteTemplatePrefs(),
+  }
+}
+
+/**
+ * Applique les prefs globales (partagées) par-dessus les prefs d’un coffre.
+ * Si au moins un coffre a l’extension active, on la considère active partout
+ * (migration douce après passage en « global »).
+ * @param {Record<string, boolean>} vaultPrefs
+ * @param {Record<string, { extensions: Record<string, boolean> }>} store
+ */
+function withGlobalExtensionPrefs(vaultPrefs, store) {
+  const next = { ...vaultPrefs }
+  for (const id of GLOBAL_NOTES_EXTENSION_IDS) {
+    const rootVal = store[NOTE_VAULT_ROOT_KEY]?.extensions?.[id]
+    const anyEnabled = Object.values(store).some(
+      (bundle) => bundle?.extensions?.[id] === true,
+    )
+    if (anyEnabled) next[id] = true
+    else if (typeof rootVal === 'boolean') next[id] = rootVal
+  }
+  return next
+}
+
+/**
+ * Propage les extensions globales vers tous les bundles du store.
+ * @param {Record<string, { extensions: Record<string, boolean>, templatePrefs: unknown }>} store
+ * @param {Record<string, boolean>} prefs
+ */
+function syncGlobalExtensionsAcrossStore(store, prefs) {
+  if (!store[NOTE_VAULT_ROOT_KEY]) store[NOTE_VAULT_ROOT_KEY] = createDefaultVaultBundle()
+  for (const id of GLOBAL_NOTES_EXTENSION_IDS) {
+    if (typeof prefs?.[id] !== 'boolean') continue
+    for (const bundle of Object.values(store)) {
+      if (!bundle?.extensions) continue
+      bundle.extensions = { ...bundle.extensions, [id]: prefs[id] }
+    }
   }
 }
 
@@ -139,6 +178,7 @@ export async function loadVaultExtensionPrefs(supabase, userId, vaultId = null) 
   const { store, migrated } = await loadRawVaultSettings(supabase, userId)
   const key = vaultSettingsKey(vaultId)
   if (!store[key]) store[key] = createDefaultVaultBundle()
+  if (!store[NOTE_VAULT_ROOT_KEY]) store[NOTE_VAULT_ROOT_KEY] = createDefaultVaultBundle()
   if (migrated) {
     try {
       await saveVaultSettingsStore(supabase, userId, store)
@@ -146,7 +186,7 @@ export async function loadVaultExtensionPrefs(supabase, userId, vaultId = null) 
       console.warn('Migration notes_vault_settings impossible:', err)
     }
   }
-  return store[key].extensions
+  return withGlobalExtensionPrefs(store[key].extensions, store)
 }
 
 /**
@@ -159,9 +199,15 @@ export async function saveVaultExtensionPrefs(supabase, userId, vaultId, prefs) 
   const { store } = await loadRawVaultSettings(supabase, userId)
   const key = vaultSettingsKey(vaultId)
   if (!store[key]) store[key] = createDefaultVaultBundle()
-  store[key].extensions = mergeNotesExtensionPrefs(prefs)
+  if (!store[NOTE_VAULT_ROOT_KEY]) store[NOTE_VAULT_ROOT_KEY] = createDefaultVaultBundle()
+
+  const merged = mergeNotesExtensionPrefs(prefs)
+  store[key].extensions = merged
+  // Extensions globales (ex. Rabbit Hole) : une seule valeur pour tous les coffres
+  syncGlobalExtensionsAcrossStore(store, merged)
+
   await saveVaultSettingsStore(supabase, userId, store)
-  return store[key].extensions
+  return withGlobalExtensionPrefs(store[key].extensions, store)
 }
 
 /**

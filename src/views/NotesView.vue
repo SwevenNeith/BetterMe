@@ -61,8 +61,10 @@ import {
 import { vaultThemeStyle, normalizeVaultIcon } from '../constants/notes/noteVaults.js'
 import { usePrefersDark } from '../composables/usePrefersDark.js'
 import NotesVaultThemeModal from '../components/notes/NotesVaultThemeModal.vue'
+import RabbitHoleThoughtModal from '../components/notes/RabbitHoleThoughtModal.vue'
 import DictionaryEntryModal from '../components/dictionnaire/DictionaryEntryModal.vue'
 import DictionaryLinkEntryModal from '../components/dictionnaire/DictionaryLinkEntryModal.vue'
+import { RABBIT_HOLE_EXTENSION_ID } from '../constants/notes/rabbitHole.js'
 import { listDictionaryEntries } from '../services/dictionnaire/dictionaryEntries.js'
 import { listDictionaryAliases } from '../services/dictionnaire/dictionaryAliases.js'
 import {
@@ -138,6 +140,8 @@ const dictionaryEntryModalOpen = ref(false)
 const dictionaryLinkModalOpen = ref(false)
 const dictionaryModalWord = ref('')
 const dictionaryEditEntry = ref(null)
+const rabbitHoleModalOpen = ref(false)
+const rabbitHoleSelectedText = ref('')
 /** @type {import('vue').Ref<{ x: number, y: number, word: string } | null>} */
 const editorContextMenu = ref(null)
 const dashboardPinMessage = ref('')
@@ -1812,6 +1816,41 @@ function openDictionaryEntryModal(word) {
   closeEditorContextMenu()
 }
 
+function openRabbitHoleModal() {
+  if (!isExtEnabled(RABBIT_HOLE_EXTENSION_ID) || !editorContextMenu.value) return
+  const selected = String(editorContextMenu.value.selectedText ?? '').trim()
+  if (!selected) return
+  rabbitHoleSelectedText.value = selected
+  rabbitHoleModalOpen.value = true
+  closeEditorContextMenu()
+}
+
+function onRabbitHoleThoughtSaved(note) {
+  if (!note?.id) return
+  const existing = notes.value.find((item) => item.id === note.id)
+  notes.value = existing
+    ? notes.value.map((item) => (item.id === note.id ? { ...item, ...note } : item))
+    : [...notes.value, note]
+
+  if (selectedNoteId.value === note.id && !dirty.value) {
+    selectedNote.value = note
+    draftTitle.value = note.title
+    draftContent.value = note.content_md ?? ''
+    saveStatus.value = 'Pensée ajoutée.'
+  } else if (noteSessions.value[note.id] && !noteSessions.value[note.id].dirty) {
+    noteSessions.value = {
+      ...noteSessions.value,
+      [note.id]: {
+        ...noteSessions.value[note.id],
+        title: note.title,
+        content: note.content_md ?? '',
+      },
+    }
+  }
+
+  showDashboardPinMessage('Pensée ajoutée au Rabbit Hole.')
+}
+
 function openDictionaryLinkModal(word) {
   dictionaryModalWord.value = word
   dictionaryLinkModalOpen.value = true
@@ -2784,6 +2823,14 @@ watch(draftFolderId, (value) => {
       @linked="onDictionaryAliasLinked"
     />
 
+    <RabbitHoleThoughtModal
+      :open="rabbitHoleModalOpen"
+      :user-id="userId || ''"
+      :selected-text="rabbitHoleSelectedText"
+      @close="rabbitHoleModalOpen = false"
+      @saved="onRabbitHoleThoughtSaved"
+    />
+
     <div
       v-if="editorContextMenu"
       class="notes-dict-context"
@@ -2821,6 +2868,15 @@ watch(draftFolderId, (value) => {
           Lier à une définition existante
         </button>
       </template>
+      <button
+        v-if="isExtEnabled(RABBIT_HOLE_EXTENSION_ID) && editorContextMenu.selectedText"
+        type="button"
+        class="notes-dict-context__item"
+        role="menuitem"
+        @click="openRabbitHoleModal"
+      >
+        Ajouter au Rabbit Hole
+      </button>
       <button
         type="button"
         class="notes-dict-context__item"

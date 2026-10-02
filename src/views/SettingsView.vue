@@ -66,6 +66,12 @@ import {
   loadTodoPromesseLimitSettings,
   saveTodoPromesseLimitSettings,
 } from '../services/todo/todoPromesseSettings.js'
+import {
+  createDefaultCoupleAnniversarySettings,
+  loadCoupleAnniversarySettings,
+  saveCoupleAnniversarySettings,
+} from '../services/timetable/coupleAnniversarySettings.js'
+import { maintainAnniversaryReminders } from '../services/timetable/anniversaryReminders.js'
 import { getDefaultPushDeviceLabel } from '../services/settings/pushDevices.js'
 const EmojiTextField = defineAsyncComponent(
   () => import('../components/common/EmojiTextField.vue'),
@@ -90,6 +96,7 @@ const COLLAPSIBLE_SECTIONS = {
   TIMER: 'timer',
   TODO_PROMESSE_LIMIT: 'todoPromesseLimit',
   TODO_PROMESSE: 'todoPromesse',
+  COUPLE_ANNIVERSARY: 'coupleAnniversary',
   MENSTRUATION: 'menstruation',
   PATTERNS: 'patterns',
 }
@@ -100,6 +107,7 @@ const expandedSections = ref({
   [COLLAPSIBLE_SECTIONS.TIMER]: false,
   [COLLAPSIBLE_SECTIONS.TODO_PROMESSE_LIMIT]: false,
   [COLLAPSIBLE_SECTIONS.TODO_PROMESSE]: false,
+  [COLLAPSIBLE_SECTIONS.COUPLE_ANNIVERSARY]: false,
   [COLLAPSIBLE_SECTIONS.MENSTRUATION]: false,
   [COLLAPSIBLE_SECTIONS.PATTERNS]: false,
 })
@@ -415,6 +423,11 @@ const todoPromesseLimitSettings = ref(createDefaultTodoPromesseLimitSettings())
 const isSavingTodoPromesseLimits = ref(false)
 const todoPromesseLimitMessage = ref('')
 const todoPromesseLimitError = ref('')
+
+const coupleAnniversarySettings = ref(createDefaultCoupleAnniversarySettings())
+const isSavingCoupleAnniversary = ref(false)
+const coupleAnniversaryMessage = ref('')
+const coupleAnniversaryError = ref('')
 
 const oneTimeUpcoming = ref([])
 const oneTimeFailed = ref([])
@@ -878,6 +891,43 @@ const onSaveTodoPromesseReminderSettings = async () => {
   }
 }
 
+const loadCoupleAnniversaryState = async () => {
+  coupleAnniversaryError.value = ''
+  if (!userId.value) return
+  try {
+    coupleAnniversarySettings.value = await loadCoupleAnniversarySettings(userId.value)
+  } catch (err) {
+    console.error(err)
+    coupleAnniversaryError.value =
+      err.message || 'Impossible de charger l’anniversaire de couple.'
+  }
+}
+
+const onSaveCoupleAnniversarySettings = async () => {
+  if (!userId.value || isSavingCoupleAnniversary.value) return
+  isSavingCoupleAnniversary.value = true
+  coupleAnniversaryMessage.value = ''
+  coupleAnniversaryError.value = ''
+  try {
+    coupleAnniversarySettings.value = await saveCoupleAnniversarySettings(
+      userId.value,
+      coupleAnniversarySettings.value,
+    )
+    void maintainAnniversaryReminders(supabase, userId.value).catch((err) => {
+      console.error('maintainAnniversaryReminders:', err)
+    })
+    coupleAnniversaryMessage.value = 'Anniversaire de couple enregistré.'
+    setTimeout(() => {
+      coupleAnniversaryMessage.value = ''
+    }, 2500)
+  } catch (err) {
+    console.error(err)
+    coupleAnniversaryError.value = err.message || 'Enregistrement impossible.'
+  } finally {
+    isSavingCoupleAnniversary.value = false
+  }
+}
+
 const onPageVisibilityUpdated = () => {
   void loadPageVisibilityState()
 }
@@ -957,6 +1007,7 @@ onMounted(async () => {
     loadPageVisibilityState(),
     loadTodoPromesseLimitState(),
     loadTodoPromesseReminderState(),
+    loadCoupleAnniversaryState(),
   ])
   window.addEventListener('betterme-notifications-granted', onNotificationsGranted)
   window.addEventListener(PAGE_VISIBILITY_UPDATED_EVENT, onPageVisibilityUpdated)
@@ -1838,6 +1889,84 @@ onUnmounted(() => {
             {{ isSavingTodoPromesseReminder ? 'Enregistrement…' : 'Enregistrer' }}
           </button>
         </div>
+        </div>
+      </section>
+
+      <section class="settings-card settings-card--spaced settings-card--collapsible">
+        <button
+          type="button"
+          class="card-toggle"
+          :aria-expanded="expandedSections[COLLAPSIBLE_SECTIONS.COUPLE_ANNIVERSARY]"
+          aria-controls="settings-section-couple-anniversary"
+          @click="toggleSection(COLLAPSIBLE_SECTIONS.COUPLE_ANNIVERSARY)"
+        >
+          <h2 class="card-toggle__title">Anniversaire de couple</h2>
+          <span
+            class="card-toggle__chevron"
+            :class="{
+              'card-toggle__chevron--open':
+                expandedSections[COLLAPSIBLE_SECTIONS.COUPLE_ANNIVERSARY],
+            }"
+            aria-hidden="true"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </span>
+        </button>
+
+        <div
+          v-show="expandedSections[COLLAPSIBLE_SECTIONS.COUPLE_ANNIVERSARY]"
+          id="settings-section-couple-anniversary"
+          class="card-body"
+        >
+          <p class="card-body__desc">
+            Affiche chaque mois sur l’EDT l’âge de votre relation (au mois près). Les années
+            piles (1 an, 2 ans…) sont mises en avant.
+          </p>
+
+          <div class="reminder-row">
+            <label class="choice-check choice-check--card">
+              <input
+                v-model="coupleAnniversarySettings.couple_anniversary_enabled"
+                type="checkbox"
+              />
+              <span>Afficher l’anniversaire de couple</span>
+            </label>
+            <label class="field">
+              <span>Date de début</span>
+              <input
+                v-model="coupleAnniversarySettings.couple_anniversary_start_date"
+                type="date"
+                :disabled="!coupleAnniversarySettings.couple_anniversary_enabled"
+              />
+            </label>
+          </div>
+
+          <p v-if="coupleAnniversaryError" class="settings-feedback settings-feedback--error">
+            {{ coupleAnniversaryError }}
+          </p>
+          <p v-if="coupleAnniversaryMessage" class="settings-feedback settings-feedback--ok">
+            {{ coupleAnniversaryMessage }}
+          </p>
+          <div class="settings-actions">
+            <button
+              type="button"
+              class="btn btn--primary"
+              :disabled="isSavingCoupleAnniversary"
+              @click="onSaveCoupleAnniversarySettings"
+            >
+              {{ isSavingCoupleAnniversary ? 'Enregistrement…' : 'Enregistrer' }}
+            </button>
+          </div>
         </div>
       </section>
     </div>
