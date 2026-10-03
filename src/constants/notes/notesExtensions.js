@@ -30,14 +30,6 @@ export const NOTES_EXTENSIONS = [
     defaultEnabled: true,
   },
   {
-    id: 'sync-scroll',
-    name: 'Scroll synchronisé',
-    description: 'En mode Split, l’édition et l’aperçu défilent ensemble.',
-    details:
-      'Conserve le comparatif côte à côte :\n\n• Quand tu scrolles dans l’éditeur, l’aperçu suit (et inversement)\n• Quand tu cliques ou déplaces le curseur dans l’éditeur, l’aperçu se place sur la zone correspondante pour suivre tes modifications en direct',
-    defaultEnabled: true,
-  },
-  {
     id: 'auto-save',
     name: 'Sauvegarde automatique',
     description: 'Enregistre la note en cours après une courte pause de frappe.',

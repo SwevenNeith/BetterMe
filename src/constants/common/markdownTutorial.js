@@ -92,6 +92,8 @@ export function needsMarkdownTutorialUpgrade(content) {
   if (!raw.includes(MARKDOWN_TUTORIAL_WIDGETS_SECTION_MARKER)) return true
   if (countMarkdownTutorialTemplateSections(raw) !== 1) return true
   if (!raw.includes(MARKDOWN_TUTORIAL_TEMPLATE_SECTION_MARKER)) return true
+  // Retrait du mode Split
+  if (raw.includes('mode **Split**') || raw.includes('panneau aperçu en Split')) return true
   return false
 }
 
@@ -264,7 +266,7 @@ Exemples rendus :
 - Lien avec libellé : [[Tutoriel Markdown|Revenir au tutoriel]]
 - Lien vers une note absente (affiché en style « manquant ») : [[Ma future note]]
 
-Astuce : clique le lien dans l’**Aperçu** (ou le panneau aperçu en Split) pour ouvrir la note liée.
+Astuce : clique le lien dans l’**Aperçu** pour ouvrir la note liée.
 
 ---
 
@@ -355,18 +357,17 @@ Grille de cases colorées : clique pour sélectionner jusqu’à **2** cases ; l
 </script>
 \`\`\`
 
-Astuce : regarde le résultat en mode **Aperçu** ou **Split**. Un bloc \`js\` classique reste du code non exécuté.
+Astuce : regarde le résultat en mode **Aperçu**. Un bloc \`js\` classique reste du code non exécuté.
 
 ---
 
 ## 13. Astuces d’édition
 
 1. Écris en **mode Édition**, bascule en **Aperçu** pour voir le rendu.
-2. Le mode **Split** affiche les deux côte à côte (scroll synchronisé).
-3. Organise tes notes dans des **dossiers** (arborescence à gauche).
-4. Les dossiers et notes sont triés **par ordre alphabétique** (dossiers d’abord, puis notes).
-5. Utilise \`[[Titre de la note]]\` pour créer des hyperliens entre tes notes.
-6. Colle un document HTML complet, ou un bloc \`html\` / \`widget\`, pour un rendu riche dans l’aperçu.
+2. Organise tes notes dans des **dossiers** (arborescence à gauche).
+3. Les dossiers et notes sont triés **par ordre alphabétique** (dossiers d’abord, puis notes).
+4. Utilise \`[[Titre de la note]]\` pour créer des hyperliens entre tes notes.
+5. Colle un document HTML complet, ou un bloc \`html\` / \`widget\`, pour un rendu riche dans l’aperçu.
 
 ---
 

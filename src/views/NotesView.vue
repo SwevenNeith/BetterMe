@@ -29,7 +29,6 @@ import {
   extractMarkdownHeadings,
 } from '../utils/notes/noteTableOfContents.js'
 import { mountNoteWidgets, NOTE_WIDGET_INDEX_ATTR, NOTE_WIDGET_PLACEHOLDER_CLASS } from '../utils/notes/noteWidgets.js'
-import { scrollPreviewToEditorCursor } from '../utils/notes/notesSplitSync.js'
 import NotesTreeNode from '../components/notes/NotesTreeNode.vue'
 import NotesTableOfContentsTree from '../components/notes/NotesTableOfContentsTree.vue'
 import AppConfirmDialog from '../components/common/AppConfirmDialog.vue'
@@ -135,7 +134,7 @@ const draftTitle = ref('')
 const draftContent = ref('')
 const draftFolderId = ref(null)
 const draftStatus = ref('')
-const viewMode = ref('split') // edit | preview | split
+const viewMode = ref('edit') // edit | preview
 const isSaving = ref(false)
 const isPastingImage = ref(false)
 const saveError = ref('')
@@ -188,7 +187,6 @@ const templatePrefs = ref(createDefaultNoteTemplatePrefs())
 const openTabs = ref([])
 /** @type {import('vue').Ref<Record<string, { title: string, content: string, folderId: string | null, dirty: boolean, viewMode: string, saveStatus: string, saveError: string }>>} */
 const noteSessions = ref({})
-let scrollSyncLock = false
 let switchingTabs = false
 
 const isGraphView = computed(() => {
@@ -238,12 +236,13 @@ const vaultSummaries = computed(() =>
   }),
 )
 
-const effectiveViewMode = computed(() => {
-  if (isMobileNotes.value && viewMode.value === 'split') return 'edit'
-  return viewMode.value
-})
+function normalizeViewMode(mode) {
+  return mode === 'preview' ? 'preview' : 'edit'
+}
 
-const defaultViewMode = computed(() => (isMobileNotes.value ? 'edit' : 'split'))
+const effectiveViewMode = computed(() => normalizeViewMode(viewMode.value))
+
+const defaultViewMode = 'edit'
 
 const MOBILE_NOTES_MQ = '(max-width: 900px)'
 let mobileNotesMql = null
@@ -256,7 +255,7 @@ function syncMobileNotesLayout() {
   if (becameMobile) {
     sidebarCollapsed.value = true
   }
-  if (mobile && viewMode.value === 'split') {
+  if (viewMode.value === 'split') {
     viewMode.value = 'edit'
   }
 }
@@ -556,10 +555,7 @@ function applyNoteToEditor(note) {
     draftFolderId.value = session.folderId
     draftStatus.value = session.status ?? note.status ?? ''
     dirty.value = Boolean(session.dirty)
-    viewMode.value =
-      session.viewMode === 'split' && isMobileNotes.value
-        ? 'edit'
-        : session.viewMode || defaultViewMode.value
+    viewMode.value = normalizeViewMode(session.viewMode || defaultViewMode)
     saveStatus.value = session.saveStatus || ''
     saveError.value = session.saveError || ''
   } else {
@@ -568,7 +564,7 @@ function applyNoteToEditor(note) {
     draftFolderId.value = note.folder_id
     draftStatus.value = note.status || ''
     dirty.value = false
-    viewMode.value = defaultViewMode.value
+    viewMode.value = defaultViewMode
     saveStatus.value = ''
     saveError.value = ''
   }
@@ -687,7 +683,7 @@ async function goToNoteHeading(heading) {
   if (!heading?.id || !selectedNote.value) return
 
   if (effectiveViewMode.value === 'edit') {
-    viewMode.value = isMobileNotes.value ? 'preview' : 'split'
+    viewMode.value = 'preview'
   }
 
   await nextTick()
@@ -1621,7 +1617,6 @@ function applyEditorSelectionFormat(kind, color = '') {
     if (!editor) return
     editor.focus()
     editor.setSelectionRange(result.selectionStart, result.selectionEnd)
-    schedulePreviewCursorSync()
   })
 }
 
@@ -1680,7 +1675,6 @@ function applySpellSuggestion(replacement) {
     if (!editor) return
     editor.focus()
     editor.setSelectionRange(result.selectionStart, result.selectionEnd)
-    schedulePreviewCursorSync()
   })
 }
 
@@ -2190,72 +2184,6 @@ function onPreviewClick(event) {
   }
 }
 
-function syncSplitScroll(source, target) {
-  if (!isExtEnabled('sync-scroll')) return
-  if (effectiveViewMode.value !== 'split' || !source || !target || scrollSyncLock) return
-  const sourceMax = source.scrollHeight - source.clientHeight
-  const targetMax = target.scrollHeight - target.clientHeight
-  if (sourceMax <= 0 || targetMax <= 0) {
-    target.scrollTop = 0
-    return
-  }
-  scrollSyncLock = true
-  target.scrollTop = (source.scrollTop / sourceMax) * targetMax
-  requestAnimationFrame(() => {
-    scrollSyncLock = false
-  })
-}
-
-let cursorPreviewSyncTimer = 0
-
-function syncPreviewToEditorCursor({ behavior = 'auto', force = false } = {}) {
-  if (!isExtEnabled('sync-scroll')) return
-  if (effectiveViewMode.value !== 'split') return
-  if (scrollSyncLock && !force) return
-  const editor = editorEl.value
-  const preview = previewEl.value
-  if (!editor || !preview) return
-
-  scrollSyncLock = true
-  scrollPreviewToEditorCursor(editor, preview, { behavior })
-  requestAnimationFrame(() => {
-    scrollSyncLock = false
-  })
-}
-
-function schedulePreviewCursorSync() {
-  if (!isExtEnabled('sync-scroll')) return
-  if (effectiveViewMode.value !== 'split') return
-  if (cursorPreviewSyncTimer) window.clearTimeout(cursorPreviewSyncTimer)
-  cursorPreviewSyncTimer = window.setTimeout(async () => {
-    cursorPreviewSyncTimer = 0
-    await nextTick()
-    syncPreviewToEditorCursor({ behavior: 'auto' })
-  }, 80)
-}
-
-function onEditorCursorNavigate(event) {
-  if (event?.type === 'keyup') {
-    const key = event.key
-    const isNav =
-      key === 'ArrowUp' ||
-      key === 'ArrowDown' ||
-      key === 'ArrowLeft' ||
-      key === 'ArrowRight' ||
-      key === 'Home' ||
-      key === 'End' ||
-      key === 'PageUp' ||
-      key === 'PageDown' ||
-      key === 'Enter'
-    if (!isNav) return
-  }
-  schedulePreviewCursorSync()
-}
-
-function onEditorInput() {
-  schedulePreviewCursorSync()
-}
-
 /**
  * Insère du Markdown à la position du curseur dans l’éditeur.
  * @param {string} markdown
@@ -2278,7 +2206,6 @@ function insertMarkdownAtCursor(markdown) {
     if (!editor) return
     editor.focus()
     editor.setSelectionRange(caret, caret)
-    schedulePreviewCursorSync()
   })
 }
 
@@ -2345,14 +2272,6 @@ function onEditorDrop(event) {
   if (!files.length) return
   event.preventDefault()
   void insertPastedNoteImages(files)
-}
-
-function onEditorScroll() {
-  syncSplitScroll(editorEl.value, previewEl.value)
-}
-
-function onPreviewScroll() {
-  syncSplitScroll(previewEl.value, editorEl.value)
 }
 
 function onTreeCreateNote(folderId) {
@@ -2430,14 +2349,6 @@ watch(
   async () => {
     await nextTick()
     remountPreviewWidgets()
-    if (
-      isExtEnabled('sync-scroll') &&
-      effectiveViewMode.value === 'split' &&
-      editorEl.value &&
-      document.activeElement === editorEl.value
-    ) {
-      syncPreviewToEditorCursor({ behavior: 'auto', force: true })
-    }
   },
   { flush: 'post' },
 )
@@ -2471,12 +2382,6 @@ watch(
 
 watch(isGraphView, (active) => {
   if (active) ensureGraphTab()
-})
-
-watch(viewMode, async (mode) => {
-  if (mode !== 'split') return
-  await nextTick()
-  syncSplitScroll(editorEl.value, previewEl.value)
 })
 
 watch(draftTitle, () => {
@@ -2913,15 +2818,6 @@ watch(draftFolderId, (value) => {
                 Édition
               </button>
               <button
-                v-if="!isMobileNotes"
-                type="button"
-                class="notes-page__mode"
-                :class="{ 'notes-page__mode--active': effectiveViewMode === 'split' }"
-                @click="viewMode = 'split'"
-              >
-                Split
-              </button>
-              <button
                 type="button"
                 class="notes-page__mode"
                 :class="{ 'notes-page__mode--active': effectiveViewMode === 'preview' }"
@@ -2946,7 +2842,6 @@ watch(draftFolderId, (value) => {
           :class="{
             'notes-page__panes--edit': effectiveViewMode === 'edit',
             'notes-page__panes--preview': effectiveViewMode === 'preview',
-            'notes-page__panes--split': effectiveViewMode === 'split',
           }"
         >
           <textarea
@@ -2957,11 +2852,6 @@ watch(draftFolderId, (value) => {
             lang="fr"
             spellcheck="true"
             placeholder="Écris en Markdown… (Ctrl+V pour coller une image)"
-            @scroll="onEditorScroll"
-            @click="onEditorCursorNavigate"
-            @keyup="onEditorCursorNavigate"
-            @select="onEditorCursorNavigate"
-            @input="onEditorInput"
             @paste="onEditorPaste"
             @dragover="onEditorDragOver"
             @drop="onEditorDrop"
@@ -2972,7 +2862,6 @@ watch(draftFolderId, (value) => {
             v-if="effectiveViewMode !== 'edit'"
             ref="previewEl"
             class="notes-page__preview markdown-body"
-            @scroll="onPreviewScroll"
             @click="onPreviewClick"
             @contextmenu="onPreviewContextMenu"
             @mouseover="onPreviewMouseOver"
@@ -3995,10 +3884,6 @@ watch(draftFolderId, (value) => {
   grid-template-columns: 1fr;
 }
 
-.notes-page__panes--split {
-  grid-template-columns: 1fr 1fr;
-}
-
 .notes-page__editor,
 .notes-page__preview {
   min-width: 0;
@@ -4019,7 +3904,6 @@ watch(draftFolderId, (value) => {
   color: #2f243a;
   background: #fff;
   outline: none;
-  border-right: 1px solid #e6ddf2;
 }
 
 .notes-page__preview {
