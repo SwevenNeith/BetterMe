@@ -71,7 +71,9 @@ const ALLOWED_ATTRS = {
   TH: new Set(['align', 'colspan', 'rowspan']),
   CODE: new Set(['class']),
   PRE: new Set(['class']),
-  SPAN: new Set(['class', 'data-dict-id', 'data-dict-word', 'data-dict-alias']),
+  SPAN: new Set(['class', 'style', 'data-dict-id', 'data-dict-word', 'data-dict-alias']),
+  MARK: new Set(['class', 'style']),
+  U: new Set(['class']),
   DIV: new Set(['class', 'data-widget-index', 'data-full-page']),
   ABBR: new Set(['title']),
   H1: new Set(['id']),
@@ -80,6 +82,47 @@ const ALLOWED_ATTRS = {
   H4: new Set(['id']),
   H5: new Set(['id']),
   H6: new Set(['id']),
+}
+
+const SAFE_STYLE_PROPS = new Set(['color', 'background-color', 'background'])
+
+function isSafeCssColorToken(value) {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (!raw) return false
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw)) return true
+  if (/^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/i.test(raw)) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Ne conserve que color / background-color sûrs (hex ou rgb/rgba).
+ * @param {string} styleValue
+ */
+function sanitizeInlineStyle(styleValue) {
+  const declarations = String(styleValue ?? '')
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  /** @type {string[]} */
+  const kept = []
+  for (const declaration of declarations) {
+    const colon = declaration.indexOf(':')
+    if (colon <= 0) continue
+    const prop = declaration.slice(0, colon).trim().toLowerCase()
+    const value = declaration.slice(colon + 1).trim()
+    if (!SAFE_STYLE_PROPS.has(prop)) continue
+    if (prop === 'background') {
+      if (!isSafeCssColorToken(value)) continue
+      kept.push(`background-color: ${value}`)
+      continue
+    }
+    if (!isSafeCssColorToken(value)) continue
+    kept.push(`${prop}: ${value}`)
+  }
+  return kept.join('; ')
 }
 
 function isSafeUrl(value, { allowDataImage = false } = {}) {
@@ -149,6 +192,10 @@ export function sanitizeMarkdownHtml(html) {
             .split(/\s+/)
             .filter((part) => /^[a-zA-Z0-9_-]+$/.test(part))
             .join(' ')
+          if (!value) continue
+        }
+        if (name === 'style') {
+          value = sanitizeInlineStyle(value)
           if (!value) continue
         }
         attrs.push(` ${name}="${String(value).replace(/"/g, '&quot;')}"`)

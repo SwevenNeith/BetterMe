@@ -1,4 +1,8 @@
 <script setup>
+import { ref } from 'vue'
+
+const NOTE_DND_MIME = 'application/x-betterme-note-id'
+
 defineProps({
   node: { type: Object, required: true },
   depth: { type: Number, default: 0 },
@@ -6,7 +10,7 @@ defineProps({
   isFolderExpanded: { type: Function, required: true },
 })
 
-defineEmits([
+const emit = defineEmits([
   'select-note',
   'toggle-folder',
   'create-note',
@@ -16,13 +20,55 @@ defineEmits([
   'delete-note',
   'delete-folder',
   'note-context-menu',
+  'move-note',
 ])
+
+const folderDropActive = ref(false)
+
+function onNoteDragStart(event, noteId) {
+  if (!event?.dataTransfer || !noteId) return
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData(NOTE_DND_MIME, noteId)
+  event.dataTransfer.setData('text/plain', noteId)
+}
+
+function onFolderDragOver(event) {
+  if (!event?.dataTransfer) return
+  const types = [...(event.dataTransfer.types || [])]
+  if (!types.includes(NOTE_DND_MIME) && !types.includes('text/plain')) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  folderDropActive.value = true
+}
+
+function onFolderDragLeave(event) {
+  const related = event.relatedTarget
+  if (related instanceof Node && event.currentTarget?.contains?.(related)) return
+  folderDropActive.value = false
+}
+
+function onFolderDrop(event, folderId) {
+  folderDropActive.value = false
+  if (!event?.dataTransfer) return
+  event.preventDefault()
+  event.stopPropagation()
+  const noteId =
+    event.dataTransfer.getData(NOTE_DND_MIME) || event.dataTransfer.getData('text/plain')
+  if (!noteId || !folderId) return
+  emit('move-note', { noteId, folderId })
+}
 </script>
 
 <template>
   <div class="notes-tree-node" :style="{ '--depth': depth }">
     <template v-if="node.type === 'folder'">
-      <div class="notes-tree-node__row notes-tree-node__row--folder">
+      <div
+        class="notes-tree-node__row notes-tree-node__row--folder"
+        :class="{ 'notes-tree-node__row--drop': folderDropActive }"
+        @dragover="onFolderDragOver"
+        @dragleave="onFolderDragLeave"
+        @drop="onFolderDrop($event, node.id)"
+      >
         <button
           type="button"
           class="notes-tree-node__main"
@@ -114,6 +160,7 @@ defineEmits([
           @delete-note="$emit('delete-note', $event)"
           @delete-folder="$emit('delete-folder', $event)"
           @note-context-menu="$emit('note-context-menu', $event)"
+          @move-note="$emit('move-note', $event)"
         />
       </div>
     </template>
@@ -122,6 +169,9 @@ defineEmits([
       <div
         class="notes-tree-node__row notes-tree-node__row--note"
         :class="{ 'notes-tree-node__row--active': selectedNoteId === node.id }"
+        draggable="true"
+        title="Glisser vers un dossier pour déplacer"
+        @dragstart="onNoteDragStart($event, node.id)"
         @contextmenu.prevent.stop="$emit('note-context-menu', { noteId: node.id, event: $event })"
       >
         <button
@@ -192,6 +242,19 @@ defineEmits([
   background: rgba(213, 181, 234, 0.55);
 }
 
+.notes-tree-node__row--drop {
+  background: rgba(173, 129, 190, 0.35);
+  outline: 1px dashed #8e6aa8;
+}
+
+.notes-tree-node__row--note {
+  cursor: grab;
+}
+
+.notes-tree-node__row--note:active {
+  cursor: grabbing;
+}
+
 .notes-tree-node__main {
   flex: 1;
   min-width: 0;
@@ -202,10 +265,14 @@ defineEmits([
   background: transparent;
   text-align: left;
   padding: 0.18rem 0.15rem;
-  cursor: pointer;
+  cursor: inherit;
   color: #3b2a4a;
   font: inherit;
   font-size: 0.8rem;
+}
+
+.notes-tree-node__row--folder .notes-tree-node__main {
+  cursor: pointer;
 }
 
 .notes-tree-node__chevron {
@@ -284,6 +351,11 @@ defineEmits([
 
   .notes-tree-node__row--active {
     background: rgba(173, 129, 190, 0.35);
+  }
+
+  .notes-tree-node__row--drop {
+    background: rgba(173, 129, 190, 0.45);
+    outline-color: #c4a8e0;
   }
 
   .notes-tree-node__main {

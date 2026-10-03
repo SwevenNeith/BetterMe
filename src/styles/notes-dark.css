@@ -210,6 +210,11 @@
     border-bottom-color: #b896d0;
   }
 
+  .notes-page .markdown-body mark {
+    background: #6b5a2a;
+    color: #f8f1d8;
+  }
+
   .notes-page .markdown-body .notes-html-widget:not(.notes-html-widget--full-page) {
     border-color: rgba(213, 181, 234, 0.28);
     background: #241c30;

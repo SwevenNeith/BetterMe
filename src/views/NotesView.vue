@@ -65,6 +65,19 @@ import RabbitHoleThoughtModal from '../components/notes/RabbitHoleThoughtModal.v
 import DictionaryEntryModal from '../components/dictionnaire/DictionaryEntryModal.vue'
 import DictionaryLinkEntryModal from '../components/dictionnaire/DictionaryLinkEntryModal.vue'
 import { RABBIT_HOLE_EXTENSION_ID } from '../constants/notes/rabbitHole.js'
+import {
+  formatNoteSelection,
+  replaceNoteSelection,
+} from '../utils/notes/noteSelectionFormat.js'
+import {
+  isSpellcheckableSelection,
+  spellcheckSelection,
+} from '../services/notes/noteSpellcheck.js'
+import {
+  TEXT_COLOR_PRESETS,
+  normalizeHex,
+  rememberRecentTextColor,
+} from '../utils/common/richNoteTextColors.js'
 import { listDictionaryEntries } from '../services/dictionnaire/dictionaryEntries.js'
 import { listDictionaryAliases } from '../services/dictionnaire/dictionaryAliases.js'
 import {
@@ -146,6 +159,25 @@ const rabbitHoleSelectedText = ref('')
 const editorContextMenu = ref(null)
 const dashboardPinMessage = ref('')
 let dashboardPinMessageTimer = null
+/** Palette couleur ouverte dans le menu contextuel : text | highlight | null */
+const contextColorPanel = ref(null)
+/** @type {import('vue').Ref<{ loading: boolean, message: string, suggestions: string[], offset: number, length: number } | null>} */
+const spellcheckMenu = ref(null)
+let spellcheckMenuToken = 0
+const NOTE_DND_MIME = 'application/x-betterme-note-id'
+const treeRootDropActive = ref(false)
+const HIGHLIGHT_COLOR_PRESETS = [
+  '#fff3a3',
+  '#ffe599',
+  '#f9cb9c',
+  '#f4cccc',
+  '#d9ead3',
+  '#cfe2f3',
+  '#d9d2e9',
+  '#ead1dc',
+  '#efefef',
+  '#ffff00',
+]
 /** @type {import('vue').Ref<{ x: number, y: number, text: string } | null>} */
 const dictionaryTooltip = ref(null)
 const extensionsOpen = ref(false)
@@ -1467,6 +1499,191 @@ async function onMoveNoteFolder() {
   await flushSave()
 }
 
+/**
+ * Déplace une note vers un dossier (null = racine du coffre courant).
+ * @param {string} noteId
+ * @param {string | null} folderId
+ */
+async function moveNoteToFolder(noteId, folderId = null) {
+  if (!userId.value || !noteId) return
+  const note = notes.value.find((item) => item.id === noteId)
+  if (!note) return
+
+  const nextFolderId = folderId || null
+  if ((note.folder_id ?? null) === nextFolderId) return
+
+  if (nextFolderId) {
+    const folder = folders.value.find((item) => item.id === nextFolderId)
+    if (!folder) return
+    if ((folder.vault_id ?? null) !== (note.vault_id ?? null)) {
+      errorMessage.value = 'Impossible de déplacer une note vers un autre coffre.'
+      return
+    }
+  }
+
+  try {
+    if (selectedNoteId.value === noteId && !isGraphView.value) {
+      draftFolderId.value = nextFolderId
+      if (nextFolderId) {
+        const next = new Set(expandedFolderIds.value)
+        next.add(nextFolderId)
+        expandedFolderIds.value = next
+      }
+      return
+    }
+
+    const updated = await updateNote(supabase, userId.value, noteId, {
+      folderId: nextFolderId,
+    })
+    notes.value = notes.value.map((item) =>
+      item.id === updated.id ? { ...item, ...updated } : item,
+    )
+    if (noteSessions.value[noteId]) {
+      noteSessions.value = {
+        ...noteSessions.value,
+        [noteId]: {
+          ...noteSessions.value[noteId],
+          folderId: nextFolderId,
+        },
+      }
+    }
+    if (nextFolderId) {
+      const next = new Set(expandedFolderIds.value)
+      next.add(nextFolderId)
+      expandedFolderIds.value = next
+    }
+    showDashboardPinMessage('Note déplacée.')
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible de déplacer la note.'
+  }
+}
+
+function onTreeMoveNote({ noteId, folderId }) {
+  void moveNoteToFolder(noteId, folderId ?? null)
+}
+
+function onTreeRootDragOver(event) {
+  if (!event?.dataTransfer) return
+  const types = [...(event.dataTransfer.types || [])]
+  if (!types.includes(NOTE_DND_MIME) && !types.includes('text/plain')) return
+  // Laisser les dossiers gérer leur propre zone ; racine = zones vides uniquement
+  if (event.target instanceof Element && event.target.closest('.notes-tree-node__row')) {
+    treeRootDropActive.value = false
+    return
+  }
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  treeRootDropActive.value = true
+}
+
+function onTreeRootDragLeave(event) {
+  const related = event.relatedTarget
+  if (related instanceof Node && event.currentTarget?.contains?.(related)) return
+  treeRootDropActive.value = false
+}
+
+function onTreeRootDrop(event) {
+  treeRootDropActive.value = false
+  if (!event?.dataTransfer) return
+  event.preventDefault()
+  const noteId =
+    event.dataTransfer.getData(NOTE_DND_MIME) || event.dataTransfer.getData('text/plain')
+  if (!noteId) return
+  void moveNoteToFolder(noteId, null)
+}
+
+function canFormatEditorSelection() {
+  const menu = editorContextMenu.value
+  if (!menu || menu.source !== 'editor') return false
+  if (!String(menu.selectedText ?? '').trim()) return false
+  return Number.isFinite(menu.selectionStart) && Number.isFinite(menu.selectionEnd)
+}
+
+function applyEditorSelectionFormat(kind, color = '') {
+  const menu = editorContextMenu.value
+  if (!canFormatEditorSelection() || !menu) return
+  const start = menu.selectionStart
+  const end = menu.selectionEnd
+  const result = formatNoteSelection(draftContent.value, start, end, kind, color)
+  if (!result.changed) {
+    closeEditorContextMenu()
+    return
+  }
+  draftContent.value = result.content
+  markDirty()
+  if (color && (kind === 'color' || kind === 'highlight')) {
+    rememberRecentTextColor(color)
+  }
+  closeEditorContextMenu()
+  void nextTick(() => {
+    const editor = editorEl.value
+    if (!editor) return
+    editor.focus()
+    editor.setSelectionRange(result.selectionStart, result.selectionEnd)
+    schedulePreviewCursorSync()
+  })
+}
+
+function openContextColorPanel(panel) {
+  contextColorPanel.value = contextColorPanel.value === panel ? null : panel
+}
+
+function applyContextColor(panel, color) {
+  const hex = normalizeHex(color)
+  if (!hex) return
+  if (panel === 'text') applyEditorSelectionFormat('color', hex)
+  else if (panel === 'highlight') applyEditorSelectionFormat('highlight', hex)
+}
+
+async function refreshSpellcheckForMenu(selectedText) {
+  const token = ++spellcheckMenuToken
+  if (!isSpellcheckableSelection(selectedText)) {
+    spellcheckMenu.value = null
+    return
+  }
+  spellcheckMenu.value = { loading: true, message: '', suggestions: [], offset: 0, length: 0 }
+  const result = await spellcheckSelection(selectedText)
+  if (token !== spellcheckMenuToken) return
+  if (!result?.suggestions?.length) {
+    spellcheckMenu.value = null
+    return
+  }
+  spellcheckMenu.value = {
+    loading: false,
+    message: result.message,
+    suggestions: result.suggestions,
+    offset: Number(result.offset) || 0,
+    length: Number(result.length) || String(selectedText).trim().length,
+  }
+}
+
+function applySpellSuggestion(replacement) {
+  const menu = editorContextMenu.value
+  const spell = spellcheckMenu.value
+  if (!menu || menu.source !== 'editor' || !spell) return
+  if (!Number.isFinite(menu.selectionStart) || !Number.isFinite(menu.selectionEnd)) return
+
+  const slice = String(draftContent.value ?? '').slice(menu.selectionStart, menu.selectionEnd)
+  const selected = String(menu.selectedText ?? '')
+  const local = selected ? slice.indexOf(selected) : 0
+  const base = menu.selectionStart + (local >= 0 ? local : 0)
+  const from = base + (Number(spell.offset) || 0)
+  const to = from + (Number(spell.length) || selected.length || slice.length)
+
+  const result = replaceNoteSelection(draftContent.value, from, to, replacement)
+  draftContent.value = result.content
+  markDirty()
+  closeEditorContextMenu()
+  void nextTick(() => {
+    const editor = editorEl.value
+    if (!editor) return
+    editor.focus()
+    editor.setSelectionRange(result.selectionStart, result.selectionEnd)
+    schedulePreviewCursorSync()
+  })
+}
+
 async function loadDictionary() {
   if (!userId.value) return
   try {
@@ -1560,6 +1777,8 @@ function openNoteContextMenu(event, selectedText = '', extras = {}) {
   const widgetIndices = Array.isArray(extras.widgetIndices)
     ? extras.widgetIndices.filter((n) => Number.isFinite(n) && n >= 0)
     : []
+  const source = extras.source || 'editor'
+  contextColorPanel.value = null
   editorContextMenu.value = {
     x: event.clientX,
     y: event.clientY,
@@ -1573,7 +1792,18 @@ function openNoteContextMenu(event, selectedText = '', extras = {}) {
     noteTitle: extras.noteTitle || '',
     vaultId: extras.vaultId ?? activeVaultId.value,
     contentMd: extras.contentMd ?? null,
-    source: extras.source || 'editor',
+    source,
+  }
+  if (
+    source === 'editor' &&
+    Number.isFinite(extras.selectionStart) &&
+    Number.isFinite(extras.selectionEnd) &&
+    extras.selectionStart !== extras.selectionEnd
+  ) {
+    void refreshSpellcheckForMenu(trimmed)
+  } else {
+    spellcheckMenuToken += 1
+    spellcheckMenu.value = null
   }
 }
 
@@ -1632,6 +1862,9 @@ function onTreeNoteContextMenu({ noteId, event }) {
 
 function closeEditorContextMenu() {
   editorContextMenu.value = null
+  contextColorPanel.value = null
+  spellcheckMenuToken += 1
+  spellcheckMenu.value = null
 }
 
 function showDashboardPinMessage(message) {
@@ -2554,7 +2787,17 @@ watch(draftFolderId, (value) => {
 
         <section v-if="!activeVault" class="notes-page__section-label">Hors coffre</section>
 
-        <nav class="notes-page__tree" aria-label="Arborescence des notes">
+        <nav
+          class="notes-page__tree"
+          :class="{ 'notes-page__tree--drop-root': treeRootDropActive }"
+          aria-label="Arborescence des notes"
+          @dragover="onTreeRootDragOver"
+          @dragleave="onTreeRootDragLeave"
+          @drop="onTreeRootDrop"
+        >
+          <p v-if="treeRootDropActive" class="notes-page__tree-drop-hint">
+            Déposer ici pour sortir du dossier
+          </p>
           <NotesTreeNode
             v-for="node in filteredTree"
             :key="`${node.type}-${node.id}`"
@@ -2571,6 +2814,7 @@ watch(draftFolderId, (value) => {
             @delete-note="onDeleteNote"
             @delete-folder="onDeleteFolder"
             @note-context-menu="onTreeNoteContextMenu"
+            @move-note="onTreeMoveNote"
           />
           <p v-if="!filteredTree.length" class="notes-page__tree-empty">
             {{ activeVault ? 'Ce coffre est vide.' : 'Aucun élément hors coffre.' }}
@@ -2710,6 +2954,7 @@ watch(draftFolderId, (value) => {
             ref="editorEl"
             v-model="draftContent"
             class="notes-page__editor"
+            lang="fr"
             spellcheck="true"
             placeholder="Écris en Markdown… (Ctrl+V pour coller une image)"
             @scroll="onEditorScroll"
@@ -2838,6 +3083,114 @@ watch(draftFolderId, (value) => {
       :style="{ top: `${editorContextMenu.y}px`, left: `${editorContextMenu.x}px` }"
       @contextmenu.prevent
     >
+      <template v-if="canFormatEditorSelection()">
+        <div class="notes-dict-context__format" role="group" aria-label="Style de la sélection">
+          <button
+            type="button"
+            class="notes-dict-context__format-btn"
+            title="Gras"
+            aria-label="Gras"
+            @mousedown.prevent
+            @click="applyEditorSelectionFormat('bold')"
+          >
+            <strong>B</strong>
+          </button>
+          <button
+            type="button"
+            class="notes-dict-context__format-btn"
+            title="Italique"
+            aria-label="Italique"
+            @mousedown.prevent
+            @click="applyEditorSelectionFormat('italic')"
+          >
+            <em>I</em>
+          </button>
+          <button
+            type="button"
+            class="notes-dict-context__format-btn"
+            title="Souligné"
+            aria-label="Souligné"
+            @mousedown.prevent
+            @click="applyEditorSelectionFormat('underline')"
+          >
+            <span class="notes-dict-context__format-u">U</span>
+          </button>
+          <button
+            type="button"
+            class="notes-dict-context__format-btn"
+            title="Barré"
+            aria-label="Barré"
+            @mousedown.prevent
+            @click="applyEditorSelectionFormat('strike')"
+          >
+            <span class="notes-dict-context__format-s">S</span>
+          </button>
+          <button
+            type="button"
+            class="notes-dict-context__format-btn"
+            :class="{ 'notes-dict-context__format-btn--active': contextColorPanel === 'highlight' }"
+            title="Surlignage"
+            aria-label="Couleur de surlignage"
+            @mousedown.prevent
+            @click="openContextColorPanel('highlight')"
+          >
+            <span class="notes-dict-context__format-mark">A</span>
+          </button>
+          <button
+            type="button"
+            class="notes-dict-context__format-btn"
+            :class="{ 'notes-dict-context__format-btn--active': contextColorPanel === 'text' }"
+            title="Couleur du texte"
+            aria-label="Couleur du texte"
+            @mousedown.prevent
+            @click="openContextColorPanel('text')"
+          >
+            <span class="notes-dict-context__format-color">A</span>
+          </button>
+        </div>
+        <div
+          v-if="contextColorPanel"
+          class="notes-dict-context__swatches"
+          role="group"
+          :aria-label="contextColorPanel === 'text' ? 'Couleur du texte' : 'Couleur de surlignage'"
+        >
+          <button
+            v-for="color in contextColorPanel === 'text' ? TEXT_COLOR_PRESETS.slice(0, 20) : HIGHLIGHT_COLOR_PRESETS"
+            :key="`${contextColorPanel}-${color}`"
+            type="button"
+            class="notes-dict-context__swatch"
+            :class="{ 'notes-dict-context__swatch--white': color === '#ffffff' }"
+            :style="{ backgroundColor: color }"
+            :title="color"
+            :aria-label="`Appliquer ${color}`"
+            @mousedown.prevent
+            @click="applyContextColor(contextColorPanel, color)"
+          />
+        </div>
+        <div class="notes-dict-context__sep" />
+      </template>
+
+      <template v-if="spellcheckMenu">
+        <p v-if="spellcheckMenu.loading" class="notes-dict-context__hint">Vérification…</p>
+        <template v-else>
+          <p v-if="spellcheckMenu.message" class="notes-dict-context__hint">
+            {{ spellcheckMenu.message }}
+          </p>
+          <button
+            v-for="suggestion in spellcheckMenu.suggestions"
+            :key="`spell-${suggestion}`"
+            type="button"
+            class="notes-dict-context__item notes-dict-context__item--spell"
+            role="menuitem"
+            @mousedown.prevent
+            @click="applySpellSuggestion(suggestion)"
+          >
+            {{ suggestion }}
+          </button>
+          <div class="notes-dict-context__sep" />
+        </template>
+      </template>
+
       <p v-if="editorContextSelectionHit" class="notes-dict-context__hint">
         Déjà connu : {{ editorContextSelectionHit.word }}
       </p>
@@ -3869,15 +4222,127 @@ watch(draftFolderId, (value) => {
   cursor: help;
 }
 
+:deep(.markdown-body mark) {
+  background: #fff3a3;
+  border-radius: 2px;
+  padding: 0 0.12em;
+  color: inherit;
+}
+
+:deep(.markdown-body u) {
+  text-underline-offset: 2px;
+}
+
+.notes-page__tree--drop-root {
+  outline: 1px dashed #8e6aa8;
+  outline-offset: -2px;
+  border-radius: 8px;
+  background: rgba(173, 129, 190, 0.12);
+}
+
+.notes-page__tree-drop-hint {
+  margin: 0 0 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: #6b5280;
+  background: rgba(213, 181, 234, 0.35);
+  text-align: center;
+}
+
 .notes-dict-context {
   position: fixed;
   z-index: 1100;
-  min-width: 220px;
+  min-width: 240px;
+  max-width: min(320px, calc(100vw - 1rem));
   padding: 0.35rem;
   border-radius: 12px;
   background: #fff;
   border: 1px solid #e6ddf2;
   box-shadow: 0 12px 32px rgba(58, 34, 86, 0.16);
+}
+
+.notes-dict-context__format {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  padding: 0.2rem 0.25rem 0.35rem;
+}
+
+.notes-dict-context__format-btn {
+  width: 1.85rem;
+  height: 1.85rem;
+  border: 1px solid #e6ddf2;
+  border-radius: 7px;
+  background: #faf7fd;
+  color: #3a2256;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notes-dict-context__format-btn:hover,
+.notes-dict-context__format-btn--active {
+  background: #efe6f8;
+  border-color: #c9b3de;
+}
+
+.notes-dict-context__format-u {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.notes-dict-context__format-s {
+  text-decoration: line-through;
+}
+
+.notes-dict-context__format-mark {
+  background: #fff3a3;
+  padding: 0 0.15rem;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+.notes-dict-context__format-color {
+  font-weight: 700;
+  border-bottom: 2px solid #e53935;
+  line-height: 1.1;
+}
+
+.notes-dict-context__swatches {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 0.2rem;
+  padding: 0.15rem 0.3rem 0.45rem;
+}
+
+.notes-dict-context__swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.notes-dict-context__swatch--white {
+  box-shadow: inset 0 0 0 1px #ddd;
+}
+
+.notes-dict-context__swatch:hover {
+  outline: 2px solid #8e6aa8;
+  outline-offset: 1px;
+}
+
+.notes-dict-context__sep {
+  height: 1px;
+  margin: 0.15rem 0.35rem 0.35rem;
+  background: #efe6f8;
 }
 
 .notes-page__dashboard-pin-toast {
@@ -3913,6 +4378,11 @@ watch(draftFolderId, (value) => {
   font: inherit;
   color: #3a2256;
   cursor: pointer;
+}
+
+.notes-dict-context__item--spell {
+  font-weight: 650;
+  color: #5b3d7a;
 }
 
 .notes-dict-context__item:hover {
