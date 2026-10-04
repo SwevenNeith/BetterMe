@@ -30,6 +30,7 @@ import {
 } from '../utils/notes/noteTableOfContents.js'
 import { mountNoteWidgets, NOTE_WIDGET_INDEX_ATTR, NOTE_WIDGET_PLACEHOLDER_CLASS } from '../utils/notes/noteWidgets.js'
 import NotesTreeNode from '../components/notes/NotesTreeNode.vue'
+import NotesEditorContextMenu from '../components/notes/NotesEditorContextMenu.vue'
 import NotesTableOfContentsTree from '../components/notes/NotesTableOfContentsTree.vue'
 import AppConfirmDialog from '../components/common/AppConfirmDialog.vue'
 import NotesExtensionsModal from '../components/notes/NotesExtensionsModal.vue'
@@ -67,6 +68,11 @@ import { RABBIT_HOLE_EXTENSION_ID } from '../constants/notes/rabbitHole.js'
 import {
   formatNoteSelection,
   replaceNoteSelection,
+  applyBlockFormat,
+  insertAtSelection,
+  eraseHighlightInRange,
+  deriveNoteTitleFromSelection,
+  selectionHasHighlight,
 } from '../utils/notes/noteSelectionFormat.js'
 import {
   isSpellcheckableSelection,
@@ -74,7 +80,6 @@ import {
 } from '../services/notes/noteSpellcheck.js'
 import {
   TEXT_COLOR_PRESETS,
-  normalizeHex,
   rememberRecentTextColor,
 } from '../utils/common/richNoteTextColors.js'
 import { listDictionaryEntries } from '../services/dictionnaire/dictionaryEntries.js'
@@ -158,13 +163,12 @@ const rabbitHoleSelectedText = ref('')
 const editorContextMenu = ref(null)
 const dashboardPinMessage = ref('')
 let dashboardPinMessageTimer = null
-/** Palette couleur ouverte dans le menu contextuel : text | highlight | null */
-const contextColorPanel = ref(null)
 /** @type {import('vue').Ref<{ loading: boolean, message: string, suggestions: string[], offset: number, length: number } | null>} */
 const spellcheckMenu = ref(null)
 let spellcheckMenuToken = 0
 const NOTE_DND_MIME = 'application/x-betterme-note-id'
 const treeRootDropActive = ref(false)
+const contextMenuCanPaste = ref(false)
 const HIGHLIGHT_COLOR_PRESETS = [
   '#fff3a3',
   '#ffe599',
@@ -1596,22 +1600,29 @@ function canFormatEditorSelection() {
   return Number.isFinite(menu.selectionStart) && Number.isFinite(menu.selectionEnd)
 }
 
-function applyEditorSelectionFormat(kind, color = '') {
+function editorSelectionHasHighlight() {
   const menu = editorContextMenu.value
-  if (!canFormatEditorSelection() || !menu) return
-  const start = menu.selectionStart
-  const end = menu.selectionEnd
-  const result = formatNoteSelection(draftContent.value, start, end, kind, color)
-  if (!result.changed) {
-    closeEditorContextMenu()
+  if (!canFormatEditorSelection() || !menu) return false
+  return selectionHasHighlight(draftContent.value, menu.selectionStart, menu.selectionEnd)
+}
+
+function restoreEditorSelection() {
+  const menu = editorContextMenu.value
+  const editor = editorEl.value
+  if (!editor || !menu) return
+  if (!Number.isFinite(menu.selectionStart) || !Number.isFinite(menu.selectionEnd)) return
+  editor.focus()
+  editor.setSelectionRange(menu.selectionStart, menu.selectionEnd)
+}
+
+function applyContentMutation(result, { close = true } = {}) {
+  if (!result?.changed && result?.content === draftContent.value) {
+    if (close) closeEditorContextMenu()
     return
   }
   draftContent.value = result.content
   markDirty()
-  if (color && (kind === 'color' || kind === 'highlight')) {
-    rememberRecentTextColor(color)
-  }
-  closeEditorContextMenu()
+  if (close) closeEditorContextMenu()
   void nextTick(() => {
     const editor = editorEl.value
     if (!editor) return
@@ -1620,15 +1631,207 @@ function applyEditorSelectionFormat(kind, color = '') {
   })
 }
 
-function openContextColorPanel(panel) {
-  contextColorPanel.value = contextColorPanel.value === panel ? null : panel
+function applyEditorSelectionFormat(kind, color = '') {
+  const menu = editorContextMenu.value
+  if (!canFormatEditorSelection() || !menu) return
+  const result = formatNoteSelection(
+    draftContent.value,
+    menu.selectionStart,
+    menu.selectionEnd,
+    kind,
+    color,
+  )
+  if (!result.changed) {
+    closeEditorContextMenu()
+    return
+  }
+  if (color && (kind === 'color' || kind === 'highlight')) {
+    rememberRecentTextColor(color)
+  }
+  applyContentMutation(result)
 }
 
-function applyContextColor(panel, color) {
-  const hex = normalizeHex(color)
-  if (!hex) return
-  if (panel === 'text') applyEditorSelectionFormat('color', hex)
-  else if (panel === 'highlight') applyEditorSelectionFormat('highlight', hex)
+function applyEditorBlockFormat(kind) {
+  const menu = editorContextMenu.value
+  if (!menu || menu.source !== 'editor') return
+  if (!Number.isFinite(menu.selectionStart) || !Number.isFinite(menu.selectionEnd)) return
+  const result = applyBlockFormat(
+    draftContent.value,
+    menu.selectionStart,
+    menu.selectionEnd,
+    kind,
+  )
+  applyContentMutation(result)
+}
+
+function applyEditorInsert(kind) {
+  const menu = editorContextMenu.value
+  if (!menu || menu.source !== 'editor') return
+  const start = Number.isFinite(menu.selectionStart) ? menu.selectionStart : draftContent.value.length
+  const end = Number.isFinite(menu.selectionEnd) ? menu.selectionEnd : start
+  let insertion = ''
+  let caret = null
+  if (kind === 'hr') {
+    insertion = '\n\n---\n\n'
+  } else if (kind === 'code') {
+    const selected = String(menu.selectedText ?? '')
+    if (selected) {
+      insertion = `\`\`\`\n${selected}\n\`\`\``
+    } else {
+      insertion = '```\n\n```'
+      caret = 4
+    }
+  } else if (kind === 'table') {
+    insertion = '\n\n| Colonne | Colonne |\n| --- | --- |\n|  |  |\n\n'
+  } else {
+    return
+  }
+  applyContentMutation(insertAtSelection(draftContent.value, start, end, insertion, caret))
+}
+
+function onContextWikiLink() {
+  applyEditorSelectionFormat('wiki')
+}
+
+function onContextExternalLink() {
+  const menu = editorContextMenu.value
+  if (!canFormatEditorSelection() || !menu) return
+  const url = window.prompt('URL du lien externe :', 'https://')
+  if (url == null) return
+  const trimmed = String(url).trim()
+  if (!trimmed) return
+  applyEditorSelectionFormat('link', trimmed)
+}
+
+function onContextSearchSelection() {
+  const text = String(editorContextMenu.value?.selectedText ?? '').trim()
+  if (!text) return
+  treeQuery.value = text
+  sidebarCollapsed.value = false
+  tocOpen.value = false
+  closeEditorContextMenu()
+}
+
+async function onContextExtractSelection() {
+  if (!userId.value || !canFormatEditorSelection()) return
+  const menu = editorContextMenu.value
+  const selected = String(menu.selectedText ?? '').trim()
+  if (!selected) return
+
+  const title = deriveNoteTitleFromSelection(selected)
+  try {
+    const note = await createNote(supabase, userId.value, {
+      title,
+      contentMd: selected,
+      folderId: draftFolderId.value,
+      vaultId: activeVaultId.value,
+    })
+    notes.value = [...notes.value, note]
+    const result = replaceNoteSelection(
+      draftContent.value,
+      menu.selectionStart,
+      menu.selectionEnd,
+      `[[${note.title}]]`,
+    )
+    applyContentMutation({ ...result, changed: true })
+    showDashboardPinMessage(`Note « ${note.title} » créée.`)
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible d’extraire la sélection.'
+    closeEditorContextMenu()
+  }
+}
+
+async function onContextCut() {
+  const menu = editorContextMenu.value
+  if (!canFormatEditorSelection() || !menu) return
+  try {
+    await navigator.clipboard.writeText(String(menu.selectedText ?? ''))
+  } catch {
+    restoreEditorSelection()
+    document.execCommand('cut')
+    closeEditorContextMenu()
+    return
+  }
+  const result = replaceNoteSelection(
+    draftContent.value,
+    menu.selectionStart,
+    menu.selectionEnd,
+    '',
+  )
+  applyContentMutation({ ...result, changed: true })
+}
+
+async function onContextCopy() {
+  const text = String(editorContextMenu.value?.selectedText ?? '')
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    restoreEditorSelection()
+    document.execCommand('copy')
+  }
+  closeEditorContextMenu()
+}
+
+async function onContextPaste({ plain = false } = {}) {
+  const menu = editorContextMenu.value
+  if (!menu || menu.source !== 'editor') return
+  let text = ''
+  try {
+    text = await navigator.clipboard.readText()
+  } catch {
+    restoreEditorSelection()
+    document.execCommand('paste')
+    closeEditorContextMenu()
+    return
+  }
+  if (plain) text = String(text).replace(/\r\n/g, '\n')
+  const start = Number.isFinite(menu.selectionStart) ? menu.selectionStart : draftContent.value.length
+  const end = Number.isFinite(menu.selectionEnd) ? menu.selectionEnd : start
+  const result = replaceNoteSelection(draftContent.value, start, end, text)
+  applyContentMutation({ ...result, changed: true })
+}
+
+function onContextSelectAll() {
+  closeEditorContextMenu()
+  void nextTick(() => {
+    const editor = editorEl.value
+    if (!editor) return
+    editor.focus()
+    editor.setSelectionRange(0, editor.value.length)
+  })
+}
+
+function onContextHighlight() {
+  applyEditorSelectionFormat('highlight', '#fff3a3')
+}
+
+function onContextEraseHighlight() {
+  const menu = editorContextMenu.value
+  if (!canFormatEditorSelection() || !menu) return
+  const result = eraseHighlightInRange(
+    draftContent.value,
+    menu.selectionStart,
+    menu.selectionEnd,
+  )
+  applyContentMutation(result)
+}
+
+function onContextColor({ kind, color }) {
+  applyEditorSelectionFormat(kind, color)
+}
+
+async function refreshClipboardPasteState() {
+  contextMenuCanPaste.value = false
+  if (!navigator.clipboard?.readText) return
+  try {
+    const text = await navigator.clipboard.readText()
+    contextMenuCanPaste.value = Boolean(String(text ?? '').length)
+  } catch {
+    // Permission refusée : on laisse coller via execCommand si possible
+    contextMenuCanPaste.value = true
+  }
 }
 
 async function refreshSpellcheckForMenu(selectedText) {
@@ -1772,7 +1975,6 @@ function openNoteContextMenu(event, selectedText = '', extras = {}) {
     ? extras.widgetIndices.filter((n) => Number.isFinite(n) && n >= 0)
     : []
   const source = extras.source || 'editor'
-  contextColorPanel.value = null
   editorContextMenu.value = {
     x: event.clientX,
     y: event.clientY,
@@ -1788,6 +1990,7 @@ function openNoteContextMenu(event, selectedText = '', extras = {}) {
     contentMd: extras.contentMd ?? null,
     source,
   }
+  void refreshClipboardPasteState()
   if (
     source === 'editor' &&
     Number.isFinite(extras.selectionStart) &&
@@ -1856,9 +2059,9 @@ function onTreeNoteContextMenu({ noteId, event }) {
 
 function closeEditorContextMenu() {
   editorContextMenu.value = null
-  contextColorPanel.value = null
   spellcheckMenuToken += 1
   spellcheckMenu.value = null
+  contextMenuCanPaste.value = false
 }
 
 function showDashboardPinMessage(message) {
@@ -2136,7 +2339,9 @@ function onPreviewMouseOver(event) {
 function onGlobalPointerDown(event) {
   if (!editorContextMenu.value) return
   const target = event.target
-  if (target instanceof Element && target.closest('.notes-dict-context')) return
+  if (target instanceof Element && (target.closest('.notes-ctx') || target.closest('.notes-dict-context'))) {
+    return
+  }
   closeEditorContextMenu()
 }
 
@@ -2965,173 +3170,43 @@ watch(draftFolderId, (value) => {
       @saved="onRabbitHoleThoughtSaved"
     />
 
-    <div
-      v-if="editorContextMenu"
-      class="notes-dict-context"
-      role="menu"
-      :style="{ top: `${editorContextMenu.y}px`, left: `${editorContextMenu.x}px` }"
-      @contextmenu.prevent
-    >
-      <template v-if="canFormatEditorSelection()">
-        <div class="notes-dict-context__format" role="group" aria-label="Style de la sélection">
-          <button
-            type="button"
-            class="notes-dict-context__format-btn"
-            title="Gras"
-            aria-label="Gras"
-            @mousedown.prevent
-            @click="applyEditorSelectionFormat('bold')"
-          >
-            <strong>B</strong>
-          </button>
-          <button
-            type="button"
-            class="notes-dict-context__format-btn"
-            title="Italique"
-            aria-label="Italique"
-            @mousedown.prevent
-            @click="applyEditorSelectionFormat('italic')"
-          >
-            <em>I</em>
-          </button>
-          <button
-            type="button"
-            class="notes-dict-context__format-btn"
-            title="Souligné"
-            aria-label="Souligné"
-            @mousedown.prevent
-            @click="applyEditorSelectionFormat('underline')"
-          >
-            <span class="notes-dict-context__format-u">U</span>
-          </button>
-          <button
-            type="button"
-            class="notes-dict-context__format-btn"
-            title="Barré"
-            aria-label="Barré"
-            @mousedown.prevent
-            @click="applyEditorSelectionFormat('strike')"
-          >
-            <span class="notes-dict-context__format-s">S</span>
-          </button>
-          <button
-            type="button"
-            class="notes-dict-context__format-btn"
-            :class="{ 'notes-dict-context__format-btn--active': contextColorPanel === 'highlight' }"
-            title="Surlignage"
-            aria-label="Couleur de surlignage"
-            @mousedown.prevent
-            @click="openContextColorPanel('highlight')"
-          >
-            <span class="notes-dict-context__format-mark">A</span>
-          </button>
-          <button
-            type="button"
-            class="notes-dict-context__format-btn"
-            :class="{ 'notes-dict-context__format-btn--active': contextColorPanel === 'text' }"
-            title="Couleur du texte"
-            aria-label="Couleur du texte"
-            @mousedown.prevent
-            @click="openContextColorPanel('text')"
-          >
-            <span class="notes-dict-context__format-color">A</span>
-          </button>
-        </div>
-        <div
-          v-if="contextColorPanel"
-          class="notes-dict-context__swatches"
-          role="group"
-          :aria-label="contextColorPanel === 'text' ? 'Couleur du texte' : 'Couleur de surlignage'"
-        >
-          <button
-            v-for="color in contextColorPanel === 'text' ? TEXT_COLOR_PRESETS.slice(0, 20) : HIGHLIGHT_COLOR_PRESETS"
-            :key="`${contextColorPanel}-${color}`"
-            type="button"
-            class="notes-dict-context__swatch"
-            :class="{ 'notes-dict-context__swatch--white': color === '#ffffff' }"
-            :style="{ backgroundColor: color }"
-            :title="color"
-            :aria-label="`Appliquer ${color}`"
-            @mousedown.prevent
-            @click="applyContextColor(contextColorPanel, color)"
-          />
-        </div>
-        <div class="notes-dict-context__sep" />
-      </template>
-
-      <template v-if="spellcheckMenu">
-        <p v-if="spellcheckMenu.loading" class="notes-dict-context__hint">Vérification…</p>
-        <template v-else>
-          <p v-if="spellcheckMenu.message" class="notes-dict-context__hint">
-            {{ spellcheckMenu.message }}
-          </p>
-          <button
-            v-for="suggestion in spellcheckMenu.suggestions"
-            :key="`spell-${suggestion}`"
-            type="button"
-            class="notes-dict-context__item notes-dict-context__item--spell"
-            role="menuitem"
-            @mousedown.prevent
-            @click="applySpellSuggestion(suggestion)"
-          >
-            {{ suggestion }}
-          </button>
-          <div class="notes-dict-context__sep" />
-        </template>
-      </template>
-
-      <p v-if="editorContextSelectionHit" class="notes-dict-context__hint">
-        Déjà connu : {{ editorContextSelectionHit.word }}
-      </p>
-      <button
-        v-if="editorContextMenu.source === 'sidebar' && editorContextMenu.noteId"
-        type="button"
-        class="notes-dict-context__item"
-        role="menuitem"
-        @click="openNoteInNewTab(editorContextMenu.noteId)"
-      >
-        Ouvrir dans un nouvel onglet
-      </button>
-      <template v-if="editorContextMenu.word">
-        <button
-          type="button"
-          class="notes-dict-context__item"
-          role="menuitem"
-          @click="openDictionaryEntryModal(editorContextMenu.word)"
-        >
-          Ajouter au dictionnaire
-        </button>
-        <button
-          type="button"
-          class="notes-dict-context__item"
-          role="menuitem"
-          @click="openDictionaryLinkModal(editorContextMenu.word)"
-        >
-          Lier à une définition existante
-        </button>
-      </template>
-      <button
-        v-if="isExtEnabled(RABBIT_HOLE_EXTENSION_ID) && editorContextMenu.selectedText"
-        type="button"
-        class="notes-dict-context__item"
-        role="menuitem"
-        @click="openRabbitHoleModal"
-      >
-        Ajouter au Rabbit Hole
-      </button>
-      <button
-        type="button"
-        class="notes-dict-context__item"
-        role="menuitem"
-        @click="pinNoteToDashboard"
-      >
-        {{
-          editorContextMenu.selectedText
-            ? 'Mettre la sélection sur le Dashboard'
-            : 'Mettre sur le Dashboard'
-        }}
-      </button>
-    </div>
+    <NotesEditorContextMenu
+      :open="Boolean(editorContextMenu)"
+      :x="editorContextMenu?.x || 0"
+      :y="editorContextMenu?.y || 0"
+      :source="editorContextMenu?.source || 'editor'"
+      :selected-text="editorContextMenu?.selectedText || ''"
+      :word="editorContextMenu?.word || ''"
+      :note-id="editorContextMenu?.noteId || ''"
+      :has-highlight="editorSelectionHasHighlight()"
+      :dictionary-hit-label="editorContextSelectionHit?.word || ''"
+      :rabbit-hole-enabled="isExtEnabled(RABBIT_HOLE_EXTENSION_ID)"
+      :can-paste="contextMenuCanPaste"
+      :spellcheck="spellcheckMenu"
+      :text-color-presets="TEXT_COLOR_PRESETS.slice(0, 20)"
+      :highlight-color-presets="HIGHLIGHT_COLOR_PRESETS"
+      @wiki-link="onContextWikiLink"
+      @external-link="onContextExternalLink"
+      @search="onContextSearchSelection"
+      @extract="onContextExtractSelection"
+      @format="applyEditorSelectionFormat"
+      @block="applyEditorBlockFormat"
+      @insert="applyEditorInsert"
+      @cut="onContextCut"
+      @copy="onContextCopy"
+      @paste="onContextPaste()"
+      @paste-plain="onContextPaste({ plain: true })"
+      @select-all="onContextSelectAll"
+      @highlight="onContextHighlight"
+      @erase-highlight="onContextEraseHighlight"
+      @dictionary-add="openDictionaryEntryModal(editorContextMenu?.word || '')"
+      @dictionary-link="openDictionaryLinkModal(editorContextMenu?.word || '')"
+      @rabbit-hole="openRabbitHoleModal"
+      @dashboard-pin="pinNoteToDashboard"
+      @open-tab="openNoteInNewTab(editorContextMenu?.noteId)"
+      @spell-suggestion="applySpellSuggestion"
+      @color="onContextColor"
+    />
 
     <p v-if="dashboardPinMessage" class="notes-page__dashboard-pin-toast" role="status">
       {{ dashboardPinMessage }}
@@ -4135,100 +4210,6 @@ watch(draftFolderId, (value) => {
   text-align: center;
 }
 
-.notes-dict-context {
-  position: fixed;
-  z-index: 1100;
-  min-width: 240px;
-  max-width: min(320px, calc(100vw - 1rem));
-  padding: 0.35rem;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid #e6ddf2;
-  box-shadow: 0 12px 32px rgba(58, 34, 86, 0.16);
-}
-
-.notes-dict-context__format {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.2rem;
-  padding: 0.2rem 0.25rem 0.35rem;
-}
-
-.notes-dict-context__format-btn {
-  width: 1.85rem;
-  height: 1.85rem;
-  border: 1px solid #e6ddf2;
-  border-radius: 7px;
-  background: #faf7fd;
-  color: #3a2256;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.85rem;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.notes-dict-context__format-btn:hover,
-.notes-dict-context__format-btn--active {
-  background: #efe6f8;
-  border-color: #c9b3de;
-}
-
-.notes-dict-context__format-u {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.notes-dict-context__format-s {
-  text-decoration: line-through;
-}
-
-.notes-dict-context__format-mark {
-  background: #fff3a3;
-  padding: 0 0.15rem;
-  border-radius: 3px;
-  font-weight: 700;
-}
-
-.notes-dict-context__format-color {
-  font-weight: 700;
-  border-bottom: 2px solid #e53935;
-  line-height: 1.1;
-}
-
-.notes-dict-context__swatches {
-  display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  gap: 0.2rem;
-  padding: 0.15rem 0.3rem 0.45rem;
-}
-
-.notes-dict-context__swatch {
-  width: 100%;
-  aspect-ratio: 1;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 4px;
-  cursor: pointer;
-  padding: 0;
-}
-
-.notes-dict-context__swatch--white {
-  box-shadow: inset 0 0 0 1px #ddd;
-}
-
-.notes-dict-context__swatch:hover {
-  outline: 2px solid #8e6aa8;
-  outline-offset: 1px;
-}
-
-.notes-dict-context__sep {
-  height: 1px;
-  margin: 0.15rem 0.35rem 0.35rem;
-  background: #efe6f8;
-}
-
 .notes-page__dashboard-pin-toast {
   position: fixed;
   z-index: 1200;
@@ -4243,34 +4224,6 @@ watch(draftFolderId, (value) => {
   font-size: 0.85rem;
   font-weight: 700;
   box-shadow: 0 10px 28px rgba(58, 34, 86, 0.28);
-}
-
-.notes-dict-context__hint {
-  margin: 0.15rem 0.55rem 0.35rem;
-  font-size: 0.78rem;
-  color: #7a688c;
-}
-
-.notes-dict-context__item {
-  display: block;
-  width: 100%;
-  border: none;
-  background: transparent;
-  text-align: left;
-  padding: 0.5rem 0.65rem;
-  border-radius: 8px;
-  font: inherit;
-  color: #3a2256;
-  cursor: pointer;
-}
-
-.notes-dict-context__item--spell {
-  font-weight: 650;
-  color: #5b3d7a;
-}
-
-.notes-dict-context__item:hover {
-  background: #f4edf9;
 }
 
 .notes-dict-tooltip {
@@ -4603,19 +4556,6 @@ watch(draftFolderId, (value) => {
   .notes-prompt__input {
     background: #2a2438;
     border-color: rgba(173, 129, 190, 0.4);
-    color: #f0e8f8;
-  }
-
-  .notes-dict-context {
-    background: #241c30;
-    border-color: rgba(213, 181, 234, 0.28);
-  }
-
-  .notes-dict-context__hint {
-    color: #b8a8c8;
-  }
-
-  .notes-dict-context__item {
     color: #f0e8f8;
   }
 
