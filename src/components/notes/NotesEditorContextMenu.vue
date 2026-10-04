@@ -4,6 +4,11 @@ import {
   TEXT_COLOR_PRESETS,
   normalizeHex,
 } from '../../utils/common/richNoteTextColors.js'
+import {
+  configureEmojiPickerElement,
+  FRENCH_EMOJI_DATA,
+  loadEmojiPickerElement,
+} from '../../composables/useEmojiPickerElement.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -66,11 +71,15 @@ const emit = defineEmits([
   'open-tab',
   'spell-suggestion',
   'color',
+  'emoji',
 ])
 
-/** @type {import('vue').Ref<null | 'format' | 'paragraph' | 'insert' | 'text-color' | 'highlight-color'>} */
+/** @type {import('vue').Ref<null | 'format' | 'paragraph' | 'insert' | 'text-color' | 'highlight-color' | 'emoji'>} */
 const openSubmenu = ref(null)
 const menuEl = ref(null)
+const emojiPickerRef = ref(null)
+const emojiPickerReady = ref(false)
+const emojiPickerLoading = ref(false)
 const menuLeft = ref(0)
 const menuTop = ref(0)
 const menuMaxHeight = ref(560)
@@ -166,6 +175,36 @@ function onPickColor(kind, color) {
   const hex = normalizeHex(color)
   if (!hex) return
   run('color', { kind, color: hex })
+}
+
+async function openEmojiPicker() {
+  if (openSubmenu.value === 'emoji') {
+    openSubmenu.value = null
+    return
+  }
+  openSubmenu.value = 'emoji'
+  if (emojiPickerReady.value) {
+    await nextTick()
+    configureEmojiPickerElement(emojiPickerRef.value)
+    void repositionMenu()
+    return
+  }
+  emojiPickerLoading.value = true
+  try {
+    await loadEmojiPickerElement()
+    emojiPickerReady.value = true
+    await nextTick()
+    configureEmojiPickerElement(emojiPickerRef.value)
+    void repositionMenu()
+  } finally {
+    emojiPickerLoading.value = false
+  }
+}
+
+function onEmojiClick(event) {
+  const unicode = String(event?.detail?.unicode ?? '').trim()
+  if (!unicode) return
+  run('emoji', unicode)
 }
 </script>
 
@@ -456,6 +495,37 @@ function onPickColor(kind, color) {
         <span class="notes-ctx__label">Tout sélectionner</span>
       </button>
 
+      <template v-if="isEditor">
+        <div class="notes-ctx__sep" />
+        <button
+          type="button"
+          class="notes-ctx__item"
+          :class="{ 'notes-ctx__item--open': openSubmenu === 'emoji' }"
+          role="menuitem"
+          aria-haspopup="true"
+          @mousedown.prevent
+          @click="openEmojiPicker"
+        >
+          <span class="notes-ctx__ico" aria-hidden="true">😀</span>
+          <span class="notes-ctx__label">Émoji</span>
+          <span class="notes-ctx__chevron">›</span>
+        </button>
+        <div v-if="openSubmenu === 'emoji'" class="notes-ctx__emoji-panel" @mousedown.stop>
+          <p v-if="emojiPickerLoading || !emojiPickerReady" class="notes-ctx__hint">
+            Chargement des emojis…
+          </p>
+          <emoji-picker
+            v-else
+            ref="emojiPickerRef"
+            class="notes-ctx__emoji-picker"
+            locale="fr"
+            :data-source="FRENCH_EMOJI_DATA"
+            @emoji-click="onEmojiClick"
+          />
+          <p class="notes-ctx__hint">Astuce : tape aussi <code>:sourire:</code> dans la note.</p>
+        </div>
+      </template>
+
       <template v-if="isEditor && hasSelection">
         <div class="notes-ctx__sep" />
         <button
@@ -671,6 +741,26 @@ function onPickColor(kind, color) {
   outline-offset: 1px;
 }
 
+.notes-ctx__emoji-panel {
+  margin: 0.15rem 0 0.35rem;
+  padding: 0.25rem;
+  border-radius: 8px;
+  background: #fffdf9;
+  border: 1px solid #e4ddd2;
+}
+
+.notes-ctx__emoji-picker {
+  width: 100%;
+  height: 280px;
+}
+
+.notes-ctx__emoji-panel code {
+  font-size: 0.78em;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.05rem 0.25rem;
+  border-radius: 4px;
+}
+
 @media (prefers-color-scheme: dark) {
   .notes-ctx {
     background: #2a2433;
@@ -699,6 +789,15 @@ function onPickColor(kind, color) {
   .notes-ctx__flyout {
     background: #322a3e;
     border-color: rgba(213, 181, 234, 0.22);
+  }
+
+  .notes-ctx__emoji-panel {
+    background: #322a3e;
+    border-color: rgba(213, 181, 234, 0.22);
+  }
+
+  .notes-ctx__emoji-panel code {
+    background: rgba(255, 255, 255, 0.08);
   }
 }
 </style>

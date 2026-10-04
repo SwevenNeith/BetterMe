@@ -47,11 +47,21 @@ import { resolveTemplateContent } from '../services/notes/noteTemplateExtension.
 import {
   loadVaultExtensionPrefs,
   loadVaultTemplatePrefs,
+  loadNotesGraphFilters,
+  saveNotesGraphFilters,
   saveVaultExtensionPrefs,
   saveVaultTemplatePrefs,
   ensureVaultSettings,
   removeVaultSettings,
 } from '../services/notes/noteVaultSettings.js'
+import {
+  createDefaultNotesGraphFilters,
+  filterNotesForGraph,
+} from '../constants/notes/notesGraphFilters.js'
+import {
+  expandEmojiShortcodeAtCaret,
+  loadEmojiShortcodeMap,
+} from '../utils/notes/emojiShortcodes.js'
 import {
   createNoteVault,
   deleteNoteVault,
@@ -187,6 +197,9 @@ const extensionsOpen = ref(false)
 const templateSettingsOpen = ref(false)
 const extensionPrefs = ref(createDefaultNotesExtensionPrefs())
 const templatePrefs = ref(createDefaultNoteTemplatePrefs())
+const graphFilters = ref(createDefaultNotesGraphFilters())
+/** @type {Map<string, string> | null} */
+let emojiShortcodeMap = null
 /** @type {import('vue').Ref<Array<{ type: 'note' | 'graph', id: string }>>} */
 const openTabs = ref([])
 /** @type {import('vue').Ref<Record<string, { title: string, content: string, folderId: string | null, dirty: boolean, viewMode: string, saveStatus: string, saveError: string }>>} */
@@ -787,7 +800,9 @@ const noteCountLabel = computed(() => {
   return parts.join(' · ')
 })
 
-const graphNotes = computed(() => contextNotes.value)
+const graphNotes = computed(() =>
+  filterNotesForGraph(contextNotes.value, contextFolders.value, graphFilters.value),
+)
 
 function filterTree(nodes, query) {
   const result = []
@@ -853,20 +868,30 @@ function expandAncestorsOfNote(noteId) {
 async function loadVaultPrefs() {
   if (!userId.value) return
   try {
-    extensionPrefs.value = await loadVaultExtensionPrefs(
-      supabase,
-      userId.value,
-      activeVaultId.value,
-    )
-    templatePrefs.value = await loadVaultTemplatePrefs(
-      supabase,
-      userId.value,
-      activeVaultId.value,
-    )
+    const [extensions, templates, filters] = await Promise.all([
+      loadVaultExtensionPrefs(supabase, userId.value, activeVaultId.value),
+      loadVaultTemplatePrefs(supabase, userId.value, activeVaultId.value),
+      loadNotesGraphFilters(supabase, userId.value),
+    ])
+    extensionPrefs.value = extensions
+    templatePrefs.value = templates
+    graphFilters.value = filters
   } catch (err) {
     console.error(err)
     extensionPrefs.value = createDefaultNotesExtensionPrefs()
     templatePrefs.value = createDefaultNoteTemplatePrefs()
+    graphFilters.value = createDefaultNotesGraphFilters()
+  }
+}
+
+async function onGraphFiltersUpdate(next) {
+  graphFilters.value = next
+  if (!userId.value) return
+  try {
+    graphFilters.value = await saveNotesGraphFilters(supabase, userId.value, next)
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible d’enregistrer les filtres de la vue globale.'
   }
 }
 
@@ -1881,6 +1906,36 @@ function applySpellSuggestion(replacement) {
   })
 }
 
+function insertEmojiAtCaret(emoji) {
+  const unicode = String(emoji ?? '')
+  if (!unicode) return
+  const menu = editorContextMenu.value
+  const editor = editorEl.value
+  const start = Number.isFinite(menu?.selectionStart)
+    ? menu.selectionStart
+    : editor?.selectionStart ?? draftContent.value.length
+  const end = Number.isFinite(menu?.selectionEnd)
+    ? menu.selectionEnd
+    : editor?.selectionEnd ?? start
+  applyContentMutation(insertAtSelection(draftContent.value, start, end, unicode))
+}
+
+async function onEditorInput() {
+  const editor = editorEl.value
+  if (!editor) return
+  const caret = editor.selectionStart ?? draftContent.value.length
+  if (!emojiShortcodeMap) {
+    emojiShortcodeMap = await loadEmojiShortcodeMap()
+  }
+  const result = expandEmojiShortcodeAtCaret(draftContent.value, caret, emojiShortcodeMap)
+  if (!result.changed) return
+  draftContent.value = result.content
+  markDirty()
+  await nextTick()
+  editor.focus()
+  editor.setSelectionRange(result.caret, result.caret)
+}
+
 async function loadDictionary() {
   if (!userId.value) return
   try {
@@ -2339,7 +2394,12 @@ function onPreviewMouseOver(event) {
 function onGlobalPointerDown(event) {
   if (!editorContextMenu.value) return
   const target = event.target
-  if (target instanceof Element && (target.closest('.notes-ctx') || target.closest('.notes-dict-context'))) {
+  if (
+    target instanceof Element &&
+    (target.closest('.notes-ctx') ||
+      target.closest('.notes-dict-context') ||
+      target.closest('emoji-picker'))
+  ) {
     return
   }
   closeEditorContextMenu()
@@ -2546,6 +2606,9 @@ watch(userId, (id) => {
     vaultsSectionCollapsed.value = loadVaultsSectionCollapsed(id)
     await loadVaultPrefs()
     await Promise.all([loadAll(), loadDictionary()])
+    void loadEmojiShortcodeMap().then((map) => {
+      emojiShortcodeMap = map
+    })
   })()
 })
 
@@ -2973,9 +3036,12 @@ watch(draftFolderId, (value) => {
         v-if="isGraphView"
         :active="isGraphView"
         :notes="graphNotes"
+        :folders="contextFolders"
+        :filters="graphFilters"
         :selected-note-id="selectedNoteId"
         :theme-style="activeVault ? activeVaultStyle : null"
         @select-note="onTreeSelectNote"
+        @update:filters="onGraphFiltersUpdate"
       />
 
       <template v-else-if="selectedNote">
@@ -3055,8 +3121,12 @@ watch(draftFolderId, (value) => {
             v-model="draftContent"
             class="notes-page__editor"
             lang="fr"
-            spellcheck="true"
+            spellcheck="false"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
             placeholder="Écris en Markdown… (Ctrl+V pour coller une image)"
+            @input="onEditorInput"
             @paste="onEditorPaste"
             @dragover="onEditorDragOver"
             @drop="onEditorDrop"
@@ -3206,6 +3276,7 @@ watch(draftFolderId, (value) => {
       @open-tab="openNoteInNewTab(editorContextMenu?.noteId)"
       @spell-suggestion="applySpellSuggestion"
       @color="onContextColor"
+      @emoji="insertEmojiAtCaret"
     />
 
     <p v-if="dashboardPinMessage" class="notes-page__dashboard-pin-toast" role="status">
@@ -3537,7 +3608,9 @@ watch(draftFolderId, (value) => {
 .notes-page__tree-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
@@ -3808,7 +3881,9 @@ watch(draftFolderId, (value) => {
 .notes-page__tree {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 0.35rem 0.3rem 0.75rem;
 }
 

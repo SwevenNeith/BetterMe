@@ -28,8 +28,8 @@ export function extractWikiLinkTitles(markdown) {
 
 /**
  * Construit le graphe notes + liens (non orienté pour l’affichage).
- * @param {{ id: string, title: string, content_md?: string }[]} notes
- * @returns {{ nodes: { id: string, title: string }[], edges: { source: string, target: string }[] }}
+ * @param {{ id: string, title: string, content_md?: string, _graphColor?: string | null, folder_id?: string | null }[]} notes
+ * @returns {{ nodes: { id: string, title: string, color: string | null, folderId: string | null }[], edges: { source: string, target: string }[] }}
  */
 export function buildNotesGraph(notes) {
   const list = Array.isArray(notes) ? notes : []
@@ -44,6 +44,8 @@ export function buildNotesGraph(notes) {
   const nodes = list.map((note) => ({
     id: note.id,
     title: String(note.title ?? '').trim() || 'Sans titre',
+    color: note._graphColor || null,
+    folderId: note._graphFolderId ?? note.folder_id ?? null,
   }))
 
   const edgeKeys = new Set()

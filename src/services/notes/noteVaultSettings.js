@@ -4,6 +4,10 @@ import {
   createDefaultNotesExtensionPrefs,
 } from '../../constants/notes/notesExtensions.js'
 import { createDefaultNoteTemplatePrefs } from '../../constants/notes/noteTemplates.js'
+import {
+  createDefaultNotesGraphFilters,
+  mergeNotesGraphFilters,
+} from '../../constants/notes/notesGraphFilters.js'
 import { mergeNotesExtensionPrefs } from './notesExtensions.js'
 import { mergeNoteTemplatePrefs } from './noteTemplateExtension.js'
 import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
@@ -22,12 +26,17 @@ function isMissingColumnError(error, column = COLUMN) {
 }
 
 /**
- * @returns {{ extensions: Record<string, boolean>, templatePrefs: import('../../constants/notes/noteTemplates.js').NoteTemplatePrefs }}
+ * @returns {{
+ *   extensions: Record<string, boolean>,
+ *   templatePrefs: import('../../constants/notes/noteTemplates.js').NoteTemplatePrefs,
+ *   graphFilters: ReturnType<typeof createDefaultNotesGraphFilters>,
+ * }}
  */
 function createDefaultVaultBundle() {
   return {
     extensions: createDefaultNotesExtensionPrefs(),
     templatePrefs: createDefaultNoteTemplatePrefs(),
+    graphFilters: createDefaultNotesGraphFilters(),
   }
 }
 
@@ -86,6 +95,7 @@ function normalizeVaultSettingsStore(raw) {
     store[key] = {
       extensions: mergeNotesExtensionPrefs(bundle.extensions),
       templatePrefs: mergeNoteTemplatePrefs(bundle.templatePrefs),
+      graphFilters: mergeNotesGraphFilters(bundle.graphFilters),
     }
   }
 
@@ -244,6 +254,38 @@ export async function saveVaultTemplatePrefs(supabase, userId, vaultId, prefs) {
   store[key].templatePrefs = mergeNoteTemplatePrefs(prefs)
   await saveVaultSettingsStore(supabase, userId, store)
   return store[key].templatePrefs
+}
+
+/**
+ * Filtres vue globale — stockés sur la racine (partagés tous coffres / appareils).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ */
+export async function loadNotesGraphFilters(supabase, userId) {
+  if (!userId) return createDefaultNotesGraphFilters()
+  const { store, migrated } = await loadRawVaultSettings(supabase, userId)
+  if (!store[NOTE_VAULT_ROOT_KEY]) store[NOTE_VAULT_ROOT_KEY] = createDefaultVaultBundle()
+  if (migrated) {
+    try {
+      await saveVaultSettingsStore(supabase, userId, store)
+    } catch (err) {
+      console.warn('Migration notes_vault_settings impossible:', err)
+    }
+  }
+  return mergeNotesGraphFilters(store[NOTE_VAULT_ROOT_KEY].graphFilters)
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {ReturnType<typeof createDefaultNotesGraphFilters>} filters
+ */
+export async function saveNotesGraphFilters(supabase, userId, filters) {
+  const { store } = await loadRawVaultSettings(supabase, userId)
+  if (!store[NOTE_VAULT_ROOT_KEY]) store[NOTE_VAULT_ROOT_KEY] = createDefaultVaultBundle()
+  store[NOTE_VAULT_ROOT_KEY].graphFilters = mergeNotesGraphFilters(filters)
+  await saveVaultSettingsStore(supabase, userId, store)
+  return store[NOTE_VAULT_ROOT_KEY].graphFilters
 }
 
 /**

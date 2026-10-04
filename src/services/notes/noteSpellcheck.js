@@ -1,6 +1,6 @@
 /**
- * Correcteur orthographe FR/EN via LanguageTool (API publique).
- * Utilisé pour les suggestions du menu contextuel Notes.
+ * Correcteur orthographe FR + EN via LanguageTool (API publique).
+ * Un mot valide dans l’une des deux langues n’est pas signalé comme faute.
  */
 
 const LT_ENDPOINT = 'https://api.languagetool.org/v2/check'
@@ -15,31 +15,12 @@ export function isSpellcheckableSelection(text) {
   const trimmed = String(text ?? '').trim()
   if (!trimmed) return false
   if (trimmed.length > MAX_TEXT_CHARS) return false
-  // Au moins une lettre (évite les seules ponctuations / nombres)
   return /[\p{L}]/u.test(trimmed)
-}
-
-/**
- * Heuristique simple : texte plutôt anglais vs français.
- * @param {string} text
- */
-function guessLanguage(text) {
-  const sample = String(text ?? '')
-  if (/[àâäéèêëïîôùûüçœæ]/i.test(sample)) return 'fr'
-  if (
-    /\b(the|and|with|this|that|have|from|your|what|when|which|would|could|should)\b/i.test(
-      sample,
-    )
-  ) {
-    return 'en-US'
-  }
-  return 'fr'
 }
 
 /**
  * @param {string} text
  * @param {string} language
- * @returns {Promise<Array<{ message: string, replacements: string[], offset: number, length: number, ruleId: string }>>}
  */
 async function checkWithLanguage(text, language) {
   const body = new URLSearchParams()
@@ -74,42 +55,60 @@ async function checkWithLanguage(text, language) {
 }
 
 /**
- * Vérifie une sélection courte en FR puis EN si besoin.
+ * Pour un mot / courte sélection : OK si accepté en FR ou en EN.
+ * Pour une phrase : ne garde que les fautes encore présentes dans les deux langues.
  * @param {string} text
- * @returns {Promise<{ language: string, suggestions: string[], message: string } | null>}
+ * @returns {Promise<{ language: string, suggestions: string[], message: string, offset: number, length: number } | null>}
  */
 export async function spellcheckSelection(text) {
   const trimmed = String(text ?? '').trim()
   if (!isSpellcheckableSelection(trimmed)) return null
 
-  const primary = guessLanguage(trimmed)
-  const secondary = primary === 'fr' ? 'en-US' : 'fr'
-
   try {
-    let matches = await checkWithLanguage(trimmed, primary)
-    let language = primary
+    const [frMatches, enMatches] = await Promise.all([
+      checkWithLanguage(trimmed, 'fr'),
+      checkWithLanguage(trimmed, 'en-US'),
+    ])
 
-    // Mot unique sans faute dans la langue primaire → tenter l’autre
-    if (!matches.length && !/\s/.test(trimmed)) {
-      matches = await checkWithLanguage(trimmed, secondary)
-      language = secondary
+    const isSingleToken = !/\s/.test(trimmed)
+
+    // Mot unique : valide dès qu’une des deux langues l’accepte
+    if (isSingleToken) {
+      if (!frMatches.length || !enMatches.length) return null
+      const top = frMatches[0]
+      const suggestions = [...new Set(top.replacements)].slice(0, MAX_SUGGESTIONS)
+      if (!suggestions.length) return null
+      return {
+        language: 'fr',
+        suggestions,
+        message: top.message || 'Orthographe',
+        offset: top.offset,
+        length: top.length,
+      }
     }
 
-    if (!matches.length) return null
+    // Phrase : faute seulement si les deux correcteurs signalent un chevauchement
+    if (!frMatches.length || !enMatches.length) return null
 
-    // Priorité aux fautes qui couvrent tout le mot / le début
-    const ranked = [...matches].sort((a, b) => {
+    const dual = frMatches.filter((fr) =>
+      enMatches.some(
+        (en) =>
+          fr.offset < en.offset + en.length && en.offset < fr.offset + fr.length,
+      ),
+    )
+    if (!dual.length) return null
+
+    const ranked = [...dual].sort((a, b) => {
       const aFull = a.offset === 0 && a.length === trimmed.length ? 0 : 1
       const bFull = b.offset === 0 && b.length === trimmed.length ? 0 : 1
       return aFull - bFull || a.offset - b.offset
     })
-
     const top = ranked[0]
     const suggestions = [...new Set(top.replacements)].slice(0, MAX_SUGGESTIONS)
     if (!suggestions.length) return null
 
     return {
-      language,
+      language: 'fr+en',
       suggestions,
       message: top.message || 'Orthographe',
       offset: top.offset,

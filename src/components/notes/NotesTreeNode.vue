@@ -89,11 +89,12 @@ function onFolderDrop(event, folderId) {
           >
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
-          <span class="notes-tree-node__label">{{ node.name }}</span>
+          <span class="notes-tree-node__label" :title="node.name">{{ node.name }}</span>
         </button>
-        <div class="notes-tree-node__actions">
+        <div class="notes-tree-node__actions notes-tree-node__actions--folder">
           <button
             type="button"
+            class="notes-tree-node__action--extra"
             title="Nouvelle note"
             aria-label="Nouvelle note"
             @click.stop="$emit('create-note', node.id)"
@@ -107,6 +108,7 @@ function onFolderDrop(event, folderId) {
           </button>
           <button
             type="button"
+            class="notes-tree-node__action--extra"
             title="Sous-dossier"
             aria-label="Créer un sous-dossier"
             @click.stop="$emit('create-folder', node.id)"
@@ -192,7 +194,7 @@ function onFolderDrop(event, folderId) {
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <polyline points="14 2 14 8 20 8" />
           </svg>
-          <span class="notes-tree-node__label">{{ node.title }}</span>
+          <span class="notes-tree-node__label" :title="node.title">{{ node.title }}</span>
         </button>
         <div class="notes-tree-node__actions">
           <button
@@ -226,12 +228,20 @@ function onFolderDrop(event, folderId) {
 </template>
 
 <style scoped>
+.notes-tree-node {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .notes-tree-node__row {
   display: flex;
   align-items: center;
   gap: 0.1rem;
   border-radius: 6px;
   padding-left: calc(var(--depth) * 0.7rem);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .notes-tree-node__row:hover {
@@ -256,7 +266,7 @@ function onFolderDrop(event, folderId) {
 }
 
 .notes-tree-node__main {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -269,6 +279,7 @@ function onFolderDrop(event, folderId) {
   color: #3b2a4a;
   font: inherit;
   font-size: 0.8rem;
+  overflow: hidden;
 }
 
 .notes-tree-node__row--folder .notes-tree-node__main {
@@ -301,6 +312,8 @@ function onFolderDrop(event, folderId) {
 }
 
 .notes-tree-node__label {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -308,11 +321,18 @@ function onFolderDrop(event, folderId) {
 
 .notes-tree-node__actions {
   display: none;
-  gap: 0.1rem;
-  padding-right: 0.2rem;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.05rem;
+  padding-right: 0.15rem;
 }
 
 .notes-tree-node__row:hover .notes-tree-node__actions {
+  display: inline-flex;
+}
+
+/* Actions secondaires dossier : visibles au survol (avec le reste) */
+.notes-tree-node__actions--folder .notes-tree-node__action--extra {
   display: inline-flex;
 }
 
@@ -327,6 +347,7 @@ function onFolderDrop(event, folderId) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .notes-tree-node__actions button svg {
@@ -342,6 +363,7 @@ function onFolderDrop(event, folderId) {
 
 .notes-tree-node__children {
   display: grid;
+  min-width: 0;
 }
 
 @media (prefers-color-scheme: dark) {
