@@ -1322,10 +1322,15 @@ onBeforeUnmount(() => {
 
 .pdc-header {
   margin-bottom: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: center;
 }
 
 .pdc-back {
   display: inline-block;
+  align-self: flex-start;
   margin-bottom: 0.65rem;
   padding: 0.25rem 0;
   border: none;
@@ -1342,16 +1347,17 @@ onBeforeUnmount(() => {
 
 .pdc-title {
   margin: 0;
-  font-size: 1.85rem;
+  font-size: 2rem;
   font-weight: 800;
   color: #2c3e50;
 }
 
 .pdc-subtitle {
-  margin: 0.4rem 0 0;
+  margin: 0.5rem auto 0;
   color: #6c757d;
-  font-size: 0.95rem;
+  font-size: 1rem;
   line-height: 1.45;
+  max-width: 42rem;
 }
 
 .pdc-card {

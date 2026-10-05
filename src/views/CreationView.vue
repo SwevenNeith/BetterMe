@@ -3,7 +3,7 @@ import { RouterLink } from 'vue-router'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 
-const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.CREATION, undefined, {
+const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.CREATION, 'Création', {
   setDocumentTitle: true,
 })
 

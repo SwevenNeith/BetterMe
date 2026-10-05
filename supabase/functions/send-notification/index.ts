@@ -809,8 +809,8 @@ Deno.serve(async (req) => {
 
       for (const row of targets) {
         try {
-          await webpush.sendNotification(
-            row.subscription,
+        await webpush.sendNotification(
+          row.subscription,
             type === 'daily_push'
               ? JSON.stringify({
                   title,

@@ -43,4 +43,5 @@ export const APP_MAIN_PAGES = [
   { id: APP_PAGE_IDS.DICTIONNAIRE, defaultLabel: 'Dictionnaire' },
   { id: APP_PAGE_IDS.MENSTRUATION, defaultLabel: 'Menstruation' },
   { id: APP_PAGE_IDS.EXERCICES_GROUP, defaultLabel: 'Exercices' },
+  { id: APP_PAGE_IDS.CREATION, defaultLabel: 'Création' },
 ]
