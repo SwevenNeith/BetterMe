@@ -7,6 +7,7 @@ import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import { listJournalEntries } from '../services/journal/journalEntries.js'
 import { createJournalPrompt } from '../services/journal/journalPrompts.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.JOURNAL, undefined, { setDocumentTitle: true })
 
@@ -113,9 +114,7 @@ async function submitPrompt() {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
 })
 

@@ -60,6 +60,7 @@ import {
   updateSubstepTitle,
 } from '../services/projets/projects.js'
 import { reconcileProjectDoneStates } from '../services/projets/projectDoneSync.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   buildHabitLogsByDate,
   getHabitLinkedCibleForPeriode,
@@ -976,9 +977,7 @@ async function onSubstepDrop(stepId, targetSubstepId, event) {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
 })
 

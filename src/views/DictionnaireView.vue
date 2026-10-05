@@ -12,6 +12,7 @@ import {
   listDictionaryEntries,
   updateDictionaryEntry,
 } from '../services/dictionnaire/dictionaryEntries.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   DICTIONARY_INDEX_KEYS,
   dictionaryLetter,
@@ -211,9 +212,7 @@ async function confirmDelete() {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
 })
 

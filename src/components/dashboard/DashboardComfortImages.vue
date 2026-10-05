@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { supabase } from '../../lib/supabase.js'
 import { setFilePickerActive, setFileUploadInProgress } from '../../composables/useAppTabResume.js'
+import { resolveSessionUser } from '../../utils/auth/sessionUser.js'
 import {
   listComfortImagesWithUrls,
   uploadComfortImage,
@@ -74,9 +75,7 @@ async function loadImages() {
 
 async function resolveUserId() {
   if (props.userId) return props.userId
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   return user?.id ?? null
 }
 

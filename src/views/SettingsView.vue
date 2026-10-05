@@ -49,6 +49,7 @@ import { sendRandomReconfortNotificationNow, syncReconfortLastSentFromSentNotifi
 import SettingsVisibilityPanel from '../components/settings/SettingsVisibilityPanel.vue'
 import SettingsDevicesPanel from '../components/settings/SettingsDevicesPanel.vue'
 import { APP_PAGE_IDS, APP_MAIN_PAGES } from '../constants/common/appPages.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   createDefaultPageVisibility,
   getPageDisplayLabel,
@@ -984,9 +985,7 @@ const onSaveMenstruationSettings = async () => {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (!user) {
     router.push('/')
     return

@@ -14,6 +14,7 @@ import { isExactOpenLibraryMatch } from '../utils/bibliotheque/openLibraryMatch.
 import { normalizeOpenLibrarySubjects } from '../utils/bibliotheque/openLibrarySubjects.js'
 import { seriesToReadingBookFields } from '../utils/bibliotheque/openLibrarySeries.js'
 import { READING_COLLECTION_WISHLIST } from '../services/lecture/readingCollections.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -145,9 +146,7 @@ async function addToLecture() {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
   await Promise.all([loadWork(), loadLectureBooks()])
 })

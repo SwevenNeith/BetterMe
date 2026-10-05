@@ -1,4 +1,5 @@
 import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase.js'
+import { fetchWithTimeout } from '../../utils/common/fetchWithTimeout.js'
 
 const RIOT_FUNCTION_URL = `${supabaseUrl}/functions/v1/riot`
 
@@ -32,11 +33,15 @@ async function getRiotHeaders() {
  * @param {Record<string, unknown>} payload
  */
 export async function callRiotFunction(payload) {
-  const response = await fetch(RIOT_FUNCTION_URL, {
-    method: 'POST',
-    headers: await getRiotHeaders(),
-    body: JSON.stringify(payload),
-  })
+  const response = await fetchWithTimeout(
+    RIOT_FUNCTION_URL,
+    {
+      method: 'POST',
+      headers: await getRiotHeaders(),
+      body: JSON.stringify(payload),
+    },
+    25_000,
+  )
 
   const text = await response.text()
   let data = null

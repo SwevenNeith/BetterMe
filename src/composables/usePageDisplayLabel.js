@@ -1,6 +1,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { APP_MAIN_PAGES } from '../constants/common/appPages.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   loadPageVisibility,
   getPageDisplayLabel,
@@ -21,9 +22,7 @@ export function usePageDisplayLabel(pageId, defaultLabel, options = {}) {
   const pageVisibility = ref(mergePageVisibility(null))
 
   async function reload() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (!user) {
       pageVisibility.value = mergePageVisibility(null)
       return

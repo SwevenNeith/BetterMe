@@ -34,6 +34,7 @@ import {
   listEpisodeProgress,
   setEpisodesWatchedBatch,
 } from '../services/television/televisionEpisodeProgress.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   cascadeEpisodeTargets,
   cascadeSeasonTargets,
@@ -561,9 +562,7 @@ async function onToggleSeason({ seasonNumber, episodeNumbers, watched }) {
 }
 
 async function initUser() {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
 }
 

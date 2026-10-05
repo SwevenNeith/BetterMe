@@ -5,6 +5,7 @@ import ReadingSpoilBook from '../components/lecture/ReadingSpoilBook.vue'
 import { supabase } from '../lib/supabase.js'
 import { getReadingBookWithCover } from '../services/lecture/readingBooks.js'
 import { deleteSpoilChapter, listSpoilChapters } from '../services/lecture/readingSpoilChapters.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -158,9 +159,7 @@ async function loadData() {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
 })
 

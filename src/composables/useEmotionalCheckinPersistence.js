@@ -1,6 +1,6 @@
-import { ref, watch, unref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, unref } from 'vue'
 import { supabase } from '../lib/supabase.js'
-import { TAB_HIDDEN_EVENT, setMutationInProgress } from './useAppTabResume.js'
+import { setMutationInProgress } from './useAppTabResume.js'
 import { withTimeout } from '../utils/common/asyncTimeout.js'
 import {
   computeCycleContext,
@@ -51,11 +51,6 @@ export function useEmotionalCheckinPersistence({
   let loadToken = 0
   let saveToken = 0
   let lastContextKey = ''
-
-  function cancelPendingLoads() {
-    loadToken++
-    isLoading.value = false
-  }
 
   async function loadPatterns(uid) {
     try {
@@ -129,20 +124,6 @@ export function useEmotionalCheckinPersistence({
     },
     { immediate: true },
   )
-
-  function onTabHidden() {
-    // N’annule que les lectures — jamais un enregistrement en cours.
-    cancelPendingLoads()
-  }
-
-  onMounted(() => {
-    window.addEventListener(TAB_HIDDEN_EVENT, onTabHidden)
-  })
-
-  onUnmounted(() => {
-    window.removeEventListener(TAB_HIDDEN_EVENT, onTabHidden)
-    cancelPendingLoads()
-  })
 
   async function saveCheckin(values) {
     const uid = unref(userId)

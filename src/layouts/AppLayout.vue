@@ -18,6 +18,7 @@ import {
   markMorningSnoozePromptShown,
   prepareMorningSnoozePrompt,
 } from '../services/todo/todoSnooze.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   getLocalTodayISO,
   purgeOldSentScheduledNotifications,
@@ -124,9 +125,7 @@ onMounted(() => {
   window.addEventListener('betterme-notifications-granted', startNotificationCron)
   void (async () => {
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const user = await resolveSessionUser()
       if (!user?.id) return
 
       userId.value = user.id
@@ -185,7 +184,16 @@ onUnmounted(() => {
       <main class="app-content">
         <NotificationPrompt />
         <RouterView v-slot="{ Component }">
-          <KeepAlive :include="['LectureView', 'TelevisionView']" :max="6">
+          <KeepAlive
+            :include="[
+              'LectureView',
+              'TelevisionView',
+              'NotesView',
+              'HabitTrackerView',
+              'BibliothequeView',
+            ]"
+            :max="8"
+          >
             <component :is="Component" />
           </KeepAlive>
         </RouterView>

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { supabase } from '../../lib/supabase.js'
 import { WORKSPACE_PAGE_OPTIONS } from '../../constants/workspace/workspacePages.js'
+import { resolveSessionUser } from '../../utils/auth/sessionUser.js'
 import {
   loadPageVisibility,
   getPageDisplayLabel,
@@ -19,9 +20,7 @@ const visibility = ref(mergePageVisibility(null))
 
 onMounted(async () => {
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (!user?.id) return
     visibility.value = await loadPageVisibility(supabase, user.id)
   } catch (err) {

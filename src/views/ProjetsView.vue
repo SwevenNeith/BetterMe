@@ -18,6 +18,7 @@ import { purgeStaleCompletedProjectItems } from '../services/projets/projectClea
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.PROJETS, undefined, { setDocumentTitle: true })
 
@@ -242,9 +243,7 @@ async function onProjectDrop(targetId, event) {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
 })
 

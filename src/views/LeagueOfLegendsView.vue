@@ -14,6 +14,7 @@ import {
   parseRiotId,
   resolveRiotAccount,
 } from '../services/jeux/riot.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   deleteLolAccount,
   listLolAccounts,
@@ -182,9 +183,7 @@ function kdaLabel(participant) {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) {
     userId.value = user.id
     await loadAccounts()

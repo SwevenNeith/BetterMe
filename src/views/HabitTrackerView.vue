@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
@@ -22,6 +22,9 @@ import {
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
+
+defineOptions({ name: 'HabitTrackerView' })
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.HABIT, undefined, { setDocumentTitle: true })
 
@@ -337,17 +340,21 @@ async function loadArchivedHabitsList() {
 
 async function loadHabits() {
   if (!userId.value) return
-  isLoading.value = true
+  const hadHabits = habits.value.length > 0
+  isLoading.value = !hadHabits
   loadError.value = ''
   try {
     habits.value = await listHabits(supabase, userId.value)
     await loadArchivedCount()
   } catch (err) {
     console.error(err)
-    const msg = err.message || ''
-    loadError.value = msg.includes('habits')
-      ? 'Table habits introuvable. Exécute scripts/create-habits-table.sql dans Supabase.'
-      : msg || 'Impossible de charger les habitudes.'
+    // Garde les habitudes déjà affichées si le réseau coupe (arrière-plan).
+    if (!hadHabits) {
+      const msg = err.message || ''
+      loadError.value = msg.includes('habits')
+        ? 'Table habits introuvable. Exécute scripts/create-habits-table.sql dans Supabase.'
+        : msg || 'Impossible de charger les habitudes.'
+    }
   } finally {
     isLoading.value = false
   }
@@ -427,9 +434,7 @@ async function onSaveHabit() {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (!user) {
     router.push('/')
     return
@@ -440,6 +445,17 @@ onMounted(async () => {
   mobileMediaQuery.addEventListener('change', updateCarouselLayout)
   window.addEventListener('resize', updateCarouselLayout)
   await setupHabitsCarousel()
+})
+
+let skipFirstActivated = true
+onActivated(async () => {
+  if (skipFirstActivated) {
+    skipFirstActivated = false
+    return
+  }
+  if (userId.value && habits.value.length === 0 && !isLoading.value) {
+    await loadHabits()
+  }
 })
 
 onUnmounted(() => {

@@ -14,6 +14,7 @@ import {
   listResourceItems,
   updateResourceItem,
 } from '../services/ressources/resourceItems.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   applyResourceDisplayFilters,
   collectResourceFilterOptions,
@@ -404,9 +405,7 @@ function onCategoryCommit(name) {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
 })
 

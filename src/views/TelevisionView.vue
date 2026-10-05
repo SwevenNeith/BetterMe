@@ -34,6 +34,7 @@ import {
 import TelevisionContinueCard from '../components/television/TelevisionContinueCard.vue'
 import TelevisionFavoriteStar from '../components/television/TelevisionFavoriteStar.vue'
 import TelevisionMediaFilterPopover from '../components/television/TelevisionMediaFilterPopover.vue'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 
 defineOptions({ name: 'TelevisionView' })
 
@@ -102,6 +103,7 @@ const userId = ref(null)
 let gridResizeObserver = null
 let searchDebounceTimer = null
 let searchRequestId = 0
+let libraryLoadGen = 0
 let skipFirstActivated = true
 
 const SEARCH_DEBOUNCE_MS = 350
@@ -444,13 +446,18 @@ async function loadLibrary() {
     nextEpisodeByMediaId.value = {}
     progressByMediaId.value = {}
     seasonsByMediaId.value = {}
+    isLibraryLoading.value = false
     return
   }
-  isLibraryLoading.value = true
+  const loadId = ++libraryLoadGen
+  const hadItems = libraryItems.value.length > 0
+  isLibraryLoading.value = !hadItems
   libraryError.value = ''
   try {
     collections.value = await listTelevisionCollections(supabase, userId.value)
+    if (loadId !== libraryLoadGen) return
     libraryItems.value = await listTelevisionMedia(supabase, userId.value)
+    if (loadId !== libraryLoadGen) return
     try {
       const { syncTelevisionReleaseNotificationsForUser } = await import(
         '../services/television/televisionReleaseNotifications.js'
@@ -467,13 +474,20 @@ async function loadLibrary() {
     )
     await refreshContinueProgress(series)
   } catch (err) {
+    if (loadId !== libraryLoadGen) return
     console.error(err)
-    libraryError.value = err.message || 'Impossible de charger ta télé.'
-    libraryItems.value = []
+    // Ne jamais vider une bibliothèque déjà chargée (abort / arrière-plan).
+    if (!libraryItems.value.length) {
+      libraryError.value = err.message || 'Impossible de charger ta télé.'
+    }
   } finally {
+    // Toujours éteindre le spinner : un load dépassé qui skip le finally
+    // laissait « Chargement… » à jamais (race watch + onMounted).
     isLibraryLoading.value = false
-    await nextTick()
-    bindGridResizeObserver()
+    if (loadId === libraryLoadGen) {
+      await nextTick()
+      bindGridResizeObserver()
+    }
   }
 }
 
@@ -680,20 +694,23 @@ watch(libraryMode, async (mode) => {
 })
 
 watch(userId, (id) => {
-  if (id) loadLibrary()
+  // Évite le double load avec onMounted (sinon libraryLoadGen laisse le spinner coincé).
+  if (id && libraryItems.value.length === 0 && !isLibraryLoading.value) {
+    void loadLibrary()
+  }
 })
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
 
   await nextTick()
   bindGridResizeObserver()
 
   if (libraryMode.value === 'mine') {
-    await loadLibrary()
+    if (libraryItems.value.length === 0) {
+      await loadLibrary()
+    }
   } else {
     await ensureLibraryLoadedForCatalog()
     const q = String(searchQuery.value ?? '').trim()
@@ -708,14 +725,16 @@ onActivated(async () => {
     skipFirstActivated = false
     return
   }
-  if (libraryMode.value === 'mine' && userId.value) {
+  // KeepAlive : ne pas rebloquer l’UI. Refresh silencieux seulement.
+  if (libraryMode.value === 'mine' && userId.value && libraryItems.value.length === 0) {
     await loadLibrary()
   }
 })
 
 onUnmounted(() => {
-  if (searchDebounceTimer != null) clearTimeout(searchDebounceTimer)
+  libraryLoadGen += 1
   searchRequestId += 1
+  if (searchDebounceTimer != null) clearTimeout(searchDebounceTimer)
   gridResizeObserver?.disconnect()
   gridResizeObserver = null
 })

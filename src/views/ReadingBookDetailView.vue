@@ -20,6 +20,7 @@ import { readingTagsNeedOpenLibrarySubjects } from '../utils/bibliotheque/openLi
 import { getOpenLibraryWork } from '../services/bibliotheque/openLibrary.js'
 import OpenLibraryLinkSearchModal from '../components/bibliotheque/OpenLibraryLinkSearchModal.vue'
 import { supabase } from '../lib/supabase.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -701,9 +702,7 @@ function onKeydown(event) {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
   document.addEventListener('keydown', onKeydown)
 })

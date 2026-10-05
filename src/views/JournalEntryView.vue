@@ -15,6 +15,7 @@ import {
   listJournalEntries,
   updateJournalEntry,
 } from '../services/journal/journalEntries.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   getRandomPendingJournalPrompt,
   listJournalPromptsWithUsage,
@@ -367,9 +368,7 @@ async function confirmDeleteEntry() {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
 })
 

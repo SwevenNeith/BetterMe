@@ -1,5 +1,6 @@
 /* eslint-disable no-useless-assignment */
 import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase.js'
+import { resolveSessionUser } from '../../utils/auth/sessionUser.js'
 import {
   dateTimeLocalToDate,
   deletePendingActiviteNotifications,
@@ -71,9 +72,7 @@ async function callEdgeFunction(payload) {
 }
 
 export async function getAuthUserId(supabase) {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   return user?.id ?? null
 }
 
@@ -514,9 +513,7 @@ export async function lancerTimer(userId, dureeEnMinutes, label) {
 /** Déclenche l'envoi des rappels dus (quotidiens + planifiés). À appeler chaque minute (cron serveur ou app ouverte). */
 export async function declencherCronNotifications() {
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (user?.id) {
       const { sendDueDailyRemindersLocally } = await import('./dailyReminders.js')
       // Horloge locale appareil + verrou last_sent_on → 1 seule notif, puis retire la file cron
@@ -530,9 +527,7 @@ export async function declencherCronNotifications() {
 
   const result = await callEdgeFunction({ type: 'cron' })
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (user?.id) {
       const [{ syncReconfortLastSentFromSentNotifications }, { rescheduleTodoPromesseReminder }] =
         await Promise.all([

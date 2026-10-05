@@ -1,6 +1,6 @@
-import { ref, watch, unref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, unref } from 'vue'
 import { supabase } from '../lib/supabase.js'
-import { TAB_HIDDEN_EVENT, setMutationInProgress } from './useAppTabResume.js'
+import { setMutationInProgress } from './useAppTabResume.js'
 import { withTimeout } from '../utils/common/asyncTimeout.js'
 import {
   fetchSymptomEntryForDate,
@@ -38,11 +38,6 @@ export function useMenstruationSymptomPersistence({
     values.value = row
       ? rowToSymptomValues(row, symptomDefs.value)
       : createEmptyValuesFromDefs(symptomDefs.value)
-  }
-
-  function cancelPendingLoads() {
-    loadToken++
-    isLoading.value = false
   }
 
   async function loadFromDb({ silent = false } = {}) {
@@ -112,19 +107,6 @@ export function useMenstruationSymptomPersistence({
       values.value = createEmptyValuesFromDefs(symptomDefs.value)
     },
   )
-
-  function onTabHidden() {
-    cancelPendingLoads()
-  }
-
-  onMounted(() => {
-    window.addEventListener(TAB_HIDDEN_EVENT, onTabHidden)
-  })
-
-  onUnmounted(() => {
-    window.removeEventListener(TAB_HIDDEN_EVENT, onTabHidden)
-    cancelPendingLoads()
-  })
 
   async function persistField(fieldKey, value) {
     const uid = unref(userId)

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
 import { useMenstruationCacheStore } from '../stores/menstruationCache.js'
 import { withTimeout } from '../utils/common/asyncTimeout.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import { supabase } from '../lib/supabase.js'
 import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
@@ -333,10 +334,8 @@ async function initMenstruationPage() {
 
   if (!userId.value) {
     try {
-      const {
-        data: { user },
-      } = await withTimeout(
-        supabase.auth.getUser(),
+      const user = await withTimeout(
+        resolveSessionUser(),
         LOAD_TIMEOUT_MS,
         'Connexion lente. Réessaie.',
       )

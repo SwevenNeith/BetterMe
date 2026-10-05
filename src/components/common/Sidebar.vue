@@ -4,6 +4,7 @@ import { nextTick, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '../../lib/supabase.js'
 import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
+import { resolveSessionUser } from '../../utils/auth/sessionUser.js'
 import {
   loadPageVisibility,
   getPageDisplayLabel,
@@ -27,9 +28,7 @@ onMounted(async () => {
   window.addEventListener('pointerdown', onGlobalPointerDown, true)
   window.addEventListener('keydown', onGlobalKeyDown)
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) {
     userName.value = user.user_metadata?.nom ?? user.email
     userId.value = user.id

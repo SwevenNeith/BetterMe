@@ -5,6 +5,7 @@ import { RouterView } from 'vue-router'
 import { useAppTabResume } from './composables/useAppTabResume.js'
 import { supabase } from './lib/supabase.js'
 import { ensureUserSettings } from './services/menstruation/menstruationNotifications.js'
+import { syncSessionUserCache, cacheSessionUser } from './utils/auth/sessionUser.js'
 
 useAppTabResume()
 
@@ -18,10 +19,13 @@ let lastWrite = 0
 const updateActivity = () => {
   const now = Date.now()
   if (now - lastWrite > 5000) {
-    // Throttle writes to localStorage (max every 5 seconds)
     localStorage.setItem('betterme_last_activity', now.toString())
     lastWrite = now
   }
+}
+
+const onVisibilityActivity = () => {
+  if (document.visibilityState === 'visible') updateActivity()
 }
 
 const checkIdleTime = async () => {
@@ -29,19 +33,18 @@ const checkIdleTime = async () => {
     const {
       data: { session },
     } = await supabase.auth.getSession()
-    if (!session) return // User is not logged in
+    if (!session) return
 
     const lastActivity = localStorage.getItem('betterme_last_activity')
     if (lastActivity) {
       const elapsed = Date.now() - parseInt(lastActivity, 10)
       if (elapsed > IDLE_TIMEOUT_MS) {
-        // Sign out due to inactivity
         await supabase.auth.signOut()
         localStorage.removeItem('betterme_last_activity')
+        cacheSessionUser(null)
         router.push('/')
       }
     } else {
-      // Initialize if not present
       localStorage.setItem('betterme_last_activity', Date.now().toString())
     }
   } catch (error) {
@@ -54,6 +57,7 @@ onMounted(async () => {
     data: { session },
   } = await supabase.auth.getSession()
   if (session?.user?.id) {
+    cacheSessionUser(session.user)
     try {
       await ensureUserSettings(session.user.id)
     } catch (err) {
@@ -64,6 +68,7 @@ onMounted(async () => {
   const {
     data: { subscription },
   } = supabase.auth.onAuthStateChange(async (event, session) => {
+    syncSessionUserCache(event, session)
     if (event === 'SIGNED_IN' && session?.user?.id) {
       try {
         await ensureUserSettings(session.user.id)
@@ -74,17 +79,15 @@ onMounted(async () => {
   })
   authSubscription = subscription
 
-  // Check immediately on load
   await checkIdleTime()
 
-  // Monitor user activity
   window.addEventListener('mousemove', updateActivity)
   window.addEventListener('keydown', updateActivity)
   window.addEventListener('click', updateActivity)
   window.addEventListener('touchstart', updateActivity)
   window.addEventListener('scroll', updateActivity)
+  document.addEventListener('visibilitychange', onVisibilityActivity)
 
-  // Periodically check inactivity (every 30 seconds)
   activityInterval = setInterval(checkIdleTime, 30000)
 })
 
@@ -95,6 +98,7 @@ onUnmounted(() => {
   window.removeEventListener('click', updateActivity)
   window.removeEventListener('touchstart', updateActivity)
   window.removeEventListener('scroll', updateActivity)
+  document.removeEventListener('visibilitychange', onVisibilityActivity)
   if (activityInterval) clearInterval(activityInterval)
 })
 </script>

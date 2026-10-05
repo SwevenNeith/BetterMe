@@ -35,6 +35,7 @@ import {
 } from '../utils/creation/progressiveResize.js'
 import PixelGridAligner from '../components/creation/PixelGridAligner.vue'
 import CrossStitchChart from '../components/creation/CrossStitchChart.vue'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 
 usePageDisplayLabel(APP_PAGE_IDS.CREATION, 'Points de Croix', {
   setDocumentTitle: true,
@@ -798,9 +799,7 @@ watch(isPixelArt, (enabled) => {
 })
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   userId.value = user?.id || null
   if (userId.value) {
     await refreshLibrary()

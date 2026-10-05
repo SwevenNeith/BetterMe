@@ -23,6 +23,7 @@ import {
   listFinanceTransactions,
   updateFinanceTransaction,
 } from '../services/finances/financeTransactions.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   MONTH_LONG,
   MONTH_SHORT,
@@ -855,9 +856,7 @@ function isSavingsCategory(category) {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
   await loadAll()
 })

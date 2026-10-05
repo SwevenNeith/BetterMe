@@ -18,6 +18,7 @@ import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { useDashboardVisibility } from '../composables/useDashboardVisibility.js'
 import { buildMobileCarouselSlides } from '../services/dashboard/dashboardVisibility.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 
 usePageDisplayLabel(APP_PAGE_IDS.DASHBOARD, undefined, { setDocumentTitle: true })
 
@@ -320,9 +321,7 @@ const loadDashboard = async ({ silent = false } = {}) => {
   }
 
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (gen !== dashboardLoadGen) return
 
     if (!user) {

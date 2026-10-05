@@ -6,10 +6,13 @@ import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { supabase } from '../lib/supabase.js'
 import { listReadingBooks } from '../services/lecture/readingBooks.js'
 import { searchOpenLibrary } from '../services/bibliotheque/openLibrary.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   findLectureBookForOpenLibraryDoc,
   syncLectureBooksWithOpenLibrary,
 } from '../services/bibliotheque/openLibraryLink.js'
+
+defineOptions({ name: 'BibliothequeView' })
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.BIBLIOTHEQUE, undefined, {
   setDocumentTitle: true,
@@ -219,9 +222,7 @@ watch(searchQuery, (value) => {
 })
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
   await loadLectureBooks()
 })

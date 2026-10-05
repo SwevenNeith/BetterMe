@@ -23,6 +23,7 @@ import {
   OPEN_LIBRARY_SORT_OPTIONS,
   createDefaultOpenLibrarySearchFilters,
 } from '../../constants/bibliotheque/openLibrarySearchFilters.js'
+import { resolveSessionUser } from '../../utils/auth/sessionUser.js'
 import {
   readPersistedPageState,
   writePersistedPageState,
@@ -443,9 +444,7 @@ watch(
 )
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
   await loadLectureBooks()
 

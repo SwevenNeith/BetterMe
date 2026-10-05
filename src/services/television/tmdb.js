@@ -1,8 +1,10 @@
 import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase.js'
+import { fetchWithTimeout } from '../../utils/common/fetchWithTimeout.js'
 
 const TMDB_FUNCTION_URL = `${supabaseUrl}/functions/v1/tmdb`
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p'
 const SEARCH_LANGUAGES = ['en-US', 'fr-FR']
+const TMDB_FETCH_TIMEOUT_MS = 20_000
 
 async function getTmdbHeaders() {
   const {
@@ -17,11 +19,15 @@ async function getTmdbHeaders() {
 }
 
 async function callTmdbFunction(payload) {
-  const response = await fetch(TMDB_FUNCTION_URL, {
-    method: 'POST',
-    headers: await getTmdbHeaders(),
-    body: JSON.stringify(payload),
-  })
+  const response = await fetchWithTimeout(
+    TMDB_FUNCTION_URL,
+    {
+      method: 'POST',
+      headers: await getTmdbHeaders(),
+      body: JSON.stringify(payload),
+    },
+    TMDB_FETCH_TIMEOUT_MS,
+  )
 
   const text = await response.text()
   let data = null

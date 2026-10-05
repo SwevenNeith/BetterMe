@@ -45,6 +45,7 @@ import {
   loadCoupleAnniversarySettings,
 } from '../services/timetable/coupleAnniversarySettings.js'
 import { maintainAnniversaryReminders } from '../services/timetable/anniversaryReminders.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   TIMETABLE_EVENT_KIND,
   birthdayOccursOn,
@@ -148,9 +149,7 @@ const { clearDraft: clearEventDraft, restoreDraft: restoreEventDraft } = useForm
 
 async function ensureEventDraftUserId() {
   if (userId.value) return userId.value
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
   return userId.value
 }
@@ -197,9 +196,7 @@ async function onAddToTodoChange(event) {
 
   Object.assign(todoLinkedForm, createDefaultTodoLinkedForm())
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (user) {
       todoPromesseLimits.value = await loadTodoPromesseLimits(user.id)
     }
@@ -584,9 +581,7 @@ const getPillStyle = (cat) => {
 const fetchTimetableMeta = async (gen) => {
   try {
     isMetaLoading.value = true
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (!user) {
       userCategories.value = []
       hobbyQuickPicks.value = []
@@ -602,9 +597,7 @@ const fetchTimetableMeta = async (gen) => {
   } catch (err) {
     console.error('Erreur chargement catégories / hobbies:', err)
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const user = await resolveSessionUser()
       if (user) {
         userCategories.value = await loadUserCategories(supabase, user.id)
       }
@@ -622,9 +615,7 @@ const fetchTimetableMeta = async (gen) => {
 // Événements de la semaine affichée (timetable_events)
 const fetchWeekEvents = async (gen) => {
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (!user) {
       if (gen === timetableLoadGen) userEvents.value = []
       return
@@ -716,19 +707,7 @@ watch(currentDate, () => {
   fetchEvents()
 })
 
-watch(
-  () => timetableCache.isValid,
-  (isValid) => {
-    if (!isValid) {
-      fetchEvents({ silent: true })
-    }
-  },
-)
-
-useViewLoadGuard(cancelTimetableLoads, () => {
-  // Liste d’événements seule : safe au resume (pas de formulaire d’édition écrasé).
-  void fetchEvents({ silent: true })
-})
+useViewLoadGuard(cancelTimetableLoads)
 
 onMounted(() => {
   const cached = timetableCache.applyToView({ userEvents, userCategories, hobbyQuickPicks })
@@ -768,9 +747,7 @@ watch(newEventIsBirthday, (enabled) => {
 
 async function loadCoupleAnniversaryState() {
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (!user) return
     userId.value = user.id
     coupleAnniversary.value = await loadCoupleAnniversarySettings(user.id)
@@ -1036,9 +1013,7 @@ const handleAddEvent = async () => {
     }
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const user = await resolveSessionUser()
       if (!user) {
         alert('Veuillez vous connecter pour ajouter une activité.')
         return
@@ -1060,9 +1035,7 @@ const handleAddEvent = async () => {
 
   try {
     isSavingEvent.value = true
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (!user) {
       alert('Veuillez vous connecter pour ajouter une activité.')
       return
@@ -1365,9 +1338,7 @@ async function confirmEventDelete(alsoDeleteLinked = false) {
 
   isDeletingEvent.value = true
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (!user) {
       alert('Veuillez vous connecter pour supprimer une activité.')
       return
@@ -1489,9 +1460,7 @@ async function confirmCategoryEdit() {
   isSavingCategory.value = true
   categoryEditError.value = ''
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (!user) {
       categoryEditError.value = 'Veuillez vous connecter pour modifier une catégorie.'
       return
@@ -1547,9 +1516,7 @@ async function confirmCategoryDelete() {
 
   isDeletingCategory.value = true
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await resolveSessionUser()
     if (!user) {
       alert('Veuillez vous connecter pour supprimer une catégorie.')
       return

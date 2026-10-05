@@ -81,6 +81,7 @@ import {
 } from '../services/todo/todoItemReminders.js'
 import { notificationsActives } from '../services/common/notifications.js'
 import { linkTodoAndTimetable, deleteAllTimetableEventsForTodo, createTimetableEventsForTodo, syncTodoTimetableLink, hasTodoTimetableLink } from '../services/todo/todoTimetableLink.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import { useTimetableCacheStore } from '../stores/timetableCache.js'
 import {
   createDefaultPlanningForm,
@@ -1223,9 +1224,7 @@ watch([viewMode, anchorDate], () => {
 })
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
   window.addEventListener('betterme-todos-changed', onTodosChangedExternally)
 })

@@ -5,6 +5,11 @@ import { supabase } from '../lib/supabase.js'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import {
+  TAB_HIDDEN_EVENT,
+  setMutationInProgress,
+} from '../composables/useAppTabResume.js'
+import { withTimeout } from '../utils/common/asyncTimeout.js'
+import {
   createNote,
   deleteNote,
   ensureMarkdownTutorial,
@@ -54,6 +59,7 @@ import {
   ensureVaultSettings,
   removeVaultSettings,
 } from '../services/notes/noteVaultSettings.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   createDefaultNotesGraphFilters,
   filterNotesForGraph,
@@ -125,6 +131,8 @@ import {
 } from '../services/notes/noteTodoSync.js'
 
 const GRAPH_TAB = { type: 'graph', id: 'graph' }
+
+defineOptions({ name: 'NotesView' })
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.NOTES, undefined, { setDocumentTitle: true })
 
@@ -316,6 +324,7 @@ const promptParentId = ref(null)
 const promptTargetId = ref(null)
 const promptValue = ref('')
 const promptError = ref('')
+const promptSubmitting = ref(false)
 
 const confirmState = ref({
   open: false,
@@ -1301,6 +1310,7 @@ async function flushSave() {
   isSaving.value = true
   saveError.value = ''
   saveStatus.value = 'Enregistrement…'
+  setMutationInProgress(true)
   try {
     const updated = await updateNote(supabase, userId.value, selectedNoteId.value, {
       title,
@@ -1346,6 +1356,7 @@ async function flushSave() {
     saveStatus.value = ''
   } finally {
     isSaving.value = false
+    setMutationInProgress(false)
   }
 }
 
@@ -1355,13 +1366,16 @@ function openPrompt(kind, { parentId = null, targetId = null, initial = '' } = {
   promptTargetId.value = targetId
   promptValue.value = initial
   promptError.value = ''
+  promptSubmitting.value = false
   promptOpen.value = true
 }
 
 function closePrompt() {
+  if (promptSubmitting.value) return
   promptOpen.value = false
   promptValue.value = ''
   promptError.value = ''
+  promptSubmitting.value = false
 }
 
 const promptTitle = computed(() => {
@@ -1380,20 +1394,39 @@ const promptTitle = computed(() => {
 })
 
 async function submitPrompt() {
-  if (!userId.value) return
+  if (promptSubmitting.value) return
+  if (!userId.value) {
+    promptError.value = 'Session introuvable. Recharge la page puis réessaie.'
+    return
+  }
   const value = promptValue.value.trim()
   if (!value) {
     promptError.value = 'Ce champ est requis.'
     return
   }
 
+  promptSubmitting.value = true
+  promptError.value = ''
+  setMutationInProgress(true)
+
   try {
+    // Réveille la session si l’app sort d’arrière-plan (évite un create “muet”).
+    try {
+      await withTimeout(supabase.auth.getSession(), 4_000, 'Session lente')
+    } catch {
+      /* continue — le create a son propre timeout */
+    }
+
     if (promptKind.value === 'folder') {
-      const folder = await createNoteFolder(supabase, userId.value, {
-        name: value,
-        parentId: promptParentId.value,
-        vaultId: activeVaultId.value,
-      })
+      const folder = await withTimeout(
+        createNoteFolder(supabase, userId.value, {
+          name: value,
+          parentId: promptParentId.value,
+          vaultId: activeVaultId.value,
+        }),
+        25_000,
+        'Création trop longue. Réessaie.',
+      )
       folders.value = [...folders.value, folder]
       if (promptParentId.value) {
         const next = new Set(expandedFolderIds.value)
@@ -1401,31 +1434,51 @@ async function submitPrompt() {
         expandedFolderIds.value = next
       }
     } else if (promptKind.value === 'note') {
-      const note = await createNoteFromContext({
-        title: value,
-        folderId: promptParentId.value,
-      })
+      const note = await withTimeout(
+        createNoteFromContext({
+          title: value,
+          folderId: promptParentId.value,
+        }),
+        25_000,
+        'Création trop longue. Réessaie.',
+      )
       notes.value = [...notes.value, note]
+      promptSubmitting.value = false
+      setMutationInProgress(false)
       closePrompt()
       await selectNote(note.id)
       return
     } else if (promptKind.value === 'rename-folder' && promptTargetId.value) {
-      const folder = await updateNoteFolder(supabase, userId.value, promptTargetId.value, {
-        name: value,
-      })
+      const folder = await withTimeout(
+        updateNoteFolder(supabase, userId.value, promptTargetId.value, {
+          name: value,
+        }),
+        25_000,
+        'Renommage trop long. Réessaie.',
+      )
       folders.value = folders.value.map((f) => (f.id === folder.id ? folder : f))
     } else if (promptKind.value === 'rename-note' && promptTargetId.value) {
-      const note = await updateNote(supabase, userId.value, promptTargetId.value, { title: value })
+      const note = await withTimeout(
+        updateNote(supabase, userId.value, promptTargetId.value, { title: value }),
+        25_000,
+        'Renommage trop long. Réessaie.',
+      )
       notes.value = notes.value.map((n) => (n.id === note.id ? note : n))
       if (selectedNoteId.value === note.id) {
         draftTitle.value = note.title
         selectedNote.value = note
       }
+    } else {
+      promptError.value = 'Action inconnue.'
+      return
     }
     closePrompt()
   } catch (err) {
     console.error(err)
     promptError.value = err.message || 'Action impossible.'
+  } finally {
+    promptSubmitting.value = false
+    setMutationInProgress(false)
   }
 }
 
@@ -2562,17 +2615,22 @@ onMounted(async () => {
     mobileNotesMql.addEventListener('change', syncMobileNotesLayout)
     window.addEventListener('pointerdown', onGlobalPointerDown, true)
     window.addEventListener('keydown', onGlobalKeyDown)
+    window.addEventListener(TAB_HIDDEN_EVENT, onNotesTabHidden)
   }
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
 })
+
+function onNotesTabHidden() {
+  // Sécurise les saisies avant mise en arrière-plan (sans recharger la vue).
+  if (dirty.value) void flushSave()
+}
 
 onUnmounted(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('pointerdown', onGlobalPointerDown, true)
     window.removeEventListener('keydown', onGlobalKeyDown)
+    window.removeEventListener(TAB_HIDDEN_EVENT, onNotesTabHidden)
   }
   if (unmountPreviewWidgets) {
     unmountPreviewWidgets()
@@ -3157,7 +3215,7 @@ watch(draftFolderId, (value) => {
     <Teleport to="body">
       <div v-if="promptOpen" class="notes-prompt" role="dialog" aria-modal="true" :aria-label="promptTitle">
         <div class="notes-prompt__overlay" @click="closePrompt" />
-        <form class="notes-prompt__card" @submit.prevent="submitPrompt">
+        <form class="notes-prompt__card" @submit.prevent="submitPrompt" @click.stop>
           <h2 class="notes-prompt__title">{{ promptTitle }}</h2>
           <input
             v-model="promptValue"
@@ -3165,12 +3223,26 @@ watch(draftFolderId, (value) => {
             class="notes-prompt__input"
             maxlength="200"
             autofocus
+            :disabled="promptSubmitting"
             :placeholder="promptKind.includes('folder') ? 'Nom du dossier' : 'Titre de la note'"
           />
           <p v-if="promptError" class="notes-prompt__error">{{ promptError }}</p>
           <div class="notes-prompt__actions">
-            <button type="button" class="notes-page__btn" @click="closePrompt">Annuler</button>
-            <button type="submit" class="notes-page__btn notes-page__btn--primary">Valider</button>
+            <button
+              type="button"
+              class="notes-page__btn"
+              :disabled="promptSubmitting"
+              @click="closePrompt"
+            >
+              Annuler
+            </button>
+            <button
+              type="submit"
+              class="notes-page__btn notes-page__btn--primary"
+              :disabled="promptSubmitting"
+            >
+              {{ promptSubmitting ? 'Création…' : 'Valider' }}
+            </button>
           </div>
         </form>
       </div>
@@ -4085,16 +4157,21 @@ watch(draftFolderId, (value) => {
   color: #6d5a7e;
 }
 
-.notes-prompt__overlay {
+.notes-prompt {
   position: fixed;
   inset: 0;
+  z-index: 5000;
+}
+
+.notes-prompt__overlay {
+  position: absolute;
+  inset: 0;
   background: rgba(40, 25, 55, 0.35);
-  z-index: 90;
 }
 
 .notes-prompt__card {
-  position: fixed;
-  z-index: 91;
+  position: absolute;
+  z-index: 1;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);

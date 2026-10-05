@@ -5,6 +5,7 @@ import ReadingSpoilChapterForm from '../components/lecture/ReadingSpoilChapterFo
 import { supabase } from '../lib/supabase.js'
 import { getReadingBookWithCover } from '../services/lecture/readingBooks.js'
 import { createSpoilChapter, listSpoilChapters, updateSpoilChapter } from '../services/lecture/readingSpoilChapters.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 
 const AUTO_SAVE_DELAY_MS = 2000
 
@@ -224,9 +225,7 @@ onBeforeRouteLeave(async (_to, _from, next) => {
 })
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
   window.addEventListener('beforeunload', handleBeforeUnload)
 })

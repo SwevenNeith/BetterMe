@@ -17,6 +17,7 @@ import {
 } from '../services/lecture/readingCollections.js'
 import { applyReadingBookFilters, formatReadingFilterLabel } from '../utils/lecture/readingBookFilters.js'
 import BibliothequeCatalogPanel from '../components/bibliotheque/BibliothequeCatalogPanel.vue'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   readPersistedPageState,
   writePersistedPageState,
@@ -481,9 +482,7 @@ function openBookFromQuery() {
 }
 
 onMounted(async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await resolveSessionUser()
   if (user) userId.value = user.id
   await nextTick()
   bindGridResizeObserver()
