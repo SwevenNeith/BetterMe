@@ -1,13 +1,20 @@
 import { onMounted, onUnmounted } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import { TAB_HIDDEN_EVENT, isTabReloadSuppressed } from './useAppTabResume.js'
+import {
+  TAB_HIDDEN_EVENT,
+  TAB_RESUME_EVENT,
+  hasActiveMutations,
+  isTabReloadSuppressed,
+} from './useAppTabResume.js'
 
 /**
- * Invalide les chargements async quand on quitte la page (route) ou l’onglet navigateur.
- * Au retour d’onglet navigateur, useAppTabResume (App.vue) recharge la page.
+ * Annule les chargements async à la sortie de page / mise en arrière-plan.
+ * Au retour, `onResume` peut refetch des listes en silence — jamais si une
+ * mutation (save) est en cours.
  * @param {() => void} onCancel
+ * @param {(() => void) | undefined} [onResume]
  */
-export function useViewLoadGuard(onCancel) {
+export function useViewLoadGuard(onCancel, onResume) {
   let backgroundTimer = null
 
   function clearBackgroundTimer() {
@@ -36,12 +43,21 @@ export function useViewLoadGuard(onCancel) {
     cancelAll()
   }
 
+  function onTabResume() {
+    if (typeof onResume !== 'function') return
+    if (document.visibilityState === 'hidden') return
+    if (hasActiveMutations() || isTabReloadSuppressed()) return
+    onResume()
+  }
+
   onBeforeRouteLeave(cancelAll)
   onMounted(() => {
     window.addEventListener(TAB_HIDDEN_EVENT, onTabHidden)
+    window.addEventListener(TAB_RESUME_EVENT, onTabResume)
   })
   onUnmounted(() => {
     window.removeEventListener(TAB_HIDDEN_EVENT, onTabHidden)
+    window.removeEventListener(TAB_RESUME_EVENT, onTabResume)
     cancelAll()
   })
 

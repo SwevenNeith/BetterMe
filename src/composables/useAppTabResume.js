@@ -1,10 +1,21 @@
 import { onMounted, onUnmounted } from 'vue'
-import { invalidateAllPageCaches } from '../stores/invalidatePageCaches.js'
+import { supabase } from '../lib/supabase.js'
+import { withTimeout } from '../utils/common/asyncTimeout.js'
 
 export const TAB_HIDDEN_EVENT = 'betterme-tab-hidden'
+export const TAB_RESUME_EVENT = 'betterme-tab-resume'
 
-const RELOAD_FLAG = 'betterme-tab-reload-pending'
+/** Ignore les micro-bascules (notifs, etc.). */
 const MIN_HIDDEN_MS = 800
+/** Anti double-reprise. */
+const RESUME_COOLDOWN_MS = 1500
+/**
+ * Au-delà, le navigateur mobile a souvent tué le réseau :
+ * un seul hard reload évite les « Enregistrement… » gelés.
+ */
+const HARD_RELOAD_AFTER_MS = 10 * 60 * 1000
+/** Si getSession ne répond pas, le client est probablement gelé. */
+const SESSION_PROBE_MS = 4_000
 
 /** Chemin app relatif à la base Vite (ex. /BetterMe/dashboard → /dashboard). */
 function getAppRelativePath(pathname = window.location.pathname) {
@@ -23,10 +34,13 @@ function isAuthenticatedAppPath() {
 
 let hiddenSince = 0
 let resumeTimer = null
+let lastResumeAt = 0
 let filePickerActive = false
 let fileUploadInProgress = false
+/** Compteur d’écritures en cours (check-in, symptômes, notes…). */
+let mutationDepth = 0
 
-/** Focus dans une iframe (widgets notes) : le parent reçoit blur sans quitter l’onglet. */
+/** Focus dans une iframe (widgets notes) : blur parent sans quitter l’onglet. */
 function isFocusInEmbeddedFrame() {
   try {
     return document.activeElement?.tagName === 'IFRAME'
@@ -35,47 +49,93 @@ function isFocusInEmbeddedFrame() {
   }
 }
 
-function shouldSuppressTabReload() {
-  return filePickerActive || fileUploadInProgress || isFocusInEmbeddedFrame()
+function shouldSuppressTabResume() {
+  return (
+    filePickerActive ||
+    fileUploadInProgress ||
+    mutationDepth > 0 ||
+    isFocusInEmbeddedFrame()
+  )
 }
 
 export function isTabReloadSuppressed() {
-  return shouldSuppressTabReload()
+  return shouldSuppressTabResume()
 }
 
-/** À appeler à l’ouverture / fermeture du sélecteur de fichiers (évite un reload au retour). */
+export function hasActiveMutations() {
+  return mutationDepth > 0
+}
+
+/** À appeler à l’ouverture / fermeture du sélecteur de fichiers. */
 export function setFilePickerActive(active) {
   filePickerActive = Boolean(active)
-  if (filePickerActive) {
-    hiddenSince = 0
-  }
+  if (filePickerActive) hiddenSince = 0
 }
 
-/** Pendant un upload Storage, ne pas recharger l’app. */
+/** Pendant un upload Storage. */
 export function setFileUploadInProgress(active) {
   fileUploadInProgress = Boolean(active)
+}
+
+/**
+ * Protège les enregistrements : pas de resume/refetch pendant une mutation.
+ * @param {boolean} active
+ */
+export function setMutationInProgress(active) {
+  mutationDepth = Math.max(0, mutationDepth + (active ? 1 : -1))
 }
 
 function notifyTabHidden() {
   window.dispatchEvent(new CustomEvent(TAB_HIDDEN_EVENT))
 }
 
-function reloadAuthenticatedApp() {
+function notifyTabResume(detail = {}) {
+  window.dispatchEvent(new CustomEvent(TAB_RESUME_EVENT, { detail }))
+}
+
+function hardReloadOnce() {
   if (!isAuthenticatedAppPath()) return
-  if (shouldSuppressTabReload()) return
-  invalidateAllPageCaches()
-  try {
-    sessionStorage.setItem(RELOAD_FLAG, String(Date.now()))
-  } catch {
-    /* ignore */
-  }
+  if (shouldSuppressTabResume()) return
   window.location.reload()
 }
 
-function tryReloadAfterBackground() {
+/**
+ * Reprise au retour :
+ * - courte absence : sonde la session, pas de reload ni d’invalidation de formulaires
+ * - longue absence / session gelée : un seul hard reload
+ */
+async function resumeAuthenticatedApp(elapsedMs) {
+  if (!isAuthenticatedAppPath()) return
+  if (shouldSuppressTabResume()) return
+
+  const now = Date.now()
+  if (now - lastResumeAt < RESUME_COOLDOWN_MS) return
+  lastResumeAt = now
+
+  if (elapsedMs >= HARD_RELOAD_AFTER_MS) {
+    hardReloadOnce()
+    return
+  }
+
+  try {
+    await withTimeout(
+      supabase.auth.getSession(),
+      SESSION_PROBE_MS,
+      'Session probe timeout',
+    )
+  } catch {
+    hardReloadOnce()
+    return
+  }
+
+  // Signal léger : les listes peuvent se rafraîchir, pas les formulaires en édition.
+  notifyTabResume({ elapsedMs })
+}
+
+function tryResumeAfterBackground() {
   if (!hiddenSince) return
   if (document.visibilityState !== 'visible') return
-  if (shouldSuppressTabReload()) {
+  if (shouldSuppressTabResume()) {
     hiddenSince = 0
     return
   }
@@ -85,21 +145,23 @@ function tryReloadAfterBackground() {
 
   if (elapsed < MIN_HIDDEN_MS) return
 
-  reloadAuthenticatedApp()
+  void resumeAuthenticatedApp(elapsed)
 }
 
 function markTabHidden() {
-  if (shouldSuppressTabReload()) return
+  // Uniquement la vraie mise en arrière-plan (pas blur/focus).
+  if (document.visibilityState !== 'hidden') return
+  if (shouldSuppressTabResume()) return
   if (!hiddenSince) hiddenSince = Date.now()
   notifyTabHidden()
 }
 
-function scheduleReloadCheck() {
-  if (shouldSuppressTabReload()) return
+function scheduleResumeCheck() {
+  if (shouldSuppressTabResume()) return
   if (resumeTimer != null) clearTimeout(resumeTimer)
   resumeTimer = setTimeout(() => {
     resumeTimer = null
-    tryReloadAfterBackground()
+    tryResumeAfterBackground()
   }, 150)
 }
 
@@ -108,60 +170,27 @@ function onVisibilityChange() {
     markTabHidden()
     return
   }
-  scheduleReloadCheck()
-}
-
-function onWindowBlur() {
-  // Clic dans un widget iframe : activeElement devient l’iframe juste après le blur.
-  const settle = () => {
-    if (isFocusInEmbeddedFrame()) {
-      hiddenSince = 0
-      return
-    }
-    markTabHidden()
-  }
-  if (isFocusInEmbeddedFrame()) return
-  queueMicrotask(settle)
-}
-
-function onWindowFocus() {
-  if (isFocusInEmbeddedFrame()) {
-    hiddenSince = 0
-    return
-  }
-  scheduleReloadCheck()
+  scheduleResumeCheck()
 }
 
 function onPageShow(event) {
-  if (event.persisted && !shouldSuppressTabReload()) {
-    reloadAuthenticatedApp()
-  }
+  if (!event.persisted || shouldSuppressTabResume()) return
+  // bfcache : même logique (sonde, reload seulement si réseau mort).
+  void resumeAuthenticatedApp(MIN_HIDDEN_MS)
 }
 
 /**
- * Recharge l’app au retour sur l’onglet navigateur (évite l’état gelé après arrière-plan).
- * À brancher une seule fois dans App.vue.
+ * Cycle de vie onglet / app mobile.
+ * Pas de blur/focus (trop de faux positifs → boucles d’enregistrement).
  */
 export function useAppTabResume() {
   onMounted(() => {
-    try {
-      if (sessionStorage.getItem(RELOAD_FLAG)) {
-        sessionStorage.removeItem(RELOAD_FLAG)
-      }
-    } catch {
-      /* ignore */
-    }
-
     document.addEventListener('visibilitychange', onVisibilityChange)
-    window.addEventListener('blur', onWindowBlur)
-    window.addEventListener('focus', onWindowFocus)
     window.addEventListener('pageshow', onPageShow)
   })
 
   onUnmounted(() => {
     document.removeEventListener('visibilitychange', onVisibilityChange)
-    window.removeEventListener('blur', onWindowBlur)
-    window.removeEventListener('focus', onWindowFocus)
     window.removeEventListener('pageshow', onPageShow)
     if (resumeTimer != null) clearTimeout(resumeTimer)
   })

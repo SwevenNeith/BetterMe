@@ -692,7 +692,6 @@ function cancelTimetableLoads() {
 }
 
 const timetableCache = useTimetableCacheStore()
-useViewLoadGuard(cancelTimetableLoads)
 
 const fetchEvents = async ({ silent = false } = {}) => {
   const gen = ++timetableLoadGen
@@ -721,10 +720,15 @@ watch(
   () => timetableCache.isValid,
   (isValid) => {
     if (!isValid) {
-      fetchEvents()
+      fetchEvents({ silent: true })
     }
   },
 )
+
+useViewLoadGuard(cancelTimetableLoads, () => {
+  // Liste d’événements seule : safe au resume (pas de formulaire d’édition écrasé).
+  void fetchEvents({ silent: true })
+})
 
 onMounted(() => {
   const cached = timetableCache.applyToView({ userEvents, userCategories, hobbyQuickPicks })

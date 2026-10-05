@@ -311,7 +311,6 @@ function cancelDashboardLoads() {
 }
 
 const dashboardCache = useDashboardCacheStore()
-useViewLoadGuard(cancelDashboardLoads)
 
 const loadDashboard = async ({ silent = false } = {}) => {
   const gen = ++dashboardLoadGen
@@ -355,6 +354,9 @@ const loadDashboard = async ({ silent = false } = {}) => {
     }
   }
 }
+
+// Pas de refetch au resume : ça écrasait le check-in / provoquait des boucles de save.
+useViewLoadGuard(cancelDashboardLoads)
 
 const setupDashboardChrome = async () => {
   await nextTick()

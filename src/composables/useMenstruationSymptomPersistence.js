@@ -1,6 +1,6 @@
 import { ref, watch, unref, onMounted, onUnmounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
-import { TAB_HIDDEN_EVENT } from './useAppTabResume.js'
+import { TAB_HIDDEN_EVENT, setMutationInProgress } from './useAppTabResume.js'
 import { withTimeout } from '../utils/common/asyncTimeout.js'
 import {
   fetchSymptomEntryForDate,
@@ -40,11 +40,9 @@ export function useMenstruationSymptomPersistence({
       : createEmptyValuesFromDefs(symptomDefs.value)
   }
 
-  function cancelPendingWork() {
+  function cancelPendingLoads() {
     loadToken++
-    saveToken++
     isLoading.value = false
-    isSaving.value = false
   }
 
   async function loadFromDb({ silent = false } = {}) {
@@ -58,6 +56,9 @@ export function useMenstruationSymptomPersistence({
       isLoading.value = false
       return
     }
+
+    // Ne pas écraser une saisie / un enregistrement en cours.
+    if (isSaving.value) return
 
     const token = ++loadToken
     if (!silent) isLoading.value = true
@@ -92,6 +93,7 @@ export function useMenstruationSymptomPersistence({
       return `${uid ?? ''}|${ctx?.iso ?? ''}|${ctx?.cycle?.id ?? ''}|${typeCycle}`
     },
     (key) => {
+      if (isSaving.value) return
       const contextChanged = lastContextKey && key !== lastContextKey
       const silent = Boolean(lastContextKey)
       lastContextKey = key
@@ -106,13 +108,13 @@ export function useMenstruationSymptomPersistence({
   watch(
     () => symptomDefs.value,
     () => {
-      if (activeEntryId.value) return
+      if (activeEntryId.value || isSaving.value) return
       values.value = createEmptyValuesFromDefs(symptomDefs.value)
     },
   )
 
   function onTabHidden() {
-    cancelPendingWork()
+    cancelPendingLoads()
   }
 
   onMounted(() => {
@@ -121,7 +123,7 @@ export function useMenstruationSymptomPersistence({
 
   onUnmounted(() => {
     window.removeEventListener(TAB_HIDDEN_EVENT, onTabHidden)
-    cancelPendingWork()
+    cancelPendingLoads()
   })
 
   async function persistField(fieldKey, value) {
@@ -139,6 +141,7 @@ export function useMenstruationSymptomPersistence({
     const token = ++saveToken
     isSaving.value = true
     saveError.value = ''
+    setMutationInProgress(true)
 
     try {
       const { entryId } = await withTimeout(
@@ -157,7 +160,7 @@ export function useMenstruationSymptomPersistence({
           value,
         ),
         SAVE_TIMEOUT_MS,
-        'Délai dépassé. Reviens sur l’onglet BetterMe puis réessaie.',
+        'Délai dépassé. Réessaie dans un instant.',
       )
       if (token !== saveToken) return
 
@@ -176,19 +179,20 @@ export function useMenstruationSymptomPersistence({
       saveError.value = err.message || 'Impossible d’enregistrer ce symptôme.'
     } finally {
       if (token === saveToken) isSaving.value = false
+      setMutationInProgress(false)
     }
   }
 
   function selectScale(key, n) {
     const v = values.value[key] === n ? null : n
     values.value = { ...values.value, [key]: v }
-    persistField(key, v)
+    void persistField(key, v)
   }
 
   function selectEnum(key, v) {
     const next = values.value[key] === v ? null : v
     values.value = { ...values.value, [key]: next }
-    persistField(key, next)
+    void persistField(key, next)
   }
 
   async function selectBoolean(key, v, { clearSideKey } = {}) {
@@ -206,7 +210,7 @@ export function useMenstruationSymptomPersistence({
   function selectSide(sideKey, v) {
     const next = values.value[sideKey] === v ? null : v
     values.value = { ...values.value, [sideKey]: next }
-    persistField(sideKey, next)
+    void persistField(sideKey, next)
   }
 
   return {

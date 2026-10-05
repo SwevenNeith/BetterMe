@@ -224,7 +224,6 @@ function endPageLoad(gen) {
 }
 
 const menstruationCache = useMenstruationCacheStore()
-const { scheduleBackground } = useViewLoadGuard(cancelMenstruationLoads)
 
 const loadPage = async ({ silent = false } = {}) => {
   if (!userId.value) {
@@ -318,6 +317,9 @@ const loadPage = async ({ silent = false } = {}) => {
     })
   }
 }
+
+// Pas de refetch au resume : sinon loadPage recharge les cycles et écrase les symptômes en cours.
+const { scheduleBackground } = useViewLoadGuard(cancelMenstruationLoads)
 
 async function initMenstruationPage() {
   loadError.value = ''

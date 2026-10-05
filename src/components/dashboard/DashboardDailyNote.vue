@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { supabase } from '../../lib/supabase.js'
 import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../../composables/usePageDisplayLabel.js'
+import { setMutationInProgress } from '../../composables/useAppTabResume.js'
 import {
   isPageVisible,
   loadPageVisibility,
@@ -151,6 +152,7 @@ async function performAutoSave(content) {
   isSaving.value = true
   saveError.value = ''
   saveState.value = 'saving'
+  setMutationInProgress(true)
 
   try {
     const saved = await saveTodayDailyNote(supabase, props.userId, nextContent, {
@@ -164,6 +166,7 @@ async function performAutoSave(content) {
     saveState.value = 'idle'
   } finally {
     isSaving.value = false
+    setMutationInProgress(false)
     if (pendingContent !== null) {
       const queued = pendingContent
       pendingContent = null

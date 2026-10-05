@@ -1,6 +1,6 @@
 import { ref, watch, unref, onMounted, onUnmounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
-import { TAB_HIDDEN_EVENT } from './useAppTabResume.js'
+import { TAB_HIDDEN_EVENT, setMutationInProgress } from './useAppTabResume.js'
 import { withTimeout } from '../utils/common/asyncTimeout.js'
 import {
   computeCycleContext,
@@ -52,11 +52,9 @@ export function useEmotionalCheckinPersistence({
   let saveToken = 0
   let lastContextKey = ''
 
-  function cancelPendingWork() {
+  function cancelPendingLoads() {
     loadToken++
-    saveToken++
     isLoading.value = false
-    isSaving.value = false
   }
 
   async function loadPatterns(uid) {
@@ -133,7 +131,8 @@ export function useEmotionalCheckinPersistence({
   )
 
   function onTabHidden() {
-    cancelPendingWork()
+    // N’annule que les lectures — jamais un enregistrement en cours.
+    cancelPendingLoads()
   }
 
   onMounted(() => {
@@ -142,7 +141,7 @@ export function useEmotionalCheckinPersistence({
 
   onUnmounted(() => {
     window.removeEventListener(TAB_HIDDEN_EVENT, onTabHidden)
-    cancelPendingWork()
+    cancelPendingLoads()
   })
 
   async function saveCheckin(values) {
@@ -159,10 +158,13 @@ export function useEmotionalCheckinPersistence({
       return false
     }
 
+    if (isSaving.value) return false
+
     const wasSaved = savedToday.value
     const token = ++saveToken
     isSaving.value = true
     saveMessage.value = ''
+    setMutationInProgress(true)
 
     try {
       const score_global = computeScoreGlobal({
@@ -195,7 +197,7 @@ export function useEmotionalCheckinPersistence({
       const result = await withTimeout(
         saveEmotionLogForDate(supabase, uid, payload, activeLogId.value),
         SAVE_TIMEOUT_MS,
-        'Délai dépassé. Reviens sur l’onglet BetterMe puis réessaie.',
+        'Délai dépassé. Réessaie dans un instant.',
       )
       if (token !== saveToken) return false
 
@@ -220,6 +222,7 @@ export function useEmotionalCheckinPersistence({
       return false
     } finally {
       if (token === saveToken) isSaving.value = false
+      setMutationInProgress(false)
     }
   }
 
