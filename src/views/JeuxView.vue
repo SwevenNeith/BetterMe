@@ -1,4 +1,5 @@
 <script setup>
+import { RouterLink } from 'vue-router'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 
@@ -7,6 +8,17 @@ defineOptions({ name: 'JeuxView' })
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.JEUX, undefined, {
   setDocumentTitle: true,
 })
+
+const games = [
+  {
+    id: 'league-of-legends',
+    name: 'League of Legends',
+    description:
+      'Enregistre tes comptes Riot et consulte les matchs des derniers jours via l’API officielle.',
+    path: '/league-of-legends',
+    emoji: '🎮',
+  },
+]
 </script>
 
 <template>
@@ -14,16 +26,21 @@ const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.JEUX, undefined, {
     <header class="jeux-header">
       <h1 class="jeux-title">{{ pageTitle }}</h1>
       <p class="jeux-subtitle">
-        Ta bibliothèque de jeux — ceux auxquels tu joues, que tu suis ou que tu as terminés.
+        Ta bibliothèque de jeux — suivi de comptes, matchs et progression.
       </p>
     </header>
 
-    <section class="jeux-card">
-      <p class="jeux-badge" aria-hidden="true">En construction</p>
-      <p class="jeux-placeholder">
-        Cette page permettra bientôt de suivre ta ludothèque : jeux en cours, terminés, envies et
-        progression. Reviens un peu plus tard !
-      </p>
+    <section class="jeux-grid" aria-label="Jeux disponibles">
+      <RouterLink
+        v-for="game in games"
+        :key="game.id"
+        :to="game.path"
+        class="jeux-card-link"
+      >
+        <span class="jeux-card-link__emoji" aria-hidden="true">{{ game.emoji }}</span>
+        <h2 class="jeux-card-link__title">{{ game.name }}</h2>
+        <p class="jeux-card-link__desc">{{ game.description }}</p>
+      </RouterLink>
     </section>
   </div>
 </template>
@@ -36,6 +53,7 @@ const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.JEUX, undefined, {
   margin: 0;
   padding: 1.5rem 1.25rem 3rem;
   box-sizing: border-box;
+  min-width: 0;
 }
 
 .jeux-header {
@@ -56,53 +74,69 @@ const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.JEUX, undefined, {
   font-size: 1rem;
 }
 
-.jeux-card {
-  width: 100%;
+.jeux-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+  gap: 1rem;
+}
+
+.jeux-card-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 1.25rem 1.15rem;
+  border-radius: 16px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
   background: rgba(255, 255, 255, 0.65);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(213, 181, 234, 0.35);
-  border-radius: 16px;
-  padding: 1.75rem 1.25rem;
-  text-align: center;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
 }
 
-.jeux-badge {
-  display: inline-block;
-  margin: 0 0 0.85rem;
-  padding: 0.28rem 0.7rem;
-  border-radius: 999px;
-  background: rgba(173, 129, 190, 0.18);
-  border: 1px solid rgba(173, 129, 190, 0.35);
-  color: #6b4f7c;
-  font-size: 0.78rem;
+.jeux-card-link:hover {
+  transform: translateY(-2px);
+  border-color: rgba(173, 129, 190, 0.55);
+  box-shadow: 0 10px 28px rgba(173, 129, 190, 0.18);
+}
+
+.jeux-card-link__emoji {
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.jeux-card-link__title {
+  margin: 0;
+  font-size: 1.15rem;
   font-weight: 800;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  color: #2c3e50;
 }
 
-.jeux-placeholder {
-  margin: 0 auto;
-  max-width: 36rem;
+.jeux-card-link__desc {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
   color: #6c757d;
-  font-size: 1rem;
-  line-height: 1.55;
 }
 
 @media (prefers-color-scheme: dark) {
-  .jeux-title {
+  .jeux-title,
+  .jeux-card-link__title {
     color: #f0e8f8;
   }
+
   .jeux-subtitle,
-  .jeux-placeholder {
+  .jeux-card-link__desc {
     color: #adb5bd;
   }
-  .jeux-card {
+
+  .jeux-card-link {
     background: rgba(35, 30, 48, 0.75);
     border-color: rgba(213, 181, 234, 0.2);
-  }
-  .jeux-badge {
-    color: #e9d5f5;
-    background: rgba(173, 129, 190, 0.22);
   }
 }
 </style>

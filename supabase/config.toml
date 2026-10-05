@@ -26,3 +26,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/fetch-image/deno.json"
 entrypoint = "./functions/fetch-image/index.ts"
+
+[functions.riot]
+enabled = true
+verify_jwt = false
+import_map = "./functions/riot/deno.json"
+entrypoint = "./functions/riot/index.ts"

@@ -48,6 +48,13 @@ export const WORKSPACE_PAGE_OPTIONS = [
     icon: 'jeux',
   },
   {
+    id: 'league-of-legends',
+    path: '/league-of-legends',
+    defaultLabel: 'League of Legends',
+    visibilityId: APP_PAGE_IDS.JEUX,
+    icon: 'jeux',
+  },
+  {
     id: APP_PAGE_IDS.SPORT,
     path: '/sport',
     defaultLabel: 'Sport',

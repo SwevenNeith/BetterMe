@@ -169,7 +169,14 @@ const isActive = (path) => {
     )
   }
   if (path === '/television') return route.path === path || route.path.startsWith('/television/')
-  if (path === '/jeux') return route.path === path || route.path.startsWith('/jeux/')
+  if (path === '/jeux') {
+    return (
+      route.path === path ||
+      route.path.startsWith('/jeux/') ||
+      route.path === '/league-of-legends' ||
+      route.path.startsWith('/league-of-legends/')
+    )
+  }
   if (path === '/sport') return route.path === path || route.path.startsWith('/sport/')
   if (path === '/wishlist') return route.path === path || route.path.startsWith('/wishlist/')
   if (path === '/creation') {
