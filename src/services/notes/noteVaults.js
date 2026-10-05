@@ -2,7 +2,7 @@ import { normalizeVaultIcon } from '../../constants/notes/noteVaults.js'
 
 const TABLE = 'note_vaults'
 
-const OPTIONAL_COLUMNS = ['surface_color', 'gradient_color', 'icon']
+const OPTIONAL_COLUMNS = ['surface_color', 'sidebar_color', 'gradient_color', 'icon']
 
 function isMissingTableError(error) {
   return (
@@ -57,6 +57,7 @@ function normalizeVault(row, input) {
     color: row.color ?? '#AD81BE',
     accent_color: row.accent_color ?? '#D5B5EA',
     surface_color: row.surface_color ?? null,
+    sidebar_color: row.sidebar_color ?? null,
     gradient_color: row.gradient_color ?? null,
     icon: normalizeVaultIcon(row.icon),
     sort_order: Number(row.sort_order ?? 0),
@@ -69,6 +70,9 @@ function normalizeVault(row, input) {
   }
   if (input?.surfaceColor !== undefined || input?.surface_color !== undefined) {
     vault.surface_color = input.surfaceColor ?? input.surface_color ?? vault.surface_color
+  }
+  if (input?.sidebarColor !== undefined || input?.sidebar_color !== undefined) {
+    vault.sidebar_color = input.sidebarColor ?? input.sidebar_color ?? vault.sidebar_color
   }
   if (input?.gradientColor !== undefined || input?.gradient_color !== undefined) {
     vault.gradient_color = input.gradientColor ?? input.gradient_color ?? vault.gradient_color
@@ -114,7 +118,7 @@ export async function listNoteVaults(supabase, userId) {
         'Colonne note_vaults.icon absente. Exécute scripts/create-note-vaults.sql dans Supabase.',
       )
     }
-    if (missingColumn === 'surface_color' || missingColumn === 'gradient_color') {
+    if (missingColumn === 'surface_color' || missingColumn === 'sidebar_color' || missingColumn === 'gradient_color') {
       console.warn(
         'Colonnes thème note_vaults absentes. Exécute scripts/create-note-vaults.sql dans Supabase.',
       )
@@ -160,7 +164,7 @@ export async function getNoteVault(supabase, userId, vaultId) {
 }
 
 /**
- * @param {{ name?: string, icon?: string, color?: string, accentColor?: string, accent_color?: string, surfaceColor?: string, surface_color?: string, gradientColor?: string, gradient_color?: string, sortOrder?: number, sort_order?: number }} input
+ * @param {{ name?: string, icon?: string, color?: string, accentColor?: string, accent_color?: string, surfaceColor?: string, surface_color?: string, sidebarColor?: string, sidebar_color?: string, gradientColor?: string, gradient_color?: string, sortOrder?: number, sort_order?: number }} input
  */
 function buildVaultPatch(input, { includeName = true } = {}) {
   const patch = {}
@@ -182,6 +186,9 @@ function buildVaultPatch(input, { includeName = true } = {}) {
   }
   if (input?.surfaceColor !== undefined || input?.surface_color !== undefined) {
     patch.surface_color = input.surfaceColor ?? input.surface_color
+  }
+  if (input?.sidebarColor !== undefined || input?.sidebar_color !== undefined) {
+    patch.sidebar_color = input.sidebarColor ?? input.sidebar_color
   }
   if (input?.gradientColor !== undefined || input?.gradient_color !== undefined) {
     patch.gradient_color = input.gradientColor ?? input.gradient_color
@@ -247,7 +254,7 @@ async function writeVaultRow(supabase, userId, vaultId, patch, input) {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
- * @param {{ name: string, icon?: string, color?: string, accentColor?: string, surfaceColor?: string, gradientColor?: string }} input
+ * @param {{ name: string, icon?: string, color?: string, accentColor?: string, surfaceColor?: string, sidebarColor?: string, gradientColor?: string }} input
  */
 export async function createNoteVault(supabase, userId, input) {
   if (!userId) throw new Error('Utilisateur non connecté.')
@@ -314,7 +321,7 @@ export async function createNoteVault(supabase, userId, input) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {string} vaultId
- * @param {{ name?: string, icon?: string, color?: string, accentColor?: string, surfaceColor?: string, gradientColor?: string }} input
+ * @param {{ name?: string, icon?: string, color?: string, accentColor?: string, surfaceColor?: string, sidebarColor?: string, gradientColor?: string }} input
  */
 export async function updateNoteVault(supabase, userId, vaultId, input) {
   if (!userId || !vaultId) throw new Error('Coffre invalide.')

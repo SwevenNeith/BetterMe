@@ -71,7 +71,7 @@ function onClose(event, tab) {
   border-bottom: none;
   border-radius: 8px 8px 0 0;
   background: transparent;
-  color: #6d5a7e;
+  color: var(--notes-vault-text-muted, #6d5a7e);
   padding: 0.35rem 0.35rem 0.4rem 0.55rem;
   font: inherit;
   font-size: 0.8rem;
@@ -79,14 +79,14 @@ function onClose(event, tab) {
 }
 
 .notes-tabs__tab:hover {
-  background: rgba(255, 255, 255, 0.45);
-  color: #3b2a4a;
+  background: var(--notes-vault-selection-hover, rgba(255, 255, 255, 0.45));
+  color: var(--notes-vault-title, var(--notes-vault-color, #3b2a4a));
 }
 
 .notes-tabs__tab--active {
-  background: #faf7fd;
-  border-color: #e0d4ee;
-  color: #3b2a4a;
+  background: var(--notes-vault-main-bg, #faf7fd);
+  border-color: var(--notes-vault-border, #e0d4ee);
+  color: var(--notes-vault-title-tab, var(--notes-vault-title, var(--notes-vault-color, #3b2a4a)));
   font-weight: 600;
 }
 
@@ -119,32 +119,32 @@ function onClose(event, tab) {
 
 @media (prefers-color-scheme: dark) {
   .notes-tabs {
-    background: #221a2e;
-    border-bottom-color: rgba(213, 181, 234, 0.18);
+    background: var(--notes-vault-tabs-bg, #221a2e);
+    border-bottom-color: var(--notes-vault-border, rgba(213, 181, 234, 0.18));
   }
 
   .notes-tabs__tab {
-    color: #b8a8c8;
+    color: var(--notes-vault-text-muted, #b8a8c8);
   }
 
   .notes-tabs__tab:hover {
-    background: rgba(213, 181, 234, 0.12);
-    color: #f0e8f8;
+    background: var(--notes-vault-selection-hover, rgba(213, 181, 234, 0.12));
+    color: var(--notes-vault-title-tab, var(--notes-vault-title, var(--notes-vault-color, #f0e8f8)));
   }
 
   .notes-tabs__tab--active {
-    background: #1f1a2c;
-    border-color: rgba(213, 181, 234, 0.22);
-    color: #f0e8f8;
+    background: var(--notes-vault-main-bg, #1f1a2c);
+    border-color: var(--notes-vault-border, rgba(213, 181, 234, 0.22));
+    color: var(--notes-vault-title-tab, var(--notes-vault-title, var(--notes-vault-color, #f0e8f8)));
   }
 
   .notes-tabs__close {
-    color: #a895bc;
+    color: var(--notes-vault-text-muted, #a895bc);
   }
 
   .notes-tabs__close:hover {
-    background: rgba(213, 181, 234, 0.22);
-    color: #f0e8f8;
+    background: var(--notes-vault-selection-hover, rgba(213, 181, 234, 0.22));
+    color: var(--notes-vault-color, #f0e8f8);
   }
 }
 </style>

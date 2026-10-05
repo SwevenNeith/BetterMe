@@ -21,6 +21,9 @@ ALTER TABLE public.note_vaults
   ADD COLUMN IF NOT EXISTS surface_color text NOT NULL DEFAULT '#F4F0FA';
 
 ALTER TABLE public.note_vaults
+  ADD COLUMN IF NOT EXISTS sidebar_color text NULL;
+
+ALTER TABLE public.note_vaults
   ADD COLUMN IF NOT EXISTS gradient_color text NOT NULL DEFAULT '#95D1AA';
 
 ALTER TABLE public.note_vaults
@@ -45,6 +48,7 @@ COMMENT ON TABLE public.note_vaults IS
 COMMENT ON COLUMN public.note_vaults.color IS 'Couleur principale du coffre (hex).';
 COMMENT ON COLUMN public.note_vaults.accent_color IS 'Couleur d’accent / fond léger (hex).';
 COMMENT ON COLUMN public.note_vaults.surface_color IS 'Couleur de surface / fond principal (hex).';
+COMMENT ON COLUMN public.note_vaults.sidebar_color IS 'Couleur de la sidebar et du contour (hex).';
 COMMENT ON COLUMN public.note_vaults.gradient_color IS 'Couleur secondaire pour dégradés (hex).';
 COMMENT ON COLUMN public.note_vaults.icon IS 'Emoji affiché comme icône du coffre.';
 

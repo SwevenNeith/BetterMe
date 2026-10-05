@@ -245,16 +245,16 @@ function onFolderDrop(event, folderId) {
 }
 
 .notes-tree-node__row:hover {
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--notes-vault-selection-hover, rgba(255, 255, 255, 0.45));
 }
 
 .notes-tree-node__row--active {
-  background: rgba(213, 181, 234, 0.55);
+  background: var(--notes-vault-selection-bg, rgba(213, 181, 234, 0.55));
 }
 
 .notes-tree-node__row--drop {
-  background: rgba(173, 129, 190, 0.35);
-  outline: 1px dashed #8e6aa8;
+  background: var(--notes-vault-drop-bg, rgba(173, 129, 190, 0.35));
+  outline: 1px dashed var(--notes-vault-color, #8e6aa8);
 }
 
 .notes-tree-node__row--note {
@@ -276,7 +276,7 @@ function onFolderDrop(event, folderId) {
   text-align: left;
   padding: 0.18rem 0.15rem;
   cursor: inherit;
-  color: #3b2a4a;
+  color: var(--notes-vault-text, #3b2a4a);
   font: inherit;
   font-size: 0.8rem;
   overflow: hidden;
@@ -292,7 +292,7 @@ function onFolderDrop(event, folderId) {
   display: inline-flex;
   justify-content: center;
   transition: transform 0.12s ease;
-  color: #7a668c;
+  color: var(--notes-vault-icon, #7a668c);
   font-size: 0.75rem;
 }
 
@@ -308,7 +308,7 @@ function onFolderDrop(event, folderId) {
   width: 0.8rem;
   height: 0.8rem;
   flex-shrink: 0;
-  color: #7a668c;
+  color: var(--notes-vault-icon, #7a668c);
 }
 
 .notes-tree-node__label {
@@ -342,7 +342,7 @@ function onFolderDrop(event, folderId) {
   cursor: pointer;
   border-radius: 4px;
   padding: 0.2rem;
-  color: #6d5a7e;
+  color: var(--notes-vault-icon, #6d5a7e);
   line-height: 0;
   display: inline-flex;
   align-items: center;
@@ -357,8 +357,8 @@ function onFolderDrop(event, folderId) {
 }
 
 .notes-tree-node__actions button:hover {
-  background: rgba(255, 255, 255, 0.7);
-  color: #4a3560;
+  background: var(--notes-vault-icon-hover-bg, rgba(255, 255, 255, 0.7));
+  color: var(--notes-vault-color, #4a3560);
 }
 
 .notes-tree-node__children {
@@ -368,34 +368,34 @@ function onFolderDrop(event, folderId) {
 
 @media (prefers-color-scheme: dark) {
   .notes-tree-node__row:hover {
-    background: rgba(213, 181, 234, 0.12);
+    background: var(--notes-vault-selection-hover, rgba(213, 181, 234, 0.12));
   }
 
   .notes-tree-node__row--active {
-    background: rgba(173, 129, 190, 0.35);
+    background: var(--notes-vault-selection-bg, rgba(173, 129, 190, 0.35));
   }
 
   .notes-tree-node__row--drop {
-    background: rgba(173, 129, 190, 0.45);
-    outline-color: #c4a8e0;
+    background: var(--notes-vault-drop-bg, rgba(173, 129, 190, 0.45));
+    outline-color: var(--notes-vault-color, #c4a8e0);
   }
 
   .notes-tree-node__main {
-    color: #f0e8f8;
+    color: var(--notes-vault-text, #f0e8f8);
   }
 
   .notes-tree-node__chevron,
   .notes-tree-node__icon {
-    color: #b8a8c8;
+    color: var(--notes-vault-icon, #b8a8c8);
   }
 
   .notes-tree-node__actions button {
-    color: #b8a8c8;
+    color: var(--notes-vault-icon, #b8a8c8);
   }
 
   .notes-tree-node__actions button:hover {
-    background: rgba(213, 181, 234, 0.18);
-    color: #f0e8f8;
+    background: var(--notes-vault-icon-hover-bg, rgba(213, 181, 234, 0.18));
+    color: var(--notes-vault-color, #f0e8f8);
   }
 }
 </style>

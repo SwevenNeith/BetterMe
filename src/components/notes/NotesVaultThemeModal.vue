@@ -7,9 +7,11 @@ import {
   NOTE_VAULT_DEFAULT_GRADIENT,
   NOTE_VAULT_DEFAULT_ICON,
   NOTE_VAULT_DEFAULT_PRIMARY,
+  NOTE_VAULT_DEFAULT_SIDEBAR,
   NOTE_VAULT_DEFAULT_SURFACE,
   deriveVaultAccentFromPrimary,
   deriveVaultGradientFromPrimary,
+  deriveVaultSidebar,
   deriveVaultSurfaceFromAccent,
   hexToRgb,
   normalizeVaultHex,
@@ -33,6 +35,7 @@ const vaultIcon = ref(NOTE_VAULT_DEFAULT_ICON)
 const primaryColor = ref(NOTE_VAULT_DEFAULT_PRIMARY)
 const accentColor = ref(NOTE_VAULT_DEFAULT_ACCENT)
 const surfaceColor = ref(NOTE_VAULT_DEFAULT_SURFACE)
+const sidebarColor = ref(NOTE_VAULT_DEFAULT_SIDEBAR)
 const gradientColor = ref(NOTE_VAULT_DEFAULT_GRADIENT)
 const autoPalette = ref(true)
 const errorMessage = ref('')
@@ -45,6 +48,7 @@ const hexDraftByField = ref({})
 const primaryRgb = ref({ r: 173, g: 129, b: 190 })
 const accentRgb = ref({ r: 213, g: 181, b: 234 })
 const surfaceRgb = ref({ r: 244, g: 240, b: 250 })
+const sidebarRgb = ref({ r: 235, g: 224, b: 245 })
 const gradientRgb = ref({ r: 149, g: 209, b: 170 })
 
 const isEditMode = computed(() => props.mode === 'edit')
@@ -60,6 +64,7 @@ const previewStyle = computed(() =>
       color: primaryColor.value,
       accent_color: accentColor.value,
       surface_color: surfaceColor.value,
+      sidebar_color: sidebarColor.value,
       gradient_color: gradientColor.value,
     },
     { dark: prefersDark.value },
@@ -79,9 +84,12 @@ function applyDerivedPalette() {
   const accent = deriveVaultAccentFromPrimary(primaryColor.value)
   accentColor.value = accent
   syncRgbFromHex(accentRgb.value, accent)
-  const surface = deriveVaultSurfaceFromAccent(accent)
+  const surface = deriveVaultSurfaceFromAccent(accent, { dark: prefersDark.value })
   surfaceColor.value = surface
   syncRgbFromHex(surfaceRgb.value, surface)
+  const sidebar = deriveVaultSidebar(accent, surface, { dark: prefersDark.value })
+  sidebarColor.value = sidebar
+  syncRgbFromHex(sidebarRgb.value, sidebar)
   const gradient = deriveVaultGradientFromPrimary(primaryColor.value)
   gradientColor.value = gradient
   syncRgbFromHex(gradientRgb.value, gradient)
@@ -115,6 +123,13 @@ function applySurfaceHex(hex) {
   syncRgbFromHex(surfaceRgb.value, next)
 }
 
+function applySidebarHex(hex) {
+  autoPalette.value = false
+  const next = normalizeVaultHex(hex, sidebarColor.value)
+  sidebarColor.value = next
+  syncRgbFromHex(sidebarRgb.value, next)
+}
+
 function applyGradientHex(hex) {
   autoPalette.value = false
   const next = normalizeVaultHex(hex, gradientColor.value)
@@ -138,6 +153,10 @@ function onSurfaceRgbInput() {
   applySurfaceHex(rgbToHex(surfaceRgb.value.r, surfaceRgb.value.g, surfaceRgb.value.b))
 }
 
+function onSidebarRgbInput() {
+  applySidebarHex(rgbToHex(sidebarRgb.value.r, sidebarRgb.value.g, sidebarRgb.value.b))
+}
+
 function onGradientRgbInput() {
   applyGradientHex(rgbToHex(gradientRgb.value.r, gradientRgb.value.g, gradientRgb.value.b))
 }
@@ -152,11 +171,19 @@ function resetDefaultTheme() {
   vaultIcon.value = NOTE_VAULT_DEFAULT_ICON
   primaryColor.value = NOTE_VAULT_DEFAULT_PRIMARY
   accentColor.value = NOTE_VAULT_DEFAULT_ACCENT
-  surfaceColor.value = NOTE_VAULT_DEFAULT_SURFACE
+  surfaceColor.value = deriveVaultSurfaceFromAccent(NOTE_VAULT_DEFAULT_ACCENT, {
+    dark: prefersDark.value,
+  })
+  sidebarColor.value = deriveVaultSidebar(
+    NOTE_VAULT_DEFAULT_ACCENT,
+    surfaceColor.value,
+    { dark: prefersDark.value },
+  )
   gradientColor.value = NOTE_VAULT_DEFAULT_GRADIENT
   syncRgbFromHex(primaryRgb.value, primaryColor.value)
   syncRgbFromHex(accentRgb.value, accentColor.value)
   syncRgbFromHex(surfaceRgb.value, surfaceColor.value)
+  syncRgbFromHex(sidebarRgb.value, sidebarColor.value)
   syncRgbFromHex(gradientRgb.value, gradientColor.value)
 }
 
@@ -175,6 +202,7 @@ function onColorHexInput(fieldId, event) {
   if (fieldId === 'primary') applyPrimaryHex(value)
   else if (fieldId === 'accent') applyAccentHex(value)
   else if (fieldId === 'surface') applySurfaceHex(value)
+  else if (fieldId === 'sidebar') applySidebarHex(value)
   else applyGradientHex(value)
 }
 
@@ -184,6 +212,7 @@ function onColorHexBlur(fieldId) {
     if (fieldId === 'primary') applyPrimaryHex(draft)
     else if (fieldId === 'accent') applyAccentHex(draft)
     else if (fieldId === 'surface') applySurfaceHex(draft)
+    else if (fieldId === 'sidebar') applySidebarHex(draft)
     else applyGradientHex(draft)
   }
   hexFocusField.value = null
@@ -203,6 +232,7 @@ function colorValueById(fieldId) {
   if (fieldId === 'primary') return primaryColor.value
   if (fieldId === 'accent') return accentColor.value
   if (fieldId === 'surface') return surfaceColor.value
+  if (fieldId === 'sidebar') return sidebarColor.value
   return gradientColor.value
 }
 
@@ -210,6 +240,7 @@ function setColorById(fieldId, value) {
   if (fieldId === 'primary') applyPrimaryHex(value)
   else if (fieldId === 'accent') applyAccentHex(value)
   else if (fieldId === 'surface') applySurfaceHex(value)
+  else if (fieldId === 'sidebar') applySidebarHex(value)
   else applyGradientHex(value)
 }
 
@@ -224,16 +255,23 @@ const colorFields = [
   {
     id: 'accent',
     title: 'Accent',
-    hint: 'Sidebar, onglets',
+    hint: 'Onglets, survols',
     rgb: accentRgb,
     onRgbInput: onAccentRgbInput,
   },
   {
     id: 'surface',
-    title: 'Surface',
-    hint: 'Fond page & éditeur',
+    title: 'Fond',
+    hint: 'Background page & zone principale',
     rgb: surfaceRgb,
     onRgbInput: onSurfaceRgbInput,
+  },
+  {
+    id: 'sidebar',
+    title: 'Sidebar',
+    hint: 'Sidebar & contour du coffre',
+    rgb: sidebarRgb,
+    onRgbInput: onSidebarRgbInput,
   },
   {
     id: 'gradient',
@@ -257,12 +295,20 @@ watch(surfaceColor, (value) => {
   syncRgbFromHex(surfaceRgb.value, value)
 })
 
+watch(sidebarColor, (value) => {
+  syncRgbFromHex(sidebarRgb.value, value)
+})
+
 watch(gradientColor, (value) => {
   syncRgbFromHex(gradientRgb.value, value)
 })
 
 watch(autoPalette, (enabled) => {
   if (enabled) applyDerivedPalette()
+})
+
+watch(prefersDark, () => {
+  if (autoPalette.value) applyDerivedPalette()
 })
 
 function reset() {
@@ -273,25 +319,35 @@ function reset() {
   hexDraftByField.value = {}
 
   if (isEditMode.value && props.vault) {
-    const theme = normalizeVaultTheme(props.vault)
+    const theme = normalizeVaultTheme(props.vault, { dark: prefersDark.value })
     name.value = props.vault.name ?? ''
     vaultIcon.value = normalizeVaultIcon(props.vault.icon)
     primaryColor.value = theme.color
     accentColor.value = theme.accent
     surfaceColor.value = theme.surface
+    sidebarColor.value = theme.sidebar
     gradientColor.value = theme.gradient
   } else {
     name.value = ''
     vaultIcon.value = NOTE_VAULT_DEFAULT_ICON
     primaryColor.value = NOTE_VAULT_DEFAULT_PRIMARY
     accentColor.value = NOTE_VAULT_DEFAULT_ACCENT
-    surfaceColor.value = NOTE_VAULT_DEFAULT_SURFACE
+    surfaceColor.value = deriveVaultSurfaceFromAccent(
+      NOTE_VAULT_DEFAULT_ACCENT,
+      { dark: prefersDark.value },
+    )
+    sidebarColor.value = deriveVaultSidebar(
+      NOTE_VAULT_DEFAULT_ACCENT,
+      surfaceColor.value,
+      { dark: prefersDark.value },
+    )
     gradientColor.value = NOTE_VAULT_DEFAULT_GRADIENT
   }
 
   syncRgbFromHex(primaryRgb.value, primaryColor.value)
   syncRgbFromHex(accentRgb.value, accentColor.value)
   syncRgbFromHex(surfaceRgb.value, surfaceColor.value)
+  syncRgbFromHex(sidebarRgb.value, sidebarColor.value)
   syncRgbFromHex(gradientRgb.value, gradientColor.value)
 }
 
@@ -323,6 +379,7 @@ function submit() {
     color: normalizeVaultHex(primaryColor.value, NOTE_VAULT_DEFAULT_PRIMARY),
     accentColor: normalizeVaultHex(accentColor.value, NOTE_VAULT_DEFAULT_ACCENT),
     surfaceColor: normalizeVaultHex(surfaceColor.value, NOTE_VAULT_DEFAULT_SURFACE),
+    sidebarColor: normalizeVaultHex(sidebarColor.value, NOTE_VAULT_DEFAULT_SIDEBAR),
     gradientColor: normalizeVaultHex(gradientColor.value, NOTE_VAULT_DEFAULT_GRADIENT),
   })
   isSaving.value = false
@@ -736,7 +793,7 @@ function submit() {
   gap: 0.3rem;
   font-size: 0.82rem;
   font-weight: 700;
-  color: var(--notes-vault-text, #3b2a4a);
+  color: var(--notes-vault-title, var(--notes-vault-text, #3b2a4a));
   min-width: 0;
 }
 
@@ -775,7 +832,7 @@ function submit() {
 
 .notes-vault-modal__preview-note {
   font-size: 0.68rem;
-  color: var(--notes-vault-text-muted, #6d5a7e);
+  color: var(--notes-vault-main-text-muted, var(--notes-vault-text-muted, #6d5a7e));
 }
 
 .notes-vault-modal__error {

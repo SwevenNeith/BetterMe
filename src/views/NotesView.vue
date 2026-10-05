@@ -3422,15 +3422,28 @@ watch(draftFolderId, (value) => {
   border-bottom-color: var(--notes-vault-border, #e0d4ee);
 }
 
+.notes-page--in-vault :deep(.notes-tabs__tab) {
+  color: var(--notes-vault-text-muted, #6d5a7e);
+}
+
 .notes-page--in-vault :deep(.notes-tabs__tab--active) {
   background: var(--notes-vault-main-bg, #faf7fd);
   border-color: var(--notes-vault-border, #e0d4ee);
-  color: var(--notes-vault-text, #3b2a4a);
+  color: var(--notes-vault-title-tab, var(--notes-vault-title, var(--notes-vault-color, #3b2a4a)));
 }
 
 .notes-page--in-vault :deep(.notes-tabs__tab:hover) {
-  background: var(--notes-vault-icon-hover-bg, rgba(255, 255, 255, 0.45));
-  color: var(--notes-vault-text, #3b2a4a);
+  background: var(--notes-vault-selection-hover, rgba(255, 255, 255, 0.45));
+  color: var(--notes-vault-title-tab, var(--notes-vault-title, var(--notes-vault-color, #3b2a4a)));
+}
+
+.notes-page--in-vault :deep(.notes-tabs__close) {
+  color: var(--notes-vault-text-muted, #8a779c);
+}
+
+.notes-page--in-vault :deep(.notes-tabs__close:hover) {
+  background: var(--notes-vault-selection-hover, rgba(60, 40, 80, 0.08));
+  color: var(--notes-vault-title-tab, var(--notes-vault-color, #3b2a4a));
 }
 
 .notes-page--in-vault .notes-page__editor-header {
@@ -3439,7 +3452,11 @@ watch(draftFolderId, (value) => {
 }
 
 .notes-page--in-vault .notes-page__title-input {
-  color: var(--notes-vault-text, #3b2a4a);
+  color: var(--notes-vault-title-main, var(--notes-vault-title, var(--notes-vault-color, #3b2a4a)));
+}
+
+.notes-page--in-vault .notes-page__title {
+  color: var(--notes-vault-title, var(--notes-vault-color, #3b2a4a));
 }
 
 .notes-page--in-vault .notes-page__folder-label,
@@ -3452,7 +3469,7 @@ watch(draftFolderId, (value) => {
 .notes-page--in-vault .notes-page__search {
   border-color: var(--notes-vault-border-strong, #d5c4e6);
   background: var(--notes-vault-input-bg, #fff);
-  color: var(--notes-vault-text, #3b2a4a);
+  color: var(--notes-vault-input-text, var(--notes-vault-text, #3b2a4a));
 }
 
 .notes-page--in-vault .notes-page__icon-btn {
@@ -3474,18 +3491,18 @@ watch(draftFolderId, (value) => {
 }
 
 .notes-page--in-vault .notes-page__mode {
-  color: var(--notes-vault-text, #3d5c50);
+  color: var(--notes-vault-main-text, var(--notes-vault-text, #3d5c50));
 }
 
 .notes-page--in-vault .notes-page__mode--active {
   background: var(--notes-vault-mode-active, #95d1aa);
-  color: var(--notes-vault-text, #244438);
+  color: var(--notes-vault-mode-active-text, var(--notes-vault-btn-text, #244438));
 }
 
 .notes-page--in-vault .notes-page__btn {
   border-color: var(--notes-vault-border-strong, #d5c4e6);
   background: var(--notes-vault-input-bg, #fff);
-  color: var(--notes-vault-text, #3b2a4a);
+  color: var(--notes-vault-input-text, var(--notes-vault-main-text, #3b2a4a));
 }
 
 .notes-page--in-vault .notes-page__btn--primary {
@@ -3496,7 +3513,7 @@ watch(draftFolderId, (value) => {
 
 .notes-page--in-vault .notes-page__back-btn {
   border-color: var(--notes-vault-border-strong, rgba(173, 129, 190, 0.35));
-  color: var(--notes-vault-text, #3d2f4a);
+  color: var(--notes-vault-input-text, var(--notes-vault-text, #3d2f4a));
   background: var(--notes-vault-input-bg, #fff);
 }
 
@@ -3507,13 +3524,9 @@ watch(draftFolderId, (value) => {
   border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 700;
-  color: var(--notes-vault-text, #3d2f4a);
-  background: color-mix(in srgb, var(--notes-vault-accent, #d5b5ea) 65%, white);
+  color: var(--notes-vault-btn-text, #3d2f4a);
+  background: var(--notes-vault-color, #ad81be);
   border: 1px solid color-mix(in srgb, var(--notes-vault-color, #ad81be) 30%, transparent);
-}
-
-.notes-page--in-vault .notes-page__title {
-  color: var(--notes-vault-text, #3b2a4a);
 }
 
 .notes-page--in-vault .notes-page__sidebar-rail {
@@ -3524,17 +3537,17 @@ watch(draftFolderId, (value) => {
 
 .notes-page--in-vault .notes-page__editor {
   background: var(--notes-vault-input-bg, #fff);
-  color: var(--notes-vault-text, #2f243a);
+  color: var(--notes-vault-input-text, var(--notes-vault-main-text, #2f243a));
   border-right-color: var(--notes-vault-border, #e6ddf2);
 }
 
 .notes-page--in-vault .notes-page__preview {
   background: var(--notes-vault-main-bg, #faf7fd);
-  color: var(--notes-vault-text, #2f243a);
+  color: var(--notes-vault-main-text, #2f243a);
 }
 
 .notes-page--in-vault .notes-page__empty {
-  color: var(--notes-vault-text-muted, #6d5a7e);
+  color: var(--notes-vault-main-text-muted, var(--notes-vault-text-muted, #6d5a7e));
 }
 
 .notes-page__vault-nav {
@@ -4135,6 +4148,19 @@ watch(draftFolderId, (value) => {
   color: #3b2a4a;
 }
 
+.notes-page--in-vault :deep(.markdown-body h1),
+.notes-page--in-vault :deep(.markdown-body h2),
+.notes-page--in-vault :deep(.markdown-body h3),
+.notes-page--in-vault :deep(.markdown-body h4),
+.notes-page--in-vault :deep(.markdown-body h5),
+.notes-page--in-vault :deep(.markdown-body h6) {
+  color: var(--notes-vault-main-text, #3b2a4a);
+}
+
+.notes-page--in-vault :deep(.markdown-body h1) {
+  border-bottom-color: var(--notes-vault-border, #e6ddf2);
+}
+
 :deep(.markdown-body h1) {
   font-size: 1.7rem;
   border-bottom: 1px solid #e6ddf2;
@@ -4415,12 +4441,12 @@ watch(draftFolderId, (value) => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .notes-page {
+  .notes-page:not(.notes-page--in-vault) {
     background: #1a1524;
     border-color: rgba(213, 181, 234, 0.22);
   }
 
-  .notes-page__sidebar {
+  .notes-page:not(.notes-page--in-vault) .notes-page__sidebar {
     background: #221a2e;
     border-right-color: rgba(213, 181, 234, 0.18);
   }
@@ -4444,13 +4470,13 @@ watch(draftFolderId, (value) => {
     background: #342c44;
   }
 
-  .notes-page__sidebar-rail {
+  .notes-page:not(.notes-page--in-vault) .notes-page__sidebar-rail {
     background: #221a2e;
     border-right-color: rgba(213, 181, 234, 0.18);
     color: #c5b8d2;
   }
 
-  .notes-page__sidebar-rail:hover {
+  .notes-page:not(.notes-page--in-vault) .notes-page__sidebar-rail:hover {
     background: #2a2438;
   }
 
@@ -4466,28 +4492,28 @@ watch(draftFolderId, (value) => {
     color: #b8a8c8;
   }
 
-  .notes-page__main {
+  .notes-page:not(.notes-page--in-vault) .notes-page__main {
     background: #1f1a2c;
   }
 
-  .notes-page__editor-header {
+  .notes-page:not(.notes-page--in-vault) .notes-page__editor-header {
     background: #241c30;
     border-bottom-color: rgba(213, 181, 234, 0.18);
   }
 
-  .notes-page__title-input {
+  .notes-page:not(.notes-page--in-vault) .notes-page__title-input {
     color: #f0e8f8;
   }
 
-  .notes-page__search,
-  .notes-page__folder-select,
-  .notes-page__btn {
+  .notes-page:not(.notes-page--in-vault) .notes-page__search,
+  .notes-page:not(.notes-page--in-vault) .notes-page__folder-select,
+  .notes-page:not(.notes-page--in-vault) .notes-page__btn {
     background: #2a2438;
     border-color: rgba(173, 129, 190, 0.4);
     color: #f0e8f8;
   }
 
-  .notes-page__mode-switch {
+  .notes-page:not(.notes-page--in-vault) .notes-page__mode-switch {
     background: #2a2438;
     border-color: rgba(114, 160, 152, 0.45);
   }
@@ -4513,13 +4539,13 @@ watch(draftFolderId, (value) => {
     background: rgba(80, 30, 30, 0.45);
   }
 
-  .notes-page__editor {
+  .notes-page:not(.notes-page--in-vault) .notes-page__editor {
     background: #1a1524;
     color: #f0e8f8;
     border-right-color: rgba(213, 181, 234, 0.18);
   }
 
-  .notes-page__preview {
+  .notes-page:not(.notes-page--in-vault) .notes-page__preview {
     background: #1f1a2c;
     color: #f0e8f8;
   }
@@ -4561,25 +4587,38 @@ watch(draftFolderId, (value) => {
   }
 
   .notes-page--in-vault .notes-page__vault-badge {
-    color: var(--notes-vault-text, #f0e8f8);
-    background: color-mix(in srgb, var(--notes-vault-accent, #d5b5ea) 35%, #2a2438);
+    color: var(--notes-vault-btn-text, #f0e8f8);
+    background: var(--notes-vault-color, #ad81be);
   }
 
   .notes-page--in-vault .notes-page__mode--active {
-    color: #1a1524;
+    color: var(--notes-vault-mode-active-text, var(--notes-vault-btn-text, #1a1524));
   }
 
-  :deep(.markdown-body h1),
-  :deep(.markdown-body h2),
-  :deep(.markdown-body h3),
-  :deep(.markdown-body h4),
-  :deep(.markdown-body h5),
-  :deep(.markdown-body h6) {
+  .notes-page:not(.notes-page--in-vault) :deep(.markdown-body h1),
+  .notes-page:not(.notes-page--in-vault) :deep(.markdown-body h2),
+  .notes-page:not(.notes-page--in-vault) :deep(.markdown-body h3),
+  .notes-page:not(.notes-page--in-vault) :deep(.markdown-body h4),
+  .notes-page:not(.notes-page--in-vault) :deep(.markdown-body h5),
+  .notes-page:not(.notes-page--in-vault) :deep(.markdown-body h6) {
     color: #f0e8f8;
   }
 
-  :deep(.markdown-body h1) {
+  .notes-page:not(.notes-page--in-vault) :deep(.markdown-body h1) {
     border-bottom-color: rgba(213, 181, 234, 0.22);
+  }
+
+  .notes-page--in-vault :deep(.markdown-body h1),
+  .notes-page--in-vault :deep(.markdown-body h2),
+  .notes-page--in-vault :deep(.markdown-body h3),
+  .notes-page--in-vault :deep(.markdown-body h4),
+  .notes-page--in-vault :deep(.markdown-body h5),
+  .notes-page--in-vault :deep(.markdown-body h6) {
+    color: var(--notes-vault-main-text, #f0e8f8);
+  }
+
+  .notes-page--in-vault :deep(.markdown-body h1) {
+    border-bottom-color: var(--notes-vault-border, rgba(213, 181, 234, 0.22));
   }
 
   :deep(.markdown-body blockquote) {
