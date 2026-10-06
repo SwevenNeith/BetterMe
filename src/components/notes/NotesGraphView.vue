@@ -214,7 +214,6 @@ function onSelect(nodeId) {
 }
 
 function nodeRadius(nodeId) {
-  if (nodeId === props.selectedNoteId) return 9
   if (nodeId === hoveredId.value) return 8
   return 6
 }
@@ -443,7 +442,6 @@ onUnmounted(() => {
           :key="node.id"
           class="notes-graph__node"
           :class="{
-            'notes-graph__node--active': node.id === selectedNoteId,
             'notes-graph__node--hover': node.id === hoveredId,
             'notes-graph__node--custom': Boolean(node.color),
           }"
@@ -460,7 +458,7 @@ onUnmounted(() => {
             :style="nodeFill(node) ? { fill: nodeFill(node), stroke: nodeFill(node) } : undefined"
           />
           <text
-            v-if="node.id === hoveredId || node.id === selectedNoteId || simNodes.length <= 18"
+            v-if="node.id === hoveredId || simNodes.length <= 18"
             :x="node.x"
             :y="node.y + nodeRadius(node.id) + 14"
             class="notes-graph__label"
@@ -503,11 +501,11 @@ onUnmounted(() => {
 }
 
 .notes-graph--themed .notes-graph__title {
-  color: var(--notes-vault-text, #3b2a4a);
+  color: var(--notes-vault-graph-header-text, var(--notes-vault-main-text, #3b2a4a));
 }
 
 .notes-graph--themed .notes-graph__meta {
-  color: var(--notes-vault-text-muted, #6d5a7e);
+  color: var(--notes-vault-graph-header-muted, var(--notes-vault-main-text-muted, #6d5a7e));
 }
 
 .notes-graph--themed .notes-graph__viewport {
@@ -516,26 +514,39 @@ onUnmounted(() => {
 
 .notes-graph--themed .notes-graph__link {
   stroke: var(--notes-vault-graph-link, #ad81be);
-  stroke-opacity: 0.55;
+  stroke-opacity: 0.65;
 }
 
 .notes-graph--themed .notes-graph__dot {
-  fill: var(--notes-vault-graph-node, #9b6fb3);
-  stroke: var(--notes-vault-graph-node-stroke, #7a528f);
+  fill: var(--notes-vault-graph-node, var(--notes-vault-accent, #9b6fb3));
+  stroke: var(--notes-vault-graph-node-stroke, var(--notes-vault-accent, #7a528f));
+  transition:
+    fill 0.15s ease,
+    stroke 0.15s ease,
+    filter 0.15s ease;
 }
 
-.notes-graph--themed .notes-graph__node--hover:not(.notes-graph__node--custom) .notes-graph__dot,
-.notes-graph--themed .notes-graph__node--active:not(.notes-graph__node--custom) .notes-graph__dot {
-  fill: var(--notes-vault-graph-node-active, #ad81be);
-  stroke: var(--notes-vault-graph-node-active-stroke, #6d4a82);
+.notes-graph--themed .notes-graph__node--hover:not(.notes-graph__node--custom) .notes-graph__dot {
+  fill: var(--notes-vault-graph-node-hover, var(--notes-vault-gradient, #95d1aa));
+  stroke: var(--notes-vault-graph-node-hover-stroke, var(--notes-vault-gradient, #72a098));
+  filter:
+    drop-shadow(0 0 5px color-mix(in srgb, var(--notes-vault-graph-node-glow, var(--notes-vault-gradient, #95d1aa)) 80%, transparent))
+    drop-shadow(0 0 12px color-mix(in srgb, var(--notes-vault-graph-node-glow, var(--notes-vault-gradient, #95d1aa)) 45%, transparent));
+}
+
+.notes-graph--themed .notes-graph__node--custom.notes-graph__node--hover .notes-graph__dot {
+  filter:
+    brightness(1.06)
+    drop-shadow(0 0 6px color-mix(in srgb, var(--notes-vault-graph-node-glow, var(--notes-vault-gradient, #95d1aa)) 70%, transparent));
 }
 
 .notes-graph--themed .notes-graph__label {
-  fill: var(--notes-vault-text, #3b2a4a);
+  fill: var(--notes-vault-graph-label, var(--notes-vault-main-text, #3b2a4a));
+  stroke: var(--notes-vault-graph-label-halo, rgba(255, 255, 255, 0.9));
 }
 
 .notes-graph--themed .notes-graph__empty {
-  color: var(--notes-vault-text-muted, #6d5a7e);
+  color: var(--notes-vault-main-text-muted, #6d5a7e);
 }
 
 .notes-graph__header {
@@ -757,14 +768,12 @@ onUnmounted(() => {
   stroke-width: 1.5;
 }
 
-.notes-graph__node--hover:not(.notes-graph__node--custom) .notes-graph__dot,
-.notes-graph__node--active:not(.notes-graph__node--custom) .notes-graph__dot {
+.notes-graph__node--hover:not(.notes-graph__node--custom) .notes-graph__dot {
   fill: #ad81be;
   stroke: #6d4a82;
 }
 
-.notes-graph__node--custom.notes-graph__node--hover .notes-graph__dot,
-.notes-graph__node--custom.notes-graph__node--active .notes-graph__dot {
+.notes-graph__node--custom.notes-graph__node--hover .notes-graph__dot {
   filter: brightness(1.08);
 }
 
@@ -876,8 +885,7 @@ onUnmounted(() => {
     stroke: #c5a0dc;
   }
 
-  .notes-graph__node--hover:not(.notes-graph__node--custom) .notes-graph__dot,
-  .notes-graph__node--active:not(.notes-graph__node--custom) .notes-graph__dot {
+  .notes-graph__node--hover:not(.notes-graph__node--custom) .notes-graph__dot {
     fill: #e8d4f8;
     stroke: #d5b5ea;
   }

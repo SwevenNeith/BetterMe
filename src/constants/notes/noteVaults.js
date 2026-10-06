@@ -332,6 +332,22 @@ export function vaultThemeStyle(vault, options = {}) {
     ? mixVaultHex('#ffffff', surface, 0.78)
     : mixVaultHex(color, surface, 0.72)
 
+  const graphHeaderBg = mixVaultHex(sidebar, surface, 0.82)
+  const graphHeaderInk = readableInk(graphHeaderBg)
+  // Liens / nœuds : garder la teinte accent/dégradé (pas de fallback blanc)
+  const graphLink = isDarkHex(surface)
+    ? mixVaultHex(accent, '#ffffff', 0.78)
+    : mixVaultHex(accent, '#1a1524', 0.82)
+  const graphNode = accent
+  const graphNodeStroke = isDarkHex(surface)
+    ? mixVaultHex(accent, '#ffffff', 0.7)
+    : mixVaultHex(accent, '#1a1524', 0.72)
+  const graphNodeHover = gradient
+  const graphNodeHoverStroke = isDarkHex(surface)
+    ? mixVaultHex(gradient, '#ffffff', 0.65)
+    : mixVaultHex(gradient, '#1a1524', 0.7)
+  const graphNodeGlow = gradient
+
   return {
     '--notes-vault-color': color,
     '--notes-vault-accent': accent,
@@ -366,19 +382,23 @@ export function vaultThemeStyle(vault, options = {}) {
     '--notes-vault-mode-bg': modeBg,
     '--notes-vault-mode-active': modeActive,
     '--notes-vault-mode-active-text': modeActiveText,
-    '--notes-vault-graph-header-bg': mixVaultHex(sidebar, surface, 0.82),
+    '--notes-vault-graph-header-bg': graphHeaderBg,
+    '--notes-vault-graph-header-text': graphHeaderInk.text,
+    '--notes-vault-graph-header-muted': graphHeaderInk.muted,
     '--notes-vault-graph-bg':
       `radial-gradient(ellipse 80% 70% at 50% 40%, color-mix(in srgb, ${accent} ${isDarkHex(surface) ? 28 : 45}%, transparent) 0%, transparent 60%),` +
       `radial-gradient(ellipse 70% 65% at 72% 78%, color-mix(in srgb, ${gradient} ${isDarkHex(surface) ? 22 : 38}%, transparent) 0%, transparent 55%),` +
       `linear-gradient(160deg, ${surface} 0%, color-mix(in srgb, ${gradient} ${isDarkHex(surface) ? 14 : 22}%, ${surface}) 52%, color-mix(in srgb, ${accent} ${isDarkHex(surface) ? 18 : 30}%, ${surface}) 100%)`,
-    '--notes-vault-graph-link': ensureContrastOn(color, surface),
-    '--notes-vault-graph-node': mixVaultHex(color, isDarkHex(surface) ? '#d5b5ea' : '#7a528f', 0.78),
-    '--notes-vault-graph-node-stroke': ensureContrastOn(color, surface),
-    '--notes-vault-graph-node-active': ensureContrastOn(color, surface),
-    '--notes-vault-graph-node-active-stroke': ensureContrastOn(
-      mixVaultHex(color, surfaceInk.text, 0.55),
-      surface,
-    ),
+    '--notes-vault-graph-link': graphLink,
+    '--notes-vault-graph-node': graphNode,
+    '--notes-vault-graph-node-stroke': graphNodeStroke,
+    '--notes-vault-graph-node-hover': graphNodeHover,
+    '--notes-vault-graph-node-hover-stroke': graphNodeHoverStroke,
+    '--notes-vault-graph-node-glow': graphNodeGlow,
+    '--notes-vault-graph-label': surfaceInk.text,
+    '--notes-vault-graph-label-halo': isDarkHex(surface)
+      ? 'rgba(18, 12, 8, 0.88)'
+      : 'rgba(255, 255, 255, 0.9)',
     '--notes-vault-table-header-bg': tableHeaderBg,
     '--notes-vault-table-header-text': tableHeaderInk.text,
     '--notes-vault-table-border': tableBorder,
