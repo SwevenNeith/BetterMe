@@ -66,27 +66,49 @@ function routingForPlatform(platform: string) {
   return PLATFORM_TO_ROUTING[platform] ?? 'europe'
 }
 
-async function riotFetch(url: string) {
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Fetch Riot avec retries sur 429 (Retry-After) et 5xx.
+ */
+async function riotFetch(url: string, options: { maxRetries?: number } = {}) {
   if (!RIOT_API_KEY) {
     throw new Error('RIOT_API_KEY is not configured')
   }
 
-  const response = await fetch(url, {
-    headers: {
-      'X-Riot-Token': RIOT_API_KEY,
-      Accept: 'application/json',
-    },
-  })
+  const maxRetries = Math.max(0, Number(options.maxRetries) || 3)
 
-  const text = await response.text()
-  let data: unknown = null
-  try {
-    data = text ? JSON.parse(text) : null
-  } catch {
-    data = { raw: text }
-  }
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const response = await fetch(url, {
+      headers: {
+        'X-Riot-Token': RIOT_API_KEY,
+        Accept: 'application/json',
+      },
+    })
 
-  if (!response.ok) {
+    const text = await response.text()
+    let data: unknown = null
+    try {
+      data = text ? JSON.parse(text) : null
+    } catch {
+      data = { raw: text }
+    }
+
+    if (response.ok) return data
+
+    const retryable = response.status === 429 || response.status >= 500
+    if (retryable && attempt < maxRetries) {
+      const retryAfterHeader = response.headers.get('Retry-After')
+      const retryAfterSec = Number(retryAfterHeader)
+      const waitMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+        ? Math.min(15_000, retryAfterSec * 1000)
+        : Math.min(8_000, 900 * (attempt + 1))
+      await sleep(waitMs)
+      continue
+    }
+
     let message =
       (data && typeof data === 'object' && 'status' in data
         ? (data as { status?: { message?: string } }).status?.message
@@ -108,7 +130,7 @@ async function riotFetch(url: string) {
     throw err
   }
 
-  return data
+  throw new Error('Riot API error (retries exhausted)')
 }
 
 function encodePathSegment(value: string) {
@@ -157,6 +179,36 @@ function summarizeParticipant(p: ParticipantRaw) {
     summoner2Id: Number(p.summoner2Id) || 0,
     champLevel: Number(p.champLevel) || 0,
     killParticipation: Number(challenges.killParticipation) || null,
+    gameEndedInEarlySurrender: Boolean(p.gameEndedInEarlySurrender),
+    gameEndedInSurrender: Boolean(p.gameEndedInSurrender),
+  }
+}
+
+/** Résumé compact pour cache / stats champions (reset ranked). */
+function buildHighlightsMatchSummary(
+  matchId: string,
+  detail: Parameters<typeof buildMatchSummary>[1],
+  puuid: string,
+) {
+  const full = buildMatchSummary(matchId, detail, puuid)
+  const me = full.participant as
+    | (ReturnType<typeof summarizeParticipant> & {
+        gameEndedInEarlySurrender?: boolean
+      })
+    | null
+  return {
+    matchId: full.matchId,
+    gameCreation: full.gameCreation,
+    gameDuration: full.gameDuration,
+    participant: me
+      ? {
+          puuid: me.puuid,
+          championId: me.championId,
+          championName: me.championName,
+          win: me.win,
+          gameEndedInEarlySurrender: Boolean(me.gameEndedInEarlySurrender),
+        }
+      : null,
   }
 }
 
@@ -444,21 +496,114 @@ Deno.serve(async (req) => {
       })
     }
 
-    if (action === 'champion-highlights') {
+    if (action === 'match-ids') {
       const puuid = String(body.puuid ?? '').trim()
       if (!puuid) {
         return jsonResponse({ error: 'puuid requis.' }, 400)
       }
 
-      const days = Math.min(90, Math.max(1, Number(body.days) || 90))
+      const count = Math.min(100, Math.max(1, Number(body.count) || 100))
+      const startIndex = Math.max(0, Number(body.start) || 0)
+      let startTime: number | null = null
+      let endTime: number | null = null
+      if (body.startTime != null && body.startTime !== '') {
+        startTime = Math.floor(Number(body.startTime))
+      }
+      if (body.endTime != null && body.endTime !== '') {
+        endTime = Math.floor(Number(body.endTime))
+      }
+      if (startTime == null || !Number.isFinite(startTime)) {
+        return jsonResponse({ error: 'startTime (epoch secondes) requis.' }, 400)
+      }
+      if (endTime == null || !Number.isFinite(endTime)) {
+        endTime = Math.floor(Date.now() / 1000)
+      }
+
+      let idsUrl =
+        `https://${routing}.api.riotgames.com/lol/match/v5/matches/by-puuid/` +
+        `${encodePathSegment(puuid)}/ids?startTime=${startTime}&endTime=${endTime}` +
+        `&start=${startIndex}&count=${count}`
+      const matchIds = (await riotFetch(idsUrl)) as string[]
+      const ids = Array.isArray(matchIds) ? matchIds : []
+
+      return jsonResponse({
+        puuid,
+        platform,
+        routing,
+        start: startIndex,
+        count,
+        startTime,
+        endTime,
+        matchIds: ids,
+        hasMore: ids.length >= count,
+      })
+    }
+
+    if (action === 'match-summaries') {
+      const puuid = String(body.puuid ?? '').trim()
+      if (!puuid) {
+        return jsonResponse({ error: 'puuid requis.' }, 400)
+      }
+      const rawIds = Array.isArray(body.matchIds) ? body.matchIds : []
+      const matchIds = rawIds
+        .map((id) => String(id ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 20)
+
+      const concurrency = 4
+      const matches: ReturnType<typeof buildHighlightsMatchSummary>[] = []
+      for (let i = 0; i < matchIds.length; i += concurrency) {
+        const slice = matchIds.slice(i, i + concurrency)
+        const batch = await Promise.all(
+          slice.map(async (matchId) => {
+            try {
+              const matchUrl =
+                `https://${routing}.api.riotgames.com/lol/match/v5/matches/${encodePathSegment(matchId)}`
+              const detail = (await riotFetch(matchUrl)) as Parameters<
+                typeof buildMatchSummary
+              >[1]
+              return buildHighlightsMatchSummary(matchId, detail, puuid)
+            } catch (err) {
+              console.warn('match-summaries failed', matchId, err)
+              return null
+            }
+          }),
+        )
+        for (const row of batch) {
+          if (row) matches.push(row)
+        }
+      }
+
+      return jsonResponse({
+        puuid,
+        platform,
+        routing,
+        matches,
+      })
+    }
+
+    if (action === 'champion-highlights') {
+      // Conservé pour compat : délègue la synchro IDs + masteries.
+      // Les stats (filtre remakes / fenêtre reset) sont calculées côté client.
+      const puuid = String(body.puuid ?? '').trim()
+      if (!puuid) {
+        return jsonResponse({ error: 'puuid requis.' }, 400)
+      }
+
+      let startTime = Math.floor(Number(body.startTime))
+      if (!Number.isFinite(startTime)) {
+        // Ancien param days → converti une dernière fois (compat)
+        const days = Math.min(365, Math.max(1, Number(body.days) || 90))
+        startTime = Math.floor(Date.now() / 1000) - days * 24 * 60 * 60
+      }
       const endTime = Math.floor(Date.now() / 1000)
-      const startTime = endTime - days * 24 * 60 * 60
-      const maxMatches = Math.min(120, Math.max(20, Number(body.maxMatches) || 100))
 
       const allIds: string[] = []
       let startIndex = 0
-      while (allIds.length < maxMatches) {
-        const batch = Math.min(100, maxMatches - allIds.length)
+      // Sécurité anti-boucle (saison dense) ; pagination 100 tant que plein.
+      const hardCap = Math.min(800, Math.max(100, Number(body.maxMatches) || 500))
+      while (allIds.length < hardCap) {
+        const batch = Math.min(100, hardCap - allIds.length)
         const idsUrl =
           `https://${routing}.api.riotgames.com/lol/match/v5/matches/by-puuid/` +
           `${encodePathSegment(puuid)}/ids?startTime=${startTime}&endTime=${endTime}` +
@@ -471,47 +616,35 @@ Deno.serve(async (req) => {
         if (ids.length < batch) break
       }
 
-      type ChampAgg = {
-        championName: string
-        championId: number
-        games: number
-        wins: number
-      }
-      const byName = new Map<string, ChampAgg>()
+      const exclude = new Set(
+        (Array.isArray(body.excludeMatchIds) ? body.excludeMatchIds : [])
+          .map((id) => String(id ?? '').trim())
+          .filter(Boolean),
+      )
+      const toFetch = allIds.filter((id) => !exclude.has(id))
 
-      // Concurrence limitée pour respecter le rate-limit Riot
-      const concurrency = 5
-      for (let i = 0; i < allIds.length; i += concurrency) {
-        const slice = allIds.slice(i, i + concurrency)
-        await Promise.all(
+      const summaries: ReturnType<typeof buildHighlightsMatchSummary>[] = []
+      const concurrency = 4
+      for (let i = 0; i < toFetch.length; i += concurrency) {
+        const slice = toFetch.slice(i, i + concurrency)
+        const batch = await Promise.all(
           slice.map(async (matchId) => {
             try {
               const matchUrl =
                 `https://${routing}.api.riotgames.com/lol/match/v5/matches/${encodePathSegment(matchId)}`
-              const detail = (await riotFetch(matchUrl)) as {
-                info?: { participants?: ParticipantRaw[] }
-              }
-              const me = (detail?.info?.participants ?? []).find(
-                (p) => String(p?.puuid ?? '') === puuid,
-              )
-              if (!me) return
-              const name = String(me.championName ?? '').trim()
-              if (!name) return
-              const cur = byName.get(name) || {
-                championName: name,
-                championId: Number(me.championId) || 0,
-                games: 0,
-                wins: 0,
-              }
-              cur.games += 1
-              if (me.win === true) cur.wins += 1
-              if (me.championId) cur.championId = Number(me.championId)
-              byName.set(name, cur)
+              const detail = (await riotFetch(matchUrl)) as Parameters<
+                typeof buildMatchSummary
+              >[1]
+              return buildHighlightsMatchSummary(matchId, detail, puuid)
             } catch (err) {
               console.warn('champion-highlights match failed', matchId, err)
+              return null
             }
           }),
         )
+        for (const row of batch) {
+          if (row) summaries.push(row)
+        }
       }
 
       let masteries: Array<{ championId?: number; championPoints?: number }> = []
@@ -524,30 +657,16 @@ Deno.serve(async (req) => {
         console.warn('champion masteries failed:', err)
       }
 
-      const masteryById = new Map<number, number>()
-      for (const row of masteries) {
-        const id = Number(row.championId)
-        if (id) masteryById.set(id, Number(row.championPoints) || 0)
-      }
-
-      const totalGames = [...byName.values()].reduce((s, c) => s + c.games, 0)
-      const champions = [...byName.values()]
-        .sort((a, b) => b.games - a.games)
-        .slice(0, 3)
-        .map((row) => ({
-          ...row,
-          winRate: row.games ? Math.round((row.wins / row.games) * 100) : 0,
-          playShare: totalGames ? Math.round((row.games / totalGames) * 100) : 0,
-          masteryPoints: masteryById.get(row.championId) ?? null,
-        }))
-
       return jsonResponse({
         puuid,
         platform,
-        days,
-        totalGames,
-        matchCount: allIds.length,
-        champions,
+        startTime,
+        endTime,
+        matchIds: allIds,
+        matches: summaries,
+        masteries,
+        fetchedCount: summaries.length,
+        knownSkipped: allIds.length - toFetch.length,
       })
     }
 
@@ -565,7 +684,7 @@ Deno.serve(async (req) => {
     return jsonResponse(
       {
         error:
-          'action invalide. Utilise "resolve-account", "league-entries", "champion-masteries", "champion-highlights", "recent-matches", "match-detail" ou "summoner".',
+          'action invalide. Utilise "resolve-account", "league-entries", "champion-masteries", "champion-highlights", "match-ids", "match-summaries", "recent-matches", "match-detail" ou "summoner".',
       },
       400,
     )

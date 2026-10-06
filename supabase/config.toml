@@ -32,3 +32,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/riot/deno.json"
 entrypoint = "./functions/riot/index.ts"
+
+[functions.sync-lol-matches]
+enabled = true
+verify_jwt = false
+import_map = "./functions/sync-lol-matches/deno.json"
+entrypoint = "./functions/sync-lol-matches/index.ts"

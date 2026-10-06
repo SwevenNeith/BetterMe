@@ -229,60 +229,6 @@ export async function fetchChampionMasteries(puuid, platform = 'euw1', count = 1
   })
 }
 
-/**
- * Top champions sur une fenêtre de jours (toutes les parties de la période, plafonnées côté serveur).
- * @param {string} puuid
- * @param {{ platform?: string, days?: number }} [options]
- */
-export async function fetchChampionHighlights(puuid, options = {}) {
-  return callRiotFunction(
-    {
-      action: 'champion-highlights',
-      puuid,
-      platform: options.platform ?? 'euw1',
-      days: options.days ?? 90,
-    },
-    90_000,
-  )
-}
-
-/**
- * Top N champions par nombre de parties (winrate + part de jeu + maîtrise).
- * @param {object[]} matches
- * @param {Map<number, number>} masteryByChampionId
- * @param {number} [limit]
- */
-export function aggregateTopChampionsFromMatches(matches, masteryByChampionId, limit = 3) {
-  const stats = new Map()
-  for (const m of matches) {
-    const p = m?.participant
-    const name = String(p?.championName ?? '').trim()
-    if (!name) continue
-    const cur = stats.get(name) || {
-      championName: name,
-      championId: Number(p.championId) || 0,
-      games: 0,
-      wins: 0,
-    }
-    cur.games += 1
-    if (p.win === true) cur.wins += 1
-    if (p.championId) cur.championId = Number(p.championId)
-    stats.set(name, cur)
-  }
-
-  const totalGames = [...stats.values()].reduce((s, c) => s + c.games, 0)
-
-  return [...stats.values()]
-    .sort((a, b) => b.games - a.games)
-    .slice(0, limit)
-    .map((row) => ({
-      ...row,
-      winRate: row.games ? Math.round((row.wins / row.games) * 100) : 0,
-      playShare: totalGames ? Math.round((row.games / totalGames) * 100) : 0,
-      masteryPoints: masteryByChampionId.get(row.championId) ?? null,
-    }))
-}
-
 export function formatMasteryPoints(points) {
   const n = Number(points)
   if (!Number.isFinite(n) || n <= 0) return '—'
@@ -292,12 +238,70 @@ export function formatMasteryPoints(points) {
 }
 
 /**
+ * @param {number | null | undefined} level
+ * @param {number | null | undefined} points
+ */
+export function formatMasteryTotal(level, points) {
+  const pts = formatMasteryPoints(points)
+  const lv = Number(level)
+  if (!Number.isFinite(lv) || lv <= 0) return pts === '—' ? '—' : pts
+  return pts === '—' ? `Niv. ${lv}` : `Niv. ${lv} · ${pts}`
+}
+
+/**
  * @param {number | null | undefined} championId
  */
 export function lolChampionIconById(championId) {
   const id = Number(championId)
   if (!Number.isFinite(id) || id <= 0) return null
   return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${id}.png`
+}
+
+/** @type {Map<number, string> | null} */
+let championIdNameCache = null
+let championIdNamePromise = null
+
+/**
+ * Catalogue id → nom FR (Data Dragon, sans clé Riot).
+ */
+export async function ensureLolChampionIdCatalog(version = LOL_DDRAGON_VERSION) {
+  if (championIdNameCache) return championIdNameCache
+  if (championIdNamePromise) return championIdNamePromise
+
+  championIdNamePromise = (async () => {
+    try {
+      const response = await fetch(
+        `https://ddragon.leagueoflegends.com/cdn/${version}/data/fr_FR/champion.json`,
+      )
+      if (!response.ok) throw new Error(`champion.json ${response.status}`)
+      const payload = await response.json()
+      const map = new Map()
+      for (const champ of Object.values(payload?.data ?? {})) {
+        const id = Number(champ?.key)
+        const name = String(champ?.name ?? '').trim()
+        if (id && name) map.set(id, name)
+      }
+      championIdNameCache = map
+      return map
+    } catch (err) {
+      console.warn('lol champion catalog:', err)
+      championIdNameCache = new Map()
+      return championIdNameCache
+    } finally {
+      championIdNamePromise = null
+    }
+  })()
+
+  return championIdNamePromise
+}
+
+/**
+ * @param {number | null | undefined} championId
+ */
+export function lolChampionNameById(championId) {
+  const id = Number(championId)
+  if (!Number.isFinite(id) || id <= 0) return ''
+  return championIdNameCache?.get(id) || `Champion ${id}`
 }
 
 /**

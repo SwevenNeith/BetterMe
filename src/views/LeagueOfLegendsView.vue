@@ -12,7 +12,6 @@ import {
   csPerMin,
   dayEndEpoch,
   dayStartEpoch,
-  fetchChampionHighlights,
   fetchLeagueEntries,
   fetchRecentMatches,
   formatMasteryPoints,
@@ -22,11 +21,13 @@ import {
   formatRankLabel,
   formatRoleLabel,
   killParticipationPct,
-  lolChampionIcon,
+  lolChampionIconById,
   lolChampionIconByName,
+  lolChampionNameById,
   lolItemIconUrl,
   lolItemName,
   lolItemTooltip,
+  ensureLolChampionIdCatalog,
   ensureLolItemCatalog,
   lolProfileIconUrl,
   lolRankEmblemUrl,
@@ -41,6 +42,22 @@ import {
   touchLolAccountSync,
   upsertLolAccount,
 } from '../services/jeux/lolAccounts.js'
+import {
+  DEFAULT_RANKED_RESET_DATE,
+  formatRankedResetDateFr,
+  validateRankedResetDate,
+} from '../constants/jeux/lolRankedReset.js'
+import {
+  candidateNewMatchIds,
+  ensureLolSettings,
+  fetchNewestStoredMatchMs,
+  fetchTopChampionsFromDb,
+  filterMissingMatchIds,
+  needsLolMatchSync,
+  newestCountedHistoryMatchMs,
+  setRankedResetDateRemote,
+  syncLolMatchesUntilDone,
+} from '../services/jeux/lolMatchStats.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 
 defineOptions({ name: 'LeagueOfLegendsView' })
@@ -63,11 +80,12 @@ const isSavingAccount = ref(false)
 const isLoadingMatches = ref(false)
 const isLoadingRanks = ref(false)
 const isLoadingChampions = ref(false)
+const isSyncingChampions = ref(false)
 const topChampions = ref([])
-const errorMessage = ref('')
-const matchesError = ref('')
-
-const showAddForm = ref(false)
+const championsTotalGames = ref(0)
+const championsProgress = ref(null)
+const rankedResetDate = ref(DEFAULT_RANKED_RESET_DATE)
+const rankedResetDraft = ref(DEFAULT_RANKED_RESET_DATE)
 const gameNameInput = ref('')
 const tagLineInput = ref('')
 const labelInput = ref('')
@@ -81,14 +99,19 @@ const queueFilter = ref('all') // all | 420 | 440 | 400 | 450
 const leagueSolo = ref(null)
 const leagueFlex = ref(null)
 
+const errorMessage = ref('')
+const matchesError = ref('')
+const rankedResetError = ref('')
+const showAddForm = ref(false)
+
 const selectedMatch = ref(null)
 
 /** Tooltip item hors overflow du modal (Teleport body). */
 const itemTipId = ref(null)
 const itemTipStyle = ref({})
 
-const selectedAccount = computed(() =>
-  accounts.value.find((item) => item.id === selectedAccountId.value) ?? null,
+const selectedAccount = computed(
+  () => accounts.value.find((item) => item.id === selectedAccountId.value) ?? null,
 )
 
 const filteredMatches = computed(() => {
@@ -108,8 +131,7 @@ const filteredMatches = computed(() => {
 const compareData = computed(() => {
   const match = selectedMatch.value
   if (!match?.participant) return null
-  const ranked =
-    Number(match.queueId) === 440 ? leagueFlex.value : leagueSolo.value
+  const ranked = Number(match.queueId) === 440 ? leagueFlex.value : leagueSolo.value
   return buildEloComparison(match.participant, match.gameDuration, ranked)
 })
 
@@ -236,26 +258,191 @@ async function removeAccount(accountId) {
   }
 }
 
+const rankedResetLabel = computed(() =>
+  formatRankedResetDateFr(rankedResetDate.value || DEFAULT_RANKED_RESET_DATE),
+)
+
+function formatHighlightPercent(value) {
+  if (value == null || !Number.isFinite(Number(value))) return '—'
+  return `${Number(value).toFixed(1)}%`
+}
+
+function mapChampionsWithNames(champions) {
+  return (champions ?? [])
+    .map((champ) => ({
+      ...champ,
+      championName: lolChampionNameById(champ.championId),
+    }))
+    .sort(
+      (a, b) =>
+        Number(b.games) - Number(a.games) ||
+        Number(b.wins) - Number(a.wins) ||
+        Number(a.championId) - Number(b.championId),
+    )
+}
+
 async function loadChampionHighlights() {
   const account = selectedAccount.value
   if (!account?.puuid) {
     topChampions.value = []
+    championsTotalGames.value = 0
+    championsProgress.value = null
     return
   }
 
   isLoadingChampions.value = true
+  rankedResetError.value = ''
   try {
-    const data = await fetchChampionHighlights(account.puuid, {
-      platform: account.platform || 'euw1',
-      days: 90,
-    })
-    topChampions.value = Array.isArray(data?.champions) ? data.champions : []
+    await ensureLolChampionIdCatalog()
+    const settings = await ensureLolSettings(
+      account.puuid,
+      account.platform || 'euw1',
+      account.routing || 'europe',
+    )
+    const reset = String(settings?.ranked_reset_date || DEFAULT_RANKED_RESET_DATE).slice(0, 10)
+    rankedResetDate.value = reset
+    rankedResetDraft.value = reset
+
+    const data = await fetchTopChampionsFromDb(account.puuid, 3)
+    topChampions.value = mapChampionsWithNames(data.champions)
+    championsTotalGames.value = Number(data.totalGames) || 0
   } catch (err) {
     console.warn('champion highlights:', err)
     topChampions.value = []
+    championsTotalGames.value = 0
+    rankedResetError.value =
+      err?.message ||
+      'Impossible de charger les stats (applique scripts/create-lol-match-stats.sql ?).'
   } finally {
     isLoadingChampions.value = false
   }
+}
+
+/**
+ * Historique récent sans filtre UI — pour savoir s’il y a une nouvelle partie comptée.
+ */
+async function probeRecentCountedMatches(account) {
+  const data = await fetchRecentMatches(account.puuid, {
+    platform: account.platform || 'euw1',
+    count: 20,
+    start: 0,
+    days: 30,
+  })
+  return Array.isArray(data?.matches) ? data.matches : []
+}
+
+/** Actualiser : historique + sync Edge seulement si nouvelle partie, sinon RPC seule. */
+async function refreshSelectedAccount() {
+  const account = selectedAccount.value
+  if (!account?.puuid || isSyncingChampions.value || isLoadingMatches.value) return
+
+  page.value = 1
+  await loadMatchesForSelected()
+  void loadRanksForSelected()
+
+  isSyncingChampions.value = true
+  championsProgress.value = null
+  rankedResetError.value = ''
+  try {
+    const settings = await ensureLolSettings(
+      account.puuid,
+      account.platform || 'euw1',
+      account.routing || 'europe',
+    )
+
+    // Probe indépendant des filtres UI (sinon une file ARAM masque une ranked récente)
+    const probeMatches =
+      queueFilter.value === 'all' && !dateFrom.value && !dateTo.value && matches.value.length
+        ? matches.value
+        : await probeRecentCountedMatches(account)
+
+    const storedNewestMs = await fetchNewestStoredMatchMs(account.puuid)
+    const historyNewestMs = newestCountedHistoryMatchMs(probeMatches)
+    const syncComplete = Boolean(settings?.sync_complete)
+
+    if (!syncComplete) {
+      // Premier remplissage / après nettoyage : backfill depuis le reset (IDs manquants only)
+      championsProgress.value = { inserted: 0, remaining: 0, pass: 0 }
+      await syncLolMatchesUntilDone(account.puuid, {
+        full: true,
+        onProgress: (info) => {
+          championsProgress.value = info
+        },
+      })
+    } else if (
+      needsLolMatchSync({
+        syncComplete: true,
+        historyNewestMs,
+        storedNewestMs,
+      })
+    ) {
+      // Table à jour : uniquement les parties plus récentes absentes de lol_matches
+      const candidates = candidateNewMatchIds(probeMatches, storedNewestMs)
+      const missing = await filterMissingMatchIds(account.puuid, candidates)
+      if (missing.length) {
+        championsProgress.value = { inserted: 0, remaining: 0, pass: 0 }
+        await syncLolMatchesUntilDone(account.puuid, {
+          matchIds: missing,
+          onProgress: (info) => {
+            championsProgress.value = info
+          },
+        })
+      }
+    }
+
+    await loadChampionHighlights()
+  } catch (err) {
+    rankedResetError.value = err?.message || 'Synchronisation impossible.'
+  } finally {
+    isSyncingChampions.value = false
+    championsProgress.value = null
+  }
+}
+
+async function applyRankedResetDate(dateYmd) {
+  const account = selectedAccount.value
+  if (!account?.puuid || isSyncingChampions.value) return
+
+  const checked = validateRankedResetDate(dateYmd)
+  if (!checked.ok) {
+    rankedResetError.value = checked.error
+    return
+  }
+
+  const label = formatRankedResetDateFr(checked.date)
+  const ok = window.confirm(
+    `Les parties antérieures au ${label} seront supprimées définitivement. Continuer ?`,
+  )
+  if (!ok) return
+
+  isSyncingChampions.value = true
+  rankedResetError.value = ''
+  championsProgress.value = { inserted: 0, remaining: 0, pass: 0 }
+  try {
+    await setRankedResetDateRemote(account.puuid, checked.date)
+    rankedResetDate.value = checked.date
+    rankedResetDraft.value = checked.date
+
+    await syncLolMatchesUntilDone(account.puuid, {
+      full: true,
+      onProgress: (info) => {
+        championsProgress.value = info
+      },
+    })
+
+    const data = await fetchTopChampionsFromDb(account.puuid, 3)
+    topChampions.value = mapChampionsWithNames(data.champions)
+    championsTotalGames.value = Number(data.totalGames) || 0
+  } catch (err) {
+    rankedResetError.value = err?.message || 'Impossible d’enregistrer la date de reset.'
+  } finally {
+    isSyncingChampions.value = false
+    championsProgress.value = null
+  }
+}
+
+function saveRankedResetFromUi() {
+  void applyRankedResetDate(rankedResetDraft.value)
 }
 
 async function loadRanksForSelected() {
@@ -442,11 +629,12 @@ watch(selectedAccountId, async (id) => {
     leagueSolo.value = null
     leagueFlex.value = null
     topChampions.value = []
+    championsTotalGames.value = 0
+    championsProgress.value = null
     return
   }
   page.value = 1
-  // Matchs d’abord (priorité UI) — le highlight champions tape fort l’API Riot
-  // et faisait échouer une partie des détails → seulement 2–3 parties affichées.
+  // Matchs d’abord ; stats champions = lecture Supabase (sync Riot seulement via Actualiser).
   await loadMatchesForSelected()
   void loadRanksForSelected()
   void loadChampionHighlights()
@@ -508,11 +696,9 @@ onMounted(async () => {
             <span class="lol-tab__name">{{ riotDisplayName(account) }}</span>
             <span v-if="account.label" class="lol-tab__label">{{ account.label }}</span>
           </span>
-          <span
-            class="lol-tab__remove"
-            title="Retirer"
-            @click.stop="removeAccount(account.id)"
-          >×</span>
+          <span class="lol-tab__remove" title="Retirer" @click.stop="removeAccount(account.id)"
+            >×</span
+          >
         </button>
 
         <button
@@ -589,11 +775,7 @@ onMounted(async () => {
       <!-- Elo Solo / Flex -->
       <section class="lol-ranks" aria-label="Classements">
         <article class="lol-rank-card">
-          <img
-            :src="lolRankEmblemUrl(leagueSolo?.tier)"
-            alt=""
-            class="lol-rank-card__emblem"
-          />
+          <img :src="lolRankEmblemUrl(leagueSolo?.tier)" alt="" class="lol-rank-card__emblem" />
           <div>
             <p class="lol-rank-card__queue">Solo / Duo</p>
             <p class="lol-rank-card__tier">{{ formatRankLabel(leagueSolo) }}</p>
@@ -603,8 +785,7 @@ onMounted(async () => {
                 ·
                 {{
                   Math.round(
-                    ((leagueSolo.wins || 0) /
-                      ((leagueSolo.wins || 0) + (leagueSolo.losses || 0))) *
+                    ((leagueSolo.wins || 0) / ((leagueSolo.wins || 0) + (leagueSolo.losses || 0))) *
                       100,
                   )
                 }}%
@@ -615,11 +796,7 @@ onMounted(async () => {
           </div>
         </article>
         <article class="lol-rank-card">
-          <img
-            :src="lolRankEmblemUrl(leagueFlex?.tier)"
-            alt=""
-            class="lol-rank-card__emblem"
-          />
+          <img :src="lolRankEmblemUrl(leagueFlex?.tier)" alt="" class="lol-rank-card__emblem" />
           <div>
             <p class="lol-rank-card__queue">Flex</p>
             <p class="lol-rank-card__tier">{{ formatRankLabel(leagueFlex) }}</p>
@@ -629,8 +806,7 @@ onMounted(async () => {
                 ·
                 {{
                   Math.round(
-                    ((leagueFlex.wins || 0) /
-                      ((leagueFlex.wins || 0) + (leagueFlex.losses || 0))) *
+                    ((leagueFlex.wins || 0) / ((leagueFlex.wins || 0) + (leagueFlex.losses || 0))) *
                       100,
                   )
                 }}%
@@ -653,29 +829,90 @@ onMounted(async () => {
       </section>
 
       <section
-        v-if="topChampions.length || isLoadingChampions"
+        v-if="selectedAccount"
         class="lol-champs"
-        aria-label="Champions les plus joués"
+        aria-label="Champions les plus joués depuis le reset"
       >
-        <p v-if="isLoadingChampions" class="lol-muted">Chargement des champions…</p>
-        <ul v-else class="lol-champs__icons">
-          <li v-for="champ in topChampions" :key="champ.championName" class="lol-champ-icon">
-            <img
-              v-if="lolChampionIcon(champ.championName, champ.championId)"
-              :src="lolChampionIcon(champ.championName, champ.championId)"
-              :alt="champ.championName"
-              :title="champ.championName"
-              class="lol-champ-icon__img"
-            />
-            <p class="lol-champ-icon__stat" :class="wrClass(champ.winRate)">
-              {{ champ.winRate }}% WR
-            </p>
-            <p class="lol-champ-icon__stat">{{ formatMasteryPoints(champ.masteryPoints) }}</p>
-            <p class="lol-champ-icon__stat lol-champ-icon__stat--share">
-              {{ champ.playShare ?? 0 }}% joué
-            </p>
-          </li>
-        </ul>
+        <div class="lol-champs__panel">
+          <div class="lol-champs__toolbar">
+            <div class="lol-champs__toolbar-text">
+              <p class="lol-champs__window">
+                Depuis le {{ rankedResetLabel }}
+                <span class="lol-champs__window-date">· hors aléatoire</span>
+              </p>
+              <p v-if="isSyncingChampions && championsProgress" class="lol-muted">
+                Synchronisation… (passe {{ championsProgress.pass }}, +{{
+                  championsProgress.inserted
+                }}
+                <template v-if="championsProgress.remaining > 0">
+                  , reste ~{{ championsProgress.remaining }}
+                </template>
+                )
+              </p>
+              <p v-else-if="isSyncingChampions" class="lol-muted">Mise à jour des stats…</p>
+              <p v-else-if="isLoadingChampions" class="lol-muted">Chargement des stats…</p>
+              <p v-else-if="championsTotalGames" class="lol-muted">
+                {{ championsTotalGames }} partie{{ championsTotalGames > 1 ? 's' : '' }} valide{{
+                  championsTotalGames > 1 ? 's' : ''
+                }}
+              </p>
+            </div>
+            <form class="lol-champs__reset-form" @submit.prevent="saveRankedResetFromUi">
+              <label class="lol-champs__reset-label">
+                Reset
+                <input
+                  v-model="rankedResetDraft"
+                  type="date"
+                  class="lol-input lol-champs__reset-input"
+                  :min="'2020-01-01'"
+                  :max="new Date().toISOString().slice(0, 10)"
+                  :disabled="isLoadingChampions || isSyncingChampions"
+                />
+              </label>
+              <button
+                type="submit"
+                class="lol-btn lol-btn--primary"
+                :disabled="isLoadingChampions || isSyncingChampions"
+              >
+                Enregistrer
+              </button>
+            </form>
+          </div>
+          <p v-if="rankedResetError" class="lol-page__error lol-champs__reset-error" role="alert">
+            {{ rankedResetError }}
+          </p>
+          <ul
+            v-if="!isLoadingChampions && !isSyncingChampions && topChampions.length"
+            class="lol-champs__icons"
+          >
+            <li v-for="champ in topChampions" :key="champ.championId" class="lol-champ-icon">
+              <img
+                v-if="lolChampionIconById(champ.championId)"
+                :src="lolChampionIconById(champ.championId)"
+                :alt="champ.championName"
+                :title="champ.championName"
+                class="lol-champ-icon__img"
+              />
+              <p class="lol-champ-icon__name">{{ champ.championName }}</p>
+              <p class="lol-champ-icon__stat" :class="wrClass(champ.winRate)">
+                {{ formatHighlightPercent(champ.winRate) }} WR
+                <span class="lol-champ-icon__games">({{ champ.games }})</span>
+              </p>
+              <p class="lol-champ-icon__stat">
+                Maîtrise · {{ formatMasteryPoints(champ.masteryPoints) }}
+              </p>
+              <p class="lol-champ-icon__stat lol-champ-icon__stat--share">
+                {{ formatHighlightPercent(champ.playShare) }} joué
+              </p>
+            </li>
+          </ul>
+          <p
+            v-else-if="!isLoadingChampions && !isSyncingChampions"
+            class="lol-muted lol-champs__empty"
+          >
+            Aucune partie valide depuis le reset.
+          </p>
+        </div>
       </section>
 
       <!-- Filtres + liste -->
@@ -685,10 +922,10 @@ onMounted(async () => {
           <button
             type="button"
             class="lol-btn"
-            :disabled="isLoadingMatches"
-            @click="loadMatchesForSelected"
+            :disabled="isLoadingMatches || isSyncingChampions"
+            @click="refreshSelectedAccount"
           >
-            Actualiser
+            {{ isSyncingChampions ? 'Synchronisation…' : 'Actualiser' }}
           </button>
         </div>
 
@@ -729,9 +966,7 @@ onMounted(async () => {
         <p v-if="isLoadingMatches" class="lol-muted">Chargement des matchs…</p>
         <p v-else-if="matchesError" class="lol-page__error">{{ matchesError }}</p>
         <template v-else>
-          <p v-if="!filteredMatches.length" class="lol-muted">
-            Aucun match pour ces filtres.
-          </p>
+          <p v-if="!filteredMatches.length" class="lol-muted">Aucun match pour ces filtres.</p>
           <ul v-else class="lol-matches">
             <li v-for="match in filteredMatches" :key="match.matchId">
               <button
@@ -763,8 +998,8 @@ onMounted(async () => {
                   </p>
                   <p class="lol-match__meta">
                     {{ formatQueueLabel(match.queueId, match.gameMode) }}
-                    · {{ formatMatchDate(match.gameCreation) }}
-                    · {{ formatMatchDuration(match.gameDuration) }}
+                    · {{ formatMatchDate(match.gameCreation) }} ·
+                    {{ formatMatchDuration(match.gameDuration) }}
                   </p>
                   <div class="lol-match__items">
                     <img
@@ -780,8 +1015,7 @@ onMounted(async () => {
                 <div class="lol-match__stats">
                   <p class="lol-match__kda">{{ kdaLabel(match.participant) }}</p>
                   <p class="lol-match__sub">
-                    {{ csPerMin(match.participant, match.gameDuration).toFixed(1) }} CS/min
-                    ·
+                    {{ csPerMin(match.participant, match.gameDuration).toFixed(1) }} CS/min ·
                     {{ killParticipationPct(match.participant, match.teamKills) ?? '—' }}% KP
                   </p>
                 </div>
@@ -857,9 +1091,9 @@ onMounted(async () => {
             </h2>
             <p class="lol-detail__meta">
               {{ formatQueueLabel(selectedMatch.queueId, selectedMatch.gameMode) }}
-              · {{ formatRoleLabel(selectedMatch.participant?.teamPosition) }}
-              · {{ formatMatchDuration(selectedMatch.gameDuration) }}
-              · {{ formatMatchDate(selectedMatch.gameCreation) }}
+              · {{ formatRoleLabel(selectedMatch.participant?.teamPosition) }} ·
+              {{ formatMatchDuration(selectedMatch.gameDuration) }} ·
+              {{ formatMatchDate(selectedMatch.gameCreation) }}
             </p>
           </div>
           <button type="button" class="lol-btn" @click="closeMatch">Fermer</button>
@@ -876,10 +1110,11 @@ onMounted(async () => {
             <p class="lol-detail__kda">{{ kdaLabel(selectedMatch.participant) }}</p>
             <p class="lol-detail__kda-label">
               KILL / MORT / ASSIST ·
-              {{ totalCs(selectedMatch.participant) }} CS
-              ({{ csPerMin(selectedMatch.participant, selectedMatch.gameDuration).toFixed(1) }}/min)
-              ·
-              {{ killParticipationPct(selectedMatch.participant, selectedMatch.teamKills) ?? '—' }} % KP
+              {{ totalCs(selectedMatch.participant) }} CS ({{
+                csPerMin(selectedMatch.participant, selectedMatch.gameDuration).toFixed(1)
+              }}/min) ·
+              {{ killParticipationPct(selectedMatch.participant, selectedMatch.teamKills) ?? '—' }}
+              % KP
             </p>
             <div class="lol-detail__items">
               <span
@@ -925,7 +1160,9 @@ onMounted(async () => {
                 <div class="lol-team__info">
                   <p class="lol-team__name">
                     {{ playerLabel(p) }}
-                    <span v-if="p.puuid === selectedMatch.participant?.puuid" class="lol-you">Vous</span>
+                    <span v-if="p.puuid === selectedMatch.participant?.puuid" class="lol-you"
+                      >Vous</span
+                    >
                   </p>
                   <p class="lol-team__champ-name">{{ p.championName }}</p>
                 </div>
@@ -956,7 +1193,9 @@ onMounted(async () => {
                 <div class="lol-team__info">
                   <p class="lol-team__name">
                     {{ playerLabel(p) }}
-                    <span v-if="p.puuid === selectedMatch.participant?.puuid" class="lol-you">Vous</span>
+                    <span v-if="p.puuid === selectedMatch.participant?.puuid" class="lol-you"
+                      >Vous</span
+                    >
                   </p>
                   <p class="lol-team__champ-name">{{ p.championName }}</p>
                 </div>
@@ -968,11 +1207,9 @@ onMounted(async () => {
 
         <section v-if="compareData" class="lol-detail__compare-preview">
           <h3 class="lol-card__title">
-            Comparatif même elo
-            ({{
-              formatRankLabel(
-                Number(selectedMatch.queueId) === 440 ? leagueFlex : leagueSolo,
-              ) || 'ton elo'
+            Comparatif même elo ({{
+              formatRankLabel(Number(selectedMatch.queueId) === 440 ? leagueFlex : leagueSolo) ||
+              'ton elo'
             }})
           </h3>
           <div class="lol-compare-inline">
@@ -1292,6 +1529,71 @@ onMounted(async () => {
   margin: 0 0 1rem;
 }
 
+.lol-champs__panel {
+  padding: 0.85rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.45);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lol-champs__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(213, 181, 234, 0.4);
+}
+
+.lol-champs__toolbar-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.lol-champs__window {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 750;
+  color: #3b2a4a;
+}
+
+.lol-champs__window-date {
+  font-weight: 600;
+  color: #6d5a7e;
+}
+
+.lol-champs__reset-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.45rem 0.55rem;
+}
+
+.lol-champs__reset-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: #6d5a7e;
+}
+
+.lol-champs__reset-input {
+  min-width: 10.5rem;
+}
+
+.lol-champs__reset-error,
+.lol-champs__empty {
+  margin: 0;
+}
+
 .lol-champs__icons {
   list-style: none;
   margin: 0;
@@ -1306,17 +1608,32 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.25rem;
+  text-align: center;
+  gap: 0.28rem;
   min-width: 0;
 }
 
 .lol-champ-icon__img {
+  display: block;
   width: min(5.5rem, 100%);
   aspect-ratio: 1;
   height: auto;
   border-radius: 14px;
   object-fit: cover;
   border: 1px solid rgba(213, 181, 234, 0.4);
+}
+
+.lol-champ-icon__name {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 750;
+  color: #3b2a4a;
+  text-align: center;
+}
+
+.lol-champ-icon__games {
+  font-weight: 600;
+  color: #8b7a96;
 }
 
 .lol-champ-icon__stat {
@@ -1370,12 +1687,22 @@ onMounted(async () => {
 }
 
 .lol-match--win {
-  background: linear-gradient(90deg, rgba(114, 160, 152, 0.28), rgba(114, 160, 152, 0.08) 55%, rgba(255, 255, 255, 0.45));
+  background: linear-gradient(
+    90deg,
+    rgba(114, 160, 152, 0.28),
+    rgba(114, 160, 152, 0.08) 55%,
+    rgba(255, 255, 255, 0.45)
+  );
   border-color: rgba(114, 160, 152, 0.45);
 }
 
 .lol-match--loss {
-  background: linear-gradient(90deg, rgba(192, 57, 43, 0.24), rgba(192, 57, 43, 0.08) 55%, rgba(255, 255, 255, 0.45));
+  background: linear-gradient(
+    90deg,
+    rgba(192, 57, 43, 0.24),
+    rgba(192, 57, 43, 0.08) 55%,
+    rgba(255, 255, 255, 0.45)
+  );
   border-color: rgba(192, 57, 43, 0.4);
 }
 
@@ -1510,20 +1837,12 @@ onMounted(async () => {
 }
 
 .lol-detail--win {
-  background: linear-gradient(
-    135deg,
-    rgba(114, 160, 152, 0.22) 0%,
-    rgba(255, 255, 255, 0.94) 42%
-  );
+  background: linear-gradient(135deg, rgba(114, 160, 152, 0.22) 0%, rgba(255, 255, 255, 0.94) 42%);
   border-color: rgba(114, 160, 152, 0.5);
 }
 
 .lol-detail--loss {
-  background: linear-gradient(
-    135deg,
-    rgba(192, 57, 43, 0.12) 0%,
-    rgba(255, 255, 255, 0.94) 42%
-  );
+  background: linear-gradient(135deg, rgba(192, 57, 43, 0.12) 0%, rgba(255, 255, 255, 0.94) 42%);
   border-color: rgba(192, 57, 43, 0.32);
 }
 
@@ -1823,19 +2142,11 @@ onMounted(async () => {
   }
 
   .lol-detail--win {
-    background: linear-gradient(
-      135deg,
-      rgba(114, 160, 152, 0.25) 0%,
-      rgba(35, 30, 48, 0.96) 45%
-    );
+    background: linear-gradient(135deg, rgba(114, 160, 152, 0.25) 0%, rgba(35, 30, 48, 0.96) 45%);
   }
 
   .lol-detail--loss {
-    background: linear-gradient(
-      135deg,
-      rgba(192, 57, 43, 0.18) 0%,
-      rgba(35, 30, 48, 0.96) 45%
-    );
+    background: linear-gradient(135deg, rgba(192, 57, 43, 0.18) 0%, rgba(35, 30, 48, 0.96) 45%);
   }
 
   .lol-detail__title,
