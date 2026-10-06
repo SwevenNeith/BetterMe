@@ -323,6 +323,15 @@ export function vaultThemeStyle(vault, options = {}) {
     ? mixVaultHex(accent, sidebar, 0.22)
     : mixVaultHex(accent, '#ffffff', 0.5)
 
+  // En-têtes de tableaux markdown : fond distinct + texte contrasté (évite lavande × texte clair)
+  const tableHeaderBg = isDarkHex(surface)
+    ? mixVaultHex(accent, surface, 0.3)
+    : mixVaultHex(accent, '#ffffff', 0.78)
+  const tableHeaderInk = readableInk(tableHeaderBg)
+  const tableBorder = isDarkHex(surface)
+    ? mixVaultHex('#ffffff', surface, 0.78)
+    : mixVaultHex(color, surface, 0.72)
+
   return {
     '--notes-vault-color': color,
     '--notes-vault-accent': accent,
@@ -370,5 +379,8 @@ export function vaultThemeStyle(vault, options = {}) {
       mixVaultHex(color, surfaceInk.text, 0.55),
       surface,
     ),
+    '--notes-vault-table-header-bg': tableHeaderBg,
+    '--notes-vault-table-header-text': tableHeaderInk.text,
+    '--notes-vault-table-border': tableBorder,
   }
 }

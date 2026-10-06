@@ -3372,12 +3372,17 @@ watch(draftFolderId, (value) => {
   display: grid;
   grid-template-columns: minmax(180px, 220px) 1fr;
   gap: 0;
-  height: calc(100vh - 2rem);
-  min-height: 520px;
+  flex: 1;
+  width: 100%;
+  height: 100vh;
+  max-height: 100vh;
+  min-height: 0;
+  box-sizing: border-box;
   background: #f4f0fa;
-  border-radius: 16px;
+  border-radius: 0;
   overflow: hidden;
-  border: 1px solid #e6ddf2;
+  border: none;
+  border-left: 1px solid #e6ddf2;
 }
 
 .notes-page--sidebar-collapsed {
@@ -3996,6 +4001,7 @@ watch(draftFolderId, (value) => {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  height: 100%;
   overflow: hidden;
   background: #faf7fd;
 }
@@ -4105,26 +4111,19 @@ watch(draftFolderId, (value) => {
 }
 
 .notes-page__panes {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  display: grid;
-}
-
-.notes-page__panes--edit {
-  grid-template-columns: 1fr;
-}
-
-.notes-page__panes--preview {
-  grid-template-columns: 1fr;
+  display: flex;
+  flex-direction: column;
 }
 
 .notes-page__editor,
 .notes-page__preview {
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  height: 100%;
-  max-height: 100%;
+  height: auto;
   overflow: auto;
 }
 
@@ -4306,6 +4305,18 @@ watch(draftFolderId, (value) => {
 
 :deep(.markdown-body th) {
   background: #efe6f8;
+  color: #2f243a;
+}
+
+.notes-page--in-vault :deep(.markdown-body table th),
+.notes-page--in-vault :deep(.markdown-body table td) {
+  border-color: var(--notes-vault-table-border, var(--notes-vault-border-strong, #dccfe9));
+  color: var(--notes-vault-main-text, #2f243a);
+}
+
+.notes-page--in-vault :deep(.markdown-body table th) {
+  background: var(--notes-vault-table-header-bg, #efe6f8);
+  color: var(--notes-vault-table-header-text, #2f243a);
 }
 
 :deep(.markdown-body a) {
@@ -4441,8 +4452,9 @@ watch(draftFolderId, (value) => {
   .notes-page--mobile {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
-    height: calc(100vh - 2rem);
-    min-height: 520px;
+    height: 100vh;
+    max-height: 100vh;
+    min-height: 0;
   }
 
   .notes-page__drawer-overlay {
@@ -4520,7 +4532,7 @@ watch(draftFolderId, (value) => {
 @media (prefers-color-scheme: dark) {
   .notes-page:not(.notes-page--in-vault) {
     background: #1a1524;
-    border-color: rgba(213, 181, 234, 0.22);
+    border-left-color: rgba(213, 181, 234, 0.22);
   }
 
   .notes-page:not(.notes-page--in-vault) .notes-page__sidebar {
@@ -4724,6 +4736,18 @@ watch(draftFolderId, (value) => {
 
   :deep(.markdown-body th) {
     background: #2a2438;
+    color: #f0e8f8;
+  }
+
+  .notes-page--in-vault :deep(.markdown-body table th),
+  .notes-page--in-vault :deep(.markdown-body table td) {
+    border-color: var(--notes-vault-table-border, rgba(213, 181, 234, 0.25));
+    color: var(--notes-vault-main-text, #f0e8f8);
+  }
+
+  .notes-page--in-vault :deep(.markdown-body table th) {
+    background: var(--notes-vault-table-header-bg, #2a2438);
+    color: var(--notes-vault-table-header-text, #f0e8f8);
   }
 
   :deep(.markdown-body .notes-html-widget:not(.notes-html-widget--full-page)) {

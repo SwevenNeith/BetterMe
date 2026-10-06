@@ -4,7 +4,7 @@
   /* —— Shell page —— */
   .notes-page {
     background: #1a1524;
-    border-color: rgba(213, 181, 234, 0.22);
+    border-left-color: rgba(213, 181, 234, 0.22);
   }
 
   .notes-page__sidebar {
@@ -227,6 +227,18 @@
 
   .notes-page .markdown-body table th {
     background: #2a2438;
+    color: #f0e8f8;
+  }
+
+  .notes-page.notes-page--in-vault .markdown-body table th,
+  .notes-page.notes-page--in-vault .markdown-body table td {
+    border-color: var(--notes-vault-table-border, rgba(213, 181, 234, 0.25));
+    color: var(--notes-vault-main-text, #f0e8f8);
+  }
+
+  .notes-page.notes-page--in-vault .markdown-body table th {
+    background: var(--notes-vault-table-header-bg, #2a2438);
+    color: var(--notes-vault-table-header-text, #f0e8f8);
   }
 
   /* —— Onglets —— */
