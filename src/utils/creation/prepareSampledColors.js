@@ -11,12 +11,24 @@ import { samplePixelArtByAlignedGrid } from './samplePixelArtBlocks.js'
  * Photo classique : resize progressif → K-means LAB.
  *
  * @param {HTMLImageElement|HTMLCanvasElement|ImageBitmap} source
- * @param {{ targetWidth: number, colorCount: number }} options
- * @returns {{ imageData: ImageData, width: number, height: number, method: 'photo' }}
+ * @param {{
+ *   targetWidth: number,
+ *   colorCount: number,
+ *   seedRgbs?: Array<{ r: number, g: number, b: number }>,
+ *   seedTolerance?: number,
+ *   darkBias?: number,
+ * }} options
+ * @returns {{
+ *   imageData: ImageData,
+ *   width: number,
+ *   height: number,
+ *   method: 'photo',
+ *   seedGroups?: Array<{ seedIndex: number, hex: string, count: number, nearHexes: string[] }>,
+ * }}
  */
 export function prepareSampledColorsFromPhoto(source, options) {
   const targetWidth = Math.max(1, Math.round(options.targetWidth))
-  const colorCount = Math.max(2, Math.round(options.colorCount))
+  const colorCount = Math.max(1, Math.round(options.colorCount))
   const srcW = source.naturalWidth || source.width
   const srcH = source.naturalHeight || source.height
   const { width, height } = computeTargetSize(srcW, srcH, targetWidth)
@@ -25,13 +37,18 @@ export function prepareSampledColorsFromPhoto(source, options) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
   if (!ctx) throw new Error('Canvas 2D indisponible.')
   const imageData = ctx.getImageData(0, 0, width, height)
-  const quantized = quantizeImageLabKMeans(imageData, colorCount)
+  const quantized = quantizeImageLabKMeans(imageData, colorCount, {
+    seedRgbs: options.seedRgbs,
+    seedTolerance: options.seedTolerance,
+    darkBias: options.darkBias,
+  })
 
   return {
     imageData: quantized.imageData,
     width: quantized.width,
     height: quantized.height,
     method: 'photo',
+    seedGroups: quantized.seedGroups,
   }
 }
 
@@ -67,6 +84,9 @@ export function prepareSampledColorsFromPixelArt(source, alignment) {
  *   targetWidth?: number,
  *   targetHeight?: number,
  *   colorCount?: number,
+ *   seedRgbs?: Array<{ r: number, g: number, b: number }>,
+ *   seedTolerance?: number,
+ *   darkBias?: number,
  *   alignment?: { cols: number, rows: number, offsetX?: number, offsetY?: number } | null,
  * }} options
  */
@@ -81,5 +101,8 @@ export function prepareSampledColors(source, options) {
   return prepareSampledColorsFromPhoto(source, {
     targetWidth: options.targetWidth ?? 80,
     colorCount: options.colorCount ?? 16,
+    seedRgbs: options.seedRgbs,
+    seedTolerance: options.seedTolerance,
+    darkBias: options.darkBias,
   })
 }

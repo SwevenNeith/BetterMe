@@ -17,6 +17,7 @@ import {
 } from '../services/creation/crossStitchPatterns.js'
 import { fetchRemoteImageBlob } from '../services/creation/fetchRemoteImage.js'
 import { buildCrossStitchGrid } from '../utils/creation/buildCrossStitchGrid.js'
+import { rgbToHex, rgbToLab, labDistanceSq } from '../utils/creation/colorLab.js'
 import { prepareSampledColors } from '../utils/creation/prepareSampledColors.js'
 import {
   AIDA_COUNTS,
@@ -47,11 +48,14 @@ const WIDTH_MIN = 20
 const WIDTH_MAX = 400
 /** Plafond mémoire / JSON (pas une limite métier) — l’alignement pixel art va jusqu’à la taille native. */
 const GRID_HARD_MAX = 8192
-const COLORS_MIN = 8
+const COLORS_MIN = 1
 const COLORS_MAX = 40
 const LIVE_DEBOUNCE_MS = 380
+const SOURCE_ZOOM_MIN = 1
+const SOURCE_ZOOM_MAX = 8
 
 const fileInputRef = ref(null)
+const sourcePreviewImgRef = ref(null)
 const sourceImage = ref(null)
 /** @type {import('vue').Ref<File|null>} */
 const sourceFile = ref(null)
@@ -63,6 +67,16 @@ const sourceImageUrl = ref('')
 const isLoadingSourceUrl = ref(false)
 const targetWidth = ref(80)
 const colorCount = ref(16)
+/** Couleurs pipette (RGB source) — verrouillées dans le K-means, max = colorCount. */
+const paletteSeeds = ref([])
+/** Teintes source absorbées par chaque pipette (après quantize). */
+const seedGroups = ref([])
+const eyedropperActive = ref(false)
+const sourceZoom = ref(1)
+/** Rayon d’attraction pipette (ΔE LAB approx., 0–80). */
+const seedTolerance = ref(42)
+/** Biais N&B : plus élevé = plus de gris vers le sombre (0–40). */
+const darkBias = ref(22)
 /** Image déjà en pixel art → échantillonnage par blocs (mode), sans K-means. */
 const isPixelArt = ref(false)
 /** Alignement validé (cols, rows, offsetX, offsetY) — conservé tant que l’image ne change pas. */
@@ -213,6 +227,18 @@ function revokeUrl(url) {
   if (url && String(url).startsWith('blob:')) URL.revokeObjectURL(url)
 }
 
+function clearPaletteSeeds() {
+  paletteSeeds.value = []
+  seedGroups.value = []
+  eyedropperActive.value = false
+  sourceZoom.value = 1
+}
+
+function nearHexesForSeedIndex(index) {
+  const group = seedGroups.value.find((g) => Number(g.seedIndex) === Number(index))
+  return group?.nearHexes ?? []
+}
+
 function clearSourceImage() {
   const shared = sourceImage.value?.dataset?.objectUrl || ''
   const preview = sourcePreviewUrl.value
@@ -220,6 +246,7 @@ function clearSourceImage() {
   sourceImage.value = null
   if (preview && preview !== shared) revokeUrl(preview)
   sourcePreviewUrl.value = ''
+  clearPaletteSeeds()
 }
 
 function clearResults() {
@@ -236,6 +263,77 @@ function clearResults() {
 
 function setChartZoom(level) {
   chartZoom.value = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, level))
+}
+
+function setSourceZoom(level) {
+  sourceZoom.value = Math.min(SOURCE_ZOOM_MAX, Math.max(SOURCE_ZOOM_MIN, Math.round(level)))
+}
+
+function toggleEyedropper() {
+  if (!paramsEditable.value || isPixelArt.value || !sourceImage.value) return
+  eyedropperActive.value = !eyedropperActive.value
+}
+
+function removePaletteSeed(index) {
+  if (!paramsEditable.value) return
+  paletteSeeds.value = paletteSeeds.value.filter((_, i) => i !== index)
+  scheduleLivePreview()
+}
+
+/**
+ * Lit la couleur du pixel cliqué sur l’aperçu source (indépendant du zoom CSS).
+ * @param {MouseEvent} event
+ */
+function onSourcePreviewClick(event) {
+  if (!eyedropperActive.value || !paramsEditable.value || isPixelArt.value) return
+  const img = sourcePreviewImgRef.value || event.currentTarget
+  if (!(img instanceof HTMLImageElement) || !sourceImage.value) return
+  if (paletteSeeds.value.length >= colorCount.value) {
+    processError.value =
+      `Tu as déjà choisi ${colorCount.value} couleur${colorCount.value > 1 ? 's' : ''} (le max du slider).`
+    return
+  }
+
+  const rect = img.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return
+  const nx = (event.clientX - rect.left) / rect.width
+  const ny = (event.clientY - rect.top) / rect.height
+  if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return
+
+  const natW = sourceImage.value.naturalWidth
+  const natH = sourceImage.value.naturalHeight
+  const px = Math.min(natW - 1, Math.max(0, Math.floor(nx * natW)))
+  const py = Math.min(natH - 1, Math.max(0, Math.floor(ny * natH)))
+
+  const canvas = document.createElement('canvas')
+  canvas.width = natW
+  canvas.height = natH
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return
+  ctx.drawImage(sourceImage.value, 0, 0)
+  const pixel = ctx.getImageData(px, py, 1, 1).data
+  if (pixel[3] < 16) {
+    processError.value = 'Pixel transparent — choisis une zone opaque.'
+    return
+  }
+
+  const rgb = { r: pixel[0], g: pixel[1], b: pixel[2] }
+  const lab = rgbToLab(rgb.r, rgb.g, rgb.b)
+  const tooClose = paletteSeeds.value.some((seed) => {
+    const other = rgbToLab(seed.r, seed.g, seed.b)
+    return labDistanceSq(lab, other) < 36
+  })
+  if (tooClose) {
+    processError.value = 'Cette teinte est déjà trop proche d’une couleur pipette.'
+    return
+  }
+
+  processError.value = ''
+  paletteSeeds.value = [
+    ...paletteSeeds.value,
+    { ...rgb, hex: rgbToHex(rgb) },
+  ]
+  scheduleLivePreview()
 }
 
 function zoomIn() {
@@ -537,6 +635,9 @@ async function runPipeline() {
       isPixelArt: isPixelArt.value,
       targetWidth: targetWidth.value,
       colorCount: colorCount.value,
+      seedRgbs: isPixelArt.value ? undefined : paletteSeeds.value,
+      seedTolerance: isPixelArt.value ? undefined : seedTolerance.value,
+      darkBias: isPixelArt.value ? undefined : darkBias.value,
       alignment: isPixelArt.value ? pixelArtAlignment.value : null,
     })
 
@@ -555,6 +656,7 @@ async function runPipeline() {
     gridSize.value = { width: sampled.width, height: sampled.height }
     stitchGrid.value = stitch.grid
     stitchLegend.value = stitch.legend
+    seedGroups.value = Array.isArray(sampled.seedGroups) ? sampled.seedGroups : []
     // Nouvelle grille → reset progression locale (sauf si mêmes dims et déjà en cours)
     stitchDoneIndices.value = []
     if (sampled.alignment) {
@@ -778,15 +880,20 @@ async function removeSavedPattern(patternId) {
   }
 }
 
-watch([targetWidth, colorCount], () => {
+watch([targetWidth, colorCount, seedTolerance, darkBias], () => {
   if (!sourceImage.value) return
   if (isPixelArt.value) return // grille pilotée par l’alignement validé
+  // Si on baisse le nb de couleurs sous le nb de pipettes, on tronque
+  if (paletteSeeds.value.length > colorCount.value) {
+    paletteSeeds.value = paletteSeeds.value.slice(0, colorCount.value)
+  }
   scheduleLivePreview()
 })
 
 watch(isPixelArt, (enabled) => {
   if (!sourceImage.value || suppressLivePreview || paramsLocked.value) return
   if (enabled) {
+    eyedropperActive.value = false
     if (alignmentValidated.value && pixelArtAlignment.value) {
       scheduleLivePreview()
     } else {
@@ -962,11 +1069,146 @@ onBeforeUnmount(() => {
 
       <div v-if="sourceImage" class="pdc-preview-row">
         <figure class="pdc-figure">
-          <img :src="sourcePreviewUrl" alt="Image source" class="pdc-preview" />
+          <div
+            class="pdc-source-viewport"
+            :class="{
+              'pdc-source-viewport--pick': eyedropperActive && !isPixelArt,
+              'pdc-source-viewport--zoomed': !isPixelArt && sourceZoom > 1,
+            }"
+          >
+            <img
+              ref="sourcePreviewImgRef"
+              :src="sourcePreviewUrl"
+              alt="Image source"
+              class="pdc-preview"
+              :class="{ 'pdc-preview--grid': isPixelArt }"
+              :style="
+                !isPixelArt && sourceZoom > 1
+                  ? {
+                      width: `${sourceImage.naturalWidth * sourceZoom}px`,
+                      maxWidth: 'none',
+                      maxHeight: 'none',
+                    }
+                  : undefined
+              "
+              draggable="false"
+              @click="onSourcePreviewClick"
+            />
+          </div>
           <figcaption>
             {{ sourceImage.naturalWidth }} × {{ sourceImage.naturalHeight }} px
+            <template v-if="!isPixelArt && sourceZoom > 1">
+              · zoom {{ sourceZoom }}×
+            </template>
           </figcaption>
         </figure>
+
+        <div v-if="!isPixelArt" class="pdc-source-tools">
+          <button
+            type="button"
+            class="pdc-btn pdc-btn--secondary pdc-btn--sm"
+            :class="{ 'pdc-btn--active': eyedropperActive }"
+            :disabled="!paramsEditable"
+            :aria-pressed="eyedropperActive"
+            title="Pipette : clique une couleur sur l’image"
+            @click="toggleEyedropper"
+          >
+            {{ eyedropperActive ? 'Pipette activée' : 'Pipette' }}
+          </button>
+          <div class="pdc-source-zoom">
+            <button
+              type="button"
+              class="pdc-btn pdc-btn--secondary pdc-btn--sm"
+              :disabled="sourceZoom <= SOURCE_ZOOM_MIN"
+              @click="setSourceZoom(sourceZoom - 1)"
+            >
+              −
+            </button>
+            <span class="pdc-source-zoom__label">{{ sourceZoom }}×</span>
+            <button
+              type="button"
+              class="pdc-btn pdc-btn--secondary pdc-btn--sm"
+              :disabled="sourceZoom >= SOURCE_ZOOM_MAX"
+              @click="setSourceZoom(sourceZoom + 1)"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        <p v-if="eyedropperActive && !isPixelArt" class="pdc-hint pdc-hint--tight">
+          Clique sur l’image pour verrouiller une couleur (zoom si besoin).
+          Les teintes proches (gris anti-alias…) sont absorbées.
+          {{ paletteSeeds.length }}/{{ colorCount }} pipette{{ colorCount > 1 ? 's' : '' }}.
+        </p>
+
+        <template v-if="!isPixelArt && (paletteSeeds.length || colorCount <= 2)">
+          <label class="pdc-slider pdc-slider--compact">
+            <span class="pdc-slider__label">
+              Tolérance pipette : <strong>{{ seedTolerance }}</strong>
+            </span>
+            <input
+              v-model.number="seedTolerance"
+              type="range"
+              min="0"
+              max="80"
+              step="1"
+              class="pdc-range"
+              :disabled="!paramsEditable"
+            />
+          </label>
+          <label class="pdc-slider pdc-slider--compact">
+            <span class="pdc-slider__label">
+              Gris → sombre : <strong>{{ darkBias }}</strong>
+              <span class="pdc-slider__hint"> (N&amp;B / 2 couleurs)</span>
+            </span>
+            <input
+              v-model.number="darkBias"
+              type="range"
+              min="0"
+              max="40"
+              step="1"
+              class="pdc-range"
+              :disabled="!paramsEditable"
+            />
+          </label>
+        </template>
+
+        <ul v-if="paletteSeeds.length && !isPixelArt" class="pdc-seeds" aria-label="Couleurs pipette">
+          <li v-for="(seed, idx) in paletteSeeds" :key="`${seed.hex}-${idx}`" class="pdc-seeds__card">
+            <div class="pdc-seeds__row">
+              <span
+                class="pdc-seeds__swatch"
+                :style="{ background: seed.hex }"
+                :title="seed.hex"
+              />
+              <span class="pdc-seeds__hex">{{ seed.hex }}</span>
+              <button
+                type="button"
+                class="pdc-seeds__remove"
+                :disabled="!paramsEditable"
+                title="Retirer"
+                @click="removePaletteSeed(idx)"
+              >
+                ×
+              </button>
+            </div>
+            <div
+              v-if="nearHexesForSeedIndex(idx).length"
+              class="pdc-seeds__near"
+              :title="'Teintes absorbées vers ' + seed.hex"
+            >
+              <span class="pdc-seeds__near-label">proches</span>
+              <span
+                v-for="hex in nearHexesForSeedIndex(idx)"
+                :key="hex"
+                class="pdc-seeds__near-swatch"
+                :style="{ background: hex }"
+                :title="hex"
+              />
+            </div>
+          </li>
+        </ul>
       </div>
 
       <label class="pdc-check">
@@ -1671,6 +1913,9 @@ onBeforeUnmount(() => {
 
 .pdc-preview-row {
   margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
 }
 
 .pdc-figure {
@@ -1685,16 +1930,163 @@ onBeforeUnmount(() => {
   color: #8c98a4;
 }
 
+.pdc-source-viewport {
+  overflow: hidden;
+  max-height: 280px;
+  border-radius: 10px;
+  border: 1px solid rgba(213, 181, 234, 0.3);
+  background: #f8f4fc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pdc-source-viewport--zoomed {
+  overflow: auto;
+  max-height: min(70vh, 520px);
+  display: block;
+  align-items: initial;
+  justify-content: initial;
+}
+
+.pdc-source-viewport--pick {
+  outline: 2px solid color-mix(in srgb, var(--color-primary, #ad81be) 70%, transparent);
+  outline-offset: 1px;
+  cursor: crosshair;
+}
+
 .pdc-preview {
   display: block;
   max-width: 100%;
   max-height: 280px;
   width: auto;
   height: auto;
-  border-radius: 10px;
-  border: 1px solid rgba(213, 181, 234, 0.3);
+  border-radius: 0;
+  border: none;
   object-fit: contain;
   background: #f8f4fc;
+  image-rendering: auto;
+}
+
+.pdc-source-viewport--zoomed .pdc-preview {
+  max-height: none;
+}
+
+.pdc-source-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+}
+
+.pdc-source-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.pdc-source-zoom__label {
+  min-width: 2rem;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 750;
+  color: #5a4a68;
+}
+
+.pdc-btn--active {
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  color: #fff;
+  border-color: transparent;
+}
+
+.pdc-slider--compact {
+  margin-bottom: 0.35rem;
+}
+
+.pdc-slider__hint {
+  font-weight: 600;
+  color: #8c98a4;
+}
+
+.pdc-seeds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.pdc-seeds__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.4);
+  background: rgba(255, 255, 255, 0.75);
+  min-width: 7.5rem;
+}
+
+.pdc-seeds__row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.pdc-seeds__swatch {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  border: 1px solid rgba(44, 62, 80, 0.25);
+  flex-shrink: 0;
+}
+
+.pdc-seeds__hex {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #5a4a68;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdc-seeds__near {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.pdc-seeds__near-label {
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: #8c98a4;
+  margin-right: 0.1rem;
+}
+
+.pdc-seeds__near-swatch {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 3px;
+  border: 1px solid rgba(44, 62, 80, 0.2);
+}
+
+.pdc-seeds__remove {
+  border: none;
+  background: transparent;
+  color: #8c98a4;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.1rem;
+}
+
+.pdc-seeds__remove:hover:not(:disabled) {
+  color: #a93226;
+}
+
+.pdc-seeds__remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .pdc-preview--grid {

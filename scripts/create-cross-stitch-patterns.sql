@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS public.cross_stitch_patterns (
   target_width integer NOT NULL DEFAULT 80
     CHECK (target_width >= 1 AND target_width <= 8192),
   color_count integer NOT NULL DEFAULT 16
-    CHECK (color_count >= 8 AND color_count <= 40),
+    CHECK (color_count >= 1 AND color_count <= 40),
   aida_count integer NOT NULL DEFAULT 14
     CHECK (aida_count IN (11, 14, 16, 18)),
   strand_count integer NOT NULL DEFAULT 2
