@@ -526,7 +526,34 @@ function mapNotificationKindToDeviceCategory(kind: unknown): string | null {
   ) {
     return 'television'
   }
+  if (raw === 'lol_match' || raw.startsWith('lol_match_cooldown:')) {
+    return 'lol_match'
+  }
   return null
+}
+
+/** Kill-switch compte (settings.lol_match_notifications_enabled). Defaut true. */
+async function isLolMatchNotificationsEnabledForUser(userId: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('settings')
+      .select('lol_match_notifications_enabled')
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (error) {
+      if (String(error.message || '').includes('lol_match_notifications_enabled')) {
+        return true
+      }
+      console.error('Lecture lol_match_notifications_enabled :', error)
+      return true
+    }
+    if (data == null || data.lol_match_notifications_enabled == null) return true
+    return data.lol_match_notifications_enabled !== false
+  } catch (err) {
+    console.error('Lecture lol_match_notifications_enabled :', err)
+    return true
+  }
 }
 
 function isSubscriptionEnabledForCategory(
@@ -796,6 +823,22 @@ Deno.serve(async (req) => {
 
       logDebug('Subscriptions trouvées :', subscriptions.length)
 
+      const manuelCategory =
+        type === 'daily_push'
+          ? 'daily'
+          : mapNotificationKindToDeviceCategory(kind)
+
+      // Kill-switch compte pour les notifs LoL partie
+      if (manuelCategory === 'lol_match' && userId) {
+        const enabled = await isLolMatchNotificationsEnabledForUser(String(userId))
+        if (!enabled) {
+          logDebug('lol_match désactivé dans settings pour', userId)
+          return new Response(JSON.stringify({ ok: true, skipped: 'lol_match_disabled' }), {
+            headers: corsHeaders,
+          })
+        }
+      }
+
       const targets = filterSubscriptionsByCategory(
         uniqueSubscriptionsByEndpoint(
           userId
@@ -804,7 +847,7 @@ Deno.serve(async (req) => {
               ? []
               : subscriptions,
         ),
-        type === 'daily_push' ? 'daily' : null,
+        manuelCategory,
       )
 
       for (const row of targets) {
@@ -1067,6 +1110,13 @@ Deno.serve(async (req) => {
 
         if (!skipDailyPush) {
           const category = mapNotificationKindToDeviceCategory(notif.kind)
+          if (category === 'lol_match' && notif.user_id) {
+            const enabled = await isLolMatchNotificationsEnabledForUser(String(notif.user_id))
+            if (!enabled) {
+              logDebug('lol_match désactivé (settings) pour', notif.user_id)
+              continue
+            }
+          }
           const targets = filterSubscriptionsByCategory(
             uniqueSubscriptionsByEndpoint(
               subscriptionsForUser(subscriptions, notif.user_id),

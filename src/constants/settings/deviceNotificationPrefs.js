@@ -1,3 +1,5 @@
+import { APP_PAGE_IDS } from '../common/appPages.js'
+
 /** Catégories de notifications gérables par appareil (prefs push). */
 export const DEVICE_NOTIFICATION_CATEGORY_IDS = {
   DAILY: 'daily',
@@ -9,6 +11,7 @@ export const DEVICE_NOTIFICATION_CATEGORY_IDS = {
   RECONFORT: 'reconfort',
   MENSTRUATION: 'menstruation',
   TELEVISION: 'television',
+  LOL_MATCH: 'lol_match',
 }
 
 /** Liste affichée sous chaque appareil (ordre UI). */
@@ -59,6 +62,13 @@ export const DEVICE_NOTIFICATION_CATEGORIES = [
     label: 'Télévision',
     description:
       'Sortie d’un film, nouvel épisode, ou retour d’une série terminée (nouvelle saison).',
+  },
+  {
+    id: DEVICE_NOTIFICATION_CATEGORY_IDS.LOL_MATCH,
+    label: 'League of Legends (partie)',
+    description:
+      'Fin de cooldown adverse (Flash, R, etc.) pendant le suivi de partie.',
+    requiresPageId: APP_PAGE_IDS.JEUX,
   },
 ]
 
@@ -120,7 +130,22 @@ export function mapNotificationKindToDeviceCategory(kind) {
   ) {
     return DEVICE_NOTIFICATION_CATEGORY_IDS.TELEVISION
   }
+  if (raw === 'lol_match' || raw.startsWith('lol_match_cooldown:')) {
+    return DEVICE_NOTIFICATION_CATEGORY_IDS.LOL_MATCH
+  }
   return null
+}
+
+/**
+ * Catégories affichables selon la visibilité des pages (Réglages → Appareils).
+ * @param {Record<string, { visible?: boolean }> | null | undefined} pageVisibility
+ */
+export function deviceNotificationCategoriesForVisibility(pageVisibility) {
+  return DEVICE_NOTIFICATION_CATEGORIES.filter((category) => {
+    if (!category.requiresPageId) return true
+    const entry = pageVisibility?.[category.requiresPageId]
+    return entry?.visible !== false
+  })
 }
 
 export function isDeviceCategoryEnabled(prefs, categoryId) {

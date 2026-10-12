@@ -1,11 +1,9 @@
 <script setup>
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { supabase } from '../../lib/supabase.js'
 import {
-  DEVICE_NOTIFICATION_CATEGORIES,
-  areAllDeviceCategoriesEnabled,
+  deviceNotificationCategoriesForVisibility,
   mergeDeviceNotificationPrefs,
-  setAllDeviceCategories,
 } from '../../constants/settings/deviceNotificationPrefs.js'
 import {
   deletePushDevice,
@@ -17,6 +15,11 @@ import {
 const props = defineProps({
   userId: {
     type: String,
+    default: null,
+  },
+  /** Visibilité des pages (masque LoL si la page Jeux est cachée). */
+  pageVisibility: {
+    type: Object,
     default: null,
   },
 })
@@ -36,7 +39,10 @@ const editingName = ref('')
 const renameInputRef = ref(null)
 const expandedDevices = ref({})
 
-const notificationCategories = DEVICE_NOTIFICATION_CATEGORIES
+/** Même liste à cases que les autres notifs ; LoL apparaît si Jeux est visible. */
+const notificationCategories = computed(() =>
+  deviceNotificationCategoriesForVisibility(props.pageVisibility),
+)
 
 function emitCount(count = devices.value.length) {
   emit('count-change', count)
@@ -97,16 +103,23 @@ async function onToggleCategory(device, categoryId, checked) {
 
 async function onSelectAllCategories(device) {
   if (savingPrefsId.value || deletingId.value) return
-  await persistDevicePrefs(device, setAllDeviceCategories(true))
+  await persistDevicePrefs(device, {
+    ...mergeDeviceNotificationPrefs(device.notificationPrefs),
+    ...Object.fromEntries(notificationCategories.value.map((c) => [c.id, true])),
+  })
 }
 
 async function onDeselectAllCategories(device) {
   if (savingPrefsId.value || deletingId.value) return
-  await persistDevicePrefs(device, setAllDeviceCategories(false))
+  await persistDevicePrefs(device, {
+    ...mergeDeviceNotificationPrefs(device.notificationPrefs),
+    ...Object.fromEntries(notificationCategories.value.map((c) => [c.id, false])),
+  })
 }
 
 function deviceHasAllCategories(device) {
-  return areAllDeviceCategoriesEnabled(device?.notificationPrefs)
+  const prefs = mergeDeviceNotificationPrefs(device?.notificationPrefs)
+  return notificationCategories.value.every((category) => prefs[category.id] !== false)
 }
 
 async function loadDevices() {

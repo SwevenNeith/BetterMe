@@ -668,6 +668,11 @@ onMounted(async () => {
       <p class="lol-page__subtitle">
         Suivi multi-comptes : elo, matchs, détail de partie et comparatif au niveau de ton rang.
       </p>
+      <div class="lol-page__actions">
+        <RouterLink to="/league-of-legends/partie" class="lol-btn lol-btn--primary">
+          Lancer une partie
+        </RouterLink>
+      </div>
     </header>
 
     <p v-if="errorMessage" class="lol-page__error" role="alert">{{ errorMessage }}</p>
@@ -1276,6 +1281,14 @@ onMounted(async () => {
   line-height: 1.45;
 }
 
+.lol-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
 .lol-page__error {
   margin: 0 0 1rem;
   padding: 0.65rem 0.8rem;
@@ -1423,6 +1436,9 @@ onMounted(async () => {
 }
 
 .lol-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid rgba(173, 129, 190, 0.4);
   background: #fff;
   color: #5b3d7a;
@@ -1431,6 +1447,13 @@ onMounted(async () => {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+a.lol-btn:hover,
+a.lol-btn:focus-visible {
+  text-decoration: none;
 }
 
 .lol-btn:disabled {

@@ -3064,6 +3064,9 @@ const getPositionedEventsForDay = (dayIdx) => {
   flex-direction: column;
   gap: 0.35rem;
   min-height: 28px;
+  /* Sans ça, le contenu nowrap élargit la colonne 1fr et déborde sur le jour suivant */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .all-day-event-bar {
@@ -3080,7 +3083,10 @@ const getPositionedEventsForDay = (dayIdx) => {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
   white-space: nowrap;
 }
 

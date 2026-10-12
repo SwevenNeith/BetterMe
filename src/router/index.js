@@ -19,6 +19,7 @@ const TelevisionView = () => import('../views/TelevisionView.vue')
 const TelevisionDetailView = () => import('../views/TelevisionDetailView.vue')
 const JeuxView = () => import('../views/JeuxView.vue')
 const LeagueOfLegendsView = () => import('../views/LeagueOfLegendsView.vue')
+const LolMatchTrackerView = () => import('../views/LolMatchTrackerView.vue')
 const SportView = () => import('../views/SportView.vue')
 const WishListView = () => import('../views/WishListView.vue')
 const FinancesView = () => import('../views/FinancesView.vue')
@@ -128,6 +129,11 @@ function createAppChildRoutes(namePrefix = '') {
       path: 'league-of-legends',
       name: n('league-of-legends'),
       component: LeagueOfLegendsView,
+    },
+    {
+      path: 'league-of-legends/partie',
+      name: n('league-of-legends-partie'),
+      component: LolMatchTrackerView,
     },
     {
       path: 'sport',

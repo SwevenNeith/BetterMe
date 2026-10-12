@@ -2360,6 +2360,7 @@ onUnmounted(() => {
       <SettingsDevicesPanel
         ref="devicesPanelRef"
         :user-id="userId"
+        :page-visibility="pageVisibility"
         @count-change="onDevicesCountChange"
       />
     </div>

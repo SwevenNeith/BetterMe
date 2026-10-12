@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "gh-pages -d dist",
-    "test": "node --test src/utils/jeux/lolChampionHighlights.test.js"
+    "test": "node --test src/utils/jeux/lolChampionHighlights.test.js src/utils/jeux/lolCooldownData.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",

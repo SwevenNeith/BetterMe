@@ -1,5 +1,10 @@
 # BetterMe
 
+## Déploiment des fonctions :
+
+supabase functions deploy sync-lol-matches
+supabase functions deploy send-notification
+
 ## Palette de Couleurs & Design System
 
 BetterMe utilise une palette de couleurs spécifique pour garantir une interface premium, esthétique et cohérente :
