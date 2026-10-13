@@ -145,6 +145,10 @@ export function expandRangeToLines(content, start, end) {
   return { from, to }
 }
 
+/** Indentation Markdown (listes imbriquées + tabulations). */
+export const NOTE_INDENT_UNIT = '  '
+export const NOTE_INDENT_MAX_LEVEL = 8
+
 const HEADING_RE = /^(#{1,6})\s+/
 const QUOTE_RE = /^>\s?/
 const UL_RE = /^[-*+]\s+/
@@ -153,14 +157,88 @@ const TASK_RE = /^[-*+]\s+\[[ xX]\]\s+/
 
 /**
  * @param {string} line
+ * @returns {{
+ *   isList: boolean,
+ *   indent: string,
+ *   bare: string,
+ *   type: 'bullet'|'number'|'task'|null,
+ *   checked: boolean,
+ *   number: number|null,
+ *   marker: string|null,
+ * }}
+ */
+export function parseNoteListLine(line) {
+  const raw = String(line ?? '')
+  const m = raw.match(/^( *)(?:([-*+])\s+(?:\[([ xX])\]\s+)?|(\d+)\.\s+)(.*)$/)
+  if (!m) {
+    const plain = raw.match(/^( *)(.*)$/)
+    return {
+      isList: false,
+      indent: plain?.[1] ?? '',
+      bare: plain?.[2] ?? raw,
+      type: null,
+      checked: false,
+      number: null,
+      marker: null,
+    }
+  }
+  const type = m[4] != null ? 'number' : m[3] != null ? 'task' : 'bullet'
+  return {
+    isList: true,
+    indent: m[1],
+    bare: m[5] ?? '',
+    type,
+    checked: m[3] === 'x' || m[3] === 'X',
+    number: m[4] != null ? Number(m[4]) : null,
+    marker: m[2] || '-',
+  }
+}
+
+/**
+ * @param {{
+ *   indent?: string,
+ *   type: 'bullet'|'number'|'task'|null,
+ *   bare?: string,
+ *   checked?: boolean,
+ *   number?: number|null,
+ *   marker?: string|null,
+ * }} opts
+ */
+export function formatNoteListLine(opts) {
+  const indent = String(opts?.indent ?? '')
+  const bare = String(opts?.bare ?? '')
+  const type = opts?.type
+  if (type === 'task') {
+    return `${indent}- [${opts?.checked ? 'x' : ' '}] ${bare}`
+  }
+  if (type === 'number') {
+    const n = Math.max(1, Number(opts?.number) || 1)
+    return `${indent}${n}. ${bare}`
+  }
+  if (type === 'bullet') {
+    return `${indent}${opts?.marker || '-'} ${bare}`
+  }
+  return `${indent}${bare}`
+}
+
+/**
+ * @param {string} line
  */
 function stripBlockPrefix(line) {
-  return line
+  const parsed = parseNoteListLine(line)
+  if (parsed.isList) {
+    return { indent: parsed.indent, bare: parsed.bare }
+  }
+  const rest = String(line ?? '')
+    .replace(/^( *)/, '')
+  const indent = String(line ?? '').match(/^( *)/)?.[1] ?? ''
+  const bare = rest
     .replace(TASK_RE, '')
     .replace(UL_RE, '')
     .replace(OL_RE, '')
     .replace(HEADING_RE, '')
     .replace(QUOTE_RE, '')
+  return { indent, bare }
 }
 
 /**
@@ -175,15 +253,19 @@ export function applyBlockFormat(content, start, end, kind) {
   const block = text.slice(from, to)
   const lines = block.split('\n')
   const nextLines = lines.map((line, index) => {
-    const bare = stripBlockPrefix(line)
-    if (kind === 'paragraph') return bare
-    if (kind === 'h1') return `# ${bare}`
-    if (kind === 'h2') return `## ${bare}`
-    if (kind === 'h3') return `### ${bare}`
-    if (kind === 'quote') return `> ${bare}`
-    if (kind === 'bullet') return `- ${bare}`
-    if (kind === 'number') return `${index + 1}. ${bare}`
-    if (kind === 'task') return `- [ ] ${bare}`
+    const { indent, bare } = stripBlockPrefix(line)
+    if (kind === 'paragraph') return `${indent}${bare}`
+    if (kind === 'h1') return `${indent}# ${bare}`
+    if (kind === 'h2') return `${indent}## ${bare}`
+    if (kind === 'h3') return `${indent}### ${bare}`
+    if (kind === 'quote') return `${indent}> ${bare}`
+    if (kind === 'bullet') return formatNoteListLine({ indent, type: 'bullet', bare })
+    if (kind === 'number') {
+      return formatNoteListLine({ indent, type: 'number', bare, number: index + 1 })
+    }
+    if (kind === 'task') {
+      return formatNoteListLine({ indent, type: 'task', bare, checked: false })
+    }
     return line
   })
   const nextBlock = nextLines.join('\n')
@@ -193,6 +275,115 @@ export function applyBlockFormat(content, start, end, kind) {
     selectionEnd: from + nextBlock.length,
     changed: nextBlock !== block,
   }
+}
+
+/**
+ * Indente / désindente les lignes sélectionnées (Tab / Shift+Tab).
+ * @param {string} content
+ * @param {number} start
+ * @param {number} end
+ * @param {'indent'|'outdent'} direction
+ */
+export function adjustNoteLineIndent(content, start, end, direction) {
+  const text = String(content ?? '')
+  const { from, to } = expandRangeToLines(text, start, end)
+  const block = text.slice(from, to)
+  const lines = block.split('\n')
+  const unit = NOTE_INDENT_UNIT
+  const nextLines = lines.map((line) => {
+    if (direction === 'indent') {
+      const level = Math.floor((line.match(/^ */)?.[0]?.length || 0) / unit.length)
+      if (level >= NOTE_INDENT_MAX_LEVEL) return line
+      return `${unit}${line}`
+    }
+    if (line.startsWith(unit)) return line.slice(unit.length)
+    if (line.startsWith('\t')) return line.slice(1)
+    if (line.startsWith(' ')) return line.slice(1)
+    return line
+  })
+  const nextBlock = nextLines.join('\n')
+  const changed = nextBlock !== block
+  // Conserve la sélection relative aux extrémités du bloc
+  const selStart = Math.max(from, Math.min(Number(start) || from, from + nextBlock.length))
+  const selEnd = Math.max(selStart, Math.min(Number(end) || selStart, from + nextBlock.length))
+  // Si on a indenté, décale le caret d’autant que le delta sur la 1re ligne
+  let selectionStart = selStart
+  let selectionEnd = selEnd
+  if (changed && lines.length === 1) {
+    const delta = nextLines[0].length - lines[0].length
+    selectionStart = Math.max(from, (Number(start) || from) + delta)
+    selectionEnd = Math.max(selectionStart, (Number(end) || selectionStart) + delta)
+  } else if (changed) {
+    selectionStart = from
+    selectionEnd = from + nextBlock.length
+  }
+  return {
+    content: changed ? `${text.slice(0, from)}${nextBlock}${text.slice(to)}` : text,
+    selectionStart,
+    selectionEnd,
+    changed,
+  }
+}
+
+/**
+ * Entrée sur une ligne de liste : continue au même niveau, ou sort / désindente si vide.
+ * @param {string} content
+ * @param {number} cursorPos
+ */
+export function handleNoteListEnter(content, cursorPos) {
+  const text = String(content ?? '')
+  const pos = Math.max(0, Math.min(Number(cursorPos) || 0, text.length))
+  let lineStart = pos
+  while (lineStart > 0 && text[lineStart - 1] !== '\n') lineStart -= 1
+  let lineEnd = pos
+  while (lineEnd < text.length && text[lineEnd] !== '\n') lineEnd += 1
+  const line = text.slice(lineStart, lineEnd)
+  const parsed = parseNoteListLine(line)
+  if (!parsed.isList) {
+    return { content: text, selectionStart: pos, selectionEnd: pos, changed: false }
+  }
+
+  const prefixLen = line.length - parsed.bare.length
+  const offsetInBare = Math.max(0, Math.min(pos - lineStart - prefixLen, parsed.bare.length))
+  const bareBefore = parsed.bare.slice(0, offsetInBare)
+  const bareAfter = parsed.bare.slice(offsetInBare)
+
+  // Item vide → désindenter d’un niveau, ou quitter la liste
+  if (!parsed.bare.trim()) {
+    if (parsed.indent.length >= NOTE_INDENT_UNIT.length) {
+      const nextIndent = parsed.indent.slice(NOTE_INDENT_UNIT.length)
+      const nextLine = formatNoteListLine({
+        ...parsed,
+        indent: nextIndent,
+        bare: '',
+        checked: false,
+      })
+      const next = `${text.slice(0, lineStart)}${nextLine}${text.slice(lineEnd)}`
+      const caret = lineStart + nextLine.length
+      return { content: next, selectionStart: caret, selectionEnd: caret, changed: true }
+    }
+    const next = `${text.slice(0, lineStart)}${text.slice(lineEnd)}`
+    return {
+      content: next,
+      selectionStart: lineStart,
+      selectionEnd: lineStart,
+      changed: true,
+    }
+  }
+
+  const firstLine = formatNoteListLine({
+    ...parsed,
+    bare: bareBefore,
+  })
+  const secondLine = formatNoteListLine({
+    ...parsed,
+    bare: bareAfter,
+    number: parsed.type === 'number' ? (parsed.number || 1) + 1 : parsed.number,
+    checked: false,
+  })
+  const next = `${text.slice(0, lineStart)}${firstLine}\n${secondLine}${text.slice(lineEnd)}`
+  const caret = lineStart + firstLine.length + 1 + (secondLine.length - bareAfter.length)
+  return { content: next, selectionStart: caret, selectionEnd: caret, changed: true }
 }
 
 /**

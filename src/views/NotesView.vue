@@ -85,6 +85,8 @@ import {
   formatNoteSelection,
   replaceNoteSelection,
   applyBlockFormat,
+  adjustNoteLineIndent,
+  handleNoteListEnter,
   insertAtSelection,
   eraseHighlightInRange,
   deriveNoteTitleFromSelection,
@@ -2566,6 +2568,44 @@ async function insertPastedNoteImages(files) {
 /**
  * @param {ClipboardEvent} event
  */
+/**
+ * Tab / Shift+Tab : indentation (listes multi-niveaux + tabulations).
+ * Entrée sur une liste : continue au même niveau (vide = désindente / sort).
+ * @param {KeyboardEvent} event
+ */
+function onEditorKeyDown(event) {
+  const editor = editorEl.value
+  if (!editor || event.isComposing) return
+
+  if (event.key === 'Tab') {
+    event.preventDefault()
+    const result = adjustNoteLineIndent(
+      draftContent.value,
+      editor.selectionStart ?? 0,
+      editor.selectionEnd ?? 0,
+      event.shiftKey ? 'outdent' : 'indent',
+    )
+    if (result.changed) applyContentMutation(result, { close: false })
+    return
+  }
+
+  if (
+    event.key === 'Enter' &&
+    !event.shiftKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey
+  ) {
+    const start = editor.selectionStart ?? 0
+    const end = editor.selectionEnd ?? start
+    if (start !== end) return
+    const result = handleNoteListEnter(draftContent.value, start)
+    if (!result.changed) return
+    event.preventDefault()
+    applyContentMutation(result, { close: false })
+  }
+}
+
 function onEditorPaste(event) {
   const files = extractImageFilesFromDataTransfer(event.clipboardData)
   if (!files.length) return
@@ -3183,7 +3223,8 @@ watch(draftFolderId, (value) => {
             autocomplete="off"
             autocorrect="off"
             autocapitalize="off"
-            placeholder="Écris en Markdown… (Ctrl+V pour coller une image)"
+            placeholder="Écris en Markdown… (Tab pour indenter, listes multi-niveaux)"
+            @keydown="onEditorKeyDown"
             @input="onEditorInput"
             @paste="onEditorPaste"
             @dragover="onEditorDragOver"
@@ -4259,6 +4300,14 @@ watch(draftFolderId, (value) => {
 :deep(.markdown-body ul),
 :deep(.markdown-body ol) {
   padding-left: 1.4rem;
+}
+
+:deep(.markdown-body ul ul),
+:deep(.markdown-body ol ol),
+:deep(.markdown-body ul ol),
+:deep(.markdown-body ol ul) {
+  margin: 0.25em 0;
+  padding-left: 1.25rem;
 }
 
 :deep(.markdown-body blockquote) {
