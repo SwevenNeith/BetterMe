@@ -23,8 +23,6 @@ import {
 } from '../services/jeux/lolMatchNotifications.js'
 import {
   applyHaste,
-  canUseCosmicInsight,
-  summonerSpellHaste,
   ultimateBaseCooldown,
   ultimateRankFromLevel,
 } from '../utils/jeux/lolCooldownData.js'
@@ -298,13 +296,9 @@ export function useLolMatchTracker() {
     return detail.spells[3] || null
   }
 
-  function enemySummonerHaste(enemy) {
-    const cosmic =
-      enemy.cosmicInsight && canUseCosmicInsight(enemy.secondaryTreeId)
-    return summonerSpellHaste({
-      bootsId: enemy.bootsId,
-      cosmicInsight: cosmic,
-    })
+  function enemySummonerHaste() {
+    // Bottes / Cosmic Insight retirés de l’UI → CD invoc. à la valeur de base
+    return 0
   }
 
   function enemyUltInfo(enemy) {
@@ -335,7 +329,7 @@ export function useLolMatchTracker() {
     const id = slot === 1 ? enemy.spell1Id : enemy.spell2Id
     const spell = getSummoner(id)
     const base = spell?.cooldown?.[0] ?? null
-    const haste = enemySummonerHaste(enemy)
+    const haste = enemySummonerHaste()
     const real = base != null ? applyHaste(base, haste) : null
     return { spell, baseCooldown: base, realCooldown: real, haste }
   }
@@ -650,9 +644,6 @@ export function useLolMatchTracker() {
     const enemy = state.enemies[index]
     if (!enemy) return
     Object.assign(enemy, patch)
-    if (patch.secondaryTreeId != null && !canUseCosmicInsight(patch.secondaryTreeId)) {
-      enemy.cosmicInsight = false
-    }
     if (patch.championId) {
       void ensureChampionDetail(patch.championId)
     }
@@ -664,9 +655,6 @@ export function useLolMatchTracker() {
         'spell1Id',
         'spell2Id',
         'keystoneId',
-        'secondaryTreeId',
-        'bootsId',
-        'cosmicInsight',
         'level',
         'ultRankOverride',
         'abilityHaste',
@@ -692,11 +680,7 @@ export function useLolMatchTracker() {
 
   function enemyLoadoutComplete(enemy) {
     return Boolean(
-      enemy?.championId &&
-        enemy.spell1Id &&
-        enemy.spell2Id &&
-        enemy.keystoneId &&
-        enemy.secondaryTreeId,
+      enemy?.championId && enemy.spell1Id && enemy.spell2Id && enemy.keystoneId,
     )
   }
 

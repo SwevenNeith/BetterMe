@@ -4,11 +4,9 @@ import { RouterLink } from 'vue-router'
 import { useLolMatchTracker } from '../composables/useLolMatchTracker.js'
 import {
   ddragonChampionIconUrl,
-  ddragonItemIconUrl,
   ddragonRuneIconUrl,
   ddragonSpellIconUrl,
 } from '../services/jeux/lolDataDragon.js'
-import { canUseCosmicInsight } from '../utils/jeux/lolCooldownData.js'
 
 defineOptions({ name: 'LolMatchTrackerView' })
 
@@ -91,7 +89,7 @@ watch(
 watch(
   () =>
     state.enemies.map((e) =>
-      [e.championId, e.spell1Id, e.spell2Id, e.keystoneId, e.secondaryTreeId].join(':'),
+      [e.championId, e.spell1Id, e.spell2Id, e.keystoneId].join(':'),
     ),
   () => {
     if (state.phase !== 'setup' || state.setupStep !== 'loadout') return
@@ -105,12 +103,6 @@ function formatRemaining(ms) {
   const m = Math.floor(s / 60)
   const r = s % 60
   return m > 0 ? `${m}:${String(r).padStart(2, '0')}` : `${r}`
-}
-
-function onCosmicToggle(enemyIndex, checked) {
-  const enemy = state.enemies[enemyIndex]
-  if (!canUseCosmicInsight(enemy.secondaryTreeId)) return
-  updateEnemy(enemyIndex, { cosmicInsight: checked })
 }
 
 function toggleSummonerSpell(enemyIndex, spellId) {
@@ -165,9 +157,7 @@ function goLoadout() {
 
 function startLive() {
   if (!canStartLive()) {
-    window.alert(
-      'Pour chaque champion : 2 sorts d’invocateur, une keystone et un arbre secondaire.',
-    )
+    window.alert('Pour chaque champion : 2 sorts d’invocateur et une keystone.')
     return
   }
   setPhase('live')
@@ -364,9 +354,7 @@ const liveLanes = computed(() =>
 
         <!-- Step 3: loadout (spells + runes) -->
         <div v-else class="lmt-step">
-          <p class="lmt-hint">
-            2 sorts + keystone + arbre secondaire → passage auto en suivi. Bottes en partie.
-          </p>
+          <p class="lmt-hint">2 sorts + keystone → passage auto en suivi.</p>
           <article
             v-for="(enemy, index) in state.enemies"
             v-show="enemy.championId"
@@ -429,34 +417,6 @@ const liveLanes = computed(() =>
                 </button>
               </div>
             </div>
-
-            <div class="lmt-field">
-              <span class="lmt-field__label">Arbre secondaire</span>
-              <div class="lmt-icon-grid">
-                <button
-                  v-for="tree in data.runeTrees"
-                  :key="tree.id"
-                  type="button"
-                  class="lmt-icon-btn lmt-icon-btn--rune"
-                  :class="{ 'lmt-icon-btn--on': enemy.secondaryTreeId === tree.id }"
-                  :title="tree.name"
-                  @click="updateEnemy(index, { secondaryTreeId: tree.id })"
-                >
-                  <img :src="ddragonRuneIconUrl(tree.icon)" :alt="tree.name" />
-                </button>
-              </div>
-              <label
-                v-if="canUseCosmicInsight(enemy.secondaryTreeId)"
-                class="lmt-check"
-              >
-                <input
-                  type="checkbox"
-                  :checked="enemy.cosmicInsight"
-                  @change="onCosmicToggle(index, $event.target.checked)"
-                />
-                Savoir cosmique (+18 haste invoc.)
-              </label>
-            </div>
           </article>
         </div>
       </section>
@@ -495,7 +455,7 @@ const liveLanes = computed(() =>
         </div>
 
         <p class="lmt-hint lmt-hint--compact">
-          Clic portrait = +1 niv. · Clic sort = lance / annule le CD · Bottes en bas
+          Clic portrait = +1 niv. · Clic sort = lance / annule le CD
         </p>
 
         <div class="lmt-board">
@@ -634,28 +594,6 @@ const liveLanes = computed(() =>
                 </button>
               </div>
 
-              <div class="lmt-boots">
-                <button
-                  type="button"
-                  class="lmt-boot"
-                  :class="{ 'lmt-boot--on': !lane.enemy.bootsId }"
-                  title="Aucune botte"
-                  @click="updateEnemy(lane.index, { bootsId: null })"
-                >
-                  —
-                </button>
-                <button
-                  v-for="boot in data.boots"
-                  :key="boot.id"
-                  type="button"
-                  class="lmt-boot"
-                  :class="{ 'lmt-boot--on': lane.enemy.bootsId === boot.id }"
-                  :title="boot.name"
-                  @click="updateEnemy(lane.index, { bootsId: boot.id })"
-                >
-                  <img :src="ddragonItemIconUrl(boot.id, version)" :alt="boot.name" />
-                </button>
-              </div>
             </template>
             <template v-else>
               <div class="lmt-lane__empty">{{ lane.role.label }}</div>
@@ -1301,41 +1239,6 @@ const liveLanes = computed(() =>
   flex-wrap: wrap;
   gap: 0.2rem;
   justify-content: center;
-}
-
-.lmt-boots {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.2rem;
-  justify-content: center;
-  margin-top: 0.25rem;
-  max-width: 100%;
-}
-
-.lmt-boot {
-  width: 1.7rem;
-  height: 1.7rem;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.08);
-  cursor: pointer;
-  overflow: hidden;
-  font-size: 0.7rem;
-  font-weight: 800;
-  color: #6c757d;
-}
-
-.lmt-boot img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.lmt-boot--on {
-  border-color: #95d1aa;
-  box-shadow: 0 0 0 1px rgba(149, 209, 170, 0.5);
 }
 
 .lmt__legal {
