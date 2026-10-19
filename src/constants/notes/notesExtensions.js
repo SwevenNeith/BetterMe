@@ -97,6 +97,14 @@ export const NOTES_EXTENSIONS = [
     defaultEnabled: false,
     global: true,
   },
+  {
+    id: 'tier-lists',
+    name: 'Tier Lists',
+    description: 'Crée des tier lists interactives (style Tiermaker) dans tes notes.',
+    details:
+      'Clic droit dans l’éditeur → Faire une TierList.\n\n• 4 tiers par défaut (S / A / B / C) aux couleurs classiques\n• En aperçu : ajoute des éléments, glisse-les dans les rangs, renomme / recolore / supprime un tier (clic droit ou ⚙)\n• Le fond du plateau s’adapte à la couleur du coffre (ou au thème général hors coffre)\n• En édition : bloc Markdown ```tierlist (JSON) — lisible et sauvegardé dans la note\n• Une sélection de lignes devient la réserve d’éléments au moment de la création',
+    defaultEnabled: true,
+  },
 ]
 
 export const NOTES_EXTENSION_IDS = NOTES_EXTENSIONS.map((ext) => ext.id)

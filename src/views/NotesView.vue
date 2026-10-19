@@ -34,6 +34,14 @@ import {
   extractMarkdownHeadings,
 } from '../utils/notes/noteTableOfContents.js'
 import { mountNoteWidgets, NOTE_WIDGET_INDEX_ATTR, NOTE_WIDGET_PLACEHOLDER_CLASS } from '../utils/notes/noteWidgets.js'
+import {
+  buildTierListFence,
+  createDefaultTierList,
+  createTierListItem,
+  replaceNoteTierListAt,
+  resolveTierListTheme,
+} from '../utils/notes/noteTierLists.js'
+import { mountNoteTierLists } from '../utils/notes/noteTierListsMount.js'
 import NotesTreeNode from '../components/notes/NotesTreeNode.vue'
 import NotesEditorContextMenu from '../components/notes/NotesEditorContextMenu.vue'
 import NotesTableOfContentsTree from '../components/notes/NotesTableOfContentsTree.vue'
@@ -760,10 +768,12 @@ const renderedPreview = computed(() =>
     enableWikiLinks: isExtEnabled('wikilinks'),
     breaks: isExtEnabled('line-breaks'),
     enableHtmlWidgets: isExtEnabled('html-widgets'),
+    enableTierLists: isExtEnabled('tier-lists'),
   }),
 )
 
 const previewWidgets = computed(() => renderedPreview.value.widgets)
+const previewTierLists = computed(() => renderedPreview.value.tierLists ?? [])
 
 const previewHtml = computed(() => {
   let html = renderedPreview.value.html
@@ -774,6 +784,9 @@ const previewHtml = computed(() => {
 })
 
 let unmountPreviewWidgets = /** @type {null | (() => void)} */ (null)
+let unmountPreviewTierLists = /** @type {null | (() => void)} */ (null)
+/** Évite de démonter les tier lists quand on synchronise depuis le widget lui-même. */
+let syncingTierListFromPreview = false
 
 function remountPreviewWidgets() {
   if (unmountPreviewWidgets) {
@@ -782,6 +795,34 @@ function remountPreviewWidgets() {
   }
   if (!previewEl.value || !isExtEnabled('html-widgets')) return
   unmountPreviewWidgets = mountNoteWidgets(previewEl.value, previewWidgets.value)
+}
+
+function remountPreviewTierLists() {
+  if (unmountPreviewTierLists) {
+    unmountPreviewTierLists()
+    unmountPreviewTierLists = null
+  }
+  if (!previewEl.value || !isExtEnabled('tier-lists')) return
+  unmountPreviewTierLists = mountNoteTierLists(previewEl.value, previewTierLists.value, {
+    theme: resolveTierListTheme(activeVaultStyle.value),
+    readonly: false,
+    onChange: (index, data) => {
+      syncingTierListFromPreview = true
+      const result = replaceNoteTierListAt(draftContent.value, index, data)
+      if (result.changed) {
+        draftContent.value = result.content
+        markDirty()
+      }
+      void nextTick(() => {
+        syncingTierListFromPreview = false
+      })
+    },
+  })
+}
+
+function remountPreviewInteractive() {
+  remountPreviewWidgets()
+  remountPreviewTierLists()
 }
 
 const dictionaryLookup = computed(() =>
@@ -1769,6 +1810,40 @@ function applyEditorInsert(kind) {
   applyContentMutation(insertAtSelection(draftContent.value, start, end, insertion, caret))
 }
 
+/**
+ * Insère une TierList (fence ```tierlist) et bascule en aperçu pour l’édition visuelle.
+ */
+function insertTierListFromContextMenu() {
+  if (!isExtEnabled('tier-lists') || !selectedNoteId.value) return
+  const menu = editorContextMenu.value
+  closeEditorContextMenu()
+
+  const data = createDefaultTierList()
+  const selected = String(menu?.selectedText ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (selected.length) {
+    data.pool = selected.map((label) => createTierListItem(label)).filter(Boolean)
+  }
+
+  const editor = editorEl.value
+  if (
+    editor &&
+    menu?.source === 'editor' &&
+    Number.isFinite(menu.selectionStart)
+  ) {
+    const start = menu.selectionStart
+    const end = Number.isFinite(menu.selectionEnd) ? menu.selectionEnd : start
+    editor.focus()
+    editor.setSelectionRange(start, end)
+  }
+
+  insertMarkdownAtCursor(buildTierListFence(data))
+  viewMode.value = 'preview'
+}
+
 function onContextWikiLink() {
   applyEditorSelectionFormat('wiki')
 }
@@ -2676,6 +2751,10 @@ onUnmounted(() => {
     unmountPreviewWidgets()
     unmountPreviewWidgets = null
   }
+  if (unmountPreviewTierLists) {
+    unmountPreviewTierLists()
+    unmountPreviewTierLists = null
+  }
   if (cursorPreviewSyncTimer) {
     window.clearTimeout(cursorPreviewSyncTimer)
     cursorPreviewSyncTimer = 0
@@ -2711,10 +2790,11 @@ watch(userId, (id) => {
 })
 
 watch(
-  [previewHtml, previewWidgets, effectiveViewMode],
+  [previewHtml, previewWidgets, effectiveViewMode, activeVaultStyle],
   async () => {
+    if (syncingTierListFromPreview) return
     await nextTick()
-    remountPreviewWidgets()
+    remountPreviewInteractive()
   },
   { flush: 'post' },
 )
@@ -3364,6 +3444,7 @@ watch(draftFolderId, (value) => {
       :has-highlight="editorSelectionHasHighlight()"
       :dictionary-hit-label="editorContextSelectionHit?.word || ''"
       :rabbit-hole-enabled="isExtEnabled(RABBIT_HOLE_EXTENSION_ID)"
+      :tier-lists-enabled="isExtEnabled('tier-lists')"
       :can-paste="contextMenuCanPaste"
       :spellcheck="spellcheckMenu"
       :text-color-presets="TEXT_COLOR_PRESETS.slice(0, 20)"
@@ -3385,6 +3466,7 @@ watch(draftFolderId, (value) => {
       @dictionary-add="openDictionaryEntryModal(editorContextMenu?.word || '')"
       @dictionary-link="openDictionaryLinkModal(editorContextMenu?.word || '')"
       @rabbit-hole="openRabbitHoleModal"
+      @tier-list="insertTierListFromContextMenu"
       @dashboard-pin="pinNoteToDashboard"
       @open-tab="openNoteInNewTab(editorContextMenu?.noteId)"
       @spell-suggestion="applySpellSuggestion"
@@ -4377,6 +4459,14 @@ watch(draftFolderId, (value) => {
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
+}
+
+:deep(.markdown-body .notes-tierlist-widget) {
+  margin: 0.85em 0;
+}
+
+:deep(.markdown-body .notes-tierlist-host) {
+  display: block;
 }
 
 :deep(.markdown-body .notes-html-widget) {

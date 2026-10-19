@@ -6,6 +6,7 @@ import {
   NOTE_WIDGET_INDEX_ATTR,
   NOTE_WIDGET_PLACEHOLDER_CLASS,
 } from '../notes/noteWidgets.js'
+import { extractNoteTierLists } from '../notes/noteTierLists.js'
 import { injectHeadingIdsIntoHtml } from '../notes/noteTableOfContents.js'
 
 marked.setOptions({
@@ -74,7 +75,7 @@ const ALLOWED_ATTRS = {
   SPAN: new Set(['class', 'style', 'data-dict-id', 'data-dict-word', 'data-dict-alias']),
   MARK: new Set(['class', 'style']),
   U: new Set(['class']),
-  DIV: new Set(['class', 'data-widget-index', 'data-full-page']),
+  DIV: new Set(['class', 'data-widget-index', 'data-full-page', 'data-tierlist-index']),
   ABBR: new Set(['title']),
   H1: new Set(['id']),
   H2: new Set(['id']),
@@ -290,15 +291,18 @@ export function expandNoteWikiLinks(text, notes = []) {
  *   enableWikiLinks?: boolean,
  *   breaks?: boolean,
  *   enableHtmlWidgets?: boolean,
+ *   enableTierLists?: boolean,
  * }} [options]
- * @returns {{ html: string, widgets: string[] }}
+ * @returns {{ html: string, widgets: string[], tierLists: object[] }}
  */
 export function renderMarkdownToSafeHtml(markdown, options = {}) {
   let source = String(markdown ?? '')
   /** @type {string[]} */
   let widgets = []
+  /** @type {ReturnType<typeof extractNoteTierLists>['tierLists']} */
+  let tierLists = []
 
-  if (!source.trim()) return { html: '', widgets }
+  if (!source.trim()) return { html: '', widgets, tierLists }
 
   // Note entière = document HTML : aperçu iframe (CSS/layout natifs)
   if (options.enableHtmlWidgets && isCompleteHtmlDocument(source)) {
@@ -310,7 +314,15 @@ export function renderMarkdownToSafeHtml(markdown, options = {}) {
     return {
       html: `<div class="${NOTE_WIDGET_PLACEHOLDER_CLASS} notes-html-widget--full-page" ${NOTE_WIDGET_INDEX_ATTR}="0" ${NOTE_WIDGET_FULL_PAGE_ATTR}="1"></div>`,
       widgets,
+      tierLists,
     }
+  }
+
+  // Extraire les tier lists avant le reste (sinon le fence devient un bloc de code)
+  if (options.enableTierLists) {
+    const extractedTiers = extractNoteTierLists(source)
+    source = extractedTiers.text
+    tierLists = extractedTiers.tierLists
   }
 
   if (options.enableHtmlWidgets) {
@@ -333,6 +345,7 @@ export function renderMarkdownToSafeHtml(markdown, options = {}) {
   return {
     html: sanitizeMarkdownHtml(withHeadingIds),
     widgets,
+    tierLists,
   }
 }
 
