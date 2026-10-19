@@ -785,8 +785,13 @@ const previewHtml = computed(() => {
 
 let unmountPreviewWidgets = /** @type {null | (() => void)} */ (null)
 let unmountPreviewTierLists = /** @type {null | (() => void)} */ (null)
-/** Évite de démonter les tier lists quand on synchronise depuis le widget lui-même. */
+/**
+ * Évite de démonter les tier lists quand on synchronise depuis le widget.
+ * Reste true jusqu’au prochain cycle de watch (sinon le flush post remonte et vole le focus).
+ */
 let syncingTierListFromPreview = false
+/** Après un remontage forcé, refocus l’input d’ajout si l’utilisateur était en train d’ajouter. */
+let pendingTierListDraftFocus = false
 
 function remountPreviewWidgets() {
   if (unmountPreviewWidgets) {
@@ -803,19 +808,23 @@ function remountPreviewTierLists() {
     unmountPreviewTierLists = null
   }
   if (!previewEl.value || !isExtEnabled('tier-lists')) return
+  const autofocusDraft = pendingTierListDraftFocus
+  pendingTierListDraftFocus = false
   unmountPreviewTierLists = mountNoteTierLists(previewEl.value, previewTierLists.value, {
     theme: resolveTierListTheme(activeVaultStyle.value),
     readonly: false,
+    autofocusDraft,
     onChange: (index, data) => {
+      const active = typeof document !== 'undefined' ? document.activeElement : null
+      pendingTierListDraftFocus = Boolean(
+        active instanceof HTMLElement && active.classList.contains('notes-tierlist__input'),
+      )
       syncingTierListFromPreview = true
       const result = replaceNoteTierListAt(draftContent.value, index, data)
       if (result.changed) {
         draftContent.value = result.content
         markDirty()
       }
-      void nextTick(() => {
-        syncingTierListFromPreview = false
-      })
     },
   })
 }
@@ -2792,7 +2801,11 @@ watch(userId, (id) => {
 watch(
   [previewHtml, previewWidgets, effectiveViewMode, activeVaultStyle],
   async () => {
-    if (syncingTierListFromPreview) return
+    if (syncingTierListFromPreview) {
+      // La note a été mise à jour depuis la TierList : ne pas démonter (garde le focus).
+      syncingTierListFromPreview = false
+      return
+    }
     await nextTick()
     remountPreviewInteractive()
   },

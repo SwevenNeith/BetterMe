@@ -14,6 +14,7 @@ import {
  * @param {{
  *   theme?: ReturnType<typeof resolveTierListTheme>,
  *   readonly?: boolean,
+ *   autofocusDraft?: boolean,
  *   onChange?: (index: number, data: ReturnType<typeof normalizeTierListData>) => void,
  * }} [options]
  * @returns {() => void}
@@ -24,8 +25,10 @@ export function mountNoteTierLists(root, tierLists, options = {}) {
   const list = Array.isArray(tierLists) ? tierLists : []
   const theme = options.theme || resolveTierListTheme(null)
   const readonly = Boolean(options.readonly)
+  const autofocusDraft = Boolean(options.autofocusDraft)
   /** @type {import('vue').App[]} */
   const apps = []
+  let focusedOnce = false
 
   root.querySelectorAll(`.${NOTE_TIERLIST_PLACEHOLDER_CLASS}`).forEach((node) => {
     if (!(node instanceof HTMLElement)) return
@@ -38,6 +41,8 @@ export function mountNoteTierLists(root, tierLists, options = {}) {
     node.appendChild(host)
 
     const initial = normalizeTierListData(list[index])
+    const shouldAutofocus = autofocusDraft && !focusedOnce
+    if (shouldAutofocus) focusedOnce = true
     const app = createApp({
       setup() {
         const model = ref(initial)
@@ -46,6 +51,7 @@ export function mountNoteTierLists(root, tierLists, options = {}) {
             modelValue: model.value,
             theme,
             readonly,
+            autofocusDraft: shouldAutofocus,
             'onUpdate:modelValue': (next) => {
               if (readonly) return
               const normalized = normalizeTierListData(next)

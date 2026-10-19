@@ -27,6 +27,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  autofocusDraft: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -122,6 +126,16 @@ function focusDraftInput() {
   input.focus()
 }
 
+function scheduleDraftFocus() {
+  void nextTick(() => {
+    focusDraftInput()
+    requestAnimationFrame(() => {
+      focusDraftInput()
+      window.setTimeout(() => focusDraftInput(), 0)
+    })
+  })
+}
+
 async function addFromInput() {
   if (props.readonly) return
   const label = draftLabel.value.trim()
@@ -132,9 +146,7 @@ async function addFromInput() {
   next.pool = [...next.pool, item]
   draftLabel.value = ''
   commit(next)
-  await nextTick()
-  focusDraftInput()
-  requestAnimationFrame(() => focusDraftInput())
+  scheduleDraftFocus()
 }
 
 function onDraftKeydown(event) {
@@ -343,6 +355,7 @@ function onDocKeydown(event) {
 onMounted(() => {
   document.addEventListener('pointerdown', onDocPointerDown, true)
   document.addEventListener('keydown', onDocKeydown)
+  if (props.autofocusDraft) scheduleDraftFocus()
 })
 
 onUnmounted(() => {
