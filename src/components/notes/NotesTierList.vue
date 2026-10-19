@@ -33,6 +33,7 @@ const emit = defineEmits(['update:modelValue'])
 
 const data = ref(normalizeTierListData(props.modelValue))
 const draftLabel = ref('')
+const draftInputEl = ref(null)
 const tierMenu = ref(null)
 /** @type {import('vue').Ref<string | null>} */
 const editingTierId = ref(null)
@@ -115,7 +116,13 @@ function moveItem(itemId, target, atIndex = null) {
   commit(next)
 }
 
-function addFromInput() {
+function focusDraftInput() {
+  const input = draftInputEl.value
+  if (!(input instanceof HTMLInputElement)) return
+  input.focus()
+}
+
+async function addFromInput() {
   if (props.readonly) return
   const label = draftLabel.value.trim()
   if (!label) return
@@ -125,12 +132,15 @@ function addFromInput() {
   next.pool = [...next.pool, item]
   draftLabel.value = ''
   commit(next)
+  await nextTick()
+  focusDraftInput()
+  requestAnimationFrame(() => focusDraftInput())
 }
 
 function onDraftKeydown(event) {
   if (event.key === 'Enter') {
     event.preventDefault()
-    addFromInput()
+    void addFromInput()
   }
 }
 
@@ -526,6 +536,7 @@ const COLOR_PRESETS = [
 
       <form v-if="!readonly" class="notes-tierlist__add" @submit.prevent="addFromInput">
         <input
+          ref="draftInputEl"
           v-model="draftLabel"
           type="text"
           class="notes-tierlist__input"
@@ -533,7 +544,12 @@ const COLOR_PRESETS = [
           placeholder="Ajouter un élément…"
           @keydown="onDraftKeydown"
         />
-        <button type="submit" class="notes-tierlist__add-btn" :disabled="!draftLabel.trim()">
+        <button
+          type="submit"
+          class="notes-tierlist__add-btn"
+          :disabled="!draftLabel.trim()"
+          @mousedown.prevent
+        >
           Ajouter
         </button>
         <button type="button" class="notes-tierlist__add-btn notes-tierlist__add-btn--ghost" @click="addTier()">
