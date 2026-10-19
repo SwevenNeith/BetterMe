@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS public.notes (
   title text NOT NULL CHECK (char_length(trim(title)) > 0),
   content_md text NOT NULL DEFAULT '',
   system_key text NULL,
+  is_pinned boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
   updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );

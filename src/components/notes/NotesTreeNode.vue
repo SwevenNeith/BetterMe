@@ -8,6 +8,9 @@ defineProps({
   depth: { type: Number, default: 0 },
   selectedNoteId: { type: String, default: null },
   isFolderExpanded: { type: Function, required: true },
+  /** Pendant une recherche : dossiers toujours ouverts + extraits affichés. */
+  searchActive: { type: Boolean, default: false },
+  searchQuery: { type: String, default: '' },
 })
 
 const emit = defineEmits([
@@ -21,6 +24,8 @@ const emit = defineEmits([
   'delete-folder',
   'note-context-menu',
   'move-note',
+  'toggle-pin',
+  'open-search-occurrence',
 ])
 
 const folderDropActive = ref(false)
@@ -145,7 +150,10 @@ function onFolderDrop(event, folderId) {
           </button>
         </div>
       </div>
-      <div v-if="isFolderExpanded(node.id)" class="notes-tree-node__children">
+      <div
+        v-if="searchActive || isFolderExpanded(node.id)"
+        class="notes-tree-node__children"
+      >
         <NotesTreeNode
           v-for="child in node.children"
           :key="`${child.type}-${child.id}`"
@@ -153,6 +161,8 @@ function onFolderDrop(event, folderId) {
           :depth="depth + 1"
           :selected-note-id="selectedNoteId"
           :is-folder-expanded="isFolderExpanded"
+          :search-active="searchActive"
+          :search-query="searchQuery"
           @select-note="(id, ev) => $emit('select-note', id, ev)"
           @toggle-folder="$emit('toggle-folder', $event)"
           @create-note="$emit('create-note', $event)"
@@ -163,65 +173,123 @@ function onFolderDrop(event, folderId) {
           @delete-folder="$emit('delete-folder', $event)"
           @note-context-menu="$emit('note-context-menu', $event)"
           @move-note="$emit('move-note', $event)"
+          @toggle-pin="$emit('toggle-pin', $event)"
+          @open-search-occurrence="$emit('open-search-occurrence', $event)"
         />
       </div>
     </template>
 
     <template v-else>
-      <div
-        class="notes-tree-node__row notes-tree-node__row--note"
-        :class="{ 'notes-tree-node__row--active': selectedNoteId === node.id }"
-        draggable="true"
-        title="Glisser vers un dossier pour déplacer"
-        @dragstart="onNoteDragStart($event, node.id)"
-        @contextmenu.prevent.stop="$emit('note-context-menu', { noteId: node.id, event: $event })"
-      >
-        <button
-          type="button"
-          class="notes-tree-node__main"
-          @click="$emit('select-note', node.id, $event)"
+      <div class="notes-tree-node__note-block">
+        <div
+          class="notes-tree-node__row notes-tree-node__row--note"
+          :class="{
+            'notes-tree-node__row--active': selectedNoteId === node.id,
+            'notes-tree-node__row--pinned': node.is_pinned,
+          }"
+          draggable="true"
+          title="Glisser vers un dossier pour déplacer"
+          @dragstart="onNoteDragStart($event, node.id)"
+          @contextmenu.prevent.stop="$emit('note-context-menu', { noteId: node.id, event: $event })"
         >
-          <span class="notes-tree-node__chevron notes-tree-node__chevron--spacer" />
-          <svg
-            class="notes-tree-node__icon"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            aria-hidden="true"
-          >
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-          </svg>
-          <span class="notes-tree-node__label" :title="node.title">{{ node.title }}</span>
-        </button>
-        <div class="notes-tree-node__actions">
           <button
             type="button"
-            title="Renommer"
-            aria-label="Renommer la note"
-            @click.stop="$emit('rename-note', node)"
+            class="notes-tree-node__main"
+            @click="$emit('select-note', node.id, $event)"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3 2.12 2.12 0 0 1 0 3L7 19l-4 1 1-4Z" />
+            <span class="notes-tree-node__chevron notes-tree-node__chevron--spacer" />
+            <svg
+              class="notes-tree-node__icon"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
             </svg>
+            <span class="notes-tree-node__label" :title="node.title">{{ node.title }}</span>
           </button>
-          <button
-            type="button"
-            title="Supprimer"
-            aria-label="Supprimer la note"
-            @click.stop="$emit('delete-note', node.id)"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              <line x1="10" y1="11" x2="10" y2="17" />
-              <line x1="14" y1="11" x2="14" y2="17" />
-            </svg>
-          </button>
+          <div class="notes-tree-node__actions">
+            <button
+              type="button"
+              class="notes-tree-node__action--extra"
+              :class="{ 'notes-tree-node__pin--on': node.is_pinned }"
+              :title="node.is_pinned ? 'Désépingler' : 'Épingler'"
+              :aria-label="node.is_pinned ? 'Désépingler la note' : 'Épingler la note'"
+              @click.stop="$emit('toggle-pin', node.id)"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              title="Renommer"
+              aria-label="Renommer la note"
+              @click.stop="$emit('rename-note', node)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3 2.12 2.12 0 0 1 0 3L7 19l-4 1 1-4Z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              title="Supprimer"
+              aria-label="Supprimer la note"
+              @click.stop="$emit('delete-note', node.id)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+            </button>
+          </div>
         </div>
+        <ul
+          v-if="searchActive && node.searchSnippets?.length"
+          class="notes-tree-node__snippets"
+          :style="{ '--depth': depth }"
+        >
+          <li v-for="(snippet, idx) in node.searchSnippets" :key="`${node.id}-snip-${idx}`">
+            <button
+              type="button"
+              class="notes-tree-node__snippet"
+              :title="'Aller à cette occurrence'"
+              @click.stop="
+                $emit('open-search-occurrence', {
+                  noteId: node.id,
+                  start: snippet.start,
+                  end: snippet.end,
+                })
+              "
+            >
+              {{ snippet.text }}
+            </button>
+          </li>
+        </ul>
+        <p
+          v-else-if="searchActive && node.titleMatch && !node.searchSnippets?.length"
+          class="notes-tree-node__snippet notes-tree-node__snippet--meta"
+          :style="{ '--depth': depth }"
+        >
+          Correspondance dans le titre
+        </p>
       </div>
     </template>
   </div>
@@ -231,6 +299,53 @@ function onFolderDrop(event, folderId) {
 .notes-tree-node {
   min-width: 0;
   max-width: 100%;
+}
+
+.notes-tree-node__note-block {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.notes-tree-node__snippets {
+  list-style: none;
+  margin: 0 0 0.25rem;
+  padding: 0 0.35rem 0.15rem calc(var(--depth) * 0.7rem + 2.05rem);
+  display: grid;
+  gap: 0.15rem;
+}
+
+.notes-tree-node__snippet {
+  width: 100%;
+  margin: 0;
+  padding: 0.2rem 0.35rem;
+  border: none;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--notes-vault-text-muted, #7a668c);
+  font: inherit;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.notes-tree-node__snippet:hover {
+  background: var(--notes-vault-selection-hover, rgba(213, 181, 234, 0.28));
+  color: var(--notes-vault-text, #3b2a4a);
+}
+
+.notes-tree-node__snippet--meta {
+  margin: 0 0 0.25rem;
+  padding-left: calc(var(--depth) * 0.7rem + 2.05rem);
+  font-style: italic;
+  background: transparent;
+  cursor: default;
+  display: block;
+  -webkit-line-clamp: unset;
 }
 
 .notes-tree-node__row {
@@ -263,6 +378,14 @@ function onFolderDrop(event, folderId) {
 
 .notes-tree-node__row--note:active {
   cursor: grabbing;
+}
+
+.notes-tree-node__row--pinned .notes-tree-node__label {
+  font-weight: 650;
+}
+
+.notes-tree-node__pin--on {
+  color: var(--notes-vault-color, #8e6aa8) !important;
 }
 
 .notes-tree-node__main {
@@ -327,7 +450,8 @@ function onFolderDrop(event, folderId) {
   padding-right: 0.15rem;
 }
 
-.notes-tree-node__row:hover .notes-tree-node__actions {
+.notes-tree-node__row:hover .notes-tree-node__actions,
+.notes-tree-node__row--pinned .notes-tree-node__actions {
   display: inline-flex;
 }
 
@@ -396,6 +520,11 @@ function onFolderDrop(event, folderId) {
   .notes-tree-node__actions button:hover {
     background: var(--notes-vault-icon-hover-bg, rgba(213, 181, 234, 0.18));
     color: var(--notes-vault-color, #f0e8f8);
+  }
+
+  .notes-tree-node__snippet {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--notes-vault-text-muted, #c5b8d2);
   }
 }
 </style>

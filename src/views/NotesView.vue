@@ -101,6 +101,15 @@ import {
   selectionHasHighlight,
 } from '../utils/notes/noteSelectionFormat.js'
 import {
+  filterWikiSuggestions,
+  findOpenWikiQuery,
+  getTextareaCaretViewportPoint,
+} from '../utils/notes/noteWikiAutocomplete.js'
+import {
+  extractNoteSearchSnippets,
+  resolveSearchOccurrence,
+} from '../utils/notes/noteSearchSnippets.js'
+import {
   isSpellcheckableSelection,
   spellcheckSelection,
 } from '../services/notes/noteSpellcheck.js'
@@ -178,6 +187,15 @@ const sidebarCollapsed = ref(false)
 const tocOpen = ref(false)
 const isMobileNotes = ref(false)
 const editorEl = ref(null)
+/** @type {import('vue').Ref<null | {
+ *   start: number,
+ *   query: string,
+ *   items: { id: string, title: string }[],
+ *   index: number,
+ *   top: number,
+ *   left: number,
+ * }>} */
+const wikiSuggest = ref(null)
 const previewEl = ref(null)
 const dictionaryEntries = ref([])
 const dictionaryAliases = ref([])
@@ -715,6 +733,56 @@ function scrollEditorToHeadingLine(lineIndex) {
   el.scrollTop = Math.max(0, lineIndex * lineHeight - el.clientHeight * 0.25 + paddingTop)
 }
 
+/**
+ * Place le curseur / la sélection sur une plage dans l’éditeur et scroll jusqu’à elle.
+ * @param {number} start
+ * @param {number} end
+ */
+function focusEditorAtRange(start, end) {
+  const el = editorEl.value
+  if (!el) return
+  const text = String(el.value ?? '')
+  const from = Math.max(0, Math.min(Number(start) || 0, text.length))
+  const to = Math.max(from, Math.min(Number(end) || from, text.length))
+
+  el.focus()
+  el.setSelectionRange(from, to)
+
+  const before = text.slice(0, from)
+  const lineIndex = before.split('\n').length - 1
+  const style = window.getComputedStyle(el)
+  const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.4 || 20
+  const paddingTop = Number.parseFloat(style.paddingTop) || 0
+  el.scrollTop = Math.max(0, lineIndex * lineHeight - el.clientHeight * 0.3 + paddingTop)
+}
+
+/**
+ * Ouvre une note et saute à une occurrence de recherche.
+ * @param {{ noteId: string, start?: number, end?: number, query?: string }} payload
+ */
+async function openNoteAtSearchOccurrence(payload) {
+  const noteId = payload?.noteId
+  if (!noteId) return
+
+  const query = String(payload.query ?? treeQuery.value ?? '').trim()
+  await selectNote(noteId, { newTab: false })
+  viewMode.value = 'edit'
+  await nextTick()
+  await nextTick()
+
+  const hit =
+    resolveSearchOccurrence(draftContent.value, query, payload.start) ||
+    (Number.isFinite(payload.start) && Number.isFinite(payload.end)
+      ? { start: payload.start, end: payload.end }
+      : null)
+  if (!hit) return
+  focusEditorAtRange(hit.start, hit.end)
+
+  if (isMobileNotes.value) {
+    sidebarCollapsed.value = true
+  }
+}
+
 async function goToNoteHeading(heading) {
   if (!heading?.id || !selectedNote.value) return
 
@@ -865,6 +933,18 @@ const graphNotes = computed(() =>
   filterNotesForGraph(contextNotes.value, contextFolders.value, graphFilters.value),
 )
 
+function noteMatchesTreeQuery(node, query) {
+  if (!query) return true
+  if (String(node.title ?? '')
+    .toLowerCase()
+    .includes(query)) {
+    return true
+  }
+  return String(node.content_md ?? '')
+    .toLowerCase()
+    .includes(query)
+}
+
 function filterTree(nodes, query) {
   const result = []
   for (const node of nodes) {
@@ -873,8 +953,18 @@ function filterTree(nodes, query) {
       if (node.name.toLowerCase().includes(query) || children.length) {
         result.push({ ...node, children })
       }
-    } else if (node.title.toLowerCase().includes(query)) {
-      result.push(node)
+    } else if (noteMatchesTreeQuery(node, query)) {
+      const snippets = extractNoteSearchSnippets(node.content_md, query, {
+        limit: 3,
+        radius: 36,
+      })
+      result.push({
+        ...node,
+        searchSnippets: snippets,
+        titleMatch: String(node.title ?? '')
+          .toLowerCase()
+          .includes(query),
+      })
     }
   }
   return result
@@ -1308,6 +1398,16 @@ function onTreeSelectNote(noteId, event) {
   void selectNote(noteId, { newTab })
 }
 
+/**
+ * @param {{ noteId: string, start: number, end: number }} payload
+ */
+function onTreeSearchOccurrence(payload) {
+  void openNoteAtSearchOccurrence({
+    ...payload,
+    query: treeQuery.value.trim(),
+  })
+}
+
 function openNoteInNewTab(noteId) {
   closeEditorContextMenu()
   if (!noteId) return
@@ -1693,6 +1793,27 @@ function onTreeMoveNote({ noteId, folderId }) {
   void moveNoteToFolder(noteId, folderId ?? null)
 }
 
+/**
+ * Épingle / désépingle une note (tri en haut du dossier).
+ * @param {string} noteId
+ */
+async function toggleNotePinned(noteId) {
+  if (!userId.value || !noteId) return
+  const note = notes.value.find((item) => item.id === noteId)
+  if (!note) return
+  const nextPinned = !note.is_pinned
+  try {
+    const updated = await updateNote(supabase, userId.value, noteId, { isPinned: nextPinned })
+    notes.value = notes.value.map((item) => (item.id === noteId ? updated : item))
+    if (selectedNote.value?.id === noteId) {
+      selectedNote.value = updated
+    }
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible de modifier l’épingle.'
+  }
+}
+
 function onTreeRootDragOver(event) {
   if (!event?.dataTransfer) return
   const types = [...(event.dataTransfer.types || [])]
@@ -2067,12 +2188,14 @@ async function onEditorInput() {
     emojiShortcodeMap = await loadEmojiShortcodeMap()
   }
   const result = expandEmojiShortcodeAtCaret(draftContent.value, caret, emojiShortcodeMap)
-  if (!result.changed) return
-  draftContent.value = result.content
-  markDirty()
-  await nextTick()
-  editor.focus()
-  editor.setSelectionRange(result.caret, result.caret)
+  if (result.changed) {
+    draftContent.value = result.content
+    markDirty()
+    await nextTick()
+    editor.focus()
+    editor.setSelectionRange(result.caret, result.caret)
+  }
+  refreshWikiSuggest()
 }
 
 async function loadDictionary() {
@@ -2652,14 +2775,119 @@ async function insertPastedNoteImages(files) {
 /**
  * @param {ClipboardEvent} event
  */
+function closeWikiSuggest() {
+  wikiSuggest.value = null
+}
+
+function onEditorBlur() {
+  flushSave()
+  window.setTimeout(() => closeWikiSuggest(), 180)
+}
+
+function refreshWikiSuggest() {
+  const editor = editorEl.value
+  if (!editor || !isExtEnabled('wikilinks') || effectiveViewMode.value === 'preview') {
+    closeWikiSuggest()
+    return
+  }
+  const cursor = editor.selectionStart ?? 0
+  if (editor.selectionEnd !== cursor) {
+    closeWikiSuggest()
+    return
+  }
+  const open = findOpenWikiQuery(draftContent.value, cursor)
+  if (!open) {
+    closeWikiSuggest()
+    return
+  }
+  const items = filterWikiSuggestions(contextNotes.value, open.query, selectedNoteId.value)
+  if (!items.length) {
+    closeWikiSuggest()
+    return
+  }
+  let top = 120
+  let left = 120
+  try {
+    const point = getTextareaCaretViewportPoint(editor, cursor)
+    top = Math.min(window.innerHeight - 220, Math.max(8, point.top + 4))
+    left = Math.min(window.innerWidth - 280, Math.max(8, point.left))
+  } catch {
+    const rect = editor.getBoundingClientRect()
+    top = rect.top + 48
+    left = rect.left + 16
+  }
+  const prevIndex = wikiSuggest.value?.index ?? 0
+  wikiSuggest.value = {
+    start: open.start,
+    query: open.query,
+    items,
+    index: Math.min(prevIndex, items.length - 1),
+    top,
+    left,
+  }
+}
+
+/**
+ * @param {{ id: string, title: string }} note
+ */
+function applyWikiSuggestion(note) {
+  const editor = editorEl.value
+  const suggest = wikiSuggest.value
+  if (!editor || !suggest || !note?.title) return
+  const cursor = editor.selectionStart ?? 0
+  const insertion = `[[${note.title}]]`
+  const result = replaceNoteSelection(draftContent.value, suggest.start, cursor, insertion)
+  draftContent.value = result.content
+  markDirty()
+  closeWikiSuggest()
+  void nextTick(() => {
+    const el = editorEl.value
+    if (!el) return
+    el.focus()
+    const caret = suggest.start + insertion.length
+    el.setSelectionRange(caret, caret)
+  })
+}
+
 /**
  * Tab / Shift+Tab : indentation (listes multi-niveaux + tabulations).
  * Entrée sur une liste : continue au même niveau (vide = désindente / sort).
+ * Autocomplétion [[wikilinks]].
  * @param {KeyboardEvent} event
  */
 function onEditorKeyDown(event) {
   const editor = editorEl.value
   if (!editor || event.isComposing) return
+
+  const suggest = wikiSuggest.value
+  if (suggest?.items?.length) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      wikiSuggest.value = {
+        ...suggest,
+        index: (suggest.index + 1) % suggest.items.length,
+      }
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      wikiSuggest.value = {
+        ...suggest,
+        index: (suggest.index - 1 + suggest.items.length) % suggest.items.length,
+      }
+      return
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault()
+      applyWikiSuggestion(suggest.items[suggest.index])
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeWikiSuggest()
+      return
+    }
+  }
 
   if (event.key === 'Tab') {
     event.preventDefault()
@@ -2688,6 +2916,10 @@ function onEditorKeyDown(event) {
     event.preventDefault()
     applyContentMutation(result, { close: false })
   }
+}
+
+function onEditorSelectOrKeyUp() {
+  void nextTick(() => refreshWikiSuggest())
 }
 
 function onEditorPaste(event) {
@@ -3022,8 +3254,8 @@ watch(draftFolderId, (value) => {
           v-model="treeQuery"
           type="search"
           class="notes-page__search"
-          placeholder="Rechercher…"
-          aria-label="Rechercher dans les notes"
+          placeholder="Rechercher (titre ou contenu)…"
+          aria-label="Rechercher dans les titres et contenus des notes"
         />
       </header>
 
@@ -3169,6 +3401,8 @@ watch(draftFolderId, (value) => {
             :depth="0"
             :selected-note-id="selectedNoteId"
             :is-folder-expanded="isFolderExpanded"
+            :search-active="Boolean(treeQuery.trim())"
+            :search-query="treeQuery.trim()"
             @select-note="onTreeSelectNote"
             @toggle-folder="toggleFolder"
             @create-note="onTreeCreateNote"
@@ -3179,6 +3413,8 @@ watch(draftFolderId, (value) => {
             @delete-folder="onDeleteFolder"
             @note-context-menu="onTreeNoteContextMenu"
             @move-note="onTreeMoveNote"
+            @toggle-pin="toggleNotePinned"
+            @open-search-occurrence="onTreeSearchOccurrence"
           />
           <p v-if="!filteredTree.length" class="notes-page__tree-empty">
             {{ activeVault ? 'Ce coffre est vide.' : 'Aucun élément hors coffre.' }}
@@ -3270,6 +3506,19 @@ watch(draftFolderId, (value) => {
                 </option>
               </select>
             </label>
+            <button
+              type="button"
+              class="notes-page__pin-btn"
+              :class="{ 'notes-page__pin-btn--on': selectedNote?.is_pinned }"
+              :title="selectedNote?.is_pinned ? 'Désépingler' : 'Épingler en haut'"
+              :aria-pressed="Boolean(selectedNote?.is_pinned)"
+              @click="toggleNotePinned(selectedNoteId)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </svg>
+            </button>
             <div class="notes-page__mode-switch" role="group" aria-label="Mode d’affichage">
               <button
                 type="button"
@@ -3319,10 +3568,12 @@ watch(draftFolderId, (value) => {
             placeholder="Écris en Markdown… (Tab pour indenter, listes multi-niveaux)"
             @keydown="onEditorKeyDown"
             @input="onEditorInput"
+            @keyup="onEditorSelectOrKeyUp"
+            @click="onEditorSelectOrKeyUp"
             @paste="onEditorPaste"
             @dragover="onEditorDragOver"
             @drop="onEditorDrop"
-            @blur="flushSave"
+            @blur="onEditorBlur"
             @contextmenu="onEditorContextMenu"
           />
           <div
@@ -3445,6 +3696,30 @@ watch(draftFolderId, (value) => {
       @close="rabbitHoleModalOpen = false"
       @saved="onRabbitHoleThoughtSaved"
     />
+
+    <Teleport to="body">
+      <div
+        v-if="wikiSuggest?.items?.length"
+        class="notes-wiki-suggest"
+        role="listbox"
+        :style="{ top: `${wikiSuggest.top}px`, left: `${wikiSuggest.left}px` }"
+        @mousedown.prevent
+      >
+        <p class="notes-wiki-suggest__hint">Notes · [[{{ wikiSuggest.query || '…' }}]]</p>
+        <button
+          v-for="(item, idx) in wikiSuggest.items"
+          :key="item.id"
+          type="button"
+          class="notes-wiki-suggest__item"
+          :class="{ 'notes-wiki-suggest__item--active': idx === wikiSuggest.index }"
+          role="option"
+          :aria-selected="idx === wikiSuggest.index"
+          @mousedown.prevent="applyWikiSuggestion(item)"
+        >
+          {{ item.title }}
+        </button>
+      </div>
+    </Teleport>
 
     <NotesEditorContextMenu
       :open="Boolean(editorContextMenu)"
@@ -4184,12 +4459,79 @@ watch(draftFolderId, (value) => {
   color: #3b2a4a;
 }
 
+.notes-page__pin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 1px solid #d5c4e6;
+  border-radius: 8px;
+  background: #fff;
+  color: #6d5a7e;
+  cursor: pointer;
+  padding: 0;
+}
+
+.notes-page__pin-btn svg {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+}
+
+.notes-page__pin-btn:hover,
+.notes-page__pin-btn--on {
+  color: var(--notes-vault-color, #5b3d7a);
+  border-color: var(--notes-vault-color, #ad81be);
+  background: rgba(213, 181, 234, 0.25);
+}
+
 .notes-page__mode-switch {
   display: inline-flex;
   border: 1px solid var(--color-tertiary, #72a098);
   border-radius: 8px;
   overflow: hidden;
   background: #e8f6ee;
+}
+
+.notes-wiki-suggest {
+  position: fixed;
+  z-index: 1200;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 1rem));
+  max-height: 220px;
+  overflow: auto;
+  padding: 0.3rem;
+  border-radius: 10px;
+  background: #f7f4ef;
+  border: 1px solid #e4ddd2;
+  box-shadow: 0 12px 32px rgba(40, 30, 20, 0.16);
+  color: #3a342c;
+  font-size: 0.86rem;
+}
+
+.notes-wiki-suggest__hint {
+  margin: 0.15rem 0.45rem 0.35rem;
+  font-size: 0.72rem;
+  color: #7a7164;
+}
+
+.notes-wiki-suggest__item {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.notes-wiki-suggest__item:hover,
+.notes-wiki-suggest__item--active {
+  background: #ebe4d8;
 }
 
 .notes-page__mode {
@@ -4851,6 +5193,34 @@ watch(draftFolderId, (value) => {
 
   .notes-page:not(.notes-page--in-vault) :deep(.markdown-body h1) {
     border-bottom-color: rgba(213, 181, 234, 0.22);
+  }
+
+  .notes-page__pin-btn {
+    background: #2a2438;
+    border-color: rgba(173, 129, 190, 0.4);
+    color: #c5b8d2;
+  }
+
+  .notes-page__pin-btn:hover,
+  .notes-page__pin-btn--on {
+    color: #f0e8f8;
+    background: rgba(213, 181, 234, 0.18);
+  }
+
+  .notes-wiki-suggest {
+    background: #2a2433;
+    border-color: rgba(213, 181, 234, 0.22);
+    color: #f0e8f8;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  }
+
+  .notes-wiki-suggest__hint {
+    color: #b8a8c8;
+  }
+
+  .notes-wiki-suggest__item:hover,
+  .notes-wiki-suggest__item--active {
+    background: rgba(213, 181, 234, 0.14);
   }
 
   .notes-page--in-vault :deep(.markdown-body h1),

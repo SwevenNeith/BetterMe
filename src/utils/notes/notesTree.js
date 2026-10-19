@@ -32,6 +32,8 @@ export function buildNotesTree(folders, notes, parentId = null) {
       id: note.id,
       title: note.title,
       system_key: note.system_key ?? null,
+      is_pinned: Boolean(note.is_pinned),
+      content_md: String(note.content_md ?? ''),
     }))
 
   return [...folderChildren, ...noteChildren]
@@ -45,11 +47,15 @@ function compareAlpha(a, b) {
 }
 
 /**
- * @param {{ title?: string, system_key?: string | null }} a
- * @param {{ title?: string, system_key?: string | null }} b
+ * @param {{ title?: string, system_key?: string | null, is_pinned?: boolean }} a
+ * @param {{ title?: string, system_key?: string | null, is_pinned?: boolean }} b
  * @param {{ system_key?: string | null } | null} parentFolder
  */
 function compareNotesInFolder(a, b, parentFolder) {
+  const pinnedA = Boolean(a?.is_pinned)
+  const pinnedB = Boolean(b?.is_pinned)
+  if (pinnedA !== pinnedB) return pinnedA ? -1 : 1
+
   if (parentFolder?.system_key === DAILY_NOTES_FOLDER_SYSTEM_KEY) {
     const dateA = parseDailyNoteDateKey(a.system_key)
     const dateB = parseDailyNoteDateKey(b.system_key)

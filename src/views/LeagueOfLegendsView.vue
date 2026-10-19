@@ -105,6 +105,8 @@ const rankedResetError = ref('')
 const showAddForm = ref(false)
 
 const selectedMatch = ref(null)
+/** Puuid du joueur dont les items sont dépliés dans le détail d’équipe. */
+const expandedTeamPuuid = ref(null)
 
 /** Tooltip item hors overflow du modal (Teleport body). */
 const itemTipId = ref(null)
@@ -542,17 +544,30 @@ function selectAccount(accountId) {
   selectedAccountId.value = accountId
   page.value = 1
   hideItemTip()
+  expandedTeamPuuid.value = null
   selectedMatch.value = null
 }
 
 function openMatch(match) {
   hideItemTip()
+  expandedTeamPuuid.value = null
   selectedMatch.value = match
 }
 
 function closeMatch() {
   hideItemTip()
+  expandedTeamPuuid.value = null
   selectedMatch.value = null
+}
+
+/**
+ * Déplie / replie les items d’un coéquipier ou adversaire (pas soi-même).
+ * @param {string | null | undefined} puuid
+ * @param {string | null | undefined} selfPuuid
+ */
+function toggleTeamItems(puuid, selfPuuid) {
+  if (!puuid || puuid === selfPuuid) return
+  expandedTeamPuuid.value = expandedTeamPuuid.value === puuid ? null : puuid
 }
 
 /**
@@ -1154,24 +1169,72 @@ onMounted(async () => {
                 v-for="p in teamOf(selectedMatch, 100)"
                 :key="p.puuid"
                 class="lol-team__row"
-                :class="{ 'lol-team__row--you': p.puuid === selectedMatch.participant?.puuid }"
+                :class="{
+                  'lol-team__row--you': p.puuid === selectedMatch.participant?.puuid,
+                  'lol-team__row--expandable': p.puuid !== selectedMatch.participant?.puuid,
+                  'lol-team__row--open': expandedTeamPuuid === p.puuid,
+                }"
               >
-                <img
-                  v-if="lolChampionIconByName(p.championName)"
-                  :src="lolChampionIconByName(p.championName)"
-                  alt=""
-                  class="lol-team__champ"
-                />
-                <div class="lol-team__info">
-                  <p class="lol-team__name">
-                    {{ playerLabel(p) }}
-                    <span v-if="p.puuid === selectedMatch.participant?.puuid" class="lol-you"
-                      >Vous</span
+                <button
+                  type="button"
+                  class="lol-team__main"
+                  :disabled="p.puuid === selectedMatch.participant?.puuid"
+                  :aria-expanded="
+                    p.puuid === selectedMatch.participant?.puuid
+                      ? undefined
+                      : expandedTeamPuuid === p.puuid
+                  "
+                  :title="
+                    p.puuid === selectedMatch.participant?.puuid
+                      ? undefined
+                      : 'Voir les items'
+                  "
+                  @click="toggleTeamItems(p.puuid, selectedMatch.participant?.puuid)"
+                >
+                  <img
+                    v-if="lolChampionIconByName(p.championName)"
+                    :src="lolChampionIconByName(p.championName)"
+                    alt=""
+                    class="lol-team__champ"
+                  />
+                  <div class="lol-team__info">
+                    <p class="lol-team__name">
+                      {{ playerLabel(p) }}
+                      <span v-if="p.puuid === selectedMatch.participant?.puuid" class="lol-you"
+                        >Vous</span
+                      >
+                    </p>
+                    <p class="lol-team__champ-name">{{ p.championName }}</p>
+                  </div>
+                  <p class="lol-team__kda">{{ kdaLabel(p) }}</p>
+                </button>
+                <div
+                  v-if="
+                    expandedTeamPuuid === p.puuid &&
+                    p.puuid !== selectedMatch.participant?.puuid
+                  "
+                  class="lol-team__items"
+                >
+                  <template v-if="participantItems(p).length">
+                    <span
+                      v-for="(itemId, idx) in participantItems(p)"
+                      :key="`b-${p.puuid}-${idx}`"
+                      class="lol-item-tip"
+                      tabindex="0"
+                      @mouseenter="showItemTip($event, itemId)"
+                      @mouseleave="hideItemTip"
+                      @focus="showItemTip($event, itemId)"
+                      @blur="hideItemTip"
                     >
-                  </p>
-                  <p class="lol-team__champ-name">{{ p.championName }}</p>
+                      <img
+                        :src="lolItemIconUrl(itemId)"
+                        :alt="lolItemName(itemId)"
+                        class="lol-team__item"
+                      />
+                    </span>
+                  </template>
+                  <p v-else class="lol-team__items-empty">Aucun item</p>
                 </div>
-                <p class="lol-team__kda">{{ kdaLabel(p) }}</p>
               </li>
             </ul>
           </section>
@@ -1187,24 +1250,72 @@ onMounted(async () => {
                 v-for="p in teamOf(selectedMatch, 200)"
                 :key="p.puuid"
                 class="lol-team__row"
-                :class="{ 'lol-team__row--you': p.puuid === selectedMatch.participant?.puuid }"
+                :class="{
+                  'lol-team__row--you': p.puuid === selectedMatch.participant?.puuid,
+                  'lol-team__row--expandable': p.puuid !== selectedMatch.participant?.puuid,
+                  'lol-team__row--open': expandedTeamPuuid === p.puuid,
+                }"
               >
-                <img
-                  v-if="lolChampionIconByName(p.championName)"
-                  :src="lolChampionIconByName(p.championName)"
-                  alt=""
-                  class="lol-team__champ"
-                />
-                <div class="lol-team__info">
-                  <p class="lol-team__name">
-                    {{ playerLabel(p) }}
-                    <span v-if="p.puuid === selectedMatch.participant?.puuid" class="lol-you"
-                      >Vous</span
+                <button
+                  type="button"
+                  class="lol-team__main"
+                  :disabled="p.puuid === selectedMatch.participant?.puuid"
+                  :aria-expanded="
+                    p.puuid === selectedMatch.participant?.puuid
+                      ? undefined
+                      : expandedTeamPuuid === p.puuid
+                  "
+                  :title="
+                    p.puuid === selectedMatch.participant?.puuid
+                      ? undefined
+                      : 'Voir les items'
+                  "
+                  @click="toggleTeamItems(p.puuid, selectedMatch.participant?.puuid)"
+                >
+                  <img
+                    v-if="lolChampionIconByName(p.championName)"
+                    :src="lolChampionIconByName(p.championName)"
+                    alt=""
+                    class="lol-team__champ"
+                  />
+                  <div class="lol-team__info">
+                    <p class="lol-team__name">
+                      {{ playerLabel(p) }}
+                      <span v-if="p.puuid === selectedMatch.participant?.puuid" class="lol-you"
+                        >Vous</span
+                      >
+                    </p>
+                    <p class="lol-team__champ-name">{{ p.championName }}</p>
+                  </div>
+                  <p class="lol-team__kda">{{ kdaLabel(p) }}</p>
+                </button>
+                <div
+                  v-if="
+                    expandedTeamPuuid === p.puuid &&
+                    p.puuid !== selectedMatch.participant?.puuid
+                  "
+                  class="lol-team__items"
+                >
+                  <template v-if="participantItems(p).length">
+                    <span
+                      v-for="(itemId, idx) in participantItems(p)"
+                      :key="`r-${p.puuid}-${idx}`"
+                      class="lol-item-tip"
+                      tabindex="0"
+                      @mouseenter="showItemTip($event, itemId)"
+                      @mouseleave="hideItemTip"
+                      @focus="showItemTip($event, itemId)"
+                      @blur="hideItemTip"
                     >
-                  </p>
-                  <p class="lol-team__champ-name">{{ p.championName }}</p>
+                      <img
+                        :src="lolItemIconUrl(itemId)"
+                        :alt="lolItemName(itemId)"
+                        class="lol-team__item"
+                      />
+                    </span>
+                  </template>
+                  <p v-else class="lol-team__items-empty">Aucun item</p>
                 </div>
-                <p class="lol-team__kda">{{ kdaLabel(p) }}</p>
               </li>
             </ul>
           </section>
@@ -1987,16 +2098,49 @@ a.lol-btn:focus-visible {
 }
 
 .lol-team__row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 0.45rem;
-  align-items: center;
-  padding: 0.3rem 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
   border-radius: 8px;
 }
 
 .lol-team__row--you {
   background: rgba(213, 181, 234, 0.28);
+}
+
+.lol-team__row--expandable .lol-team__main {
+  cursor: pointer;
+}
+
+.lol-team__row--expandable .lol-team__main:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.lol-team__row--open {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.lol-team__main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  padding: 0.3rem 0.35rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.lol-team__main:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .lol-team__champ {
@@ -2017,6 +2161,28 @@ a.lol-btn:focus-visible {
 
 .lol-team__champ-name {
   margin: 0.1rem 0 0;
+  font-size: 0.72rem;
+  color: #8b7a96;
+}
+
+.lol-team__items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0 0.35rem 0.45rem 2.8rem;
+}
+
+.lol-team__item {
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 4px;
+  object-fit: cover;
+  display: block;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.lol-team__items-empty {
+  margin: 0;
   font-size: 0.72rem;
   color: #8b7a96;
 }
@@ -2112,7 +2278,21 @@ a.lol-btn:focus-visible {
   .lol-field__label,
   .lol-filter,
   .lol-rank-card__queue {
-    color: #b8a8c8;
+    color: #c9b8d8;
+  }
+
+  .lol-rank-card__wl {
+    color: #e8d4f8;
+    font-weight: 700;
+  }
+
+  .lol-champ-icon__name {
+    color: #f0e8f8;
+  }
+
+  .lol-champ-icon__games {
+    color: #d4c4e4;
+    font-weight: 700;
   }
 
   .lol-card,
@@ -2142,20 +2322,20 @@ a.lol-btn:focus-visible {
     color: #fff;
   }
 
-  .lol-champ-icon__wr--good {
-    color: #7dcea0;
-  }
-
-  .lol-champ-icon__wr--bad {
-    color: #f1948a;
-  }
-
   .lol-champ-icon__stat {
     color: #e8d4f8;
   }
 
+  .lol-champ-icon__stat.lol-champ-icon__wr--good {
+    color: #3dde7a;
+  }
+
+  .lol-champ-icon__stat.lol-champ-icon__wr--bad {
+    color: #ff6b5a;
+  }
+
   .lol-champ-icon__stat--share {
-    color: #b8a8c8;
+    color: #c9b8d8;
   }
 
   .lol-detail {

@@ -9,6 +9,8 @@ import { normalizeNoteStatus } from '../../constants/notes/noteStatus.js'
 const TABLE = 'notes'
 const SEED_TABLE = 'notes_seed_state'
 const SELECT =
+  'id, user_id, folder_id, title, content_md, system_key, vault_id, status, status_set_at, todo_item_id, is_pinned, created_at, updated_at'
+const SELECT_NO_PIN =
   'id, user_id, folder_id, title, content_md, system_key, vault_id, status, status_set_at, todo_item_id, created_at, updated_at'
 const SELECT_LEGACY =
   'id, user_id, folder_id, title, content_md, system_key, vault_id, created_at, updated_at'
@@ -20,6 +22,14 @@ function isMissingStatusColumnError(error) {
     (error.message.includes("'status'") ||
       error.message.includes("'status_set_at'") ||
       error.message.includes("'todo_item_id'"))
+  )
+}
+
+function isMissingPinnedColumnError(error) {
+  return (
+    error?.code === 'PGRST204' &&
+    typeof error.message === 'string' &&
+    error.message.includes("'is_pinned'")
   )
 }
 
@@ -35,6 +45,7 @@ function normalizeNote(row) {
     status: normalizeNoteStatus(row.status),
     status_set_at: row.status_set_at ?? null,
     todo_item_id: row.todo_item_id ?? null,
+    is_pinned: Boolean(row.is_pinned),
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? row.created_at ?? null,
   }
@@ -43,6 +54,17 @@ function normalizeNote(row) {
 async function selectNotes(supabase, buildQuery) {
   const primary = await buildQuery(SELECT)
   if (!primary.error) return primary
+
+  if (isMissingPinnedColumnError(primary.error)) {
+    const withoutPin = await buildQuery(SELECT_NO_PIN)
+    if (!withoutPin.error) return withoutPin
+    if (isMissingStatusColumnError(withoutPin.error)) {
+      const fallback = await buildQuery(SELECT_LEGACY)
+      if (fallback.error) throw fallback.error
+      return fallback
+    }
+    throw withoutPin.error
+  }
 
   if (isMissingStatusColumnError(primary.error)) {
     const fallback = await buildQuery(SELECT_LEGACY)
@@ -91,6 +113,7 @@ export async function getNote(supabase, userId, noteId) {
  *   vaultId?: string | null,
  *   status?: string | null,
  *   statusSetAt?: string | null,
+ *   isPinned?: boolean,
  * }} input
  */
 export async function createNote(supabase, userId, input = {}) {
@@ -122,10 +145,19 @@ export async function createNote(supabase, userId, input = {}) {
       input?.statusSetAt ?? input?.status_set_at ?? (status === 'a_traiter' ? now : null)
   }
 
+  if (input?.isPinned === true || input?.is_pinned === true) {
+    row.is_pinned = true
+  }
+
   let result = await supabase.from(TABLE).insert(row).select(SELECT).single()
+  if (result.error && isMissingPinnedColumnError(result.error)) {
+    delete row.is_pinned
+    result = await supabase.from(TABLE).insert(row).select(SELECT_NO_PIN).single()
+  }
   if (result.error && isMissingStatusColumnError(result.error)) {
     delete row.status
     delete row.status_set_at
+    delete row.is_pinned
     result = await supabase.from(TABLE).insert(row).select(SELECT_LEGACY).single()
   }
   if (result.error) throw result.error
@@ -143,6 +175,7 @@ export async function createNote(supabase, userId, input = {}) {
  *   status?: string | null,
  *   statusSetAt?: string | null,
  *   todoItemId?: string | null,
+ *   isPinned?: boolean,
  * }} input
  */
 export async function updateNote(supabase, userId, noteId, input) {
@@ -174,6 +207,9 @@ export async function updateNote(supabase, userId, noteId, input) {
   if (input?.todoItemId !== undefined || input?.todo_item_id !== undefined) {
     patch.todo_item_id = input.todoItemId ?? input.todo_item_id ?? null
   }
+  if (input?.isPinned !== undefined || input?.is_pinned !== undefined) {
+    patch.is_pinned = Boolean(input.isPinned ?? input.is_pinned)
+  }
 
   let result = await supabase
     .from(TABLE)
@@ -183,11 +219,27 @@ export async function updateNote(supabase, userId, noteId, input) {
     .select(SELECT)
     .single()
 
+  if (result.error && isMissingPinnedColumnError(result.error)) {
+    if (patch.is_pinned !== undefined) {
+      throw new Error(
+        'Colonne is_pinned absente. Exécute scripts/migrate-notes-pinned.sql dans Supabase.',
+      )
+    }
+    result = await supabase
+      .from(TABLE)
+      .update(patch)
+      .eq('id', noteId)
+      .eq('user_id', userId)
+      .select(SELECT_NO_PIN)
+      .single()
+  }
+
   if (result.error && isMissingStatusColumnError(result.error)) {
     const legacyPatch = { ...patch }
     delete legacyPatch.status
     delete legacyPatch.status_set_at
     delete legacyPatch.todo_item_id
+    delete legacyPatch.is_pinned
     result = await supabase
       .from(TABLE)
       .update(legacyPatch)
