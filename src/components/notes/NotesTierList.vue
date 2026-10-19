@@ -257,15 +257,56 @@ function pickTierColor(tierId) {
   closeTierMenu()
 }
 
+/**
+ * Place le menu entièrement dans le viewport (remonte / décale à gauche si besoin).
+ * @param {number} anchorX
+ * @param {number} anchorY
+ * @param {number} [width]
+ * @param {number} [height]
+ */
+function fitMenuInViewport(anchorX, anchorY, width = 260, height = 340) {
+  if (typeof window === 'undefined') return { x: anchorX, y: anchorY }
+  const margin = 8
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const w = Math.min(width, vw - margin * 2)
+  const h = Math.min(height, vh - margin * 2)
+
+  let x = anchorX
+  let y = anchorY
+
+  // Trop près du bord droit → ouvrir vers la gauche
+  if (x + w > vw - margin) x = anchorX - w
+  // Trop près du bas → ouvrir vers le haut
+  if (y + h > vh - margin) y = anchorY - h
+
+  x = Math.min(Math.max(margin, x), Math.max(margin, vw - w - margin))
+  y = Math.min(Math.max(margin, y), Math.max(margin, vh - h - margin))
+  return { x: Math.round(x), y: Math.round(y) }
+}
+
 function openTierMenu(event, tierId) {
   if (props.readonly) return
   event.preventDefault()
   event.stopPropagation()
+  const pos = fitMenuInViewport(event.clientX, event.clientY)
   tierMenu.value = {
     tierId,
-    x: event.clientX,
-    y: event.clientY,
+    x: pos.x,
+    y: pos.y,
   }
+  void nextTick(() => {
+    if (!tierMenu.value || tierMenu.value.tierId !== tierId) return
+    const menu = document.querySelector('.notes-tierlist__menu')
+    if (!(menu instanceof HTMLElement)) return
+    const fitted = fitMenuInViewport(
+      event.clientX,
+      event.clientY,
+      menu.offsetWidth,
+      menu.offsetHeight,
+    )
+    tierMenu.value = { ...tierMenu.value, x: fitted.x, y: fitted.y }
+  })
 }
 
 function closeTierMenu() {
@@ -561,11 +602,14 @@ const COLOR_PRESETS = [
   color: #f2eef8;
   font-size: 0.92rem;
   user-select: none;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .notes-tierlist__board {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .notes-tierlist__row {
@@ -573,6 +617,7 @@ const COLOR_PRESETS = [
   grid-template-columns: minmax(4.75rem, 7.5rem) minmax(0, 1fr) 2.1rem;
   min-height: 3.1rem;
   border-bottom: 1px solid #000;
+  min-width: 0;
 }
 
 .notes-tierlist__label {
@@ -640,6 +685,7 @@ const COLOR_PRESETS = [
   gap: 0.35rem;
   padding: 0.35rem 0.45rem;
   min-height: 3.1rem;
+  min-width: 0;
   background: var(--ntl-board);
   transition: background 0.12s ease;
 }
@@ -796,8 +842,13 @@ const COLOR_PRESETS = [
 .notes-tierlist__menu {
   position: fixed;
   z-index: 1200;
+  box-sizing: border-box;
   min-width: 220px;
   max-width: min(300px, calc(100vw - 1rem));
+  max-height: calc(100vh - 1rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 0.35rem;
   border-radius: 10px;
   background: #f7f4ef;
@@ -867,6 +918,10 @@ const COLOR_PRESETS = [
 
   .notes-tierlist__label {
     font-size: 0.95rem;
+  }
+
+  .notes-tierlist__item-label {
+    max-width: min(10rem, 40vw);
   }
 }
 </style>

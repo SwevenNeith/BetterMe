@@ -4463,10 +4463,14 @@ watch(draftFolderId, (value) => {
 
 :deep(.markdown-body .notes-tierlist-widget) {
   margin: 0.85em 0;
+  max-width: 100%;
+  min-width: 0;
 }
 
 :deep(.markdown-body .notes-tierlist-host) {
   display: block;
+  max-width: 100%;
+  min-width: 0;
 }
 
 :deep(.markdown-body .notes-html-widget) {
