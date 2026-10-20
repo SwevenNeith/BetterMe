@@ -5,7 +5,12 @@ import { RouterView } from 'vue-router'
 import { useAppTabResume } from './composables/useAppTabResume.js'
 import { supabase } from './lib/supabase.js'
 import { ensureUserSettings } from './services/menstruation/menstruationNotifications.js'
-import { syncSessionUserCache, cacheSessionUser } from './utils/auth/sessionUser.js'
+import { loadSettingsBootBundle } from './services/settings/settingsBoot.js'
+import {
+  syncSessionUserCache,
+  cacheSessionUser,
+  resolveSessionUser,
+} from './utils/auth/sessionUser.js'
 
 useAppTabResume()
 
@@ -30,10 +35,8 @@ const onVisibilityActivity = () => {
 
 const checkIdleTime = async () => {
   try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) return
+    const user = await resolveSessionUser()
+    if (!user?.id) return
 
     const lastActivity = localStorage.getItem('betterme_last_activity')
     if (lastActivity) {
@@ -55,13 +58,14 @@ const checkIdleTime = async () => {
 onMounted(() => {
   void (async () => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      if (session?.user?.id) {
-        cacheSessionUser(session.user)
-        void ensureUserSettings(session.user.id).catch((err) => {
+      const user = await resolveSessionUser()
+      if (user?.id) {
+        void ensureUserSettings(user.id).catch((err) => {
           console.error('Impossible de créer les réglages par défaut:', err)
+        })
+        // Prefetch settings groupé avant le montage des vues / widgets.
+        void loadSettingsBootBundle(supabase, user.id).catch((err) => {
+          console.error('settings boot prefetch:', err)
         })
       }
     } catch (err) {

@@ -10,7 +10,7 @@ import {
   declencherCronNotifications,
   notificationsActives,
 } from '../services/common/notifications.js'
-import { hasCompletedVisibilityOnboarding } from '../services/settings/visibilityOnboarding.js'
+import { loadSettingsBootBundle } from '../services/settings/settingsBoot.js'
 import {
   applyMorningSnoozeSelection,
   dismissMorningSnoozeCandidates,
@@ -130,11 +130,12 @@ onMounted(() => {
 
       userId.value = user.id
 
+      let bootBundle = null
       try {
-        const completed = await hasCompletedVisibilityOnboarding(supabase, user.id)
-        showVisibilityOnboarding.value = !completed
+        bootBundle = await loadSettingsBootBundle(supabase, user.id)
+        showVisibilityOnboarding.value = !bootBundle.visibilityOnboardingCompleted
       } catch (onboardingErr) {
-        console.error('visibility onboarding:', onboardingErr)
+        console.error('settings boot:', onboardingErr)
       }
 
       if (!showVisibilityOnboarding.value) {
@@ -155,7 +156,10 @@ onMounted(() => {
               import('../services/television/televisionReleaseNotifications.js'),
             ])
             await Promise.allSettled([
-              realignAllDeviceLocalNotifications(supabase, user.id),
+              realignAllDeviceLocalNotifications(supabase, user.id, {
+                knownUtcOffsetMinutes: bootBundle?.notificationUtcOffsetMinutes,
+                knownTimezone: bootBundle?.notificationTimezone,
+              }),
               purgeStaleMenstruationNotificationsOnStartup(user.id),
               syncTelevisionReleaseNotificationsForUser(user.id).catch((tvErr) => {
                 console.error('syncTelevisionReleaseNotifications:', tvErr)
@@ -171,9 +175,9 @@ onMounted(() => {
       }
 
       if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-        window.requestIdleCallback(runBackgroundNotificationSync, { timeout: 4000 })
+        window.requestIdleCallback(runBackgroundNotificationSync, { timeout: 8000 })
       } else {
-        setTimeout(runBackgroundNotificationSync, 1500)
+        setTimeout(runBackgroundNotificationSync, 3500)
       }
     } catch (err) {
       console.error(

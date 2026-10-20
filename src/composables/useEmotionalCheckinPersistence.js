@@ -113,14 +113,22 @@ export function useEmotionalCheckinPersistence({
       const day = unref(dateJour)
       return `${uid ?? ''}|${day ?? ''}`
     },
-    (key) => {
-      const dateChanged = lastContextKey && key !== lastContextKey
-      const silent = Boolean(lastContextKey)
+    (key, previousKey) => {
+      const [uid = ''] = key.split('|')
+      const prev = previousKey ?? lastContextKey
+      const [prevUid = ''] = String(prev || '').split('|')
+      const dateChanged = Boolean(prev) && key !== prev
+      // Première authentification (null → user) : toujours appliquer au formulaire.
+      // Sinon on chargeait le snapshot « en silence » et Annuler était le seul moyen de le voir.
+      const becomingAuthed = Boolean(uid) && !prevUid
+      const applyToForm = !prev || becomingAuthed || dateChanged
+      const silent = Boolean(prev) && !becomingAuthed && !dateChanged
+
       lastContextKey = key
       if (dateChanged) {
         activeLogId.value = null
       }
-      loadFromDb({ applyToForm: !silent, silent })
+      void loadFromDb({ applyToForm, silent })
     },
     { immediate: true },
   )

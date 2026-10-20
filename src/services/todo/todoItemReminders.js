@@ -219,8 +219,13 @@ export async function rescheduleAllTodoItemReminders(userId, supabaseClient = su
       throw error
     }
 
-    for (const item of data ?? []) {
-      await rescheduleTodoItemReminder(userId, item, supabaseClient)
+    const items = data ?? []
+    const CONCURRENCY = 4
+    for (let i = 0; i < items.length; i += CONCURRENCY) {
+      const chunk = items.slice(i, i + CONCURRENCY)
+      await Promise.all(
+        chunk.map((item) => rescheduleTodoItemReminder(userId, item, supabaseClient)),
+      )
     }
   } catch (err) {
     if (isMissingReminderColumnError(err)) return

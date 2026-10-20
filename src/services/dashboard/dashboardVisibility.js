@@ -628,11 +628,27 @@ export function invalidateDashboardVisibilityCache(userId = null) {
   dashboardVisibilityInFlight.clear()
 }
 
+/**
+ * Alimente le cache sans requête (ex. boot settings groupé).
+ * @param {string} userId
+ * @param {DashboardVisibilityMap} visibility
+ */
+export function primeDashboardVisibilityCache(userId, visibility) {
+  if (!userId || !visibility) return
+  dashboardVisibilityCache.set(userId, mergeDashboardVisibility(visibility))
+}
+
 export async function loadDashboardVisibility(supabase, userId) {
   if (!userId) return createDefaultDashboardVisibility()
 
   const cached = dashboardVisibilityCache.get(userId)
   if (cached) return cached
+
+  // Import dynamique pour éviter le cycle settingsBoot ↔ dashboardVisibility.
+  const { awaitSettingsBootIfPending } = await import('../settings/settingsBoot.js')
+  await awaitSettingsBootIfPending(userId)
+  const afterBoot = dashboardVisibilityCache.get(userId)
+  if (afterBoot) return afterBoot
 
   const pending = dashboardVisibilityInFlight.get(userId)
   if (pending) return pending
@@ -691,6 +707,9 @@ export async function saveDashboardVisibility(supabase, userId, visibility) {
   }
 
   dashboardVisibilityCache.set(userId, payload)
+  void import('../settings/settingsBoot.js').then(({ invalidateSettingsBootCache }) => {
+    invalidateSettingsBootCache(userId)
+  })
   notifyDashboardVisibilityUpdated()
 }
 

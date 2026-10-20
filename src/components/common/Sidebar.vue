@@ -1558,7 +1558,11 @@ onUnmounted(() => {
   position: fixed;
   top: 0;
   left: 0;
+  /* 100vh coupe le bas sur téléphone (barre navigateur / home indicator). */
   height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
   width: 260px;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(20px);
@@ -1567,8 +1571,10 @@ onUnmounted(() => {
   box-shadow: 4px 0 24px rgba(173, 129, 190, 0.1);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   z-index: 100;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1920,12 +1926,15 @@ onUnmounted(() => {
 
 /* ─── Nav ─── */
 .sidebar-nav {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   padding: 1rem 0.75rem;
+  overflow-x: hidden;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .nav-link {
@@ -2196,15 +2205,19 @@ onUnmounted(() => {
 
 /* ─── Footer ─── */
 .sidebar-footer {
-  padding: 0 0.75rem 1.5rem;
+  padding: 0 0.75rem 1.25rem;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+  background: inherit;
 }
 
 .footer-nav-link {
   margin-bottom: 0.25rem;
+  flex-shrink: 0;
 }
 
 .logout-btn {
@@ -2221,6 +2234,8 @@ onUnmounted(() => {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .logout-btn:hover {
@@ -2323,9 +2338,15 @@ onUnmounted(() => {
 @media (max-width: 768px) {
   .sidebar {
     transform: translateX(-100%);
+    /* Viewport visible (évite le bas coupé sous la barre Safari / Chrome). */
+    height: 100svh;
+    max-height: 100svh;
   }
   .sidebar--open {
     transform: translateX(0);
+  }
+  .sidebar-footer {
+    padding-bottom: max(1.25rem, calc(0.5rem + env(safe-area-inset-bottom, 0px)));
   }
   .sidebar-workspace-btn {
     display: none;

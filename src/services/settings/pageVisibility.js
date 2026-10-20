@@ -92,6 +92,16 @@ export function invalidatePageVisibilityCache(userId = null) {
 }
 
 /**
+ * Alimente le cache sans requête (ex. boot settings groupé).
+ * @param {string} userId
+ * @param {PageVisibilityMap} visibility
+ */
+export function primePageVisibilityCache(userId, visibility) {
+  if (!userId || !visibility) return
+  pageVisibilityCache.set(userId, mergePageVisibility(visibility))
+}
+
+/**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @returns {Promise<PageVisibilityMap>}
@@ -101,6 +111,12 @@ export async function loadPageVisibility(supabase, userId) {
 
   const cached = pageVisibilityCache.get(userId)
   if (cached) return cached
+
+  // Import dynamique pour éviter le cycle settingsBoot ↔ pageVisibility.
+  const { awaitSettingsBootIfPending } = await import('./settingsBoot.js')
+  await awaitSettingsBootIfPending(userId)
+  const afterBoot = pageVisibilityCache.get(userId)
+  if (afterBoot) return afterBoot
 
   const pending = pageVisibilityInFlight.get(userId)
   if (pending) return pending
@@ -159,6 +175,9 @@ export async function savePageVisibility(supabase, userId, visibility) {
   }
 
   pageVisibilityCache.set(userId, payload)
+  void import('./settingsBoot.js').then(({ invalidateSettingsBootCache }) => {
+    invalidateSettingsBootCache(userId)
+  })
   notifyPageVisibilityUpdated()
 }
 

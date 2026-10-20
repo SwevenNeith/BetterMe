@@ -28,7 +28,13 @@ const userId = ref(null)
 let saveMessageTimeoutId = null
 let dashboardLoadGen = 0
 
-const { dashboardVisibility, dashboardLayout, visibleWidgetIds } = useDashboardVisibility({
+const {
+  dashboardVisibility,
+  dashboardLayout,
+  visibleWidgetIds,
+  isDashboardVisibilityLoading,
+  hasLoadedDashboardVisibility,
+} = useDashboardVisibility({
   userId,
 })
 
@@ -116,6 +122,11 @@ let scrollSyncRaf = null
 let mobileMediaQuery = null
 
 const MOBILE_MEDIA = '(max-width: 768px)'
+
+/** Mobile : ne monte que la slide active ±1 pour éviter la tempête de requêtes. */
+function shouldMountMobileSlide(slideIndex) {
+  return Math.abs(slideIndex - activePage.value) <= 1
+}
 
 const lastSlideIndex = computed(() => Math.max(0, slideCount.value - 1))
 
@@ -375,13 +386,17 @@ onMounted(async () => {
   }
 
   await loadDashboard({ silent: cached })
+  // Après userId : le watch du check-in applique déjà les données.
+  // Recharge explicite pour garantir l’affichage (évite la course null → user).
+  if (!isCheckinSaving.value) {
+    await loadEmotionCheckinFromDb({ applyToForm: true }).catch((err) => {
+      console.error('emotion checkin:', err)
+    })
+  }
   setupDashboardChrome()
   mobileMediaQuery = window.matchMedia(MOBILE_MEDIA)
   mobileMediaQuery.addEventListener('change', updateCarouselLayout)
   window.addEventListener('resize', updateCarouselLayout)
-  if (!isCheckinSaving.value) {
-    await loadEmotionCheckinFromDb({ applyToForm: true })
-  }
 })
 
 watch(dashboardVisibility, () => {
@@ -471,6 +486,13 @@ const onCancelEmotionalCheckin = () => {
       <p class="welcome-subtitle">Voici ton aperçu de la journée.</p>
     </div>
 
+    <p
+      v-if="isDashboardVisibilityLoading && !hasLoadedDashboardVisibility"
+      class="dashboard-visibility-loading"
+    >
+      Chargement du tableau de bord…
+    </p>
+
     <!-- 2 columns layout -->
     <div class="dashboard-carousel-wrapper">
       <!-- Navigation Arrows for mobile (outside the sliding track) -->
@@ -501,33 +523,35 @@ const onCancelEmotionalCheckin = () => {
               class="dashboard-column"
               :class="{ 'intro-column': slideIndex === 0 && slide.length > 1 }"
             >
-              <DashboardWidgetBlock
-                v-for="widgetId in slide"
-                :key="`mobile-${slideIndex}-${widgetId}`"
-                :widget-id="widgetId"
-                :pin="pinForWidget(widgetId)"
-                :as-column="false"
-                :user-id="userId"
-                :date-iso="todayStr"
-                :formatted-today="formattedToday"
-                :user-events="userEvents"
-                :is-loading-events="isLoadingEvents"
-                :get-category-style="getCategoryStyle"
-                :get-category-icon="getCategoryIcon"
-                :get-category-name="getCategoryName"
-                :is-loading-menstruation-board="isLoadingMenstruationBoard"
-                :has-menstruation-cycle-data="hasMenstruationCycleData"
-                :menstruation-mode="menstruationMode"
-                :menstruation-cycles="menstruationCycles"
-                :menstruation-cycles-naturel="menstruationCyclesNaturel"
-                :pattern-message="patternMessage"
-                :saved-today="savedToday"
-                :status-message="saveMessage"
-                :saving="isCheckinSaving"
-                checkin-compact
-                @save-checkin="onSaveEmotionalCheckin"
-                @cancel-checkin="onCancelEmotionalCheckin"
-              />
+              <template v-if="shouldMountMobileSlide(slideIndex)">
+                <DashboardWidgetBlock
+                  v-for="widgetId in slide"
+                  :key="`mobile-${slideIndex}-${widgetId}`"
+                  :widget-id="widgetId"
+                  :pin="pinForWidget(widgetId)"
+                  :as-column="false"
+                  :user-id="userId"
+                  :date-iso="todayStr"
+                  :formatted-today="formattedToday"
+                  :user-events="userEvents"
+                  :is-loading-events="isLoadingEvents"
+                  :get-category-style="getCategoryStyle"
+                  :get-category-icon="getCategoryIcon"
+                  :get-category-name="getCategoryName"
+                  :is-loading-menstruation-board="isLoadingMenstruationBoard"
+                  :has-menstruation-cycle-data="hasMenstruationCycleData"
+                  :menstruation-mode="menstruationMode"
+                  :menstruation-cycles="menstruationCycles"
+                  :menstruation-cycles-naturel="menstruationCyclesNaturel"
+                  :pattern-message="patternMessage"
+                  :saved-today="savedToday"
+                  :status-message="saveMessage"
+                  :saving="isCheckinSaving"
+                  checkin-compact
+                  @save-checkin="onSaveEmotionalCheckin"
+                  @cancel-checkin="onCancelEmotionalCheckin"
+                />
+              </template>
             </div>
           </template>
 
@@ -749,6 +773,14 @@ const onCancelEmotionalCheckin = () => {
   color: #6c757d;
   margin-top: 0.5rem;
   margin-bottom: 0;
+}
+
+.dashboard-visibility-loading {
+  margin: 0 0 1rem;
+  text-align: center;
+  color: #8a9098;
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .dashboard-center-band {
