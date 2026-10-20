@@ -94,11 +94,13 @@ const newEventTimerEnabled = ref(false)
 const newEventTimerHours = ref(0)
 const newEventTimerMinutes = ref(30)
 const addToTodo = ref(false)
+const newEventBatteryCost = ref(0)
 const isSavingEvent = ref(false)
 const eventFormError = ref('')
 const todoLinkedForm = reactive(createDefaultTodoLinkedForm())
 const todoPromesseLimits = ref({ perDay: 3, perWeek: 3 })
 const userId = ref(null)
+const pendingDeleteBatteryCount = ref(0)
 const coupleAnniversary = ref({
   couple_anniversary_enabled: false,
   couple_anniversary_start_date: '',
@@ -129,8 +131,6 @@ const { clearDraft: clearEventDraft, restoreDraft: restoreEventDraft } = useForm
     timerHours: newEventTimerHours.value,
     timerMinutes: newEventTimerMinutes.value,
     addToTodo: addToTodo.value,
-    todoLinkedForm: { ...todoLinkedForm },
-  }),
     batteryCost: newEventBatteryCost.value,
     todoLinkedForm: { ...todoLinkedForm },
   }),
@@ -4718,4 +4718,6 @@ const getPositionedEventsForDay = (dayIdx) => {
   .event-delete-btn,
   .all-day-delete-btn {
     background: rgba(28, 24, 37, 0.92);
+  }
+}
 </style>
