@@ -11,7 +11,13 @@ import {
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
 } from '../../services/settings/pageVisibility.js'
-import { listTodoCompletionsInRange, listTodoItems, setTodoCompletionForDate, setTodoQuantiteForDate, syncTodoIsDoneFlags } from '../../services/todo/todoItems.js'
+import {
+  listTodoCompletionsInRange,
+  listTodoItems,
+  setTodoCompletionForDate,
+  setTodoQuantiteForDate,
+  syncTodoIsDoneFlags,
+} from '../../services/todo/todoItems.js'
 import {
   buildCompletionProgressMap,
   getTodosForDate,
@@ -506,7 +512,11 @@ onUnmounted(() => {
   }
 
   .dashboard-todos__quantite-btn {
-    background: color-mix(in srgb, var(--todo-freq-bg, rgba(213, 181, 234, 0.1)) 70%, rgba(255, 255, 255, 0.08));
+    background: color-mix(
+      in srgb,
+      var(--todo-freq-bg, rgba(213, 181, 234, 0.1)) 70%,
+      rgba(255, 255, 255, 0.08)
+    );
     border-color: var(--todo-freq-border, rgba(213, 181, 234, 0.28));
     color: var(--todo-freq-accent, #d5b5ea);
   }

@@ -36,7 +36,7 @@ function normalizeTimeValue(value) {
 }
 
 const ENTRY_COLUMNS =
-  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, created_at'
+  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, created_at'
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
@@ -309,6 +309,8 @@ async function maybeApplyWeeklyBaseAdjustment(supabase, userId, dayIso) {
  *   cost: number,
  *   kind?: 'planned'|'actual',
  *   activity_id?: string | null,
+ *   source_type?: string | null,
+ *   source_id?: string | null,
  * }} payload
  */
 export async function addBatteryEntry(supabase, userId, dayIso, payload) {
@@ -333,6 +335,8 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
       cost,
       kind,
       sort_order,
+      source_type: payload.source_type || null,
+      source_id: payload.source_id || null,
     })
     .select(ENTRY_COLUMNS)
     .single()
@@ -408,7 +412,7 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
 export async function deleteBatteryEntry(supabase, userId, entryId) {
   const { data: existing, error: fetchError } = await supabase
     .from(ENTRIES_TABLE)
-    .select('day_id')
+    .select(`${ENTRY_COLUMNS}, day_id`)
     .eq('id', entryId)
     .eq('user_id', userId)
     .single()
@@ -430,7 +434,26 @@ export async function deleteBatteryEntry(supabase, userId, entryId) {
     .single()
 
   if (dayError) throw dayError
-  return recomputeAndPersistDay(supabase, userId, day)
+  const result = await recomputeAndPersistDay(supabase, userId, day)
+  return { ...result, deletedEntry: existing }
+}
+
+/**
+ * Charge une entrée Batterie (pour suppression liée).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} entryId
+ */
+export async function getBatteryEntry(supabase, userId, entryId) {
+  const { data, error } = await supabase
+    .from(ENTRIES_TABLE)
+    .select(ENTRY_COLUMNS)
+    .eq('id', entryId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) throw error
+  return data
 }
 
 /**
@@ -562,13 +585,25 @@ export async function listBatteryHistory(supabase, userId, opts = {}) {
 }
 
 /**
- * Snapshot compact pour le widget Dashboard.
+ * Snapshot compact pour le widget Dashboard (lecture seule si le jour existe).
+ * Évite un recompute+UPDATE à chaque affichage du dashboard.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {string | Date} [date]
  */
 export async function getBatteryDashboardSnapshot(supabase, userId, date = new Date()) {
-  const { day, entries } = await ensureBatteryDay(supabase, userId, date)
+  const dayIso = toDayDateIso(date)
+  let day = await fetchDayRow(supabase, userId, dayIso)
+  let entries
+
+  if (day) {
+    entries = await listDayEntries(supabase, day.id)
+  } else {
+    const ensured = await ensureBatteryDay(supabase, userId, dayIso)
+    day = ensured.day
+    entries = ensured.entries
+  }
+
   const spent = sumEntryCosts(entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL))
   const budget = Number(day.computed_budget) || 0
   return {

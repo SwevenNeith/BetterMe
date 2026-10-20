@@ -1,4 +1,5 @@
 import { TODO_FREQUENCY } from '../../constants/todo/todoOptions.js'
+import { BATTERY_SOURCE_TYPES } from '../../constants/battery/battery.js'
 import {
   addDaysISO,
   assertPromesseLimits,
@@ -9,6 +10,7 @@ import {
   isTodoCompletedOnDate,
   normalizeDateISO,
 } from '../../utils/todo/todoCalendar.js'
+import { deleteBatteryEntriesForSource } from '../battery/batterySourceSync.js'
 import { loadTodoPromesseLimits } from './todoPromesseSettings.js'
 
 const TABLE = 'todo_items'
@@ -333,6 +335,7 @@ export async function deleteTodoItem(supabase, userId, itemId) {
   if (!userId || !itemId) return
 
   await clearTodoItemReminder(itemId)
+  await deleteBatteryEntriesForSource(supabase, userId, BATTERY_SOURCE_TYPES.TODO, itemId)
 
   const { error } = await supabase.from(TABLE).delete().eq('id', itemId).eq('user_id', userId)
 

@@ -137,30 +137,43 @@ onMounted(() => {
         console.error('visibility onboarding:', onboardingErr)
       }
 
-      const [
-        { purgeStaleMenstruationNotificationsOnStartup },
-        { realignAllDeviceLocalNotifications },
-        { syncTelevisionReleaseNotificationsForUser },
-      ] = await Promise.all([
-        import('../services/menstruation/menstruationNotificationSync.js'),
-        import('../services/common/notificationRealign.js'),
-        import('../services/television/televisionReleaseNotifications.js'),
-      ])
-      await realignAllDeviceLocalNotifications(supabase, user.id)
-      await purgeStaleMenstruationNotificationsOnStartup(user.id)
-      try {
-        await syncTelevisionReleaseNotificationsForUser(user.id)
-      } catch (tvErr) {
-        console.error('syncTelevisionReleaseNotifications:', tvErr)
-      }
-      try {
-        await purgeOldSentScheduledNotifications(supabase, user.id)
-      } catch (purgeErr) {
-        console.error('purgeOldSentScheduledNotifications:', purgeErr)
+      if (!showVisibilityOnboarding.value) {
+        void maybeShowMorningSnoozePrompt()
       }
 
-      if (!showVisibilityOnboarding.value) {
-        await maybeShowMorningSnoozePrompt()
+      // Diffère le sync notifications pour ne pas saturer le réseau au premier affichage.
+      const runBackgroundNotificationSync = () => {
+        void (async () => {
+          try {
+            const [
+              { purgeStaleMenstruationNotificationsOnStartup },
+              { realignAllDeviceLocalNotifications },
+              { syncTelevisionReleaseNotificationsForUser },
+            ] = await Promise.all([
+              import('../services/menstruation/menstruationNotificationSync.js'),
+              import('../services/common/notificationRealign.js'),
+              import('../services/television/televisionReleaseNotifications.js'),
+            ])
+            await Promise.allSettled([
+              realignAllDeviceLocalNotifications(supabase, user.id),
+              purgeStaleMenstruationNotificationsOnStartup(user.id),
+              syncTelevisionReleaseNotificationsForUser(user.id).catch((tvErr) => {
+                console.error('syncTelevisionReleaseNotifications:', tvErr)
+              }),
+              purgeOldSentScheduledNotifications(supabase, user.id).catch((purgeErr) => {
+                console.error('purgeOldSentScheduledNotifications:', purgeErr)
+              }),
+            ])
+          } catch (syncErr) {
+            console.error('background notification sync:', syncErr)
+          }
+        })()
+      }
+
+      if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(runBackgroundNotificationSync, { timeout: 4000 })
+      } else {
+        setTimeout(runBackgroundNotificationSync, 1500)
       }
     } catch (err) {
       console.error(

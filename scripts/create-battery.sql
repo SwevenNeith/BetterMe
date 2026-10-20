@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS public.battery_day_entries (
   cost integer NOT NULL DEFAULT 0,
   kind text NOT NULL CHECK (kind IN ('planned', 'actual')),
   sort_order integer NOT NULL DEFAULT 0,
+  source_type text NULL CHECK (source_type IS NULL OR source_type IN ('todo', 'timetable')),
+  source_id uuid NULL,
   created_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
 
@@ -88,12 +90,24 @@ COMMENT ON TABLE public.battery_day_entries IS
   'Entrées planifiées ou réelles d’une journée Batterie.';
 COMMENT ON COLUMN public.battery_day_entries.kind IS
   'planned = planification (veille) ; actual = réalisé (journée / soir).';
+COMMENT ON COLUMN public.battery_day_entries.source_type IS
+  'Origine de l’entrée : todo | timetable (null = saisie manuelle Batterie).';
+COMMENT ON COLUMN public.battery_day_entries.source_id IS
+  'Id de la tâche TODO ou de l’événement EDT source.';
 
 CREATE INDEX IF NOT EXISTS battery_day_entries_day_kind_idx
   ON public.battery_day_entries (day_id, kind, sort_order);
 
 CREATE INDEX IF NOT EXISTS battery_day_entries_user_activity_idx
   ON public.battery_day_entries (user_id, activity_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS battery_day_entries_source_day_uidx
+  ON public.battery_day_entries (user_id, source_type, source_id, day_id)
+  WHERE source_type IS NOT NULL AND source_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS battery_day_entries_source_idx
+  ON public.battery_day_entries (user_id, source_type, source_id)
+  WHERE source_type IS NOT NULL AND source_id IS NOT NULL;
 
 ALTER TABLE public.battery_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.battery_activities ENABLE ROW LEVEL SECURITY;

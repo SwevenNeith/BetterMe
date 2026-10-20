@@ -25,6 +25,12 @@ export const BATTERY_ENTRY_KINDS = {
   ACTUAL: 'actual',
 }
 
+/** Origine d’une entrée Batterie liée à TODO / EDT. */
+export const BATTERY_SOURCE_TYPES = {
+  TODO: 'todo',
+  TIMETABLE: 'timetable',
+}
+
 export const BATTERY_GAUGE_COLORS = {
   green: '#5a9e78',
   orange: '#d4a017',

@@ -2,16 +2,15 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
+import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 
 const router = useRouter()
 const isCheckingSession = ref(true)
 
 onMounted(async () => {
   try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (session) {
+    const user = await resolveSessionUser()
+    if (user) {
       router.push('/dashboard')
       return
     }

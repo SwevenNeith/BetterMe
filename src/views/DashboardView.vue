@@ -240,14 +240,22 @@ const loadMenstruationBoard = async (uid, gen) => {
 // Fetch Events & Categories from Supabase
 const fetchTodayEvents = async (userId, gen) => {
   try {
-    // Fetch categories
-    const { data: catData, error: catError } = await supabase
-      .from('timetable_categories')
-      .select('*')
-      .eq('user_id', userId)
+    const [catResult, evResult] = await Promise.all([
+      supabase.from('timetable_categories').select('*').eq('user_id', userId),
+      supabase
+        .from('timetable_events')
+        .select('*')
+        .eq('user_id', userId)
+        .or(
+          `date_start.eq.${todayStr.value},and(date_start.lte.${todayStr.value},date_end.gte.${todayStr.value})`,
+        ),
+    ])
 
-    if (catError) throw catError
-    userCategories.value = catData || []
+    if (catResult.error) throw catResult.error
+    if (evResult.error) throw evResult.error
+    if (gen !== dashboardLoadGen) return
+
+    userCategories.value = catResult.data || []
 
     const defaultCategories = [
       { name: 'Travail', color: 'hsl(280, 65%, 72%)', icon: '💼' },
@@ -269,19 +277,7 @@ const fetchTodayEvents = async (userId, gen) => {
       }
     }
 
-    // Fetch events (must be active today)
-    const { data: evData, error: evError } = await supabase
-      .from('timetable_events')
-      .select('*')
-      .eq('user_id', userId)
-      .or(
-        `date_start.eq.${todayStr.value},and(date_start.lte.${todayStr.value},date_end.gte.${todayStr.value})`,
-      )
-
-    if (evError) throw evError
-
-    // Sort events
-    const parsedEvents = (evData || []).map((ev) => {
+    const parsedEvents = (evResult.data || []).map((ev) => {
       let startDecimal = 0
       if (!ev.all_day && ev.time) {
         const startStr = ev.time.split('-')[0].trim().replace('h', ':')
@@ -294,9 +290,7 @@ const fetchTodayEvents = async (userId, gen) => {
     })
 
     parsedEvents.sort((a, b) => a.startDecimal - b.startDecimal)
-    if (gen === dashboardLoadGen) {
-      userEvents.value = parsedEvents
-    }
+    userEvents.value = parsedEvents
   } catch (err) {
     console.error('Error fetching today events:', err)
     if (gen === dashboardLoadGen) {

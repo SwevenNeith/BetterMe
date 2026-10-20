@@ -76,6 +76,21 @@ export function mergePageVisibility(raw) {
   return defaults
 }
 
+/** @type {Map<string, PageVisibilityMap>} */
+const pageVisibilityCache = new Map()
+/** @type {Map<string, Promise<PageVisibilityMap>>} */
+const pageVisibilityInFlight = new Map()
+
+export function invalidatePageVisibilityCache(userId = null) {
+  if (userId) {
+    pageVisibilityCache.delete(userId)
+    pageVisibilityInFlight.delete(userId)
+    return
+  }
+  pageVisibilityCache.clear()
+  pageVisibilityInFlight.clear()
+}
+
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
@@ -84,20 +99,37 @@ export function mergePageVisibility(raw) {
 export async function loadPageVisibility(supabase, userId) {
   if (!userId) return createDefaultPageVisibility()
 
-  await ensureUserSettings(userId)
+  const cached = pageVisibilityCache.get(userId)
+  if (cached) return cached
 
-  const { data, error } = await supabase
-    .from(SETTINGS_TABLE)
-    .select(COLUMN)
-    .eq('user_id', userId)
-    .maybeSingle()
+  const pending = pageVisibilityInFlight.get(userId)
+  if (pending) return pending
 
-  if (error) {
-    if (isMissingColumnError(error)) return createDefaultPageVisibility()
-    throw error
+  const task = (async () => {
+    await ensureUserSettings(userId)
+
+    const { data, error } = await supabase
+      .from(SETTINGS_TABLE)
+      .select(COLUMN)
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (error) {
+      if (isMissingColumnError(error)) return createDefaultPageVisibility()
+      throw error
+    }
+
+    const merged = mergePageVisibility(data?.[COLUMN])
+    pageVisibilityCache.set(userId, merged)
+    return merged
+  })()
+
+  pageVisibilityInFlight.set(userId, task)
+  try {
+    return await task
+  } finally {
+    pageVisibilityInFlight.delete(userId)
   }
-
-  return mergePageVisibility(data?.[COLUMN])
 }
 
 /**
@@ -126,6 +158,7 @@ export async function savePageVisibility(supabase, userId, visibility) {
     throw error
   }
 
+  pageVisibilityCache.set(userId, payload)
   notifyPageVisibilityUpdated()
 }
 

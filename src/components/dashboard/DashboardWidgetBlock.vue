@@ -1,21 +1,35 @@
 <script setup>
-import MenstruationCycleCalendar from '../menstruation/MenstruationCycleCalendar.vue'
-import MenstruationNaturalCycleCalendar from '../menstruation/MenstruationNaturalCycleCalendar.vue'
-import DashboardEmotionalCheckin from './DashboardEmotionalCheckin.vue'
-import DashboardComfortImages from './DashboardComfortImages.vue'
-import DashboardWordOfTheDay from './DashboardWordOfTheDay.vue'
-import DashboardTodayTodos from './DashboardTodayTodos.vue'
-import DashboardHabitsAnnual from './DashboardHabitsAnnual.vue'
-import DashboardNotesGraph from './DashboardNotesGraph.vue'
-import DashboardDailyNote from './DashboardDailyNote.vue'
-import DashboardPinnedNote from './DashboardPinnedNote.vue'
-import DashboardReadingInProgress from './DashboardReadingInProgress.vue'
-import DashboardTelevisionInProgress from './DashboardTelevisionInProgress.vue'
-import DashboardActiveProjects from './DashboardActiveProjects.vue'
-import DashboardFinancesBreakdown from './DashboardFinancesBreakdown.vue'
-import DashboardBattery from './DashboardBattery.vue'
+import { defineAsyncComponent } from 'vue'
 import { DASHBOARD_WIDGET_IDS } from '../../constants/dashboard/dashboardWidgets.js'
 import { isPinnedNoteWidgetId } from '../../constants/dashboard/dashboardPinnedNotes.js'
+
+const MenstruationCycleCalendar = defineAsyncComponent(
+  () => import('../menstruation/MenstruationCycleCalendar.vue'),
+)
+const MenstruationNaturalCycleCalendar = defineAsyncComponent(
+  () => import('../menstruation/MenstruationNaturalCycleCalendar.vue'),
+)
+const DashboardEmotionalCheckin = defineAsyncComponent(
+  () => import('./DashboardEmotionalCheckin.vue'),
+)
+const DashboardComfortImages = defineAsyncComponent(() => import('./DashboardComfortImages.vue'))
+const DashboardWordOfTheDay = defineAsyncComponent(() => import('./DashboardWordOfTheDay.vue'))
+const DashboardTodayTodos = defineAsyncComponent(() => import('./DashboardTodayTodos.vue'))
+const DashboardHabitsAnnual = defineAsyncComponent(() => import('./DashboardHabitsAnnual.vue'))
+const DashboardNotesGraph = defineAsyncComponent(() => import('./DashboardNotesGraph.vue'))
+const DashboardDailyNote = defineAsyncComponent(() => import('./DashboardDailyNote.vue'))
+const DashboardPinnedNote = defineAsyncComponent(() => import('./DashboardPinnedNote.vue'))
+const DashboardReadingInProgress = defineAsyncComponent(
+  () => import('./DashboardReadingInProgress.vue'),
+)
+const DashboardTelevisionInProgress = defineAsyncComponent(
+  () => import('./DashboardTelevisionInProgress.vue'),
+)
+const DashboardActiveProjects = defineAsyncComponent(() => import('./DashboardActiveProjects.vue'))
+const DashboardFinancesBreakdown = defineAsyncComponent(
+  () => import('./DashboardFinancesBreakdown.vue'),
+)
+const DashboardBattery = defineAsyncComponent(() => import('./DashboardBattery.vue'))
 
 defineProps({
   widgetId: {

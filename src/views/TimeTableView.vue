@@ -37,8 +37,17 @@ import {
   deleteTimetableEvent,
   deleteAllTimetableEventsForTodo,
   createTimetableEventsForTodo,
+  listTimetableEventsForTodo,
 } from '../services/todo/todoTimetableLink.js'
 import { isRecurringTodoFrequency } from '../utils/todo/todoPlanningDates.js'
+import { BATTERY_SOURCE_TYPES } from '../constants/battery/battery.js'
+import {
+  clearTodoBatteryWhenTimetableLinked,
+  countBatteryEntriesForSources,
+  getLinkedBatteryCost,
+  syncBatteryFromTimetableEvent,
+  syncBatteryFromTodo,
+} from '../services/battery/batterySourceSync.js'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import {
@@ -122,6 +131,9 @@ const { clearDraft: clearEventDraft, restoreDraft: restoreEventDraft } = useForm
     addToTodo: addToTodo.value,
     todoLinkedForm: { ...todoLinkedForm },
   }),
+    batteryCost: newEventBatteryCost.value,
+    todoLinkedForm: { ...todoLinkedForm },
+  }),
   setState: (state) => {
     if (!state || typeof state !== 'object') return
     newEventTitle.value = state.title ?? ''
@@ -141,6 +153,7 @@ const { clearDraft: clearEventDraft, restoreDraft: restoreEventDraft } = useForm
     newEventTimerHours.value = Number(state.timerHours) || 0
     newEventTimerMinutes.value = Number(state.timerMinutes) || 30
     addToTodo.value = Boolean(state.addToTodo)
+    newEventBatteryCost.value = Number(state.batteryCost) || 0
     if (state.todoLinkedForm && typeof state.todoLinkedForm === 'object') {
       Object.assign(todoLinkedForm, createDefaultTodoLinkedForm(), state.todoLinkedForm)
     }
@@ -268,6 +281,7 @@ function resetEventForm() {
   resetReminderFields()
   resetTimerFields()
   resetTodoLinkedForm()
+  newEventBatteryCost.value = 0
 }
 
 function closeEventModal() {
@@ -316,8 +330,26 @@ async function openEventForEdit(event) {
     setTimerFieldsFromMinutes(original.timer_duration)
   }
 
+  newEventBatteryCost.value = 0
   isModalOpen.value = true
   await restoreEventFormDraft()
+  void loadEventBatteryCost(original)
+}
+
+async function loadEventBatteryCost(event) {
+  if (!event?.id) return
+  try {
+    const user = await resolveSessionUser()
+    if (!user) return
+    const cost = await getLinkedBatteryCost(supabase, user.id, [
+      { sourceType: BATTERY_SOURCE_TYPES.TIMETABLE, sourceId: event.id },
+    ])
+    if (cost != null && editingEventId.value === event.id) {
+      newEventBatteryCost.value = cost
+    }
+  } catch (err) {
+    console.error(err)
+  }
 }
 
 const getReminderMinutesBefore = () => {
@@ -1125,7 +1157,7 @@ const handleAddEvent = async () => {
         const todo = await createTodoItem(supabase, user.id, todoPayload, {
           skipReminderSchedule: true,
         })
-        const { categories } = await createTimetableEventsForTodo(
+        const { categories, events: createdEvents } = await createTimetableEventsForTodo(
           supabase,
           user.id,
           { ...todo, ...todoPayload },
@@ -1148,6 +1180,14 @@ const handleAddEvent = async () => {
           userCategories.value,
         )
         userCategories.value = categories
+        await clearTodoBatteryWhenTimetableLinked(supabase, user.id, todo.id)
+        for (const event of createdEvents ?? []) {
+          await syncBatteryFromTimetableEvent(supabase, user.id, event, {
+            cost: newEventBatteryCost.value,
+            preserveExistingCost: false,
+            linkedTodoFrequence: todoPayload.frequence,
+          })
+        }
         timetableCache.publish({
           userEvents: userEvents.value,
           userCategories: userCategories.value,
@@ -1233,6 +1273,7 @@ const handleAddEvent = async () => {
     }
 
     // Lien TODO d’abord : une seule source de rappel (EDT), jamais de rappel TODO en parallèle
+    let linkedTodoFrequence = null
     if (addToTodo.value && !editingEventHasTodoLink.value && !isBirthday) {
       const todoPayload = buildTodoPayloadFromTimetable(
         {
@@ -1244,13 +1285,23 @@ const handleAddEvent = async () => {
         },
         todoLinkedForm,
       )
+      linkedTodoFrequence = todoPayload.frequence
       const todo = await createTodoItem(supabase, user.id, todoPayload, {
         skipReminderSchedule: true,
       })
       if (savedEvent?.id && todo?.id) {
         await linkTodoAndTimetable(supabase, user.id, todo.id, savedEvent.id)
         savedEvent.todo_item_id = todo.id
+        await clearTodoBatteryWhenTimetableLinked(supabase, user.id, todo.id)
       }
+    }
+
+    if (savedEvent) {
+      await syncBatteryFromTimetableEvent(supabase, user.id, savedEvent, {
+        cost: newEventBatteryCost.value,
+        preserveExistingCost: false,
+        linkedTodoFrequence,
+      })
     }
 
     if (notificationsActives() && reminderActive && savedEvent) {
@@ -1325,11 +1376,35 @@ function requestDeleteEvent(eventId) {
   const event = userEvents.value.find((entry) => entry.id === eventId)
   if (!event || isDeletingEvent.value) return
   pendingDeleteEvent.value = event
+  pendingDeleteBatteryCount.value = 0
+  void loadPendingDeleteEventBatteryCount(event)
+}
+
+async function loadPendingDeleteEventBatteryCount(event) {
+  try {
+    const user = await resolveSessionUser()
+    if (!user || !event) return
+    const sources = [{ sourceType: BATTERY_SOURCE_TYPES.TIMETABLE, sourceId: event.id }]
+    if (event.todo_item_id) {
+      sources.push({ sourceType: BATTERY_SOURCE_TYPES.TODO, sourceId: event.todo_item_id })
+      const siblings = await listTimetableEventsForTodo(supabase, user.id, event.todo_item_id)
+      for (const sibling of siblings) {
+        sources.push({ sourceType: BATTERY_SOURCE_TYPES.TIMETABLE, sourceId: sibling.id })
+      }
+    }
+    const count = await countBatteryEntriesForSources(supabase, user.id, sources)
+    if (pendingDeleteEvent.value?.id === event.id) {
+      pendingDeleteBatteryCount.value = count
+    }
+  } catch (err) {
+    console.error(err)
+  }
 }
 
 function cancelEventDelete() {
   if (isDeletingEvent.value) return
   pendingDeleteEvent.value = null
+  pendingDeleteBatteryCount.value = 0
 }
 
 async function confirmEventDelete(alsoDeleteLinked = false) {
@@ -1359,6 +1434,19 @@ async function confirmEventDelete(alsoDeleteLinked = false) {
       })
       userEvents.value = userEvents.value.filter((entry) => entry.todo_item_id !== todoId)
       timetableCache.$patch({ isValid: false })
+      // Si la TODO ponctuelle reste, on la re-synchronise en prévu Batterie.
+      const { data: todoRow } = await supabase
+        .from('todo_items')
+        .select('id, nom, frequence, date_echeance')
+        .eq('id', todoId)
+        .eq('user_id', user.id)
+        .maybeSingle()
+      if (todoRow) {
+        await syncBatteryFromTodo(supabase, user.id, todoRow, {
+          cost: 0,
+          preserveExistingCost: true,
+        })
+      }
     } else {
       await deleteTimetableEvent(supabase, user.id, event.id)
       userEvents.value = userEvents.value.filter((entry) => entry.id !== event.id)
@@ -1371,6 +1459,7 @@ async function confirmEventDelete(alsoDeleteLinked = false) {
     }
 
     pendingDeleteEvent.value = null
+    pendingDeleteBatteryCount.value = 0
     timetableCache.publish({
       userEvents: userEvents.value,
       userCategories: userCategories.value,
@@ -2389,6 +2478,20 @@ const getPositionedEventsForDay = (dayIdx) => {
             :promesse-limit-hint="todoPromesseLimitHint"
           />
 
+          <label v-if="!newEventIsBirthday" class="modal-battery-cost">
+            <span>Coût Batterie (prévu)</span>
+            <input
+              v-model.number="newEventBatteryCost"
+              type="number"
+              step="1"
+              title="Positif = dépense, négatif = regain (0 autorisé)"
+            />
+          </label>
+          <p v-if="!newEventIsBirthday" class="category-tip">
+            Ajouté au prévu Batterie pour chaque jour de l’événement (multi-jours inclus). Hors
+            anniversaires.
+          </p>
+
           <p v-if="eventFormError" class="event-form-error" role="alert">{{ eventFormError }}</p>
 
           <button type="submit" class="modal-submit-btn" :disabled="isSavingEvent">
@@ -2422,6 +2525,14 @@ const getPositionedEventsForDay = (dayIdx) => {
         </h2>
         <p id="timetable-delete-message" class="timetable-delete-dialog__message">
           « {{ pendingDeleteEvent.title }} » sera définitivement supprimée.
+        </p>
+        <p
+          v-if="pendingDeleteBatteryCount > 0"
+          class="timetable-delete-dialog__message timetable-delete-dialog__message--linked"
+        >
+          {{ pendingDeleteBatteryCount }} entrée{{ pendingDeleteBatteryCount > 1 ? 's' : '' }}
+          Batterie (prévu) liée{{ pendingDeleteBatteryCount > 1 ? 's' : '' }}
+          (retirées avec la source choisie).
         </p>
         <p
           v-if="pendingDeleteEvent.todo_item_id"
@@ -4471,6 +4582,32 @@ const getPositionedEventsForDay = (dayIdx) => {
   }
 }
 
+.modal-battery-cost {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #95a5a6;
+}
+
+.modal-battery-cost input {
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  background: rgba(255, 255, 255, 0.88);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #2c3e50;
+  text-transform: none;
+  letter-spacing: normal;
+  max-width: 8rem;
+}
+
 .category-tip {
   display: block;
   font-size: 0.78rem;
@@ -4581,6 +4718,4 @@ const getPositionedEventsForDay = (dayIdx) => {
   .event-delete-btn,
   .all-day-delete-btn {
     background: rgba(28, 24, 37, 0.92);
-  }
-}
 </style>

@@ -52,34 +52,36 @@ const checkIdleTime = async () => {
   }
 }
 
-onMounted(async () => {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  if (session?.user?.id) {
-    cacheSessionUser(session.user)
+onMounted(() => {
+  void (async () => {
     try {
-      await ensureUserSettings(session.user.id)
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      if (session?.user?.id) {
+        cacheSessionUser(session.user)
+        void ensureUserSettings(session.user.id).catch((err) => {
+          console.error('Impossible de créer les réglages par défaut:', err)
+        })
+      }
     } catch (err) {
-      console.error('Impossible de créer les réglages par défaut:', err)
+      console.error('session boot:', err)
     }
-  }
+  })()
 
   const {
     data: { subscription },
-  } = supabase.auth.onAuthStateChange(async (event, session) => {
+  } = supabase.auth.onAuthStateChange((event, session) => {
     syncSessionUserCache(event, session)
     if (event === 'SIGNED_IN' && session?.user?.id) {
-      try {
-        await ensureUserSettings(session.user.id)
-      } catch (err) {
+      void ensureUserSettings(session.user.id).catch((err) => {
         console.error('Impossible de créer les réglages par défaut:', err)
-      }
+      })
     }
   })
   authSubscription = subscription
 
-  await checkIdleTime()
+  void checkIdleTime()
 
   window.addEventListener('mousemove', updateActivity)
   window.addEventListener('keydown', updateActivity)

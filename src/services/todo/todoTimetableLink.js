@@ -4,6 +4,8 @@ import { deletePendingTodoItemReminders } from './todoItemReminders.js'
 import { getLocalTodayISO } from '../common/scheduledReminders.js'
 import { normalizeDateISO } from '../../utils/habit/habitCalendar.js'
 import { getTodoPlanningOccurrenceDates, isRecurringTodoFrequency } from '../../utils/todo/todoPlanningDates.js'
+import { BATTERY_SOURCE_TYPES } from '../../constants/battery/battery.js'
+import { deleteBatteryEntriesForSource } from '../battery/batterySourceSync.js'
 
 /**
  * Annule tous les rappels pending liés à une paire TODO ↔ événements EDT.
@@ -259,6 +261,12 @@ export async function deleteTimetableEvent(supabase, userId, eventId) {
 
   const todoItemId = eventRow?.todo_item_id ?? null
 
+  await deleteBatteryEntriesForSource(
+    supabase,
+    userId,
+    BATTERY_SOURCE_TYPES.TIMETABLE,
+    eventId,
+  )
   await deleteTimetableEventRow(supabase, userId, eventId)
 
   if (todoItemId) {
@@ -303,6 +311,12 @@ export async function deleteAllTimetableEventsForTodo(
   })
 
   for (const event of events) {
+    await deleteBatteryEntriesForSource(
+      supabase,
+      userId,
+      BATTERY_SOURCE_TYPES.TIMETABLE,
+      event.id,
+    )
     await deleteTimetableEventRow(supabase, userId, event.id)
   }
   await clearTodoTimetableLink(supabase, userId, todoItemId)

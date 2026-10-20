@@ -613,23 +613,55 @@ export function patchDashboardNotesGraphVaultId(visibility, vaultId) {
  * @param {string} userId
  * @returns {Promise<DashboardVisibilityMap>}
  */
+/** @type {Map<string, DashboardVisibilityMap>} */
+const dashboardVisibilityCache = new Map()
+/** @type {Map<string, Promise<DashboardVisibilityMap>>} */
+const dashboardVisibilityInFlight = new Map()
+
+export function invalidateDashboardVisibilityCache(userId = null) {
+  if (userId) {
+    dashboardVisibilityCache.delete(userId)
+    dashboardVisibilityInFlight.delete(userId)
+    return
+  }
+  dashboardVisibilityCache.clear()
+  dashboardVisibilityInFlight.clear()
+}
+
 export async function loadDashboardVisibility(supabase, userId) {
   if (!userId) return createDefaultDashboardVisibility()
 
-  await ensureUserSettings(userId)
+  const cached = dashboardVisibilityCache.get(userId)
+  if (cached) return cached
 
-  const { data, error } = await supabase
-    .from(SETTINGS_TABLE)
-    .select(COLUMN)
-    .eq('user_id', userId)
-    .maybeSingle()
+  const pending = dashboardVisibilityInFlight.get(userId)
+  if (pending) return pending
 
-  if (error) {
-    if (isMissingColumnError(error)) return createDefaultDashboardVisibility()
-    throw error
+  const task = (async () => {
+    await ensureUserSettings(userId)
+
+    const { data, error } = await supabase
+      .from(SETTINGS_TABLE)
+      .select(COLUMN)
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (error) {
+      if (isMissingColumnError(error)) return createDefaultDashboardVisibility()
+      throw error
+    }
+
+    const merged = mergeDashboardVisibility(data?.[COLUMN])
+    dashboardVisibilityCache.set(userId, merged)
+    return merged
+  })()
+
+  dashboardVisibilityInFlight.set(userId, task)
+  try {
+    return await task
+  } finally {
+    dashboardVisibilityInFlight.delete(userId)
   }
-
-  return mergeDashboardVisibility(data?.[COLUMN])
 }
 
 /**
@@ -658,6 +690,7 @@ export async function saveDashboardVisibility(supabase, userId, visibility) {
     throw error
   }
 
+  dashboardVisibilityCache.set(userId, payload)
   notifyDashboardVisibilityUpdated()
 }
 

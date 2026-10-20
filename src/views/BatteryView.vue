@@ -8,7 +8,15 @@ import {
   BATTERY_EVENING_FEELINGS,
   BATTERY_MORNING_LABELS,
   BATTERY_SLEEP_QUALITIES,
+  BATTERY_SOURCE_TYPES,
 } from '../constants/battery/battery.js'
+import { deleteTodoItem } from '../services/todo/todoItems.js'
+import {
+  deleteAllTimetableEventsForTodo,
+  deleteTimetableEvent,
+} from '../services/todo/todoTimetableLink.js'
+import { deleteBatteryEntriesForSource } from '../services/battery/batterySourceSync.js'
+import { useTimetableCacheStore } from '../stores/timetableCache.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
@@ -270,14 +278,88 @@ async function onEntryCostChange(entry, event) {
   }
 }
 
-async function removeEntry(entry) {
+const pendingDeleteEntry = ref(null)
+const isDeletingEntry = ref(false)
+
+function removeEntry(entry) {
+  if (!entry?.id || isDeletingEntry.value) return
+  pendingDeleteEntry.value = entry
+}
+
+function cancelDeleteEntry() {
+  if (isDeletingEntry.value) return
+  pendingDeleteEntry.value = null
+}
+
+async function confirmDeleteEntry(alsoDeleteLinked = false) {
+  const entry = pendingDeleteEntry.value
+  if (!userId.value || !entry?.id || isDeletingEntry.value) return
+
+  isDeletingEntry.value = true
+  statusMessage.value = ''
   try {
-    const result = await deleteBatteryEntry(supabase, userId.value, entry.id)
-    day.value = result.day
-    entries.value = result.entries
+    if (alsoDeleteLinked && entry.source_type && entry.source_id) {
+      if (entry.source_type === BATTERY_SOURCE_TYPES.TODO) {
+        const hasPlanning = await supabase
+          .from('todo_items')
+          .select('timetable_event_id')
+          .eq('id', entry.source_id)
+          .eq('user_id', userId.value)
+          .maybeSingle()
+        if (hasPlanning.data?.timetable_event_id) {
+          await deleteAllTimetableEventsForTodo(supabase, userId.value, entry.source_id, {
+            clearTodoReminders: true,
+          })
+          useTimetableCacheStore().$patch({ isValid: false })
+        }
+        await deleteTodoItem(supabase, userId.value, entry.source_id)
+      } else if (entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE) {
+        const { data: eventRow } = await supabase
+          .from('timetable_events')
+          .select('id, todo_item_id')
+          .eq('id', entry.source_id)
+          .eq('user_id', userId.value)
+          .maybeSingle()
+
+        if (eventRow?.todo_item_id) {
+          await deleteAllTimetableEventsForTodo(supabase, userId.value, eventRow.todo_item_id, {
+            clearTodoReminders: true,
+          })
+          await deleteTodoItem(supabase, userId.value, eventRow.todo_item_id)
+        } else if (eventRow) {
+          await deleteTimetableEvent(supabase, userId.value, eventRow.id)
+        } else {
+          await deleteBatteryEntriesForSource(
+            supabase,
+            userId.value,
+            entry.source_type,
+            entry.source_id,
+          )
+        }
+        useTimetableCacheStore().$patch({ isValid: false })
+      }
+    } else {
+      // Uniquement Batterie : retire cette entrée (les autres jours d’un multi-jours restent)
+      await deleteBatteryEntry(supabase, userId.value, entry.id)
+    }
+
+    await loadDay()
+    pendingDeleteEntry.value = null
+    statusMessage.value = 'Supprimé'
   } catch (err) {
     console.error(err)
+    statusMessage.value = err?.message || 'Erreur de suppression'
+  } finally {
+    isDeletingEntry.value = false
   }
+}
+
+function confirmDeleteEntryOnly() {
+  void confirmDeleteEntry(false)
+}
+
+function confirmDeleteEntryWithLinked() {
+  void confirmDeleteEntry(true)
 }
 
 async function doCopyPlanned() {
@@ -634,6 +716,85 @@ onMounted(async () => {
         </div>
       </section>
     </template>
+
+    <div
+      v-if="pendingDeleteEntry"
+      class="battery-confirm-overlay"
+      @click.self="cancelDeleteEntry"
+      @keydown.escape="cancelDeleteEntry"
+    >
+      <div
+        class="battery-confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="battery-delete-title"
+        aria-describedby="battery-delete-message"
+      >
+        <h2 id="battery-delete-title" class="battery-confirm-title">Supprimer cette entrée ?</h2>
+        <p id="battery-delete-message" class="battery-confirm-message">
+          « {{ pendingDeleteEntry.label }} » sera retirée du
+          {{ pendingDeleteEntry.kind === BATTERY_ENTRY_KINDS.PLANNED ? 'prévu' : 'réel' }}.
+        </p>
+        <p
+          v-if="pendingDeleteEntry.source_type"
+          class="battery-confirm-message battery-confirm-message--linked"
+        >
+          Cette entrée est liée
+          {{
+            pendingDeleteEntry.source_type === BATTERY_SOURCE_TYPES.TODO
+              ? 'à une tâche TODO'
+              : 'à une activité EDT'
+          }}.
+          Voulez-vous aussi supprimer la source (et ses éventuelles liaisons) ?
+        </p>
+        <div class="battery-confirm-actions">
+          <template v-if="pendingDeleteEntry.source_type">
+            <button
+              type="button"
+              class="battery-confirm-cancel"
+              :disabled="isDeletingEntry"
+              @click="cancelDeleteEntry"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              class="battery-confirm-cancel"
+              :disabled="isDeletingEntry"
+              @click="confirmDeleteEntryOnly"
+            >
+              Non, uniquement Batterie
+            </button>
+            <button
+              type="button"
+              class="battery-confirm-danger"
+              :disabled="isDeletingEntry"
+              @click="confirmDeleteEntryWithLinked"
+            >
+              {{ isDeletingEntry ? 'Suppression…' : 'Oui, supprimer les deux' }}
+            </button>
+          </template>
+          <template v-else>
+            <button
+              type="button"
+              class="battery-confirm-cancel"
+              :disabled="isDeletingEntry"
+              @click="cancelDeleteEntry"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              class="battery-confirm-danger"
+              :disabled="isDeletingEntry"
+              @click="confirmDeleteEntryOnly"
+            >
+              {{ isDeletingEntry ? 'Suppression…' : 'Supprimer' }}
+            </button>
+          </template>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1346,6 +1507,76 @@ onMounted(async () => {
 .cost-tag--restore-5 {
   background: rgba(45, 120, 80, 0.5);
   color: #0f3d28;
+}
+
+.battery-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(44, 62, 80, 0.35);
+  backdrop-filter: blur(4px);
+}
+
+.battery-confirm-dialog {
+  width: 100%;
+  max-width: 28rem;
+  padding: 1.25rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  box-shadow: 0 18px 40px rgba(60, 30, 80, 0.16);
+}
+
+.battery-confirm-title {
+  margin: 0 0 0.55rem;
+  font-size: 1.15rem;
+  color: #2c3e50;
+}
+
+.battery-confirm-message {
+  margin: 0 0 0.55rem;
+  font-size: 0.92rem;
+  color: #6c757d;
+  line-height: 1.4;
+}
+
+.battery-confirm-message--linked {
+  color: #ad81be;
+  font-weight: 600;
+}
+
+.battery-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.85rem;
+}
+
+.battery-confirm-cancel,
+.battery-confirm-danger {
+  border-radius: 10px;
+  padding: 0.5rem 0.85rem;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.battery-confirm-cancel {
+  border: 1px solid rgba(173, 129, 190, 0.35);
+  background: rgba(255, 255, 255, 0.85);
+  color: #6c757d;
+}
+
+.battery-confirm-danger {
+  border: 1px solid rgba(196, 92, 92, 0.45);
+  background: rgba(196, 92, 92, 0.9);
+  color: #fff;
 }
 
 .icon-btn {

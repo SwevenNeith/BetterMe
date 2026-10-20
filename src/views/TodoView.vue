@@ -80,7 +80,23 @@ import {
   validateTodoReminderInput,
 } from '../services/todo/todoItemReminders.js'
 import { notificationsActives } from '../services/common/notifications.js'
-import { linkTodoAndTimetable, deleteAllTimetableEventsForTodo, createTimetableEventsForTodo, syncTodoTimetableLink, hasTodoTimetableLink } from '../services/todo/todoTimetableLink.js'
+import {
+  linkTodoAndTimetable,
+  deleteAllTimetableEventsForTodo,
+  createTimetableEventsForTodo,
+  syncTodoTimetableLink,
+  hasTodoTimetableLink,
+  listTimetableEventsForTodo,
+} from '../services/todo/todoTimetableLink.js'
+import { BATTERY_SOURCE_TYPES } from '../constants/battery/battery.js'
+import {
+  clearTodoBatteryWhenTimetableLinked,
+  countBatteryEntriesForSources,
+  getLinkedBatteryCost,
+  shouldSyncTodoToBattery,
+  syncBatteryFromTimetableEvent,
+  syncBatteryFromTodo,
+} from '../services/battery/batterySourceSync.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import { useTimetableCacheStore } from '../stores/timetableCache.js'
 import {
@@ -152,6 +168,15 @@ const todoForm = reactive({
   date_echeance: getLocalTodayISO(),
   is_promesse: false,
   quantite_cible: 0,
+  batteryCost: 0,
+})
+
+const pendingDeleteBatteryCount = ref(0)
+
+const showBatteryCostField = computed(() => {
+  if (todoForm.frequence === TODO_FREQUENCY.WEEK_GOAL) return false
+  if (todoForm.frequence === TODO_FREQUENCY.ONE_OFF) return true
+  return addToPlanning.value
 })
 
 const todoDraftKey = computed(() => {
@@ -174,6 +199,7 @@ const { clearDraft: clearTodoDraft, restoreDraft: restoreTodoDraft } = useFormDr
       date_echeance: todoForm.date_echeance,
       is_promesse: todoForm.is_promesse,
       quantite_cible: todoForm.quantite_cible,
+      batteryCost: todoForm.batteryCost,
     },
     addToPlanning: addToPlanning.value,
     planningForm: { ...planningForm },
@@ -182,6 +208,7 @@ const { clearDraft: clearTodoDraft, restoreDraft: restoreTodoDraft } = useFormDr
     if (!state || typeof state !== 'object') return
     if (state.todoForm && typeof state.todoForm === 'object') {
       Object.assign(todoForm, state.todoForm)
+      if (state.todoForm.batteryCost == null) todoForm.batteryCost = 0
     }
     addToPlanning.value = Boolean(state.addToPlanning)
     if (state.planningForm && typeof state.planningForm === 'object') {
@@ -390,6 +417,7 @@ function resetForm() {
   todoForm.reminderMinutes = 15
   todoForm.is_promesse = false
   todoForm.quantite_cible = 0
+  todoForm.batteryCost = 0
   editingItemId.value = null
   editingItemHasPlanningLink.value = false
   editingPlanningEventCount.value = 0
@@ -432,6 +460,7 @@ async function openEditForm(item) {
   todoForm.date_echeance = normalizeDateISO(item.date_echeance) || getLocalTodayISO()
   todoForm.is_promesse = Boolean(item.is_promesse)
   todoForm.quantite_cible = item.quantite_cible ?? 0
+  todoForm.batteryCost = 0
   editingItemHasPlanningLink.value = false
   editingPlanningEventCount.value = 0
   editingPlanningNextDate.value = ''
@@ -440,6 +469,26 @@ async function openEditForm(item) {
   restoreTodoDraft()
   void revealForm()
   void refreshEditingPlanningLink()
+  void loadTodoBatteryCost(item)
+}
+
+async function loadTodoBatteryCost(item) {
+  if (!userId.value || !item?.id) return
+  try {
+    const sources = [{ sourceType: BATTERY_SOURCE_TYPES.TODO, sourceId: item.id }]
+    if (item.timetable_event_id) {
+      sources.unshift({
+        sourceType: BATTERY_SOURCE_TYPES.TIMETABLE,
+        sourceId: item.timetable_event_id,
+      })
+    }
+    const cost = await getLinkedBatteryCost(supabase, userId.value, sources)
+    if (cost != null && editingItemId.value === item.id) {
+      todoForm.batteryCost = cost
+    }
+  } catch (err) {
+    console.error(err)
+  }
 }
 
 function closeForm() {
@@ -656,22 +705,30 @@ async function loadData() {
       fetchStart,
       fetchEnd,
     )
-    items.value = await sanitizeLoadedTodoPlanningLinks(itemsData)
+    items.value = itemsData
     completionProgress.value = buildCompletionProgressMap(completionsData)
-    await syncTodoIsDoneFlags(
-      supabase,
-      userId.value,
-      items.value,
-      completionProgress.value,
-      todayISO,
-    )
     promesseLimits.value = limits
+    // Affiche d’abord la liste, puis sync is_done / liens EDT en arrière-plan.
+    isLoading.value = false
+    void (async () => {
+      try {
+        await syncTodoIsDoneFlags(
+          supabase,
+          userId.value,
+          items.value,
+          completionProgress.value,
+          todayISO,
+        )
+        items.value = await sanitizeLoadedTodoPlanningLinks(items.value)
+      } catch (bgErr) {
+        console.error('todo background sync:', bgErr)
+      }
+    })()
   } catch (err) {
     console.error(err)
     loadError.value = err.message || 'Impossible de charger la liste.'
     items.value = []
     completionProgress.value = new Map()
-  } finally {
     isLoading.value = false
   }
 }
@@ -918,14 +975,16 @@ async function submitForm() {
         todoItemId: savedTodo?.id ?? null,
       }
 
+      let createdEvents = []
       if (isRecurringTodoFrequency(payload.frequence)) {
-        await createTimetableEventsForTodo(
+        const result = await createTimetableEventsForTodo(
           supabase,
           userId.value,
           { ...savedTodo, ...payload },
           planningInput,
           planningCategories.value,
         )
+        createdEvents = result.events ?? []
       } else {
         const { event } = await createTimetableEvent(
           supabase,
@@ -937,9 +996,23 @@ async function submitForm() {
         if (savedTodo?.id && event?.id) {
           await linkTodoAndTimetable(supabase, userId.value, savedTodo.id, event.id)
         }
+        if (event) createdEvents = [event]
       }
 
       useTimetableCacheStore().$patch({ isValid: false })
+      await syncBatteryAfterTodoSave(savedTodo, {
+        events: createdEvents,
+        cost: todoForm.batteryCost,
+        linkedTodoFrequence: payload.frequence,
+      })
+    } else {
+      await syncBatteryAfterTodoSave(savedTodo, {
+        events: editingItemHasPlanningLink.value
+          ? await listTimetableEventsForTodo(supabase, userId.value, savedTodo.id)
+          : [],
+        cost: todoForm.batteryCost,
+        linkedTodoFrequence: payload.frequence,
+      })
     }
 
     clearTodoDraft()
@@ -962,14 +1035,62 @@ async function submitForm() {
   }
 }
 
+async function syncBatteryAfterTodoSave(savedTodo, { events = [], cost = 0, linkedTodoFrequence } = {}) {
+  if (!userId.value || !savedTodo?.id) return
+
+  const batteryCost = Math.round(Number(cost) || 0)
+  const linkedEvents = (events ?? []).filter(Boolean)
+
+  if (linkedEvents.length) {
+    await clearTodoBatteryWhenTimetableLinked(supabase, userId.value, savedTodo.id)
+    for (const event of linkedEvents) {
+      await syncBatteryFromTimetableEvent(supabase, userId.value, event, {
+        cost: batteryCost,
+        preserveExistingCost: false,
+        linkedTodoFrequence: linkedTodoFrequence ?? savedTodo.frequence,
+      })
+    }
+    return
+  }
+
+  if (shouldSyncTodoToBattery(savedTodo)) {
+    await syncBatteryFromTodo(supabase, userId.value, savedTodo, {
+      cost: batteryCost,
+      preserveExistingCost: false,
+    })
+  }
+}
+
 function removeItem(item) {
   if (!userId.value || !item?.id || isDeletingId.value) return
   pendingDeleteItem.value = item
+  pendingDeleteBatteryCount.value = 0
+  void loadPendingDeleteBatteryCount(item)
+}
+
+async function loadPendingDeleteBatteryCount(item) {
+  if (!userId.value || !item?.id) return
+  try {
+    const sources = [{ sourceType: BATTERY_SOURCE_TYPES.TODO, sourceId: item.id }]
+    if (item.timetable_event_id) {
+      const events = await listTimetableEventsForTodo(supabase, userId.value, item.id)
+      for (const event of events) {
+        sources.push({ sourceType: BATTERY_SOURCE_TYPES.TIMETABLE, sourceId: event.id })
+      }
+    }
+    const count = await countBatteryEntriesForSources(supabase, userId.value, sources)
+    if (pendingDeleteItem.value?.id === item.id) {
+      pendingDeleteBatteryCount.value = count
+    }
+  } catch (err) {
+    console.error(err)
+  }
 }
 
 function cancelDelete() {
   if (isDeletingId.value) return
   pendingDeleteItem.value = null
+  pendingDeleteBatteryCount.value = 0
 }
 
 async function confirmDelete(alsoDeleteLinked = false) {
@@ -992,6 +1113,7 @@ async function confirmDelete(alsoDeleteLinked = false) {
     }
     await deleteTodoItem(supabase, userId.value, item.id)
     pendingDeleteItem.value = null
+    pendingDeleteBatteryCount.value = 0
     if (editingItemId.value === item.id) {
       closeForm()
     }
@@ -1585,6 +1707,19 @@ watch(userId, (id) => {
         :require-start-time="planningRequiresStartTime"
       />
 
+      <label v-if="showBatteryCostField" class="todo-form-field todo-form-battery-cost">
+        <span>Coût Batterie (prévu)</span>
+        <input
+          v-model.number="todoForm.batteryCost"
+          type="number"
+          step="1"
+          title="Positif = dépense, négatif = regain (0 autorisé)"
+        />
+      </label>
+      <p v-if="showBatteryCostField" class="todo-form-hint">
+        Ajouté au prévu Batterie du jour (0 = aucun coût). Hors « Cette semaine ».
+      </p>
+
       <p v-if="formError" class="todo-error" role="alert">{{ formError }}</p>
 
       <div class="todo-form-actions">
@@ -1714,6 +1849,14 @@ watch(userId, (id) => {
         <h2 id="todo-delete-title" class="todo-confirm-title">Supprimer cet élément ?</h2>
         <p id="todo-delete-message" class="todo-confirm-message">
           « {{ pendingDeleteItem.nom }} » sera définitivement supprimé.
+        </p>
+        <p
+          v-if="pendingDeleteBatteryCount > 0"
+          class="todo-confirm-message todo-confirm-message--linked"
+        >
+          {{ pendingDeleteBatteryCount }} entrée{{ pendingDeleteBatteryCount > 1 ? 's' : '' }}
+          Batterie (prévu) liée{{ pendingDeleteBatteryCount > 1 ? 's' : '' }}
+          (retirées avec la source choisie).
         </p>
         <p v-if="pendingDeleteItem.timetable_event_id" class="todo-confirm-message todo-confirm-message--linked">
           Cet élément est lié à ton emploi du temps. Voulez-vous aussi supprimer
@@ -2119,6 +2262,16 @@ watch(userId, (id) => {
   flex-direction: column;
   gap: 0.3rem;
   min-width: 0;
+}
+
+.todo-form-battery-cost input {
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  border-radius: 10px;
+  padding: 0.5rem 0.65rem;
+  background: rgba(255, 255, 255, 0.88);
+  font: inherit;
+  color: #2c3e50;
+  max-width: 8rem;
 }
 
 .todo-form-weekdays {

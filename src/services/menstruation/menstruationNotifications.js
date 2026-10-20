@@ -113,26 +113,48 @@ function buildSettingsInsertPayload(userId) {
   }
 }
 
+/** Mémo session : évite N SELECT settings au boot (dashboard × widgets). */
+const ensuredSettingsUserIds = new Set()
+/** @type {Map<string, Promise<void>>} */
+const ensureSettingsInFlight = new Map()
+
 /**
  * Crée la ligne settings si absente (toutes les notifs activées par défaut).
  */
 export async function ensureUserSettings(userId) {
   if (!userId) return
+  if (ensuredSettingsUserIds.has(userId)) return
 
-  const { data: existing, error: readError } = await supabase
-    .from(SETTINGS_TABLE)
-    .select('user_id')
-    .eq('user_id', userId)
-    .maybeSingle()
+  const pending = ensureSettingsInFlight.get(userId)
+  if (pending) return pending
 
-  if (readError) throw readError
-  if (existing?.user_id) return
+  const task = (async () => {
+    const { data: existing, error: readError } = await supabase
+      .from(SETTINGS_TABLE)
+      .select('user_id')
+      .eq('user_id', userId)
+      .maybeSingle()
 
-  const { error: insertError } = await supabase
-    .from(SETTINGS_TABLE)
-    .insert(buildSettingsInsertPayload(userId))
+    if (readError) throw readError
+    if (existing?.user_id) {
+      ensuredSettingsUserIds.add(userId)
+      return
+    }
 
-  if (insertError && insertError.code !== '23505') throw insertError
+    const { error: insertError } = await supabase
+      .from(SETTINGS_TABLE)
+      .insert(buildSettingsInsertPayload(userId))
+
+    if (insertError && insertError.code !== '23505') throw insertError
+    ensuredSettingsUserIds.add(userId)
+  })()
+
+  ensureSettingsInFlight.set(userId, task)
+  try {
+    await task
+  } finally {
+    ensureSettingsInFlight.delete(userId)
+  }
 }
 
 export async function loadMenstruationNotifSettings(userId) {
