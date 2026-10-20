@@ -9,6 +9,7 @@ export const DASHBOARD_WIDGET_IDS = {
   MENSTRUATION: 'menstruation',
   FINANCES: 'finances',
   HABITS: 'habits',
+  BATTERY: 'battery',
   NOTES_GRAPH: 'notes-graph',
   READING_IN_PROGRESS: 'reading-in-progress',
   TELEVISION_IN_PROGRESS: 'television-in-progress',
@@ -36,6 +37,7 @@ export const DASHBOARD_WIDGETS = [
   { id: DASHBOARD_WIDGET_IDS.MENSTRUATION, defaultLabel: 'Menstruation' },
   { id: DASHBOARD_WIDGET_IDS.FINANCES, defaultLabel: 'Finances' },
   { id: DASHBOARD_WIDGET_IDS.HABITS, defaultLabel: 'Habitudes (vue mensuelle)' },
+  { id: DASHBOARD_WIDGET_IDS.BATTERY, defaultLabel: 'Batterie du jour' },
   { id: DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS, defaultLabel: 'Lectures en cours' },
   { id: DASHBOARD_WIDGET_IDS.TELEVISION_IN_PROGRESS, defaultLabel: 'Télévision en cours' },
   { id: DASHBOARD_WIDGET_IDS.PROJECTS, defaultLabel: 'Projets actifs' },
@@ -55,6 +57,7 @@ export const DASHBOARD_WIDGET_MOBILE_ORDER = [
   DASHBOARD_WIDGET_IDS.DAILY_NOTE,
   DASHBOARD_WIDGET_IDS.FINANCES,
   DASHBOARD_WIDGET_IDS.HABITS,
+  DASHBOARD_WIDGET_IDS.BATTERY,
   DASHBOARD_WIDGET_IDS.PROJECTS,
   DASHBOARD_WIDGET_IDS.NOTES_GRAPH,
   DASHBOARD_WIDGET_IDS.MENSTRUATION,
@@ -76,6 +79,7 @@ export const DASHBOARD_WIDGET_DESKTOP_LEFT = [
 /** Colonne droite du dashboard (desktop). */
 export const DASHBOARD_WIDGET_DESKTOP_RIGHT = [
   DASHBOARD_WIDGET_IDS.DAILY_NOTE,
+  DASHBOARD_WIDGET_IDS.BATTERY,
   DASHBOARD_WIDGET_IDS.MENSTRUATION,
   DASHBOARD_WIDGET_IDS.FINANCES,
   DASHBOARD_WIDGET_IDS.HABITS,

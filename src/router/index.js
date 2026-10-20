@@ -31,6 +31,9 @@ const ReadingBookDetailView = () => import('../views/ReadingBookDetailView.vue')
 const RessourcesView = () => import('../views/RessourcesView.vue')
 const JournalView = () => import('../views/JournalView.vue')
 const JournalEntryView = () => import('../views/JournalEntryView.vue')
+const BatteryView = () => import('../views/BatteryView.vue')
+const BatteryCatalogView = () => import('../views/BatteryCatalogView.vue')
+const BatteryHistoryView = () => import('../views/BatteryHistoryView.vue')
 const NotesView = () => import('../views/NotesView.vue')
 const DictionnaireView = () => import('../views/DictionnaireView.vue')
 const WorkspaceView = () => import('../views/WorkspaceView.vue')
@@ -179,6 +182,21 @@ function createAppChildRoutes(namePrefix = '') {
       path: 'journal/:entryId',
       name: n('journal-entree'),
       component: JournalEntryView,
+    },
+    {
+      path: 'battery',
+      name: n('battery'),
+      component: BatteryView,
+    },
+    {
+      path: 'battery/catalogue',
+      name: n('battery-catalogue'),
+      component: BatteryCatalogView,
+    },
+    {
+      path: 'battery/historique',
+      name: n('battery-historique'),
+      component: BatteryHistoryView,
     },
     {
       path: 'notes/coffre/:vaultId/graphe',

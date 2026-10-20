@@ -108,6 +108,12 @@ const journalLink = {
   icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"></path><path d="M2 6h4"></path><path d="M2 10h4"></path><path d="M2 14h4"></path><path d="M2 18h4"></path><path d="m21.378 5.626-1.004-1.004a2.121 2.121 0 0 0-3 0L12 9.997v3h3l6.378-6.371a2.122 2.122 0 0 0 0-3z"></path></svg>`,
 }
 
+const batteryLink = {
+  name: 'Batterie',
+  path: '/battery',
+  icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sidebar-svg-icon"><rect x="6" y="6" width="10" height="16" rx="2"></rect><path d="M9 3h4v3H9z"></path><path d="M9 14h4"></path><path d="M9 17h4"></path></svg>`,
+}
+
 const notesLink = {
   name: 'Notes',
   path: '/notes',
@@ -189,6 +195,9 @@ const isActive = (path) => {
   if (path === '/finances') return route.path === path || route.path.startsWith('/finances/')
   if (path === '/ressources') return route.path === path || route.path.startsWith('/ressources/')
   if (path === '/journal') return route.path === path || route.path.startsWith('/journal/')
+  if (path === '/battery') {
+    return route.path === path || route.path.startsWith('/battery/')
+  }
   if (path === '/notes') return route.path === path || route.path.startsWith('/notes/')
   if (path === '/dictionnaire') return route.path === path || route.path.startsWith('/dictionnaire/')
   return route.path === path
@@ -250,6 +259,7 @@ const defaultSidebarOrder = [
   SIDEBAR_ITEM_IDS.FINANCES,
   SIDEBAR_ITEM_IDS.RESSOURCES,
   SIDEBAR_ITEM_IDS.JOURNAL,
+  SIDEBAR_ITEM_IDS.BATTERY,
   SIDEBAR_ITEM_IDS.NOTES,
   SIDEBAR_ITEM_IDS.DICTIONNAIRE,
   SIDEBAR_ITEM_IDS.MENSTRUATION,
@@ -270,6 +280,7 @@ const sidebarItemsById = {
   [SIDEBAR_ITEM_IDS.FINANCES]: financesLink,
   [SIDEBAR_ITEM_IDS.RESSOURCES]: ressourcesLink,
   [SIDEBAR_ITEM_IDS.JOURNAL]: journalLink,
+  [SIDEBAR_ITEM_IDS.BATTERY]: batteryLink,
   [SIDEBAR_ITEM_IDS.NOTES]: notesLink,
   [SIDEBAR_ITEM_IDS.DICTIONNAIRE]: dictionnaireLink,
   [SIDEBAR_ITEM_IDS.HABIT]: habitTrackerLink,
