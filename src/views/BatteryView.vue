@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
@@ -29,6 +29,7 @@ import {
   copyPlannedToActual,
   deleteBatteryEntry,
   ensureBatteryDay,
+  isPlannedEntryDone,
   updateBatteryDay,
   updateBatteryEntry,
 } from '../services/battery/batteryDays.js'
@@ -38,6 +39,7 @@ import {
   formatMinutesAsHm,
   hoursBetweenTimes,
   lieInMinutes,
+  remainingEnergy,
   shiftDayIso,
   sumEntryCosts,
   toTimeInputValue,
@@ -112,7 +114,14 @@ const plannedEntries = computed(() =>
 const spent = computed(() => sumEntryCosts(actualEntries.value))
 const plannedSpent = computed(() => sumEntryCosts(plannedEntries.value))
 const budget = computed(() => Number(day.value?.computed_budget) || 0)
-const planOverBudget = computed(() => plannedSpent.value > budget.value)
+/** Jauge = budget − dépenses réelles (une activité à +1 coûte 1 point de batterie). */
+const remaining = computed(() => remainingEnergy(budget.value, spent.value))
+const planOverBudget = computed(
+  () => plannedEntries.value.length > 0 && plannedSpent.value > budget.value,
+)
+const planOverflow = computed(() =>
+  planOverBudget.value ? plannedSpent.value - budget.value : 0,
+)
 
 const sleepDurationHours = computed(() =>
   hoursBetweenTimes(sleepBedtime.value, sleepWakeTime.value),
@@ -280,8 +289,31 @@ async function submitEntry() {
   }
 }
 
-async function onEntryCostChange(entry, event) {
-  const cost = Math.round(Number(event.target.value) || 0)
+const editingCostEntryId = ref(null)
+const editingCostValue = ref(0)
+
+function startEditActualCost(entry) {
+  if (entry.kind !== BATTERY_ENTRY_KINDS.ACTUAL) return
+  editingCostEntryId.value = entry.id
+  editingCostValue.value = Number(entry.cost) || 0
+  void nextTick(() => {
+    const el = document.querySelector(`[data-cost-edit="${entry.id}"]`)
+    if (el instanceof HTMLInputElement) {
+      el.focus()
+      el.select()
+    }
+  })
+}
+
+function cancelEditActualCost() {
+  editingCostEntryId.value = null
+}
+
+async function commitEditActualCost(entry) {
+  if (editingCostEntryId.value !== entry.id) return
+  const cost = Math.round(Number(editingCostValue.value) || 0)
+  editingCostEntryId.value = null
+  if (cost === Math.round(Number(entry.cost) || 0)) return
   try {
     const result = await updateBatteryEntry(supabase, userId.value, entry.id, { cost })
     day.value = result.day
@@ -509,13 +541,14 @@ onUnmounted(() => {
     <p v-else-if="isLoading" class="flash">Chargement…</p>
 
     <template v-else>
-      <!-- Jauge hero -->
+      <!-- Jauge hero = batterie réelle (activités du jour), pas le prévu -->
       <section class="hero-card">
         <div class="hero-card__top">
-          <p class="hero-kicker">Énergie du jour</p>
+          <p class="hero-kicker">Batterie réelle</p>
           <ul class="hero-meta">
             <li><span>Budget</span><strong>{{ budget }}</strong></li>
-            <li><span>Dépensé</span><strong>{{ spent }}</strong></li>
+            <li><span>Utilisé</span><strong>{{ spent }}</strong></li>
+            <li><span>Restant</span><strong>{{ remaining }}</strong></li>
             <li v-if="day?.carryover"><span>Report</span><strong>{{ day.carryover }}</strong></li>
           </ul>
         </div>
@@ -612,13 +645,12 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="plan-summary" :class="{ 'is-over': planOverBudget }">
+        <div class="plan-summary">
           <span>Total prévu <strong>{{ plannedSpent }}</strong></span>
           <span class="dot">·</span>
           <span>Total réel <strong>{{ spent }}</strong></span>
           <span class="dot">·</span>
           <span>Écart <strong>{{ spent - plannedSpent }}</strong></span>
-          <span v-if="planOverBudget" class="over-pill">dépassement prévu</span>
           <button
             v-if="plannedEntries.length && !actualEntries.length"
             type="button"
@@ -628,6 +660,10 @@ onUnmounted(() => {
             Copier le plan → réel
           </button>
         </div>
+        <p v-if="planOverBudget" class="plan-hint">
+          Ton plan ({{ plannedSpent }} pts) dépasse ton budget du jour ({{ budget }}, soit
+          {{ planOverflow }} de trop).
+        </p>
 
         <form class="entry-form" @submit.prevent="submitEntry">
           <div class="entry-search-wrap">
@@ -677,19 +713,19 @@ onUnmounted(() => {
               <li
                 v-for="entry in plannedEntries"
                 :key="entry.id"
-                class="entry-row"
-                :class="`entry-row--${costStyleClass(entry.cost)}`"
+                class="entry-row entry-row--plan"
+                :class="[
+                  `entry-row--${costStyleClass(entry.cost)}`,
+                  { 'entry-row--done': isPlannedEntryDone(entry) },
+                ]"
               >
-                <span class="entry-label">{{ entry.label }}</span>
+                <span class="entry-label">
+                  {{ entry.label }}
+                  <span v-if="isPlannedEntryDone(entry)" class="entry-done-pill">fait</span>
+                </span>
                 <span class="cost-tag" :class="`cost-tag--${costStyleClass(entry.cost)}`">
                   {{ formatCost(entry.cost) }}
                 </span>
-                <input
-                  class="entry-cost-input"
-                  type="number"
-                  :value="entry.cost"
-                  @change="onEntryCostChange(entry, $event)"
-                />
                 <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
               </li>
               <li v-if="!plannedEntries.length" class="empty-line">Rien de planifié</li>
@@ -701,19 +737,33 @@ onUnmounted(() => {
               <li
                 v-for="entry in actualEntries"
                 :key="entry.id"
-                class="entry-row"
+                class="entry-row entry-row--actual"
                 :class="`entry-row--${costStyleClass(entry.cost)}`"
               >
                 <span class="entry-label">{{ entry.label }}</span>
-                <span class="cost-tag" :class="`cost-tag--${costStyleClass(entry.cost)}`">
-                  {{ formatCost(entry.cost) }}
-                </span>
                 <input
-                  class="entry-cost-input"
+                  v-if="editingCostEntryId === entry.id"
+                  :data-cost-edit="entry.id"
+                  v-model.number="editingCostValue"
+                  class="cost-tag cost-tag--edit"
+                  :class="`cost-tag--${costStyleClass(editingCostValue)}`"
                   type="number"
-                  :value="entry.cost"
-                  @change="onEntryCostChange(entry, $event)"
+                  step="1"
+                  aria-label="Modifier le coût"
+                  @keydown.enter.prevent="commitEditActualCost(entry)"
+                  @keydown.escape.prevent="cancelEditActualCost"
+                  @blur="commitEditActualCost(entry)"
                 />
+                <button
+                  v-else
+                  type="button"
+                  class="cost-tag cost-tag--btn"
+                  :class="`cost-tag--${costStyleClass(entry.cost)}`"
+                  title="Modifier le coût"
+                  @click="startEditActualCost(entry)"
+                >
+                  {{ formatCost(entry.cost) }}
+                </button>
                 <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
               </li>
               <li v-if="!actualEntries.length" class="empty-line">Aucune activité réelle</li>
@@ -1128,6 +1178,13 @@ onUnmounted(() => {
   color: #5a9e78;
 }
 
+.plan-hint {
+  margin: -0.35rem 0 0.9rem;
+  font-size: 0.88rem;
+  color: #8a6a40;
+  line-height: 1.4;
+}
+
 .check-panel {
   margin-bottom: 1rem;
   padding: 1rem 1.15rem 1.1rem;
@@ -1370,8 +1427,7 @@ onUnmounted(() => {
 }
 
 .entry-search-wrap input,
-.entry-form input,
-.entry-cost-input {
+.entry-form input {
   border: 1px solid rgba(213, 181, 234, 0.45);
   border-radius: 10px;
   padding: 0.5rem 0.65rem;
@@ -1460,7 +1516,7 @@ onUnmounted(() => {
 
 .entry-row {
   display: grid;
-  grid-template-columns: 1fr auto 4.2rem auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 0.4rem;
   border-radius: 10px;
@@ -1480,15 +1536,36 @@ onUnmounted(() => {
 .entry-row--restore-5 { background: rgba(45, 120, 80, 0.32); }
 
 .entry-label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
   font-weight: 600;
   color: #2c3e50;
   font-size: 0.92rem;
 }
 
-.entry-cost-input {
-  width: 100%;
-  text-align: center;
-  padding: 0.35rem 0.25rem;
+.entry-row--done {
+  opacity: 0.58;
+  background: rgba(173, 129, 190, 0.08) !important;
+}
+
+.entry-row--done .entry-label {
+  color: #8a9098;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.entry-done-pill {
+  text-decoration: none;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #2f6b4a;
+  background: rgba(149, 209, 170, 0.35);
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
 }
 
 .cost-tag {
@@ -1498,6 +1575,31 @@ onUnmounted(() => {
   color: #6c757d;
   border-radius: 999px;
   padding: 0.15rem 0.45rem;
+}
+
+.cost-tag--btn {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 0.85rem;
+  line-height: 1.2;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cost-tag--btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 1px 4px rgba(44, 62, 80, 0.12);
+}
+
+.cost-tag--edit {
+  width: 3.4rem;
+  border: 1px solid rgba(173, 129, 190, 0.55);
+  text-align: center;
+  padding: 0.15rem 0.25rem;
+  outline: none;
+  box-sizing: border-box;
 }
 
 .cost-tag--neutral {
@@ -1769,9 +1871,9 @@ onUnmounted(() => {
   .evening-card,
   .mini-chip,
   .entry-form input,
-  .entry-cost-input,
   .sleep-time-field input,
-  .today-btn {
+  .today-btn,
+  .cost-tag--edit {
     background: rgba(35, 30, 48, 0.78);
     border-color: rgba(213, 181, 234, 0.22);
     color: #f0e8f8;
@@ -1779,6 +1881,10 @@ onUnmounted(() => {
 
   .sleep-metric strong {
     color: #f0e8f8;
+  }
+
+  .plan-hint {
+    color: #d4b56a;
   }
 
   .kind-toggle__btn.is-active {

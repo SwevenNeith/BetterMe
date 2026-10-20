@@ -10,7 +10,10 @@ import {
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
 } from '../../services/settings/pageVisibility.js'
-import { getBatteryDashboardSnapshot } from '../../services/battery/batteryDays.js'
+import {
+  BATTERY_UPDATED_EVENT,
+  getBatteryDashboardSnapshot,
+} from '../../services/battery/batteryDays.js'
 import { getLocalTodayISO } from '../../services/common/scheduledReminders.js'
 import BatteryGauge from '../battery/BatteryGauge.vue'
 
@@ -28,6 +31,8 @@ const isLoading = ref(false)
 const loadError = ref('')
 const budget = ref(10)
 const spent = ref(0)
+const plannedSpent = ref(0)
+const planOverBudget = ref(false)
 
 const isBatteryPageVisible = computed(() =>
   isPageVisible(APP_PAGE_IDS.BATTERY, pageVisibility.value),
@@ -50,6 +55,8 @@ async function loadSnapshot() {
   if (!props.userId || !isBatteryPageVisible.value) {
     budget.value = 10
     spent.value = 0
+    plannedSpent.value = 0
+    planOverBudget.value = false
     return
   }
   isLoading.value = true
@@ -62,6 +69,8 @@ async function loadSnapshot() {
     )
     budget.value = snap.budget
     spent.value = snap.spent
+    plannedSpent.value = snap.plannedSpent ?? 0
+    planOverBudget.value = Boolean(snap.planOverBudget)
   } catch (err) {
     console.error('dashboard battery:', err)
     loadError.value = 'Impossible de charger la batterie.'
@@ -76,12 +85,14 @@ function onVisibilityUpdated() {
 
 onMounted(async () => {
   window.addEventListener(PAGE_VISIBILITY_UPDATED_EVENT, onVisibilityUpdated)
+  window.addEventListener(BATTERY_UPDATED_EVENT, loadSnapshot)
   await loadPageVisibilityState()
   await loadSnapshot()
 })
 
 onUnmounted(() => {
   window.removeEventListener(PAGE_VISIBILITY_UPDATED_EVENT, onVisibilityUpdated)
+  window.removeEventListener(BATTERY_UPDATED_EVENT, loadSnapshot)
 })
 
 watch(
@@ -101,13 +112,16 @@ watch(
           {{ pageTitle }}
         </RouterLink>
       </h2>
-      <p class="dash-battery__hint">Énergie du jour</p>
+      <p class="dash-battery__hint">Batterie réelle du jour</p>
     </div>
 
     <div v-if="isLoading" class="dash-battery__loading">Chargement…</div>
     <p v-else-if="loadError" class="dash-battery__error">{{ loadError }}</p>
     <div v-else class="dash-battery__body">
       <BatteryGauge :budget="budget" :spent="spent" size="sm" />
+      <p v-if="planOverBudget" class="dash-battery__hint-plan">
+        Plan ({{ plannedSpent }}) au-dessus du budget ({{ budget }}).
+      </p>
     </div>
   </section>
 </template>
@@ -165,6 +179,13 @@ watch(
   color: #c45c5c;
 }
 
+.dash-battery__hint-plan {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #8a6a40;
+  line-height: 1.35;
+}
+
 @media (prefers-color-scheme: dark) {
   .dash-battery__title {
     color: #f0e8f8;
@@ -173,6 +194,10 @@ watch(
   .dash-battery__hint,
   .dash-battery__loading {
     color: #adb5bd;
+  }
+
+  .dash-battery__hint-plan {
+    color: #d4b56a;
   }
 }
 </style>

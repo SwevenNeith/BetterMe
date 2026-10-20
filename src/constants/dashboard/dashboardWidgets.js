@@ -32,7 +32,7 @@ export const DASHBOARD_WIDGETS = [
   { id: DASHBOARD_WIDGET_IDS.COMFORT, defaultLabel: 'Image de réconfort' },
   { id: DASHBOARD_WIDGET_IDS.DICTIONARY_WORD, defaultLabel: 'Mot du jour' },
   { id: DASHBOARD_WIDGET_IDS.TODO, defaultLabel: 'TODO du jour' },
-  { id: DASHBOARD_WIDGET_IDS.BATTERY_PLANNED, defaultLabel: 'Batterie · prévu du jour' },
+  { id: DASHBOARD_WIDGET_IDS.BATTERY_PLANNED, defaultLabel: 'Activités · prévues' },
   { id: DASHBOARD_WIDGET_IDS.TIMETABLE, defaultLabel: 'Emploi du temps du jour' },
   { id: DASHBOARD_WIDGET_IDS.CHECKIN, defaultLabel: 'Check-in émotionnel' },
   { id: DASHBOARD_WIDGET_IDS.DAILY_NOTE, defaultLabel: 'Note du jour' },
@@ -131,14 +131,10 @@ export const DASHBOARD_MOBILE_FIRST_PAGE_COMPANIONS = [
 ]
 
 /** Widgets regroupés sur la page Note du jour (mobile). */
-export const DASHBOARD_MOBILE_DAILY_NOTE_PAGE_COMPANIONS = [
-  DASHBOARD_WIDGET_IDS.FINANCES,
-]
+export const DASHBOARD_MOBILE_DAILY_NOTE_PAGE_COMPANIONS = [DASHBOARD_WIDGET_IDS.FINANCES]
 
 /** Widgets placés juste au-dessus de l’EDT sur la même page mobile. */
-export const DASHBOARD_MOBILE_TIMETABLE_PAGE_PREFIX = [
-  DASHBOARD_WIDGET_IDS.BATTERY_PLANNED,
-]
+export const DASHBOARD_MOBILE_TIMETABLE_PAGE_PREFIX = [DASHBOARD_WIDGET_IDS.BATTERY_PLANNED]
 
 /** Widgets regroupés sur la page Emploi du temps (mobile), après l’EDT. */
 export const DASHBOARD_MOBILE_TIMETABLE_PAGE_COMPANIONS = [

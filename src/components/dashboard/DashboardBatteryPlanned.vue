@@ -1,16 +1,20 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { supabase } from '../../lib/supabase.js'
 import { APP_PAGE_IDS } from '../../constants/common/appPages.js'
-import { usePageDisplayLabel } from '../../composables/usePageDisplayLabel.js'
 import {
   isPageVisible,
   loadPageVisibility,
   mergePageVisibility,
   PAGE_VISIBILITY_UPDATED_EVENT,
 } from '../../services/settings/pageVisibility.js'
-import { listBatteryPlannedForDay } from '../../services/battery/batteryDays.js'
+import {
+  BATTERY_UPDATED_EVENT,
+  completePlannedBatteryEntry,
+  isPlannedEntryDone,
+  listBatteryPlannedForDay,
+} from '../../services/battery/batteryDays.js'
 import { costIntensity, costStyleClass, sumEntryCosts } from '../../utils/battery/batteryMath.js'
 import { normalizeDateISO } from '../../utils/habit/habitCalendar.js'
 
@@ -25,18 +29,24 @@ const props = defineProps({
   },
 })
 
-const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.BATTERY)
-
 const pageVisibility = ref(mergePageVisibility(null))
 const isLoading = ref(false)
 const loadError = ref('')
 const plannedEntries = ref([])
+const dayBudget = ref(0)
+const completingId = ref(null)
+const actionError = ref('')
+/** Coût saisi par entrée (chaîne vide = défaut). */
+const costDrafts = reactive(/** @type {Record<string, string>} */ ({}))
 
 const isBatteryPageVisible = computed(() =>
   isPageVisible(APP_PAGE_IDS.BATTERY, pageVisibility.value),
 )
 
 const plannedTotal = computed(() => sumEntryCosts(plannedEntries.value))
+const planOverBudget = computed(
+  () => plannedEntries.value.length > 0 && plannedTotal.value > dayBudget.value,
+)
 
 function formatCost(n) {
   const v = Number(n) || 0
@@ -50,6 +60,25 @@ function costEffectLabel(cost) {
   if (v > 0) return 'Dépense'
   if (v < 0) return 'Regain'
   return 'Neutre'
+}
+
+function defaultAmount(cost) {
+  return Math.abs(Number(cost) || 0)
+}
+
+/**
+ * Résout le coût réel : vide → défaut prévu ; sinon magnitude + même signe que le prévu.
+ * @param {object} entry
+ */
+function resolveActualCost(entry) {
+  const raw = costDrafts[entry.id]
+  if (raw == null || String(raw).trim() === '') {
+    return Math.round(Number(entry.cost) || 0)
+  }
+  const amount = Math.abs(Math.round(Number(raw) || 0))
+  const planned = Number(entry.cost) || 0
+  if (planned < 0) return -amount
+  return amount
 }
 
 /** Fond pastel façon carte EDT, teinté selon drain / regain. */
@@ -92,6 +121,7 @@ async function loadPageVisibilityState() {
 async function loadPlanned() {
   if (!props.userId || !isBatteryPageVisible.value) {
     plannedEntries.value = []
+    dayBudget.value = 0
     return
   }
 
@@ -101,14 +131,37 @@ async function loadPlanned() {
   isLoading.value = true
   loadError.value = ''
   try {
-    const { planned } = await listBatteryPlannedForDay(supabase, props.userId, dayIso)
+    const { planned, day } = await listBatteryPlannedForDay(supabase, props.userId, dayIso)
     plannedEntries.value = planned
+    dayBudget.value = Number(day?.computed_budget) || 0
+    for (const entry of planned) {
+      if (!(entry.id in costDrafts)) costDrafts[entry.id] = ''
+    }
   } catch (err) {
     console.error('dashboard battery planned:', err)
     loadError.value = 'Impossible de charger le prévu Batterie.'
     plannedEntries.value = []
+    dayBudget.value = 0
   } finally {
     isLoading.value = false
+  }
+}
+
+async function markDone(entry) {
+  if (!props.userId || completingId.value) return
+  completingId.value = entry.id
+  actionError.value = ''
+  try {
+    await completePlannedBatteryEntry(supabase, props.userId, entry.id, {
+      cost: resolveActualCost(entry),
+    })
+    delete costDrafts[entry.id]
+    await loadPlanned()
+  } catch (err) {
+    console.error(err)
+    actionError.value = err?.message || 'Impossible de valider cette activité.'
+  } finally {
+    completingId.value = null
   }
 }
 
@@ -118,12 +171,14 @@ function onVisibilityUpdated() {
 
 onMounted(async () => {
   window.addEventListener(PAGE_VISIBILITY_UPDATED_EVENT, onVisibilityUpdated)
+  window.addEventListener(BATTERY_UPDATED_EVENT, loadPlanned)
   await loadPageVisibilityState()
   await loadPlanned()
 })
 
 onUnmounted(() => {
   window.removeEventListener(PAGE_VISIBILITY_UPDATED_EVENT, onVisibilityUpdated)
+  window.removeEventListener(BATTERY_UPDATED_EVENT, loadPlanned)
 })
 
 watch(
@@ -142,10 +197,15 @@ watch(
         :to="{ name: 'battery', query: { date: dateIso } }"
         class="column-title__link"
       >
-        <span>{{ pageTitle }} · prévu</span>
+        <span>Activités · prévues</span>
       </RouterLink>
       <span v-if="plannedEntries.length" class="column-date">Total {{ plannedTotal }}</span>
     </h2>
+
+    <p v-if="planOverBudget" class="battery-planned-hint">
+      Plan ({{ plannedTotal }}) au-dessus du budget ({{ dayBudget }}).
+    </p>
+    <p v-if="actionError" class="battery-planned-error">{{ actionError }}</p>
 
     <div class="today-events-container battery-planned-container">
       <div v-if="isLoading" class="loading-state">
@@ -164,19 +224,47 @@ watch(
           v-for="entry in plannedEntries"
           :key="entry.id"
           class="dashboard-event-card"
-          :class="`dashboard-event-card--${costStyleClass(entry.cost)}`"
-          :style="costCardStyle(entry.cost)"
+          :class="[
+            `dashboard-event-card--${costStyleClass(entry.cost)}`,
+            { 'dashboard-event-card--done': isPlannedEntryDone(entry) },
+          ]"
+          :style="isPlannedEntryDone(entry) ? undefined : costCardStyle(entry.cost)"
         >
-          <div class="event-time">
-            <span class="time-badge">{{ formatCost(entry.cost) }}</span>
-          </div>
           <div class="event-details">
             <div class="event-title-row">
               <h4 class="event-title">{{ entry.label }}</h4>
             </div>
             <div class="event-tags">
               <span class="event-category-tag">{{ costEffectLabel(entry.cost) }}</span>
+              <span class="event-category-tag">prévu {{ formatCost(entry.cost) }}</span>
+              <span v-if="isPlannedEntryDone(entry)" class="event-category-tag event-category-tag--done">
+                Fait
+              </span>
             </div>
+          </div>
+
+          <div v-if="!isPlannedEntryDone(entry)" class="event-complete">
+            <label class="event-complete__field">
+              <span>Coût réel</span>
+              <input
+                v-model="costDrafts[entry.id]"
+                type="number"
+                min="0"
+                step="1"
+                inputmode="numeric"
+                :placeholder="String(defaultAmount(entry.cost))"
+                :disabled="completingId === entry.id"
+                :aria-label="`Coût réel pour ${entry.label}`"
+              />
+            </label>
+            <button
+              type="button"
+              class="event-complete__btn"
+              :disabled="completingId === entry.id"
+              @click="markDone(entry)"
+            >
+              {{ completingId === entry.id ? '…' : 'Fait' }}
+            </button>
           </div>
         </div>
       </div>
@@ -189,6 +277,20 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
+}
+
+.battery-planned-hint {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #8a6a40;
+  line-height: 1.35;
+}
+
+.battery-planned-error {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #c45c5c;
 }
 
 .column-title {
@@ -291,19 +393,28 @@ watch(
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
 }
 
-.event-time {
-  margin-bottom: 0.05rem;
+.dashboard-event-card--done {
+  background: rgba(173, 129, 190, 0.08) !important;
+  color: #8a9098 !important;
+  opacity: 0.72;
+  box-shadow: none;
 }
 
-.time-badge {
-  background: rgba(255, 255, 255, 0.65);
-  padding: 0.25rem 0.65rem;
-  border-radius: 6px;
-  font-size: 0.78rem;
-  font-weight: 800;
-  color: inherit;
-  letter-spacing: 0.03em;
-  font-variant-numeric: tabular-nums;
+.dashboard-event-card--done:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.dashboard-event-card--done .event-title {
+  font-weight: 700;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  color: #8a9098;
+}
+
+.event-category-tag--done {
+  background: rgba(149, 209, 170, 0.35) !important;
+  color: #2f6b4a;
 }
 
 .event-title-row {
@@ -336,6 +447,66 @@ watch(
   letter-spacing: 0.02em;
 }
 
+.event-complete {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.55rem;
+  margin-top: 0.25rem;
+}
+
+.event-complete__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
+  min-width: 5.5rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: inherit;
+  opacity: 0.85;
+}
+
+.event-complete__field input {
+  width: 100%;
+  max-width: 7rem;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  background: rgba(255, 255, 255, 0.7);
+  color: #2c3e50;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: normal;
+  box-sizing: border-box;
+}
+
+.event-complete__btn {
+  border: none;
+  border-radius: 9px;
+  padding: 0.45rem 0.95rem;
+  background: rgba(255, 255, 255, 0.75);
+  color: #2f6b4a;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.event-complete__btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.event-complete__btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 @media (prefers-color-scheme: dark) {
   .column-title {
     color: #f0e8f8;
@@ -345,14 +516,42 @@ watch(
     color: #adb5bd;
   }
 
+  .battery-planned-hint {
+    color: #d4b56a;
+  }
+
   .battery-planned-container {
     background: rgba(25, 20, 35, 0.65);
     border-color: rgba(213, 181, 234, 0.15);
   }
 
-  .time-badge,
   .event-category-tag {
     background: rgba(0, 0, 0, 0.25);
+  }
+
+  .dashboard-event-card--done {
+    background: rgba(173, 129, 190, 0.1) !important;
+    color: #adb5bd !important;
+  }
+
+  .dashboard-event-card--done .event-title {
+    color: #adb5bd;
+  }
+
+  .event-category-tag--done {
+    background: rgba(149, 209, 170, 0.22) !important;
+    color: #95d1aa;
+  }
+
+  .event-complete__field input {
+    background: rgba(25, 20, 35, 0.55);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #f0e8f8;
+  }
+
+  .event-complete__btn {
+    background: rgba(25, 20, 35, 0.55);
+    color: #95d1aa;
   }
 }
 </style>

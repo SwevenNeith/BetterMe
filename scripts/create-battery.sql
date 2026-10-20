@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS public.battery_day_entries (
   sort_order integer NOT NULL DEFAULT 0,
   source_type text NULL CHECK (source_type IS NULL OR source_type IN ('todo', 'timetable')),
   source_id uuid NULL,
+  completed_actual_id uuid NULL REFERENCES public.battery_day_entries (id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
 
@@ -94,9 +95,15 @@ COMMENT ON COLUMN public.battery_day_entries.source_type IS
   'Origine de l’entrée : todo | timetable (null = saisie manuelle Batterie).';
 COMMENT ON COLUMN public.battery_day_entries.source_id IS
   'Id de la tâche TODO ou de l’événement EDT source.';
+COMMENT ON COLUMN public.battery_day_entries.completed_actual_id IS
+  'Pour kind=planned : id de l’entrée réelle correspondante une fois faite (null = encore à faire).';
 
 CREATE INDEX IF NOT EXISTS battery_day_entries_day_kind_idx
   ON public.battery_day_entries (day_id, kind, sort_order);
+
+CREATE INDEX IF NOT EXISTS battery_day_entries_completed_actual_idx
+  ON public.battery_day_entries (completed_actual_id)
+  WHERE completed_actual_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS battery_day_entries_user_activity_idx
   ON public.battery_day_entries (user_id, activity_id, created_at DESC);

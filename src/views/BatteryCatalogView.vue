@@ -29,6 +29,9 @@ const loadError = ref('')
 const statusMessage = ref('')
 const activities = ref([])
 const query = ref('')
+/** @typedef {'alpha'|'cost-desc'|'cost-asc'} CatalogSort */
+/** @type {import('vue').Ref<CatalogSort>} */
+const sortMode = ref('alpha')
 const newName = ref('')
 /** Magnitude toujours positive ; le signe vient de newEffect. */
 const newAmount = ref(1)
@@ -36,6 +39,12 @@ const newAmount = ref(1)
 const newEffect = ref('drain')
 const formError = ref('')
 const busyId = ref(null)
+
+const SORT_OPTIONS = [
+  { id: 'alpha', label: 'A → Z' },
+  { id: 'cost-desc', label: 'Plus coûteuse → moins' },
+  { id: 'cost-asc', label: 'Moins coûteuse → plus' },
+]
 
 const targetDate = computed(() => {
   const raw = String(route.query.date || '')
@@ -58,8 +67,27 @@ const targetDateLabel = computed(() => {
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
-  if (!q) return activities.value
-  return activities.value.filter((a) => a.name.toLowerCase().includes(q))
+  const list = q
+    ? activities.value.filter((a) => a.name.toLowerCase().includes(q))
+    : [...activities.value]
+
+  const byName = (a, b) =>
+    String(a.name || '').localeCompare(String(b.name || ''), 'fr', { sensitivity: 'base' })
+
+  if (sortMode.value === 'cost-desc') {
+    // Coût signé : +2 (dépense) > −2 (regain) → plus « cher » en premier.
+    return list.sort((a, b) => {
+      const diff = (Number(b.default_cost) || 0) - (Number(a.default_cost) || 0)
+      return diff !== 0 ? diff : byName(a, b)
+    })
+  }
+  if (sortMode.value === 'cost-asc') {
+    return list.sort((a, b) => {
+      const diff = (Number(a.default_cost) || 0) - (Number(b.default_cost) || 0)
+      return diff !== 0 ? diff : byName(a, b)
+    })
+  }
+  return list.sort(byName)
 })
 
 /**
@@ -80,10 +108,6 @@ function formatCost(n) {
 
 function effectOf(cost) {
   return Number(cost) < 0 ? 'restore' : 'drain'
-}
-
-function amountOf(cost) {
-  return Math.abs(Number(cost) || 0)
 }
 
 async function loadActivities() {
@@ -123,30 +147,20 @@ async function createItem() {
   }
 }
 
-/**
- * @param {object} activity
- * @param {EnergyEffect} [effect]
- * @param {number} [amount]
- */
-async function persistActivityCost(activity, effect, amount) {
-  const nextEffect = effect ?? effectOf(activity.default_cost)
-  const nextAmount = amount ?? amountOf(activity.default_cost)
-  const default_cost = toSignedCost(nextEffect, nextAmount)
+async function renameItem(activity, event) {
+  const name = String(event.target.value || '').trim()
+  if (!name || name === activity.name) {
+    event.target.value = activity.name
+    return
+  }
   try {
-    await updateBatteryActivity(supabase, userId.value, activity.id, { default_cost })
+    await updateBatteryActivity(supabase, userId.value, activity.id, { name })
     await loadActivities()
   } catch (err) {
     console.error(err)
+    event.target.value = activity.name
+    formError.value = err?.message || 'Impossible de renommer.'
   }
-}
-
-function onAmountChange(activity, event) {
-  const amount = Math.abs(Math.round(Number(event.target.value) || 0))
-  persistActivityCost(activity, effectOf(activity.default_cost), amount)
-}
-
-function setActivityEffect(activity, effect) {
-  persistActivityCost(activity, effect, amountOf(activity.default_cost))
 }
 
 async function removeItem(activity) {
@@ -250,15 +264,26 @@ onMounted(async () => {
         </form>
         <p v-if="formError" class="flash flash--error">{{ formError }}</p>
         <p class="hint">
-          Choisis Dépense ou Regain, puis le nombre de points. Le coût réel d’un jour peut différer
-          du défaut ; s’il reste différent pendant 2 semaines d’affilée, il devient le nouveau défaut.
+          Choisis Dépense ou Regain, puis les points à la création. Ensuite tu peux renommer ou
+          supprimer ; le coût par défaut évolue tout seul via les activités réelles du jour (même
+          coût pendant 2 semaines d’affilée).
         </p>
       </section>
 
       <section class="panel list-panel">
         <div class="list-panel__head">
           <h2 class="panel__title">Mes activités</h2>
-          <input v-model="query" type="search" class="search" placeholder="Rechercher…" />
+          <div class="list-panel__tools">
+            <label class="sort-field">
+              <span class="sort-field__label">Tri</span>
+              <select v-model="sortMode" class="sort-select" aria-label="Trier les activités">
+                <option v-for="opt in SORT_OPTIONS" :key="opt.id" :value="opt.id">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </label>
+            <input v-model="query" type="search" class="search" placeholder="Rechercher…" />
+          </div>
         </div>
 
         <ul class="list">
@@ -269,43 +294,25 @@ onMounted(async () => {
             :class="`item--${costStyleClass(activity.default_cost)}`"
           >
             <div class="item__top">
-              <span class="item__name">{{ activity.name }}</span>
+              <input
+                class="item__name-input"
+                type="text"
+                :value="activity.name"
+                aria-label="Nom de l’activité"
+                title="Renommer"
+                @change="renameItem(activity, $event)"
+              />
               <span
                 class="item__badge"
                 :class="`item__badge--${costStyleClass(activity.default_cost)}`"
+                :title="
+                  effectOf(activity.default_cost) === 'restore'
+                    ? 'Regain (coût par défaut)'
+                    : 'Dépense (coût par défaut)'
+                "
               >
                 {{ formatCost(activity.default_cost) }}
               </span>
-            </div>
-
-            <div class="item__edit">
-              <div class="effect-toggle effect-toggle--sm" role="group" aria-label="Effet">
-                <button
-                  type="button"
-                  class="effect-toggle__btn effect-toggle__btn--drain"
-                  :class="{ 'is-active': effectOf(activity.default_cost) === 'drain' }"
-                  @click="setActivityEffect(activity, 'drain')"
-                >
-                  Dépense
-                </button>
-                <button
-                  type="button"
-                  class="effect-toggle__btn effect-toggle__btn--restore"
-                  :class="{ 'is-active': effectOf(activity.default_cost) === 'restore' }"
-                  @click="setActivityEffect(activity, 'restore')"
-                >
-                  Regain
-                </button>
-              </div>
-              <input
-                class="cost-input"
-                type="number"
-                min="0"
-                step="1"
-                :value="amountOf(activity.default_cost)"
-                title="Points d’énergie"
-                @change="onAmountChange(activity, $event)"
-              />
             </div>
 
             <div class="item__actions">
@@ -459,8 +466,7 @@ onMounted(async () => {
 }
 
 .create-form input,
-.search,
-.cost-input {
+.search {
   border: 1px solid rgba(213, 181, 234, 0.45);
   border-radius: 10px;
   padding: 0.55rem 0.7rem;
@@ -479,11 +485,6 @@ onMounted(async () => {
   gap: 0.15rem;
 }
 
-.effect-toggle--sm {
-  flex: 1;
-  min-width: 0;
-}
-
 .effect-toggle__btn {
   border: none;
   border-radius: 8px;
@@ -495,12 +496,6 @@ onMounted(async () => {
   background: transparent;
   cursor: pointer;
   white-space: nowrap;
-}
-
-.effect-toggle--sm .effect-toggle__btn {
-  flex: 1;
-  padding: 0.35rem 0.45rem;
-  font-size: 0.75rem;
 }
 
 .effect-toggle__btn--drain.is-active {
@@ -554,8 +549,47 @@ onMounted(async () => {
   margin: 0;
 }
 
+.list-panel__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.55rem;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.sort-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.sort-field__label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a9098;
+}
+
+.sort-select,
 .search {
   width: min(280px, 100%);
+}
+
+.sort-select {
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2c3e50;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  box-sizing: border-box;
+  cursor: pointer;
 }
 
 .list {
@@ -633,10 +667,23 @@ onMounted(async () => {
   gap: 0.5rem;
 }
 
-.item__name {
+.item__name-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.35rem 0.45rem;
+  background: rgba(255, 255, 255, 0.55);
+  font: inherit;
   font-weight: 700;
   color: #2c3e50;
-  min-width: 0;
+}
+
+.item__name-input:hover,
+.item__name-input:focus {
+  border-color: rgba(213, 181, 234, 0.55);
+  background: rgba(255, 255, 255, 0.92);
+  outline: none;
 }
 
 .item__badge {
@@ -681,19 +728,6 @@ onMounted(async () => {
 .item__badge--restore-5 {
   background: rgba(45, 120, 80, 0.55);
   color: #0f3d28;
-}
-
-.item__edit {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 4.5rem;
-  gap: 0.45rem;
-  align-items: stretch;
-}
-
-.cost-input {
-  width: 100%;
-  text-align: center;
-  padding: 0.4rem 0.3rem;
 }
 
 .item__actions {
@@ -770,6 +804,13 @@ onMounted(async () => {
     grid-template-columns: 1fr;
   }
 
+  .list-panel__tools {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sort-select,
   .search {
     width: 100%;
   }
@@ -782,8 +823,18 @@ onMounted(async () => {
 @media (prefers-color-scheme: dark) {
   .page-title,
   .panel__title,
-  .item__name {
+  .item__name-input {
     color: #f0e8f8;
+  }
+
+  .item__name-input {
+    background: rgba(35, 30, 48, 0.55);
+  }
+
+  .item__name-input:hover,
+  .item__name-input:focus {
+    background: rgba(35, 30, 48, 0.85);
+    border-color: rgba(213, 181, 234, 0.35);
   }
 
   .page-back {
@@ -804,10 +855,14 @@ onMounted(async () => {
   .panel,
   .create-form input,
   .search,
-  .cost-input {
+  .sort-select {
     background: rgba(35, 30, 48, 0.78);
     border-color: rgba(213, 181, 234, 0.22);
     color: #f0e8f8;
+  }
+
+  .sort-field__label {
+    color: #adb5bd;
   }
 
   .item--neutral {

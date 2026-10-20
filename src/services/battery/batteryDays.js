@@ -46,7 +46,7 @@ function normalizeTimeValue(value) {
 }
 
 const ENTRY_COLUMNS =
-  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, created_at'
+  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, created_at'
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
@@ -473,6 +473,127 @@ export async function getBatteryEntry(supabase, userId, entryId) {
   return data
 }
 
+export const BATTERY_UPDATED_EVENT = 'betterme-battery-updated'
+
+export function notifyBatteryUpdated() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(BATTERY_UPDATED_EVENT))
+}
+
+/** @param {{ completed_actual_id?: string | null, kind?: string } | null | undefined} entry */
+export function isPlannedEntryDone(entry) {
+  return (
+    entry?.kind === BATTERY_ENTRY_KINDS.PLANNED && Boolean(entry?.completed_actual_id)
+  )
+}
+
+/**
+ * Crée l’entrée réelle correspondante en laissant le prévu en place (lié via completed_actual_id).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} entryId
+ * @param {{ cost?: number | null }} [opts]
+ */
+export async function completePlannedBatteryEntry(supabase, userId, entryId, opts = {}) {
+  const { data: existing, error: fetchError } = await supabase
+    .from(ENTRIES_TABLE)
+    .select(ENTRY_COLUMNS)
+    .eq('id', entryId)
+    .eq('user_id', userId)
+    .single()
+
+  if (fetchError) throw fetchError
+  if (!existing || existing.kind !== BATTERY_ENTRY_KINDS.PLANNED) {
+    throw new Error('Cette activité prévue est introuvable.')
+  }
+  if (existing.completed_actual_id) {
+    throw new Error('Cette activité est déjà marquée comme faite.')
+  }
+
+  const cost =
+    opts.cost == null
+      ? Math.round(Number(existing.cost) || 0)
+      : Math.round(Number(opts.cost) || 0)
+
+  const { data: actualRows, error: countError } = await supabase
+    .from(ENTRIES_TABLE)
+    .select('id')
+    .eq('day_id', existing.day_id)
+    .eq('kind', BATTERY_ENTRY_KINDS.ACTUAL)
+
+  if (countError) throw countError
+
+  const { data: actual, error: insertError } = await supabase
+    .from(ENTRIES_TABLE)
+    .insert({
+      user_id: userId,
+      day_id: existing.day_id,
+      activity_id: existing.activity_id || null,
+      label: existing.label,
+      cost,
+      kind: BATTERY_ENTRY_KINDS.ACTUAL,
+      sort_order: (actualRows ?? []).length,
+    })
+    .select(ENTRY_COLUMNS)
+    .single()
+
+  if (insertError) throw insertError
+
+  const { error: linkError } = await supabase
+    .from(ENTRIES_TABLE)
+    .update({ completed_actual_id: actual.id })
+    .eq('id', existing.id)
+    .eq('user_id', userId)
+
+  if (linkError) {
+    // Colonne absente → bascule ancienne logique (convertir le prévu en réel).
+    if (
+      linkError.code === 'PGRST204' ||
+      String(linkError.message || '').includes('completed_actual_id')
+    ) {
+      await supabase.from(ENTRIES_TABLE).delete().eq('id', actual.id).eq('user_id', userId)
+      const { data: converted, error: convertError } = await supabase
+        .from(ENTRIES_TABLE)
+        .update({
+          kind: BATTERY_ENTRY_KINDS.ACTUAL,
+          cost,
+          sort_order: (actualRows ?? []).length,
+        })
+        .eq('id', entryId)
+        .eq('user_id', userId)
+        .select(ENTRY_COLUMNS)
+        .single()
+      if (convertError) throw convertError
+      if (converted.activity_id) {
+        await maybeLearnDefaultCost(
+          supabase,
+          userId,
+          converted.activity_id,
+          converted.cost,
+          converted.id,
+        )
+      }
+    } else {
+      await supabase.from(ENTRIES_TABLE).delete().eq('id', actual.id).eq('user_id', userId)
+      throw linkError
+    }
+  } else if (actual.activity_id) {
+    await maybeLearnDefaultCost(supabase, userId, actual.activity_id, actual.cost, actual.id)
+  }
+
+  const { data: day, error: dayError } = await supabase
+    .from(DAYS_TABLE)
+    .select(DAY_COLUMNS)
+    .eq('id', existing.day_id)
+    .single()
+
+  if (dayError) throw dayError
+  const result = await recomputeAndPersistDay(supabase, userId, day)
+  await refreshBatteryPlanningReminder(userId)
+  notifyBatteryUpdated()
+  return result
+}
+
 /**
  * Copie les entrées planifiées vers le réel (si le réel est vide).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
@@ -657,12 +778,17 @@ export async function getBatteryDashboardSnapshot(supabase, userId, date = new D
     entries = ensured.entries
   }
 
-  const spent = sumEntryCosts(entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL))
+  const actual = (entries ?? []).filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL)
+  const planned = (entries ?? []).filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED)
+  const spent = sumEntryCosts(actual)
+  const plannedSpent = sumEntryCosts(planned)
   const budget = Number(day.computed_budget) || 0
   return {
     day,
     budget,
     spent,
+    plannedSpent,
+    planOverBudget: planned.length > 0 && plannedSpent > budget,
     remaining: budget - spent,
   }
 }
