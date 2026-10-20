@@ -4,6 +4,7 @@ export const DASHBOARD_WIDGET_IDS = {
   DICTIONARY_WORD: 'dictionary-word',
   TODO: 'todo',
   TIMETABLE: 'timetable',
+  BATTERY_PLANNED: 'battery-planned',
   CHECKIN: 'checkin',
   DAILY_NOTE: 'daily-note',
   MENSTRUATION: 'menstruation',
@@ -31,6 +32,7 @@ export const DASHBOARD_WIDGETS = [
   { id: DASHBOARD_WIDGET_IDS.COMFORT, defaultLabel: 'Image de réconfort' },
   { id: DASHBOARD_WIDGET_IDS.DICTIONARY_WORD, defaultLabel: 'Mot du jour' },
   { id: DASHBOARD_WIDGET_IDS.TODO, defaultLabel: 'TODO du jour' },
+  { id: DASHBOARD_WIDGET_IDS.BATTERY_PLANNED, defaultLabel: 'Batterie · prévu du jour' },
   { id: DASHBOARD_WIDGET_IDS.TIMETABLE, defaultLabel: 'Emploi du temps du jour' },
   { id: DASHBOARD_WIDGET_IDS.CHECKIN, defaultLabel: 'Check-in émotionnel' },
   { id: DASHBOARD_WIDGET_IDS.DAILY_NOTE, defaultLabel: 'Note du jour' },
@@ -51,6 +53,7 @@ export const DASHBOARD_WIDGET_MOBILE_ORDER = [
   DASHBOARD_WIDGET_IDS.COMFORT,
   DASHBOARD_WIDGET_IDS.DICTIONARY_WORD,
   DASHBOARD_WIDGET_IDS.TODO,
+  DASHBOARD_WIDGET_IDS.BATTERY_PLANNED,
   DASHBOARD_WIDGET_IDS.TIMETABLE,
   DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS,
   DASHBOARD_WIDGET_IDS.TELEVISION_IN_PROGRESS,
@@ -69,6 +72,7 @@ export const DASHBOARD_WIDGET_DESKTOP_LEFT = [
   DASHBOARD_WIDGET_IDS.COMFORT,
   DASHBOARD_WIDGET_IDS.DICTIONARY_WORD,
   DASHBOARD_WIDGET_IDS.TODO,
+  DASHBOARD_WIDGET_IDS.BATTERY_PLANNED,
   DASHBOARD_WIDGET_IDS.TIMETABLE,
   DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS,
   DASHBOARD_WIDGET_IDS.TELEVISION_IN_PROGRESS,
@@ -131,7 +135,12 @@ export const DASHBOARD_MOBILE_DAILY_NOTE_PAGE_COMPANIONS = [
   DASHBOARD_WIDGET_IDS.FINANCES,
 ]
 
-/** Widgets regroupés sur la page Emploi du temps (mobile). */
+/** Widgets placés juste au-dessus de l’EDT sur la même page mobile. */
+export const DASHBOARD_MOBILE_TIMETABLE_PAGE_PREFIX = [
+  DASHBOARD_WIDGET_IDS.BATTERY_PLANNED,
+]
+
+/** Widgets regroupés sur la page Emploi du temps (mobile), après l’EDT. */
 export const DASHBOARD_MOBILE_TIMETABLE_PAGE_COMPANIONS = [
   DASHBOARD_WIDGET_IDS.READING_IN_PROGRESS,
   DASHBOARD_WIDGET_IDS.TELEVISION_IN_PROGRESS,
@@ -150,8 +159,20 @@ function buildMobileGroupsFromRest(rest) {
   for (const id of rest) {
     if (used.has(id)) continue
 
+    if (id === DASHBOARD_WIDGET_IDS.BATTERY_PLANNED) {
+      // Regroupé avec l’EDT juste en dessous.
+      if (rest.includes(DASHBOARD_WIDGET_IDS.TIMETABLE)) continue
+    }
+
     if (id === DASHBOARD_WIDGET_IDS.TIMETABLE) {
-      const page = [id]
+      const page = []
+      for (const prefixId of DASHBOARD_MOBILE_TIMETABLE_PAGE_PREFIX) {
+        if (rest.includes(prefixId) && !used.has(prefixId)) {
+          page.push(prefixId)
+          used.add(prefixId)
+        }
+      }
+      page.push(id)
       for (const companionId of DASHBOARD_MOBILE_TIMETABLE_PAGE_COMPANIONS) {
         if (rest.includes(companionId) && !used.has(companionId)) {
           page.push(companionId)

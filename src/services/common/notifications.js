@@ -529,13 +529,15 @@ export async function declencherCronNotifications() {
   try {
     const user = await resolveSessionUser()
     if (user?.id) {
-      const [{ syncReconfortLastSentFromSentNotifications }, { rescheduleTodoPromesseReminder }] =
-        await Promise.all([
-          import('../dashboard/reconfortNotifications.js'),
-          import('../todo/todoPromesseNotifications.js'),
-        ])
+      const [
+        { syncReconfortLastSentFromSentNotifications },
+        { rescheduleBatteryPlanningReminder },
+      ] = await Promise.all([
+        import('../dashboard/reconfortNotifications.js'),
+        import('../battery/batteryPlanningNotifications.js'),
+      ])
       await syncReconfortLastSentFromSentNotifications(supabase, user.id)
-      await rescheduleTodoPromesseReminder(user.id)
+      await rescheduleBatteryPlanningReminder(user.id)
     }
   } catch (err) {
     console.error('Post-cron notifications:', err)

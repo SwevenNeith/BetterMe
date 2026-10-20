@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
@@ -120,6 +120,20 @@ const sleepDurationHours = computed(() =>
 const lieInGapMinutes = computed(() =>
   lieInMinutes(sleepWakeTime.value, sleepOutOfBedTime.value),
 )
+
+/** Horloge locale pour la fenêtre 20h → 1h. */
+const nowMs = ref(Date.now())
+let eveningClockTimer = null
+
+function isEveningFeelingWindow(date = new Date()) {
+  const hour = date.getHours()
+  return hour >= 20 || hour < 1
+}
+
+const showEveningFeeling = computed(() => {
+  if (!isToday.value) return false
+  return isEveningFeelingWindow(new Date(nowMs.value))
+})
 
 const periodLabel = computed(() => {
   try {
@@ -419,11 +433,23 @@ onMounted(async () => {
   const qDate = String(route.query.date || '')
   if (/^\d{4}-\d{2}-\d{2}$/.test(qDate)) selectedDate.value = qDate
 
+  nowMs.value = Date.now()
+  eveningClockTimer = window.setInterval(() => {
+    nowMs.value = Date.now()
+  }, 60_000)
+
   const user = await resolveSessionUser()
   if (!user) return
   userId.value = user.id
   await loadActivities()
   await loadDay()
+})
+
+onUnmounted(() => {
+  if (eveningClockTimer != null) {
+    window.clearInterval(eveningClockTimer)
+    eveningClockTimer = null
+  }
 })
 </script>
 
@@ -696,8 +722,8 @@ onMounted(async () => {
         </div>
       </section>
 
-      <!-- Ressenti du soir -->
-      <section class="panel evening-panel">
+      <!-- Ressenti du soir : visible de 20h à 1h (jour courant) -->
+      <section v-if="showEveningFeeling" class="panel evening-panel">
         <h2 class="panel__title">Ressenti du soir</h2>
         <p class="panel__hint">Comment tu as fini la journée ?</p>
         <div class="evening-cards">

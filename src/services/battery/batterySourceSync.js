@@ -126,6 +126,16 @@ export async function deleteBatteryEntriesForSource(supabase, userId, sourceType
     .select('id')
 
   if (error) throw error
+  if (data?.length) {
+    try {
+      const { rescheduleBatteryPlanningReminder } = await import(
+        './batteryPlanningNotifications.js'
+      )
+      await rescheduleBatteryPlanningReminder(userId)
+    } catch (err) {
+      console.error('rescheduleBatteryPlanningReminder after source delete:', err)
+    }
+  }
   return data?.length ?? 0
 }
 
@@ -246,6 +256,15 @@ export async function syncPlannedEntriesForSource(supabase, userId, input) {
 
     if (error) throw error
     results.push(data)
+  }
+
+  try {
+    const { rescheduleBatteryPlanningReminder } = await import(
+      './batteryPlanningNotifications.js'
+    )
+    await rescheduleBatteryPlanningReminder(userId)
+  } catch (err) {
+    console.error('rescheduleBatteryPlanningReminder after planned sync:', err)
   }
 
   return results

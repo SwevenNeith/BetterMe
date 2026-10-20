@@ -30,6 +30,9 @@ const DashboardFinancesBreakdown = defineAsyncComponent(
   () => import('./DashboardFinancesBreakdown.vue'),
 )
 const DashboardBattery = defineAsyncComponent(() => import('./DashboardBattery.vue'))
+const DashboardBatteryPlanned = defineAsyncComponent(
+  () => import('./DashboardBatteryPlanned.vue'),
+)
 
 defineProps({
   widgetId: {
@@ -126,6 +129,7 @@ const COLUMN_CLASS_BY_ID = {
   [IDS.COMFORT]: 'intro-column comfort-column',
   [IDS.DICTIONARY_WORD]: 'dictionary-word-column',
   [IDS.TODO]: 'todo-column',
+  [IDS.BATTERY_PLANNED]: 'battery-planned-column',
   [IDS.TIMETABLE]: 'edt-column',
   [IDS.CHECKIN]: 'checkin-column',
   [IDS.DAILY_NOTE]: 'daily-note-column',
@@ -166,6 +170,12 @@ function rootClass(widgetId, asColumn) {
 
     <DashboardTodayTodos
       v-else-if="widgetId === IDS.TODO"
+      :user-id="userId"
+      :date-iso="dateIso"
+    />
+
+    <DashboardBatteryPlanned
+      v-else-if="widgetId === IDS.BATTERY_PLANNED"
       :user-id="userId"
       :date-iso="dateIso"
     />

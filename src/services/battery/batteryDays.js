@@ -18,6 +18,16 @@ import {
 } from './batteryActivities.js'
 import { getBatterySettings, updateBatterySettings } from './batterySettings.js'
 
+async function refreshBatteryPlanningReminder(userId) {
+  if (!userId) return
+  try {
+    const { rescheduleBatteryPlanningReminder } = await import('./batteryPlanningNotifications.js')
+    await rescheduleBatteryPlanningReminder(userId)
+  } catch (err) {
+    console.error('refreshBatteryPlanningReminder:', err)
+  }
+}
+
 const DAYS_TABLE = 'battery_days'
 const ENTRIES_TABLE = 'battery_day_entries'
 
@@ -347,7 +357,11 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
     await maybeLearnDefaultCost(supabase, userId, data.activity_id, cost, data.id)
   }
 
-  return recomputeAndPersistDay(supabase, userId, day)
+  const result = await recomputeAndPersistDay(supabase, userId, day)
+  if (kind === BATTERY_ENTRY_KINDS.PLANNED) {
+    await refreshBatteryPlanningReminder(userId)
+  }
+  return result
 }
 
 /**
@@ -435,6 +449,9 @@ export async function deleteBatteryEntry(supabase, userId, entryId) {
 
   if (dayError) throw dayError
   const result = await recomputeAndPersistDay(supabase, userId, day)
+  if (existing.kind === BATTERY_ENTRY_KINDS.PLANNED) {
+    await refreshBatteryPlanningReminder(userId)
+  }
   return { ...result, deletedEntry: existing }
 }
 
@@ -534,12 +551,23 @@ async function maybeLearnDefaultCost(supabase, userId, activityId, cost, entryId
  * Historique des jours avec dépenses.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
- * @param {{ days?: number }} [opts]
+ * @param {{ days?: number, from?: string, to?: string }} [opts]
  */
 export async function listBatteryHistory(supabase, userId, opts = {}) {
-  const days = Math.max(7, Number(opts.days) || 30)
-  const to = toDayDateIso(new Date())
-  const from = shiftDayIso(to, -(days - 1))
+  const today = toDayDateIso(new Date())
+  let to = opts.to ? toDayDateIso(opts.to) : today
+  let from = opts.from ? toDayDateIso(opts.from) : ''
+
+  if (!from) {
+    const days = Math.max(1, Number(opts.days) || 30)
+    from = shiftDayIso(to, -(days - 1))
+  }
+
+  if (from > to) {
+    const swap = from
+    from = to
+    to = swap
+  }
 
   const { data: dayRows, error } = await supabase
     .from(DAYS_TABLE)
@@ -582,6 +610,31 @@ export async function listBatteryHistory(supabase, userId, opts = {}) {
       remaining: Number(day.computed_budget) - spent,
     }
   })
+}
+
+/**
+ * Entrées prévues du jour (lecture seule si le jour existe déjà).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string | Date} [date]
+ */
+export async function listBatteryPlannedForDay(supabase, userId, date = new Date()) {
+  const dayIso = toDayDateIso(date)
+  let day = await fetchDayRow(supabase, userId, dayIso)
+  let entries
+
+  if (day) {
+    entries = await listDayEntries(supabase, day.id)
+  } else {
+    const ensured = await ensureBatteryDay(supabase, userId, dayIso)
+    day = ensured.day
+    entries = ensured.entries
+  }
+
+  return {
+    day,
+    planned: (entries ?? []).filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED),
+  }
 }
 
 /**

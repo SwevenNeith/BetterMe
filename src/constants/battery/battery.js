@@ -37,4 +37,15 @@ export const BATTERY_GAUGE_COLORS = {
   red: '#c45c5c',
 }
 
+/** Raccourcis de période pour l’historique Batterie. */
+export const BATTERY_HISTORY_PRESETS = [
+  { id: '7d', label: '7 jours' },
+  { id: '30d', label: '30 jours' },
+  { id: '90d', label: '90 jours' },
+  { id: 'month', label: 'Ce mois' },
+  { id: 'year', label: 'Cette année' },
+  { id: 'custom', label: 'Personnalisé' },
+]
+
+/** @deprecated Utiliser BATTERY_HISTORY_PRESETS */
 export const BATTERY_HISTORY_WINDOWS = [30, 90]

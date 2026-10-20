@@ -19,16 +19,6 @@ const COMPLETIONS_TABLE = 'todo_item_completions'
 const TODO_ITEM_SELECT =
   'id, user_id, nom, description, frequence, jour_semaine, heure, date_echeance, is_promesse, is_done, quantite_cible, sort_order, timetable_event_id, note_id, reminder, reminder_time, created_at, updated_at'
 
-async function refreshTodoPromesseReminder(userId) {
-  if (!userId) return
-  try {
-    const { rescheduleTodoPromesseReminder } = await import('./todoPromesseNotifications.js')
-    await rescheduleTodoPromesseReminder(userId)
-  } catch (err) {
-    console.error('refreshTodoPromesseReminder:', err)
-  }
-}
-
 async function refreshTodoItemReminder(userId, item) {
   if (!userId || !item?.id) return
   try {
@@ -246,7 +236,6 @@ export async function createTodoItem(supabase, userId, payload, options = {}) {
         )
         .single()
       if (retry.error) throw retry.error
-      await refreshTodoPromesseReminder(userId)
       if (!options.skipReminderSchedule) {
         await refreshTodoItemReminder(userId, retry.data)
       } else {
@@ -256,7 +245,6 @@ export async function createTodoItem(supabase, userId, payload, options = {}) {
     }
     throw error
   }
-  await refreshTodoPromesseReminder(userId)
   if (!options.skipReminderSchedule) {
     await refreshTodoItemReminder(userId, data)
   } else {
@@ -307,7 +295,6 @@ export async function replaceTodoItem(supabase, userId, itemId, payload, options
         )
         .single()
       if (retry.error) throw retry.error
-      await refreshTodoPromesseReminder(userId)
       if (!options.skipReminderSchedule) {
         await refreshTodoItemReminder(userId, retry.data)
       } else {
@@ -317,7 +304,6 @@ export async function replaceTodoItem(supabase, userId, itemId, payload, options
     }
     throw error
   }
-  await refreshTodoPromesseReminder(userId)
   if (!options.skipReminderSchedule) {
     await refreshTodoItemReminder(userId, data)
   } else {
@@ -340,7 +326,15 @@ export async function deleteTodoItem(supabase, userId, itemId) {
   const { error } = await supabase.from(TABLE).delete().eq('id', itemId).eq('user_id', userId)
 
   if (error) throw error
-  await refreshTodoPromesseReminder(userId)
+
+  try {
+    const { rescheduleBatteryPlanningReminder } = await import(
+      '../battery/batteryPlanningNotifications.js'
+    )
+    await rescheduleBatteryPlanningReminder(userId)
+  } catch (err) {
+    console.error('rescheduleBatteryPlanningReminder after todo delete:', err)
+  }
 }
 
 /**

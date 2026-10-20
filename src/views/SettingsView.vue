@@ -59,7 +59,6 @@ import {
 import {
   createDefaultTodoPromesseReminderSettings,
   loadTodoPromesseReminderSettings,
-  rescheduleTodoPromesseReminder,
   saveTodoPromesseReminderSettings,
 } from '../services/todo/todoPromesseNotifications.js'
 import {
@@ -866,7 +865,7 @@ const loadTodoPromesseReminderState = async () => {
   } catch (err) {
     console.error(err)
     todoPromesseReminderError.value =
-      err.message || 'Impossible de charger les réglages de rappel promesses.'
+      err.message || 'Impossible de charger les réglages de planification Batterie.'
   }
 }
 
@@ -877,7 +876,10 @@ const onSaveTodoPromesseReminderSettings = async () => {
   todoPromesseReminderError.value = ''
   try {
     await saveTodoPromesseReminderSettings(userId.value, todoPromesseReminderSettings.value)
-    await rescheduleTodoPromesseReminder(userId.value, {
+    const { rescheduleBatteryPlanningReminder } = await import(
+      '../services/battery/batteryPlanningNotifications.js'
+    )
+    await rescheduleBatteryPlanningReminder(userId.value, {
       settings: todoPromesseReminderSettings.value,
     })
     todoPromesseReminderMessage.value = 'Réglages enregistrés.'
@@ -1816,7 +1818,7 @@ onUnmounted(() => {
           aria-controls="settings-section-todo-promesse"
           @click="toggleSection(COLLAPSIBLE_SECTIONS.TODO_PROMESSE)"
         >
-          <h2 class="card-toggle__title">Rappel promesses</h2>
+          <h2 class="card-toggle__title">Planification Batterie</h2>
           <span
             class="card-toggle__chevron"
             :class="{
@@ -1844,7 +1846,8 @@ onUnmounted(() => {
           class="card-body"
         >
         <p class="card-body__desc">
-          Notification quotidienne si aucune promesse n’est prévue pour le lendemain.
+          Notification quotidienne si la journée de demain n’a pas encore d’activités prévues sur
+          Batterie.
         </p>
 
         <div v-if="!notificationsSupportees()" class="settings-alert settings-alert--warn">
@@ -1860,7 +1863,7 @@ onUnmounted(() => {
               v-model="todoPromesseReminderSettings.todo_promesse_reminder_enabled"
               type="checkbox"
             />
-            <span>Recevoir le rappel promesses</span>
+            <span>Recevoir le rappel de planification</span>
           </label>
           <label class="field">
             <span>Heure d’envoi</span>

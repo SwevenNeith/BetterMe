@@ -1,20 +1,27 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
-import { BATTERY_HISTORY_WINDOWS } from '../constants/battery/battery.js'
+import { BATTERY_HISTORY_PRESETS } from '../constants/battery/battery.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
+import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
 import { listBatteryHistory } from '../services/battery/batteryDays.js'
 import { listEmotionLogs } from '../services/mood/emotionLogs.js'
 import {
   correlateWithMood,
-  describeCorrelation,
+  describeAvgLieIn,
+  describeAvgSpentByLieIn,
+  describeAvgSpentBySleep,
+  describeEmotionalEnergyCorrelation,
   describeLieInCorrelation,
+  describeMoodCorrelation,
+  describeSleepHoursCorrelation,
   seriesForChart,
   topCostliestDays,
   topGreedyActivities,
 } from '../utils/battery/batteryInsights.js'
-import { formatMinutesAsHm } from '../utils/battery/batteryMath.js'
+import { toDayDateIso } from '../utils/battery/batteryMath.js'
+import { toISODate } from '../utils/habit/habitCalendar.js'
 
 defineOptions({ name: 'BatteryHistoryView' })
 
@@ -24,11 +31,97 @@ const route = useRoute()
 const router = useRouter()
 
 const userId = ref(null)
-const historyWindow = ref(30)
+const periodPreset = ref('30d')
+const customFrom = ref('')
+const customTo = ref('')
 const history = ref([])
 const emotionLogs = ref([])
 const isLoading = ref(false)
 const loadError = ref('')
+const rangeError = ref('')
+
+const todayIso = computed(() => getLocalTodayISO())
+
+function monthRange(anchor = new Date()) {
+  const y = anchor.getFullYear()
+  const m = anchor.getMonth() + 1
+  const lastDay = new Date(y, m, 0).getDate()
+  return {
+    from: toISODate(y, m, 1),
+    to: toISODate(y, m, lastDay),
+  }
+}
+
+function yearRange(anchor = new Date()) {
+  const y = anchor.getFullYear()
+  return {
+    from: toISODate(y, 1, 1),
+    to: toISODate(y, 12, 31),
+  }
+}
+
+function resolvePeriodRange() {
+  const today = todayIso.value
+  const preset = periodPreset.value
+
+  if (preset === '7d') {
+    return { from: shiftDays(today, -6), to: today }
+  }
+  if (preset === '30d') {
+    return { from: shiftDays(today, -29), to: today }
+  }
+  if (preset === '90d') {
+    return { from: shiftDays(today, -89), to: today }
+  }
+  if (preset === 'month') {
+    const range = monthRange()
+    return { from: range.from, to: range.to > today ? today : range.to }
+  }
+  if (preset === 'year') {
+    const range = yearRange()
+    return { from: range.from, to: range.to > today ? today : range.to }
+  }
+
+  const from = customFrom.value
+  const to = customTo.value || today
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return null
+  }
+  return from <= to ? { from, to } : { from: to, to: from }
+}
+
+function shiftDays(iso, delta) {
+  const [y, m, d] = String(iso).split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  date.setDate(date.getDate() + delta)
+  return toDayDateIso(date)
+}
+
+const activeRange = computed(() => resolvePeriodRange())
+
+const periodLabel = computed(() => {
+  const range = activeRange.value
+  if (!range) return 'période'
+  if (periodPreset.value === '7d') return '7 jours'
+  if (periodPreset.value === '30d') return '30 jours'
+  if (periodPreset.value === '90d') return '90 jours'
+  if (periodPreset.value === 'month') return 'ce mois'
+  if (periodPreset.value === 'year') return 'cette année'
+  return `du ${formatDateFr(range.from)} au ${formatDateFr(range.to)}`
+})
+
+function formatDateFr(iso) {
+  try {
+    const [y, m, d] = String(iso).split('-').map(Number)
+    return new Date(y, m - 1, d).toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    })
+  } catch {
+    return iso
+  }
+}
 
 const chartSeries = computed(() => seriesForChart(history.value))
 const costliestDays = computed(() => topCostliestDays(history.value, 5))
@@ -41,14 +134,20 @@ const chartMax = computed(() => {
 
 async function loadHistory() {
   if (!userId.value) return
+
+  const range = resolvePeriodRange()
+  if (!range) {
+    rangeError.value = 'Choisis une date de début et une date de fin.'
+    return
+  }
+  rangeError.value = ''
   isLoading.value = true
   loadError.value = ''
   try {
-    history.value = await listBatteryHistory(supabase, userId.value, {
-      days: historyWindow.value,
-    })
+    history.value = await listBatteryHistory(supabase, userId.value, range)
     emotionLogs.value = await listEmotionLogs(supabase, userId.value, {
-      limit: historyWindow.value + 10,
+      from: range.from,
+      to: range.to,
     })
   } catch (err) {
     console.error(err)
@@ -59,6 +158,24 @@ async function loadHistory() {
   } finally {
     isLoading.value = false
   }
+}
+
+function selectPreset(id) {
+  periodPreset.value = id
+  if (id !== 'custom') {
+    void loadHistory()
+    return
+  }
+  if (!customFrom.value || !customTo.value) {
+    const today = todayIso.value
+    customTo.value = today
+    customFrom.value = shiftDays(today, -29)
+  }
+}
+
+function applyCustomRange() {
+  periodPreset.value = 'custom'
+  void loadHistory()
 }
 
 function goBack() {
@@ -76,12 +193,11 @@ function openDay(dayIso) {
   })
 }
 
-watch(historyWindow, () => {
-  loadHistory()
-})
-
 onMounted(async () => {
   document.title = `${pageTitle} · BetterMe`
+  const today = todayIso.value
+  customTo.value = today
+  customFrom.value = shiftDays(today, -29)
   const user = await resolveSessionUser()
   if (!user) return
   userId.value = user.id
@@ -103,16 +219,29 @@ onMounted(async () => {
     <div class="toolbar">
       <div class="window-chips" role="group" aria-label="Période">
         <button
-          v-for="w in BATTERY_HISTORY_WINDOWS"
-          :key="w"
+          v-for="preset in BATTERY_HISTORY_PRESETS"
+          :key="preset.id"
           type="button"
           class="chip"
-          :class="{ 'is-active': historyWindow === w }"
-          @click="historyWindow = w"
+          :class="{ 'is-active': periodPreset === preset.id }"
+          @click="selectPreset(preset.id)"
         >
-          {{ w }} jours
+          {{ preset.label }}
         </button>
       </div>
+
+      <div v-if="periodPreset === 'custom'" class="custom-range">
+        <label class="custom-range__field">
+          <span>Du</span>
+          <input v-model="customFrom" type="date" :max="customTo || todayIso" />
+        </label>
+        <label class="custom-range__field">
+          <span>Au</span>
+          <input v-model="customTo" type="date" :min="customFrom || undefined" :max="todayIso" />
+        </label>
+        <button type="button" class="chip chip--apply" @click="applyCustomRange">Appliquer</button>
+      </div>
+      <p v-if="rangeError" class="range-error">{{ rangeError }}</p>
     </div>
 
     <p v-if="loadError" class="flash flash--error">{{ loadError }}</p>
@@ -120,8 +249,8 @@ onMounted(async () => {
 
     <template v-else>
       <section class="panel chart-panel">
-        <h2 class="panel__title">Dépenses sur {{ historyWindow }} jours</h2>
-        <div class="chart" role="img" :aria-label="`Dépenses sur ${historyWindow} jours`">
+        <h2 class="panel__title">Dépenses · {{ periodLabel }}</h2>
+        <div class="chart" role="img" :aria-label="`Dépenses · ${periodLabel}`">
           <div
             v-for="point in chartSeries"
             :key="point.date"
@@ -173,48 +302,38 @@ onMounted(async () => {
         </section>
 
         <section class="panel">
-          <h2 class="panel__title">Corrélations</h2>
-          <ul class="plain-list plain-list--stack">
+          <h2 class="panel__title">Ce que disent tes données</h2>
+          <p class="panel__intro">
+            Lectures simples à partir de ta période sélectionnée — pas de chiffres bruts.
+          </p>
+          <ul class="insight-list">
             <li>
-              <strong>Dépenses ↔ humeur</strong>
-              <span>{{ correlations.spentVsMood ?? '—' }}</span>
-              <span class="subtle">{{ describeCorrelation(correlations.spentVsMood) }}</span>
+              <strong>Humeur</strong>
+              <p>{{ describeMoodCorrelation(correlations.spentVsMood) }}</p>
             </li>
             <li>
-              <strong>Dépenses ↔ énergie émotionnelle</strong>
-              <span>{{ correlations.spentVsEmotionalEnergy ?? '—' }}</span>
-              <span class="subtle">{{ describeCorrelation(correlations.spentVsEmotionalEnergy) }}</span>
+              <strong>Énergie émotionnelle</strong>
+              <p>{{ describeEmotionalEnergyCorrelation(correlations.spentVsEmotionalEnergy) }}</p>
             </li>
             <li>
-              <strong>Moyenne dépensée selon qualité du sommeil</strong>
-              <span class="subtle">
-                mauvaise {{ correlations.avgSpentBySleep.bad ?? '—' }} ·
-                moyenne {{ correlations.avgSpentBySleep.ok ?? '—' }} ·
-                bonne {{ correlations.avgSpentBySleep.good ?? '—' }}
-              </span>
+              <strong>Qualité du sommeil</strong>
+              <p>{{ describeAvgSpentBySleep(correlations.avgSpentBySleep) }}</p>
             </li>
             <li>
-              <strong>Dépenses ↔ durée de sommeil</strong>
-              <span>{{ correlations.spentVsSleepHours ?? '—' }}</span>
-              <span class="subtle">{{ describeCorrelation(correlations.spentVsSleepHours) }}</span>
+              <strong>Durée de sommeil</strong>
+              <p>{{ describeSleepHoursCorrelation(correlations.spentVsSleepHours) }}</p>
             </li>
             <li>
-              <strong>Dépenses ↔ temps au lit après réveil</strong>
-              <span>{{ correlations.spentVsLieIn ?? '—' }}</span>
-              <span class="subtle">{{ describeLieInCorrelation(correlations.spentVsLieIn) }}</span>
+              <strong>Temps au lit après réveil</strong>
+              <p>{{ describeLieInCorrelation(correlations.spentVsLieIn) }}</p>
             </li>
             <li>
-              <strong>Moyenne dépensée selon l’écart réveil → sortie</strong>
-              <span class="subtle">
-                &lt;20 min {{ correlations.avgSpentByLieIn.short ?? '—' }} ·
-                20–45 min {{ correlations.avgSpentByLieIn.medium ?? '—' }} ·
-                45–90 min {{ correlations.avgSpentByLieIn.long ?? '—' }} ·
-                &gt;90 min {{ correlations.avgSpentByLieIn.very_long ?? '—' }}
-              </span>
+              <strong>Selon l’écart réveil → sortie</strong>
+              <p>{{ describeAvgSpentByLieIn(correlations.avgSpentByLieIn) }}</p>
             </li>
             <li>
-              <strong>Écart moyen réveil → sortie du lit</strong>
-              <span>{{ formatMinutesAsHm(correlations.avgLieInMinutes) }}</span>
+              <strong>Habitude du matin</strong>
+              <p>{{ describeAvgLieIn(correlations.avgLieInMinutes) }}</p>
             </li>
           </ul>
         </section>
@@ -311,35 +430,95 @@ onMounted(async () => {
 
 .toolbar {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+  width: 100%;
   margin-bottom: 1.15rem;
 }
 
 .window-chips {
   display: flex;
+  flex-wrap: wrap;
+  width: 100%;
   gap: 0.4rem;
   padding: 0.28rem;
   border-radius: 12px;
   background: rgba(213, 181, 234, 0.14);
   border: 1px solid rgba(213, 181, 234, 0.28);
+  box-sizing: border-box;
 }
 
 .chip {
+  flex: 1 1 0;
   border: none;
   border-radius: 9px;
-  padding: 0.45rem 0.9rem;
+  padding: 0.45rem 0.55rem;
   font: inherit;
   font-size: 0.88rem;
   font-weight: 700;
   color: #6c757d;
   background: transparent;
   cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .chip.is-active {
   background: rgba(255, 255, 255, 0.92);
   color: #ad81be;
   box-shadow: 0 2px 6px rgba(173, 129, 190, 0.12);
+}
+
+.chip--apply {
+  flex: 0 0 auto;
+  background: rgba(173, 129, 190, 0.28);
+  color: #5a3d6e;
+  padding-inline: 1rem;
+}
+
+.custom-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  width: 100%;
+  gap: 0.65rem;
+  box-sizing: border-box;
+}
+
+.custom-range__field {
+  display: flex;
+  flex: 1 1 10rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a9098;
+}
+
+.custom-range__field input {
+  width: 100%;
+  border: 1px solid rgba(213, 181, 234, 0.4);
+  border-radius: 9px;
+  padding: 0.45rem 0.55rem;
+  background: rgba(255, 255, 255, 0.88);
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #2c3e50;
+  text-transform: none;
+  letter-spacing: normal;
+  box-sizing: border-box;
+}
+
+.range-error {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #c45c5c;
 }
 
 .panel {
@@ -462,6 +641,45 @@ onMounted(async () => {
   gap: 0.2rem;
 }
 
+.panel__intro {
+  margin: -0.25rem 0 0.85rem;
+  font-size: 0.88rem;
+  color: #8a9098;
+  line-height: 1.4;
+}
+
+.insight-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.insight-list li {
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(213, 181, 234, 0.1);
+  border: 1px solid rgba(213, 181, 234, 0.22);
+}
+
+.insight-list strong {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #8a6a9e;
+}
+
+.insight-list p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: #2c3e50;
+}
+
 .item-name {
   font-weight: 600;
 }
@@ -516,8 +734,22 @@ onMounted(async () => {
   .page-title,
   .panel__title,
   .plain-list li,
-  .item-name {
+  .item-name,
+  .insight-list p {
     color: #f0e8f8;
+  }
+
+  .panel__intro {
+    color: #adb5bd;
+  }
+
+  .insight-list li {
+    background: rgba(35, 30, 48, 0.55);
+    border-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .insight-list strong {
+    color: #c9b0d8;
   }
 
   .page-back {
@@ -545,6 +777,22 @@ onMounted(async () => {
 
   .chip.is-active {
     color: #d5b5ea;
+  }
+
+  .custom-range__field {
+    color: #adb5bd;
+  }
+
+  .custom-range__field input {
+    background: rgba(35, 30, 48, 0.78);
+    border-color: rgba(213, 181, 234, 0.28);
+    color: #f0e8f8;
+    color-scheme: dark;
+  }
+
+  .chip--apply {
+    background: rgba(173, 129, 190, 0.35);
+    color: #e8d4f0;
   }
 }
 </style>

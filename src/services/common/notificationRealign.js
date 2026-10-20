@@ -1,6 +1,6 @@
 import { syncNotificationTimezone } from './scheduledReminders.js'
 import { rescheduleDailyReminderPushes } from './dailyReminders.js'
-import { rescheduleTodoPromesseReminder } from '../todo/todoPromesseNotifications.js'
+import { rescheduleBatteryPlanningReminder } from '../battery/batteryPlanningNotifications.js'
 import { rescheduleAllTodoItemReminders } from '../todo/todoItemReminders.js'
 import { maintainRollingTimetableReminders } from './rollingTimetableReminders.js'
 import { maintainAnniversaryReminders } from '../timetable/anniversaryReminders.js'
@@ -18,7 +18,7 @@ export async function realignAllDeviceLocalNotifications(supabase, userId) {
 
   const results = await Promise.allSettled([
     rescheduleDailyReminderPushes(supabase, userId),
-    rescheduleTodoPromesseReminder(userId),
+    rescheduleBatteryPlanningReminder(userId),
     rescheduleAllTodoItemReminders(userId),
     maintainRollingTimetableReminders(supabase, userId),
     maintainAnniversaryReminders(supabase, userId),

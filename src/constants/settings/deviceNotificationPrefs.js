@@ -44,8 +44,9 @@ export const DEVICE_NOTIFICATION_CATEGORIES = [
   },
   {
     id: DEVICE_NOTIFICATION_CATEGORY_IDS.TODO_PROMESSE,
-    label: 'Rappel promesses',
-    description: 'Rappel quotidien s’il n’y a pas de promesse pour demain.',
+    label: 'Planification Batterie',
+    description:
+      'Rappel quotidien si la journée de demain n’a pas encore d’activités prévues sur Batterie.',
   },
   {
     id: DEVICE_NOTIFICATION_CATEGORY_IDS.RECONFORT,
@@ -117,7 +118,7 @@ export function mapNotificationKindToDeviceCategory(kind) {
     return DEVICE_NOTIFICATION_CATEGORY_IDS.TIMER
   }
   if (raw === 'todo_item_reminder') return DEVICE_NOTIFICATION_CATEGORY_IDS.TODO_ITEM
-  if (raw === 'todo_promesse_reminder') {
+  if (raw === 'todo_promesse_reminder' || raw === 'battery_planning_reminder') {
     return DEVICE_NOTIFICATION_CATEGORY_IDS.TODO_PROMESSE
   }
   if (raw === 'reconfort') return DEVICE_NOTIFICATION_CATEGORY_IDS.RECONFORT

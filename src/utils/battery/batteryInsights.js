@@ -181,19 +181,83 @@ function avg(arr) {
 }
 
 /**
- * Interprétation courte d’un coefficient.
  * @param {number | null} r
+ * @returns {'none'|'weak'|'moderate'|'strong'}
  */
-export function describeCorrelation(r) {
-  if (r == null) return 'Pas assez de données (5 jours min.).'
+function correlationStrength(r) {
+  if (r == null || !Number.isFinite(r)) return 'none'
   const abs = Math.abs(r)
-  if (abs < 0.2) return 'Peu de lien apparent.'
-  if (r > 0) {
-    if (abs < 0.5) return 'Lien positif modéré : plus tu dépenses, plus le score tend à monter.'
-    return 'Lien positif notable.'
+  if (abs < 0.2) return 'weak'
+  if (abs < 0.5) return 'moderate'
+  return 'strong'
+}
+
+/**
+ * Interprétation d’un coefficient Pearson en phrase naturelle.
+ * @param {number | null} r
+ * @param {{
+ *   subject?: string,
+ *   positive?: string,
+ *   negative?: string,
+ *   weak?: string,
+ * }} [opts]
+ */
+export function describeCorrelation(r, opts = {}) {
+  if (r == null) {
+    return 'Pas encore assez de jours renseignés (il en faut au moins 5) pour voir un lien.'
   }
-  if (abs < 0.5) return 'Lien négatif modéré : jours coûteux associés à un score plus bas.'
-  return 'Lien négatif notable : jours coûteux souvent liés à un score plus bas.'
+  const strength = correlationStrength(r)
+  const subject = opts.subject || 'ces deux mesures'
+  if (strength === 'weak') {
+    return opts.weak || `Pour l’instant, peu de lien clair entre ${subject}.`
+  }
+  const intensity = strength === 'strong' ? 'assez clair' : 'modéré'
+  if (r > 0) {
+    return (
+      opts.positive ||
+      `Lien ${intensity} : quand l’une monte, l’autre tend aussi à monter (${subject}).`
+    )
+  }
+  return (
+    opts.negative ||
+    `Lien ${intensity} : quand l’une monte, l’autre tend à baisser (${subject}).`
+  )
+}
+
+/** @param {number | null} r */
+export function describeMoodCorrelation(r) {
+  return describeCorrelation(r, {
+    subject: 'tes dépenses d’énergie et ton humeur',
+    weak: 'Tes jours coûteux ne semblent pas liés de façon nette à ton humeur.',
+    positive:
+      'Les jours où tu dépenses plus d’énergie, ton humeur tend aussi à être meilleure.',
+    negative:
+      'Les jours où tu dépenses plus d’énergie, ton humeur tend à être plus basse.',
+  })
+}
+
+/** @param {number | null} r */
+export function describeEmotionalEnergyCorrelation(r) {
+  return describeCorrelation(r, {
+    subject: 'tes dépenses d’énergie et ton énergie émotionnelle',
+    weak: 'Peu de lien apparent entre ce que tu dépenses et ton énergie émotionnelle.',
+    positive:
+      'Quand tu dépenses plus d’énergie, ton énergie émotionnelle tend aussi à être plus haute.',
+    negative:
+      'Quand tu dépenses plus d’énergie, ton énergie émotionnelle tend à être plus basse.',
+  })
+}
+
+/** @param {number | null} r */
+export function describeSleepHoursCorrelation(r) {
+  return describeCorrelation(r, {
+    subject: 'tes dépenses et ta durée de sommeil',
+    weak: 'La durée de sommeil ne semble pas liée clairement à tes dépenses du jour.',
+    positive:
+      'Les jours où tu as dormi plus longtemps, tu as tendu à dépenser plus d’énergie.',
+    negative:
+      'Les jours où tu as dormi plus longtemps, tu as tendu à dépenser moins d’énergie.',
+  })
 }
 
 /**
@@ -201,11 +265,85 @@ export function describeCorrelation(r) {
  * @param {number | null} r
  */
 export function describeLieInCorrelation(r) {
-  if (r == null) return 'Pas assez de données (5 jours min.).'
-  const abs = Math.abs(r)
-  if (abs < 0.2) return 'Peu de lien entre temps au lit après réveil et dépenses.'
-  if (r > 0) {
-    return 'Les jours où tu restes longtemps au lit après le réveil tendent à être plus coûteux.'
+  if (r == null) {
+    return 'Pas encore assez de jours avec réveil et sortie du lit pour conclure.'
   }
-  return 'Les jours où tu sors vite du lit tendent à être plus coûteux (ou l’inverse).'
+  const strength = correlationStrength(r)
+  if (strength === 'weak') {
+    return 'Le temps passé au lit après le réveil ne semble pas lié clairement à tes dépenses.'
+  }
+  if (r > 0) {
+    return strength === 'strong'
+      ? 'Plus tu restes longtemps au lit après le réveil, plus tes journées tendent à être coûteuses en énergie.'
+      : 'Les jours où tu restes un peu plus longtemps au lit après le réveil tendent à être un peu plus coûteux.'
+  }
+  return strength === 'strong'
+    ? 'Plus tu sors vite du lit après le réveil, plus tes journées tendent à être coûteuses (ou l’inverse).'
+    : 'Les jours où tu sors plus vite du lit tendent parfois à être un peu plus coûteux.'
+}
+
+/**
+ * Phrase sur les moyennes de dépenses selon la qualité du sommeil.
+ * @param {{ bad?: number|null, ok?: number|null, good?: number|null }} averages
+ */
+export function describeAvgSpentBySleep(averages) {
+  const parts = []
+  if (averages?.bad != null) parts.push(`mauvaise nuit ≈ ${averages.bad} pts`)
+  if (averages?.ok != null) parts.push(`nuit moyenne ≈ ${averages.ok} pts`)
+  if (averages?.good != null) parts.push(`bonne nuit ≈ ${averages.good} pts`)
+  if (!parts.length) {
+    return 'Pas encore de journées avec une qualité de sommeil renseignée.'
+  }
+
+  const values = [
+    ['mauvaise', averages.bad],
+    ['moyenne', averages.ok],
+    ['bonne', averages.good],
+  ].filter(([, v]) => v != null)
+  values.sort((a, b) => Number(b[1]) - Number(a[1]))
+
+  if (values.length >= 2 && values[0][1] !== values[values.length - 1][1]) {
+    return `En moyenne tu dépenses le plus après une nuit ${values[0][0]} (${values[0][1]} pts) et le moins après une nuit ${values[values.length - 1][0]} (${values[values.length - 1][1]} pts).`
+  }
+  return `Moyenne dépensée selon le sommeil : ${parts.join(', ')}.`
+}
+
+/**
+ * Phrase sur les moyennes selon l’écart réveil → sortie.
+ * @param {{ short?: number|null, medium?: number|null, long?: number|null, very_long?: number|null }} averages
+ */
+export function describeAvgSpentByLieIn(averages) {
+  const labels = {
+    short: 'moins de 20 min au lit après réveil',
+    medium: '20–45 min',
+    long: '45–90 min',
+    very_long: 'plus de 90 min',
+  }
+  const values = Object.entries(labels)
+    .map(([key, label]) => ({ key, label, value: averages?.[key] }))
+    .filter((row) => row.value != null)
+
+  if (!values.length) {
+    return 'Pas encore de journées avec réveil et sortie du lit renseignés.'
+  }
+
+  values.sort((a, b) => Number(b.value) - Number(a.value))
+  if (values.length === 1) {
+    return `Quand tu restes ${values[0].label}, tu dépenses en moyenne ${values[0].value} pts.`
+  }
+  return `Tu dépenses le plus les jours où tu restes ${values[0].label} (≈ ${values[0].value} pts) et le moins quand c’est ${values[values.length - 1].label} (≈ ${values[values.length - 1].value} pts).`
+}
+
+/**
+ * @param {number | null} minutes
+ */
+export function describeAvgLieIn(minutes) {
+  if (minutes == null || !Number.isFinite(Number(minutes))) {
+    return 'Pas encore d’écart moyen réveil → sortie du lit calculable.'
+  }
+  const total = Math.max(0, Math.round(Number(minutes)))
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  const label = h <= 0 ? `${m} min` : m === 0 ? `${h} h` : `${h} h ${m} min`
+  return `En moyenne, tu restes ${label} au lit après ton réveil.`
 }

@@ -11,6 +11,7 @@ export const SCHEDULED_KIND = {
   TIMER_START: 'timer_start',
   RECONFORT: 'reconfort',
   TODO_PROMESSE_REMINDER: 'todo_promesse_reminder',
+  BATTERY_PLANNING_REMINDER: 'battery_planning_reminder',
   TODO_ITEM_REMINDER: 'todo_item_reminder',
   /**
    * Préfixe : daily_reminder:<uuid>

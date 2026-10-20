@@ -128,8 +128,13 @@ export async function upsertEmotionLog(supabase, userId, payload, knownId = null
   return saveEmotionLogForDate(supabase, userId, payload, knownId)
 }
 
-export async function listEmotionLogs(supabase, userId, { limit = 180 } = {}) {
-  const { data, error } = await supabase
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {{ limit?: number, from?: string, to?: string }} [opts]
+ */
+export async function listEmotionLogs(supabase, userId, { limit = 180, from, to } = {}) {
+  let query = supabase
     .from(TABLE)
     .select(
       [
@@ -146,7 +151,12 @@ export async function listEmotionLogs(supabase, userId, { limit = 180 } = {}) {
     )
     .eq('user_id', userId)
     .order('date_jour', { ascending: true })
-    .limit(limit)
+
+  if (from) query = query.gte('date_jour', from)
+  if (to) query = query.lte('date_jour', to)
+  if (!from && !to) query = query.limit(limit)
+
+  const { data, error } = await query
   if (error) throw error
   return data ?? []
 }
