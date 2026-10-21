@@ -481,6 +481,30 @@ export function notifyBatteryUpdated() {
   window.dispatchEvent(new CustomEvent(BATTERY_UPDATED_EVENT))
 }
 
+/**
+ * Persiste l’ordre d’une liste d’entrées (sort_order = index).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {Array<{ id: string }>} orderedEntries
+ */
+export async function persistBatteryEntryOrders(supabase, userId, orderedEntries) {
+  if (!userId || !orderedEntries?.length) return
+
+  const results = await Promise.all(
+    orderedEntries.map((entry, index) =>
+      supabase
+        .from(ENTRIES_TABLE)
+        .update({ sort_order: index })
+        .eq('id', entry.id)
+        .eq('user_id', userId),
+    ),
+  )
+  const failed = results.find((result) => result.error)
+  if (failed?.error) throw failed.error
+
+  notifyBatteryUpdated()
+}
+
 /** @param {{ completed_actual_id?: string | null, kind?: string } | null | undefined} entry */
 export function isPlannedEntryDone(entry) {
   return (

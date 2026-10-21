@@ -31,6 +31,7 @@ import {
   deleteBatteryEntry,
   ensureBatteryDay,
   isPlannedEntryDone,
+  persistBatteryEntryOrders,
   updateBatteryDay,
   updateBatteryEntry,
 } from '../services/battery/batteryDays.js'
@@ -317,6 +318,67 @@ async function submitEntry() {
 const editingCostEntryId = ref(null)
 const editingCostValue = ref(0)
 const completingPlannedId = ref(null)
+const draggingPlannedId = ref(null)
+
+function onPlannedDragStart(entryId, event) {
+  if (event.target?.closest('button, input, label')) {
+    event.preventDefault()
+    return
+  }
+  draggingPlannedId.value = entryId
+  try {
+    event.dataTransfer?.setData('text/plain', entryId)
+    event.dataTransfer.effectAllowed = 'move'
+  } catch {
+    /* ignore */
+  }
+}
+
+function onPlannedDragOver(entryId, event) {
+  if (!draggingPlannedId.value || draggingPlannedId.value === entryId) return
+  event.preventDefault()
+  try {
+    event.dataTransfer.dropEffect = 'move'
+  } catch {
+    /* ignore */
+  }
+}
+
+function onPlannedDragEnd() {
+  draggingPlannedId.value = null
+}
+
+function reorderById(list, sourceId, targetId) {
+  const from = list.findIndex((item) => item.id === sourceId)
+  const to = list.findIndex((item) => item.id === targetId)
+  if (from < 0 || to < 0 || from === to) return false
+  const [moved] = list.splice(from, 1)
+  list.splice(to, 0, moved)
+  return true
+}
+
+async function onPlannedDrop(targetId, event) {
+  event.preventDefault()
+  const sourceId = draggingPlannedId.value || event.dataTransfer?.getData('text/plain')
+  draggingPlannedId.value = null
+  if (!sourceId || sourceId === targetId || !userId.value) return
+
+  const planned = entries.value.filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED)
+  const actual = entries.value.filter((e) => e.kind !== BATTERY_ENTRY_KINDS.PLANNED)
+  if (!planned.some((e) => e.id === sourceId) || !planned.some((e) => e.id === targetId)) return
+
+  const reordered = [...planned]
+  if (!reorderById(reordered, sourceId, targetId)) return
+
+  entries.value = [...reordered, ...actual]
+  try {
+    await persistBatteryEntryOrders(supabase, userId.value, reordered)
+  } catch (err) {
+    console.error(err)
+    statusMessage.value = err?.message || 'Impossible de réordonner'
+    await loadDay()
+  }
+}
 
 async function markPlannedDone(entry) {
   if (!userId.value || !entry?.id || completingPlannedId.value) return
@@ -771,10 +833,18 @@ onUnmounted(() => {
                 class="entry-row entry-row--plan"
                 :class="[
                   `entry-row--${costStyleClass(entry.cost)}`,
-                  { 'entry-row--done': isPlannedEntryDone(entry) },
+                  {
+                    'entry-row--done': isPlannedEntryDone(entry),
+                    'entry-row--dragging': draggingPlannedId === entry.id,
+                  },
                 ]"
+                draggable="true"
+                @dragstart="onPlannedDragStart(entry.id, $event)"
+                @dragover="onPlannedDragOver(entry.id, $event)"
+                @drop="onPlannedDrop(entry.id, $event)"
+                @dragend="onPlannedDragEnd"
               >
-                <span class="entry-label">
+                <span class="entry-label" title="Glisser pour réordonner">
                   {{ entry.label }}
                   <span v-if="isPlannedEntryDone(entry)" class="entry-done-pill">fait</span>
                 </span>
@@ -1602,6 +1672,19 @@ onUnmounted(() => {
 
 .entry-row--plan:not(.entry-row--done) {
   grid-template-columns: 1fr auto auto auto;
+}
+
+.entry-row--plan {
+  cursor: grab;
+  touch-action: manipulation;
+}
+
+.entry-row--plan:active {
+  cursor: grabbing;
+}
+
+.entry-row--dragging {
+  opacity: 0.55;
 }
 
 .fait-btn {

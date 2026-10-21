@@ -14,6 +14,7 @@ import {
   completePlannedBatteryEntry,
   isPlannedEntryDone,
   listBatteryPlannedForDay,
+  persistBatteryEntryOrders,
 } from '../../services/battery/batteryDays.js'
 import {
   costIntensity,
@@ -41,6 +42,7 @@ const plannedEntries = ref([])
 const dayBudget = ref(0)
 const completingId = ref(null)
 const actionError = ref('')
+const draggingId = ref(null)
 /** Coût saisi par entrée (chaîne vide = défaut). */
 const costDrafts = reactive(/** @type {Record<string, string>} */ ({}))
 
@@ -156,6 +158,62 @@ async function markDone(entry) {
   }
 }
 
+function onDragStart(entryId, event) {
+  if (event.target?.closest('button, input, label')) {
+    event.preventDefault()
+    return
+  }
+  draggingId.value = entryId
+  try {
+    event.dataTransfer?.setData('text/plain', entryId)
+    event.dataTransfer.effectAllowed = 'move'
+  } catch {
+    /* ignore */
+  }
+}
+
+function onDragOver(entryId, event) {
+  if (!draggingId.value || draggingId.value === entryId) return
+  event.preventDefault()
+  try {
+    event.dataTransfer.dropEffect = 'move'
+  } catch {
+    /* ignore */
+  }
+}
+
+function onDragEnd() {
+  draggingId.value = null
+}
+
+function reorderById(list, sourceId, targetId) {
+  const from = list.findIndex((item) => item.id === sourceId)
+  const to = list.findIndex((item) => item.id === targetId)
+  if (from < 0 || to < 0 || from === to) return false
+  const [moved] = list.splice(from, 1)
+  list.splice(to, 0, moved)
+  return true
+}
+
+async function onDrop(targetId, event) {
+  event.preventDefault()
+  const sourceId = draggingId.value || event.dataTransfer?.getData('text/plain')
+  draggingId.value = null
+  if (!sourceId || sourceId === targetId || !props.userId) return
+
+  const reordered = [...plannedEntries.value]
+  if (!reorderById(reordered, sourceId, targetId)) return
+
+  plannedEntries.value = reordered
+  try {
+    await persistBatteryEntryOrders(supabase, props.userId, reordered)
+  } catch (err) {
+    console.error(err)
+    actionError.value = err?.message || 'Impossible de réordonner.'
+    await loadPlanned()
+  }
+}
+
 function onVisibilityUpdated() {
   loadPageVisibilityState().then(loadPlanned)
 }
@@ -217,9 +275,18 @@ watch(
           class="dashboard-event-card"
           :class="[
             `dashboard-event-card--${costStyleClass(entry.cost)}`,
-            { 'dashboard-event-card--done': isPlannedEntryDone(entry) },
+            {
+              'dashboard-event-card--done': isPlannedEntryDone(entry),
+              'dashboard-event-card--dragging': draggingId === entry.id,
+            },
           ]"
           :style="isPlannedEntryDone(entry) ? undefined : costCardStyle(entry.cost)"
+          draggable="true"
+          title="Glisser pour réordonner"
+          @dragstart="onDragStart(entry.id, $event)"
+          @dragover="onDragOver(entry.id, $event)"
+          @drop="onDrop(entry.id, $event)"
+          @dragend="onDragEnd"
         >
           <h4 class="event-title">{{ entry.label }}</h4>
 
@@ -372,6 +439,16 @@ watch(
   position: relative;
   overflow: hidden;
   min-width: 0;
+  cursor: grab;
+  touch-action: manipulation;
+}
+
+.dashboard-event-card:active {
+  cursor: grabbing;
+}
+
+.dashboard-event-card--dragging {
+  opacity: 0.55;
 }
 
 .dashboard-event-card--done {
