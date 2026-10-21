@@ -15,6 +15,7 @@ import { normalizeOpenLibrarySubjects } from '../utils/bibliotheque/openLibraryS
 import { seriesToReadingBookFields } from '../utils/bibliotheque/openLibrarySeries.js'
 import { READING_COLLECTION_WISHLIST } from '../services/lecture/readingCollections.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
+import OpenLibraryCoverImg from '../components/bibliotheque/OpenLibraryCoverImg.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -126,7 +127,10 @@ async function addToLecture() {
       collection: READING_COLLECTION_WISHLIST,
       pages: work.value.pageCount ?? '',
       publicationYear: work.value.firstPublishYear ?? '',
-      imageUrl: work.value.coverUrl || '',
+      imageUrl:
+        (work.value.coverCandidates || []).find((url) => /books\.google\.com/i.test(url)) ||
+        work.value.coverUrl ||
+        '',
       openLibraryWorkKey: work.value.key,
       tags: subjects,
       ...seriesFields,
@@ -201,11 +205,18 @@ watch(workKeyParam, () => loadWork())
       </template>
 
       <template #cover>
-        <img
-          v-if="work.coverUrl"
+        <OpenLibraryCoverImg
+          v-if="work.coverUrl || work.coverCandidates?.length || work.coverId || work.isbn || work.key"
           :src="work.coverUrl"
+          :candidates="work.coverCandidates"
+          :cover-id="work.coverId"
+          :isbn="work.isbn"
+          :isbns="work.isbns"
+          :work-key="work.key"
+          size="L"
           :alt="`Couverture de ${work.title}`"
-          class="reading-fiche-cover"
+          img-class="reading-fiche-cover"
+          loading="eager"
         />
         <div v-else class="reading-fiche-cover reading-fiche-cover--placeholder">
           <span>couverture du livre</span>

@@ -12,7 +12,7 @@ import {
 } from '../../services/settings/pageVisibility.js'
 import { READING_COLLECTION_EN_COURS } from '../../services/lecture/readingCollections.js'
 import { listReadingBooksWithCovers } from '../../services/lecture/readingBooks.js'
-import RemoteImg from '../common/RemoteImg.vue'
+import OpenLibraryCoverImg from '../bibliotheque/OpenLibraryCoverImg.vue'
 
 const BOOKS_PER_PAGE = 3
 
@@ -60,10 +60,6 @@ watch(inProgressBooks, () => {
 
 function goToPage(index) {
   currentPage.value = Math.min(Math.max(index, 0), totalPages.value - 1)
-}
-
-function bookCoverFallbacks(book) {
-  return [book?.open_library_cover_url, book?.cover_image_url].filter(Boolean)
 }
 
 async function loadPageVisibilityState() {
@@ -156,12 +152,14 @@ onUnmounted(() => {
             class="dashboard-reading__card"
           >
             <div class="dashboard-reading__cover-wrap">
-              <RemoteImg
-                v-if="book.coverUrl || book.open_library_cover_url || book.cover_image_url"
+              <OpenLibraryCoverImg
+                v-if="book.coverUrl || book.open_library_cover_url || book.open_library_work_key || book.cover_image_url"
                 :src="book.coverUrl"
-                :fallbacks="bookCoverFallbacks(book)"
+                :candidates="[book.open_library_cover_url, book.cover_image_url].filter(Boolean)"
+                :work-key="book.open_library_work_key"
                 :alt="`Couverture de ${book.title}`"
-                class="dashboard-reading__cover"
+                img-class="dashboard-reading__cover"
+                loading="lazy"
               />
               <div v-else class="dashboard-reading__cover dashboard-reading__cover--placeholder">
                 {{ book.title?.charAt(0)?.toUpperCase() || '?' }}

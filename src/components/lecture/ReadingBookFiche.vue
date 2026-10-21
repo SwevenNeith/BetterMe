@@ -10,6 +10,7 @@ import ReadingCollectionCombobox from './ReadingCollectionCombobox.vue'
 import ReadingSpoilSection from './ReadingSpoilSection.vue'
 import ReadingRereadingsSection from './ReadingRereadingsSection.vue'
 import ReadingOpenLibraryEditionsField from './ReadingOpenLibraryEditionsField.vue'
+import OpenLibraryCoverImg from '../bibliotheque/OpenLibraryCoverImg.vue'
 import {
   formatExtraTagsInput,
   formatFrenchDate,
@@ -223,13 +224,23 @@ function fieldClass(field) {
           @click="startEdit('cover')"
         >
           <img
-            v-if="
-              (isEditing('cover') && (coverPreview || book?.coverUrl)) ||
-              (!isEditing('cover') && book?.coverUrl)
-            "
-            :src="isEditing('cover') ? coverPreview || book?.coverUrl : book?.coverUrl"
+            v-if="isEditing('cover') && coverPreview"
+            :src="coverPreview"
             :alt="`Couverture de ${book?.title}`"
             class="reading-fiche-cover"
+          />
+          <OpenLibraryCoverImg
+            v-else-if="
+              book?.coverUrl ||
+              book?.open_library_cover_url ||
+              book?.open_library_work_key
+            "
+            :src="book?.coverUrl"
+            :candidates="book?.coverCandidates"
+            :work-key="book?.open_library_work_key"
+            :alt="`Couverture de ${book?.title}`"
+            img-class="reading-fiche-cover"
+            loading="eager"
           />
           <div v-else class="reading-fiche-cover reading-fiche-cover--placeholder">
             <span>couverture du livre</span>

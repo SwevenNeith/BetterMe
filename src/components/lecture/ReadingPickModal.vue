@@ -5,6 +5,7 @@ import { bookToEditForm } from '../../utils/lecture/readingBookForm.js'
 import { updateReadingBook } from '../../services/lecture/readingBooks.js'
 import { READING_COLLECTION_EN_COURS } from '../../services/lecture/readingCollections.js'
 import { supabase } from '../../lib/supabase.js'
+import OpenLibraryCoverImg from '../bibliotheque/OpenLibraryCoverImg.vue'
 
 const props = defineProps({
   open: {
@@ -236,11 +237,13 @@ onUnmounted(() => {
 
         <template v-else-if="currentBook">
           <div class="reading-pick-cover-wrap">
-            <img
-              v-if="currentBook.coverUrl"
+            <OpenLibraryCoverImg
+              v-if="currentBook.coverUrl || currentBook.open_library_cover_url || currentBook.open_library_work_key"
               :src="currentBook.coverUrl"
+              :work-key="currentBook.open_library_work_key"
               :alt="`Couverture de ${currentBook.title}`"
-              class="reading-pick-cover"
+              img-class="reading-pick-cover"
+              loading="eager"
             />
             <div v-else class="reading-pick-cover reading-pick-cover--placeholder">
               <span>📖</span>

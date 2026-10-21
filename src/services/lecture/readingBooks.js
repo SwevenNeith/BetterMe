@@ -5,6 +5,7 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024
 
 import { buildTagsFromGenreAndExtra, formToBookPayload } from '../../utils/lecture/readingBookForm.js'
 import { mergeOpenLibrarySubjectsIntoTags, normalizeOpenLibrarySubjects } from '../../utils/bibliotheque/openLibrarySubjects.js'
+import { readingBookCoverCandidates } from '../bibliotheque/openLibrary.js'
 import { ensureReadingCollection } from './readingCollections.js'
 
 const ALLOWED_MIME = new Set([
@@ -114,9 +115,14 @@ function assertImageUrl(url) {
   }
 }
 
-/** URL de couverture servie par Open Library (covers.openlibrary.org). */
+/** URL de couverture Open Library / archive.org / Google Books (fallback catalogue). */
 export function isOpenLibraryCoverUrl(url) {
-  return /covers\.openlibrary\.org/i.test(String(url ?? ''))
+  const value = String(url ?? '')
+  return (
+    /covers\.openlibrary\.org/i.test(value) ||
+    /archive\.org\/download\/(?:[sml]_covers_|olcovers)/i.test(value) ||
+    /books\.google\.com\/books\/content/i.test(value)
+  )
 }
 
 /**
@@ -192,7 +198,25 @@ export async function resolveReadingCoverUrl(supabase, book) {
   }
 
   const { customUrl, openLibraryUrl } = splitReadingCoverFields(book)
+  // Ne pas réécrire vers archive.org (timeout fréquent) : l’UI bascule via candidats.
   return customUrl || openLibraryUrl || null
+}
+
+/**
+ * Métadonnées d’affichage couverture (candidats Google Books + OL).
+ * @param {object} book
+ * @param {string|null} [coverUrl]
+ */
+export function withCoverDisplayMeta(book, coverUrl = null) {
+  const resolved = coverUrl ?? book?.coverUrl ?? null
+  return {
+    ...book,
+    coverUrl: resolved,
+    coverCandidates: readingBookCoverCandidates(
+      { ...book, coverUrl: resolved },
+      { isbns: book?.coverIsbns || [] },
+    ),
+  }
 }
 
 function withCoverMeta(row, coverUrl = null) {
@@ -242,10 +266,10 @@ export async function listReadingBooks(supabase, userId) {
 export async function listReadingBooksWithCovers(supabase, userId) {
   const rows = await listReadingBooks(supabase, userId)
   return Promise.all(
-    rows.map(async (row) => ({
-      ...row,
-      coverUrl: await resolveReadingCoverUrl(supabase, row),
-    })),
+    rows.map(async (row) => {
+      const coverUrl = await resolveReadingCoverUrl(supabase, row)
+      return withCoverDisplayMeta(row, coverUrl)
+    }),
   )
 }
 
@@ -270,7 +294,7 @@ export async function getReadingBookWithCover(supabase, userId, bookId) {
   if (!data) return null
 
   const coverUrl = await resolveReadingCoverUrl(supabase, data)
-  return withCoverMeta(data, coverUrl)
+  return withCoverDisplayMeta(withCoverMeta(data, coverUrl), coverUrl)
 }
 
 /**

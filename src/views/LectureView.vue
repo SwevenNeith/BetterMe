@@ -17,6 +17,7 @@ import {
 } from '../services/lecture/readingCollections.js'
 import { applyReadingBookFilters, formatReadingFilterLabel } from '../utils/lecture/readingBookFilters.js'
 import BibliothequeCatalogPanel from '../components/bibliotheque/BibliothequeCatalogPanel.vue'
+import OpenLibraryCoverImg from '../components/bibliotheque/OpenLibraryCoverImg.vue'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   readPersistedPageState,
@@ -695,12 +696,14 @@ watch(booksPerPage, () => {
                   :aria-label="`Ouvrir ${book.title}`"
                   @click="openBookPage(book)"
                 >
-                  <img
-                    v-if="book.coverUrl"
+                  <OpenLibraryCoverImg
+                    v-if="book.coverUrl || book.open_library_cover_url || book.open_library_work_key"
                     :src="book.coverUrl"
+                    :candidates="book.coverCandidates"
+                    :work-key="book.open_library_work_key"
                     :alt="`Couverture de ${book.title}`"
-                    class="reading-book-cover"
-                    referrerpolicy="no-referrer"
+                    img-class="reading-book-cover"
+                    loading="lazy"
                   />
                   <div
                     v-else
@@ -725,12 +728,14 @@ watch(booksPerPage, () => {
                   :aria-label="`Ouvrir ${book.title}`"
                   @click="openBookPage(book)"
                 >
-                  <img
-                    v-if="book.coverUrl"
+                  <OpenLibraryCoverImg
+                    v-if="book.coverUrl || book.open_library_cover_url || book.open_library_work_key"
                     :src="book.coverUrl"
+                    :candidates="book.coverCandidates"
+                    :work-key="book.open_library_work_key"
                     :alt="`Couverture de ${book.title}`"
-                    class="reading-book-cover"
-                    referrerpolicy="no-referrer"
+                    img-class="reading-book-cover"
+                    loading="lazy"
                   />
                   <div
                     v-else

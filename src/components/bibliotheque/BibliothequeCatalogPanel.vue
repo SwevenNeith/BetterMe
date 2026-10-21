@@ -28,6 +28,7 @@ import {
   readPersistedPageState,
   writePersistedPageState,
 } from '../../composables/usePersistedPageState.js'
+import OpenLibraryCoverImg from './OpenLibraryCoverImg.vue'
 
 const CATALOG_SEARCH_STORAGE_KEY = 'betterme-bibliotheque-catalog-v2'
 
@@ -206,6 +207,10 @@ async function quickAddToLibrary(doc) {
       const subjects = await resolveSubjectsForWork(doc.key, doc.subjects)
       await linkReadingBookToOpenLibrary(supabase, userId.value, matched.id, {
         workKey: doc.key,
+        coverUrl:
+          (doc.coverCandidates || []).find((url) => /books\.google\.com/i.test(url)) ||
+          doc.coverUrl ||
+          null,
         pages: doc.pageCount,
         publicationYear: doc.firstPublishYear,
         subjects,
@@ -223,7 +228,10 @@ async function quickAddToLibrary(doc) {
         collection: READING_COLLECTION_WISHLIST,
         pages: doc.pageCount ?? '',
         publicationYear: doc.firstPublishYear ?? '',
-        imageUrl: doc.coverUrl || '',
+        imageUrl:
+          (doc.coverCandidates || []).find((url) => /books\.google\.com/i.test(url)) ||
+          doc.coverUrl ||
+          '',
         openLibraryWorkKey: doc.key,
         // Tableau de tags direct (évite le round-trip genre/extraTags qui re-coupe les virgules)
         tags: subjects,
@@ -335,10 +343,9 @@ function resultKey(doc) {
   return doc?.key || `${doc?.title}-${doc?.firstPublishYear}`
 }
 
-function coverFor(doc) {
-  if (!doc?.coverUrl) return null
-  if (failedCoverKeys.value.has(resultKey(doc))) return null
-  return doc.coverUrl
+function hasCover(doc) {
+  if (failedCoverKeys.value.has(resultKey(doc))) return false
+  return Boolean(doc?.coverUrl || doc?.coverCandidates?.length || doc?.coverId || doc?.isbn)
 }
 
 function onCoverError(doc) {
@@ -620,11 +627,16 @@ onUnmounted(() => {
               :aria-label="`Ouvrir la fiche de ${catalogAriaLabel(doc)}`"
               @click="openBook(doc)"
             >
-              <img
-                v-if="coverFor(doc)"
-                :src="coverFor(doc)"
+              <OpenLibraryCoverImg
+                v-if="hasCover(doc)"
+                :src="doc.coverUrl"
+                :candidates="doc.coverCandidates"
+                :cover-id="doc.coverId"
+                :isbn="doc.isbn"
+                :isbns="doc.isbns"
+                :work-key="doc.key"
                 :alt="`Couverture de ${doc.title}`"
-                class="catalog-book__cover"
+                img-class="catalog-book__cover"
                 loading="lazy"
                 @error="onCoverError(doc)"
               />

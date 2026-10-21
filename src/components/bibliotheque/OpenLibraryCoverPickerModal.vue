@@ -4,6 +4,7 @@ import {
   listOpenLibraryCoverOptions,
 } from '../../services/bibliotheque/openLibrary.js'
 import { findExactOpenLibraryMatchForBook } from '../../services/bibliotheque/openLibraryLink.js'
+import OpenLibraryCoverImg from './OpenLibraryCoverImg.vue'
 
 const props = defineProps({
   open: {
@@ -147,10 +148,12 @@ onUnmounted(() => {
             :aria-pressed="selectedId === option.id"
             @click="selectedId = option.id"
           >
-            <img
+            <OpenLibraryCoverImg
               :src="option.coverUrl"
+              :candidates="option.coverCandidates"
+              :cover-id="option.coverId"
               :alt="option.label"
-              class="ol-cover-picker__cover"
+              img-class="ol-cover-picker__cover"
               loading="lazy"
             />
             <span class="ol-cover-picker__label">{{ option.label }}</span>

@@ -2,6 +2,7 @@
 import { onUnmounted, ref, watch } from 'vue'
 import { searchOpenLibrary } from '../../services/bibliotheque/openLibrary.js'
 import { stripLeadingArticles } from '../../utils/bibliotheque/openLibraryMatch.js'
+import OpenLibraryCoverImg from './OpenLibraryCoverImg.vue'
 
 const props = defineProps({
   open: {
@@ -39,12 +40,15 @@ function close() {
   emit('close')
 }
 
-function coverFor(doc) {
-  return doc?.coverUrl || null
+function hasCover(doc) {
+  return Boolean(doc?.coverUrl || doc?.coverCandidates?.length || doc?.coverId || doc?.isbn)
 }
 
 function onCoverError(doc) {
-  if (doc) doc.coverUrl = null
+  if (!doc) return
+  doc.coverUrl = null
+  doc.coverCandidates = []
+  doc.coverId = null
 }
 
 function canSearch(title, author) {
@@ -255,11 +259,16 @@ onUnmounted(() => {
             :disabled="linking"
             @click="selectDoc(doc)"
           >
-            <img
-              v-if="coverFor(doc)"
-              :src="coverFor(doc)"
+            <OpenLibraryCoverImg
+              v-if="hasCover(doc)"
+              :src="doc.coverUrl"
+              :candidates="doc.coverCandidates"
+              :cover-id="doc.coverId"
+              :isbn="doc.isbn"
+              :isbns="doc.isbns"
+              :work-key="doc.key"
               :alt="`Couverture de ${doc.title}`"
-              class="ol-link-picker__cover"
+              img-class="ol-link-picker__cover"
               loading="lazy"
               @error="onCoverError(doc)"
             />

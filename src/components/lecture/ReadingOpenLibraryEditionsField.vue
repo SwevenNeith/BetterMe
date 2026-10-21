@@ -8,6 +8,7 @@ import {
   isOpenLibraryCoverUrl,
   splitReadingCoverFields,
 } from '../../services/lecture/readingBooks.js'
+import OpenLibraryCoverImg from '../bibliotheque/OpenLibraryCoverImg.vue'
 
 const props = defineProps({
   book: {
@@ -201,10 +202,12 @@ onUnmounted(() => {
             :aria-selected="coverMatchesCurrent(option)"
             @click="selectOption(option)"
           >
-            <img
+            <OpenLibraryCoverImg
               :src="option.coverUrl"
+              :candidates="option.coverCandidates"
+              :cover-id="option.coverId"
               :alt="option.label"
-              class="reading-editions__cover"
+              img-class="reading-editions__cover"
               loading="lazy"
             />
             <span class="reading-editions__option-label">{{ option.label }}</span>

@@ -11,6 +11,7 @@ import {
   findLectureBookForOpenLibraryDoc,
   syncLectureBooksWithOpenLibrary,
 } from '../services/bibliotheque/openLibraryLink.js'
+import OpenLibraryCoverImg from '../components/bibliotheque/OpenLibraryCoverImg.vue'
 
 defineOptions({ name: 'BibliothequeView' })
 
@@ -168,10 +169,9 @@ function resultKey(doc) {
   return doc?.key || `${doc?.title}-${doc?.firstPublishYear}`
 }
 
-function coverFor(doc) {
-  if (!doc?.coverUrl) return null
-  if (failedCoverKeys.value.has(resultKey(doc))) return null
-  return doc.coverUrl
+function hasCover(doc) {
+  if (failedCoverKeys.value.has(resultKey(doc))) return false
+  return Boolean(doc?.coverUrl || doc?.coverCandidates?.length || doc?.coverId || doc?.isbn)
 }
 
 function onCoverError(doc) {
@@ -298,11 +298,16 @@ onUnmounted(() => {
               @click="openBook(doc)"
             >
               <div class="bibliotheque-book__cover-wrap">
-                <img
-                  v-if="coverFor(doc)"
-                  :src="coverFor(doc)"
+                <OpenLibraryCoverImg
+                  v-if="hasCover(doc)"
+                  :src="doc.coverUrl"
+                  :candidates="doc.coverCandidates"
+                  :cover-id="doc.coverId"
+                  :isbn="doc.isbn"
+                  :isbns="doc.isbns"
+                  :work-key="doc.key"
                   :alt="`Couverture de ${doc.title}`"
-                  class="bibliotheque-book__cover"
+                  img-class="bibliotheque-book__cover"
                   loading="lazy"
                   @error="onCoverError(doc)"
                 />
