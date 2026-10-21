@@ -53,22 +53,6 @@ const planOverBudget = computed(
   () => plannedEntries.value.length > 0 && plannedTotal.value > dayBudget.value,
 )
 
-function formatCost(n) {
-  const v = Number(n) || 0
-  const abs = Math.abs(v)
-  const label = Number.isInteger(abs) ? String(abs) : abs.toFixed(1)
-  if (v > 0) return `−${label}`
-  if (v < 0) return `+${label}`
-  return '0'
-}
-
-function costEffectLabel(cost) {
-  const v = Number(cost) || 0
-  if (v > 0) return 'Dépense'
-  if (v < 0) return 'Regain'
-  return 'Neutre'
-}
-
 function defaultAmount(cost) {
   return Math.abs(Number(cost) || 0)
 }
@@ -237,33 +221,27 @@ watch(
           ]"
           :style="isPlannedEntryDone(entry) ? undefined : costCardStyle(entry.cost)"
         >
-          <div class="event-details">
-            <div class="event-title-row">
-              <h4 class="event-title">{{ entry.label }}</h4>
-            </div>
-            <div class="event-tags">
-              <span class="event-category-tag">{{ costEffectLabel(entry.cost) }}</span>
-              <span class="event-category-tag">prévu {{ formatCost(entry.cost) }}</span>
-              <span v-if="isPlannedEntryDone(entry)" class="event-category-tag event-category-tag--done">
-                Fait
-              </span>
-            </div>
-          </div>
+          <h4 class="event-title">{{ entry.label }}</h4>
 
-          <div v-if="!isPlannedEntryDone(entry)" class="event-complete">
-            <label class="event-complete__field">
-              <span>Coût réel</span>
-              <input
-                v-model="costDrafts[entry.id]"
-                type="number"
-                min="0"
-                step="0.5"
-                inputmode="decimal"
-                :placeholder="String(defaultAmount(entry.cost))"
-                :disabled="completingId === entry.id"
-                :aria-label="`Coût réel pour ${entry.label}`"
-              />
-            </label>
+          <span
+            v-if="isPlannedEntryDone(entry)"
+            class="event-done-pill"
+          >
+            Fait
+          </span>
+          <div v-else class="event-complete">
+            <input
+              v-model="costDrafts[entry.id]"
+              class="event-complete__input"
+              type="number"
+              min="0"
+              step="0.5"
+              inputmode="decimal"
+              :placeholder="String(defaultAmount(entry.cost))"
+              :disabled="completingId === entry.id"
+              :aria-label="`Coût réel pour ${entry.label}`"
+              :title="`Coût réel (défaut ${defaultAmount(entry.cost)})`"
+            />
             <button
               type="button"
               class="event-complete__btn"
@@ -283,19 +261,19 @@ watch(
 .battery-planned-block {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: 0.55rem;
 }
 
 .battery-planned-hint {
   margin: 0;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   color: #8a6a40;
-  line-height: 1.35;
+  line-height: 1.3;
 }
 
 .battery-planned-error {
   margin: 0;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: #c45c5c;
 }
@@ -306,7 +284,7 @@ watch(
   justify-content: space-between;
   gap: 0.75rem;
   margin: 0;
-  font-size: 1.35rem;
+  font-size: 1.15rem;
   font-weight: 800;
   color: #2c3e50;
 }
@@ -321,7 +299,7 @@ watch(
 }
 
 .column-date {
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 700;
   color: #8c98a4;
   white-space: nowrap;
@@ -333,10 +311,10 @@ watch(
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(213, 181, 234, 0.25);
-  border-radius: 20px;
-  padding: 1.5rem;
-  box-shadow: 0 8px 32px rgba(173, 129, 190, 0.08);
-  min-height: 140px;
+  border-radius: 14px;
+  padding: 0.75rem;
+  box-shadow: 0 6px 20px rgba(173, 129, 190, 0.06);
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -350,20 +328,22 @@ watch(
   flex: 1;
   text-align: center;
   color: #8c98a4;
-  gap: 0.75rem;
+  gap: 0.4rem;
   font-weight: 600;
-  min-height: 100px;
+  font-size: 0.88rem;
+  min-height: 64px;
+  padding: 0.5rem;
 }
 
 .empty-icon {
-  font-size: 2.4rem;
+  font-size: 1.5rem;
   opacity: 0.75;
 }
 
 .spinner {
-  width: 24px;
-  height: 24px;
-  border: 3px solid rgba(213, 181, 234, 0.3);
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(213, 181, 234, 0.3);
   border-top-color: #ad81be;
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -378,131 +358,99 @@ watch(
 .today-events-list {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.4rem;
 }
 
 .dashboard-event-card {
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  padding: 0.45rem 0.6rem;
   display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  box-shadow: none;
   position: relative;
   overflow: hidden;
-}
-
-.dashboard-event-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+  min-width: 0;
 }
 
 .dashboard-event-card--done {
   background: rgba(173, 129, 190, 0.08) !important;
   color: #8a9098 !important;
   opacity: 0.72;
-  box-shadow: none;
-}
-
-.dashboard-event-card--done:hover {
-  transform: none;
-  box-shadow: none;
 }
 
 .dashboard-event-card--done .event-title {
-  font-weight: 700;
+  font-weight: 600;
   text-decoration: line-through;
   text-decoration-thickness: 1px;
   color: #8a9098;
 }
 
-.event-category-tag--done {
-  background: rgba(149, 209, 170, 0.35) !important;
-  color: #2f6b4a;
-}
-
-.event-title-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
 .event-title {
-  font-size: 1.1rem;
-  font-weight: 800;
-  margin: 0;
-  line-height: 1.3;
-}
-
-.event-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.event-category-tag {
-  display: inline-flex;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.45);
-  border-radius: 999px;
-  padding: 0.2rem 0.65rem;
-  font-size: 0.72rem;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.92rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  margin: 0;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-done-pill {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #2f6b4a;
+  background: rgba(149, 209, 170, 0.35);
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
 }
 
 .event-complete {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.55rem;
-  margin-top: 0.25rem;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
 }
 
-.event-complete__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  flex: 1;
-  min-width: 5.5rem;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: inherit;
-  opacity: 0.85;
-}
-
-.event-complete__field input {
-  width: 100%;
-  max-width: 7rem;
+.event-complete__input {
+  width: 3rem;
   border: 1px solid rgba(255, 255, 255, 0.55);
-  border-radius: 8px;
-  padding: 0.4rem 0.5rem;
+  border-radius: 7px;
+  padding: 0.28rem 0.35rem;
   background: rgba(255, 255, 255, 0.7);
   color: #2c3e50;
   font: inherit;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   font-weight: 700;
-  text-transform: none;
-  letter-spacing: normal;
+  text-align: center;
   box-sizing: border-box;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.event-complete__input::-webkit-outer-spin-button,
+.event-complete__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .event-complete__btn {
   border: none;
-  border-radius: 9px;
-  padding: 0.45rem 0.95rem;
+  border-radius: 7px;
+  padding: 0.28rem 0.65rem;
   background: rgba(255, 255, 255, 0.75);
   color: #2f6b4a;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .event-complete__btn:hover:not(:disabled) {
@@ -532,10 +480,6 @@ watch(
     border-color: rgba(213, 181, 234, 0.15);
   }
 
-  .event-category-tag {
-    background: rgba(0, 0, 0, 0.25);
-  }
-
   .dashboard-event-card--done {
     background: rgba(173, 129, 190, 0.1) !important;
     color: #adb5bd !important;
@@ -545,12 +489,12 @@ watch(
     color: #adb5bd;
   }
 
-  .event-category-tag--done {
-    background: rgba(149, 209, 170, 0.22) !important;
+  .event-done-pill {
+    background: rgba(149, 209, 170, 0.22);
     color: #95d1aa;
   }
 
-  .event-complete__field input {
+  .event-complete__input {
     background: rgba(25, 20, 35, 0.55);
     border-color: rgba(255, 255, 255, 0.2);
     color: #f0e8f8;
