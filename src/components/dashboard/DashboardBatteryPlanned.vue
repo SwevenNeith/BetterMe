@@ -74,27 +74,27 @@ function resolveActualCost(entry) {
   return amount
 }
 
-/** Fond pastel façon carte EDT, teinté selon drain / regain. */
+/** Fond pastel doux (lilas dépense / bleu perle regain), aligné palette app. */
 function costCardStyle(cost) {
   const v = Number(cost) || 0
   const intensity = costIntensity(v)
   if (v === 0) {
     return {
-      background: 'hsla(280, 35%, 88%, 0.85)',
+      background: 'hsla(280, 22%, 90%, 0.88)',
       color: '#5a4a66',
     }
   }
   if (v > 0) {
-    const lightness = 88 - intensity * 4
+    const lightness = 90 - intensity * 3
     return {
-      background: `hsla(340, 55%, ${lightness}%, 0.9)`,
-      color: '#6b2a40',
+      background: `hsla(285, 28%, ${lightness}%, 0.9)`,
+      color: '#5e4a6c',
     }
   }
-  const lightness = 86 - intensity * 4
+  const lightness = 90 - intensity * 3
   return {
-    background: `hsla(145, 40%, ${lightness}%, 0.9)`,
-    color: '#1e4a32',
+    background: `hsla(220, 30%, ${lightness}%, 0.9)`,
+    color: '#445570',
   }
 }
 
@@ -482,8 +482,8 @@ watch(
   font-weight: 800;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: #2f6b4a;
-  background: rgba(149, 209, 170, 0.35);
+  color: #5a6b8a;
+  background: rgba(143, 162, 212, 0.32);
   border-radius: 999px;
   padding: 0.15rem 0.45rem;
 }
@@ -522,7 +522,7 @@ watch(
   border-radius: 7px;
   padding: 0.28rem 0.65rem;
   background: rgba(255, 255, 255, 0.75);
-  color: #2f6b4a;
+  color: #5a6b8a;
   font: inherit;
   font-size: 0.78rem;
   font-weight: 800;
@@ -567,8 +567,8 @@ watch(
   }
 
   .event-done-pill {
-    background: rgba(149, 209, 170, 0.22);
-    color: #95d1aa;
+    background: rgba(143, 162, 212, 0.22);
+    color: #b8c6e0;
   }
 
   .event-complete__input {
@@ -579,7 +579,7 @@ watch(
 
   .event-complete__btn {
     background: rgba(25, 20, 35, 0.55);
-    color: #95d1aa;
+    color: #b8c6e0;
   }
 }
 </style>

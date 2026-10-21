@@ -1635,13 +1635,13 @@ onUnmounted(() => {
 }
 
 .list-col--plan {
-  background: rgba(143, 162, 212, 0.12);
-  border: 1px solid rgba(143, 162, 212, 0.28);
+  background: rgba(143, 162, 212, 0.1);
+  border: 1px solid rgba(143, 162, 212, 0.22);
 }
 
 .list-col--actual {
-  background: rgba(149, 209, 170, 0.12);
-  border: 1px solid rgba(149, 209, 170, 0.28);
+  background: rgba(173, 129, 190, 0.08);
+  border: 1px solid rgba(173, 129, 190, 0.2);
 }
 
 .list-col__title {
@@ -1692,7 +1692,7 @@ onUnmounted(() => {
   border-radius: 8px;
   padding: 0.28rem 0.65rem;
   background: rgba(255, 255, 255, 0.8);
-  color: #2f6b4a;
+  color: #5a6b8a;
   font: inherit;
   font-size: 0.78rem;
   font-weight: 800;
@@ -1711,17 +1711,18 @@ onUnmounted(() => {
   cursor: wait;
 }
 
-.entry-row--drain-1 { background: rgba(250, 230, 238, 0.7); }
-.entry-row--drain-2 { background: rgba(244, 200, 218, 0.55); }
-.entry-row--drain-3 { background: rgba(232, 160, 192, 0.4); }
-.entry-row--drain-4 { background: rgba(212, 120, 150, 0.35); }
-.entry-row--drain-5 { background: rgba(180, 70, 100, 0.32); }
+/* Dépense : lilas doux (palette app) — Restore : bleu perle */
+.entry-row--drain-1 { background: rgba(236, 228, 242, 0.75); }
+.entry-row--drain-2 { background: rgba(224, 210, 234, 0.65); }
+.entry-row--drain-3 { background: rgba(205, 184, 222, 0.5); }
+.entry-row--drain-4 { background: rgba(186, 158, 206, 0.42); }
+.entry-row--drain-5 { background: rgba(168, 138, 192, 0.38); }
 
-.entry-row--restore-1 { background: rgba(232, 245, 236, 0.75); }
-.entry-row--restore-2 { background: rgba(200, 232, 210, 0.55); }
-.entry-row--restore-3 { background: rgba(149, 209, 170, 0.4); }
-.entry-row--restore-4 { background: rgba(90, 170, 120, 0.35); }
-.entry-row--restore-5 { background: rgba(45, 120, 80, 0.32); }
+.entry-row--restore-1 { background: rgba(232, 238, 248, 0.8); }
+.entry-row--restore-2 { background: rgba(214, 224, 240, 0.7); }
+.entry-row--restore-3 { background: rgba(190, 206, 230, 0.55); }
+.entry-row--restore-4 { background: rgba(166, 186, 220, 0.45); }
+.entry-row--restore-5 { background: rgba(148, 172, 210, 0.4); }
 
 .entry-label {
   display: inline-flex;
@@ -1750,8 +1751,8 @@ onUnmounted(() => {
   font-weight: 800;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: #2f6b4a;
-  background: rgba(149, 209, 170, 0.35);
+  color: #5a6b8a;
+  background: rgba(143, 162, 212, 0.32);
   border-radius: 999px;
   padding: 0.1rem 0.4rem;
 }
@@ -1797,32 +1798,32 @@ onUnmounted(() => {
 
 .cost-tag--drain-1,
 .cost-tag--drain-2 {
-  background: rgba(232, 160, 192, 0.35);
-  color: #9a3d5c;
+  background: rgba(173, 129, 190, 0.22);
+  color: #6b5a78;
 }
 .cost-tag--drain-3 {
-  background: rgba(217, 120, 160, 0.45);
-  color: #8a2d4c;
+  background: rgba(173, 129, 190, 0.32);
+  color: #5e4a6c;
 }
 .cost-tag--drain-4,
 .cost-tag--drain-5 {
-  background: rgba(180, 70, 100, 0.5);
-  color: #5c1830;
+  background: rgba(173, 129, 190, 0.42);
+  color: #4f3d5c;
 }
 
 .cost-tag--restore-1,
 .cost-tag--restore-2 {
-  background: rgba(149, 209, 170, 0.35);
-  color: #2f6b4a;
+  background: rgba(143, 162, 212, 0.22);
+  color: #4f5f7a;
 }
 .cost-tag--restore-3 {
-  background: rgba(90, 170, 120, 0.45);
-  color: #1e5a38;
+  background: rgba(143, 162, 212, 0.32);
+  color: #445570;
 }
 .cost-tag--restore-4,
 .cost-tag--restore-5 {
-  background: rgba(45, 120, 80, 0.5);
-  color: #0f3d28;
+  background: rgba(143, 162, 212, 0.42);
+  color: #3a4a66;
 }
 
 .battery-confirm-overlay {
@@ -2145,17 +2146,17 @@ onUnmounted(() => {
 
   .fait-btn {
     background: rgba(25, 20, 35, 0.55);
-    color: #95d1aa;
+    color: #b8c6e0;
   }
 
   .list-col--plan {
-    background: rgba(143, 162, 212, 0.14);
-    border-color: rgba(143, 162, 212, 0.28);
+    background: rgba(143, 162, 212, 0.12);
+    border-color: rgba(143, 162, 212, 0.22);
   }
 
   .list-col--actual {
-    background: rgba(149, 209, 170, 0.12);
-    border-color: rgba(149, 209, 170, 0.28);
+    background: rgba(173, 129, 190, 0.1);
+    border-color: rgba(173, 129, 190, 0.2);
   }
 
   .entry-row--done .entry-label {
@@ -2169,23 +2170,23 @@ onUnmounted(() => {
   .cost-tag--drain-1,
   .cost-tag--drain-2,
   .cost-tag--drain-3 {
-    color: #f0b8d0;
+    color: #d5b5ea;
   }
 
   .cost-tag--drain-4,
   .cost-tag--drain-5 {
-    color: #f5c4d4;
+    color: #e2c8f0;
   }
 
   .cost-tag--restore-1,
   .cost-tag--restore-2,
   .cost-tag--restore-3 {
-    color: #b8e0c4;
+    color: #b8c6e0;
   }
 
   .cost-tag--restore-4,
   .cost-tag--restore-5 {
-    color: #95d1aa;
+    color: #c5d2ea;
   }
 
   .battery-confirm-dialog {

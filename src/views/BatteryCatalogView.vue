@@ -556,15 +556,15 @@ onMounted(async () => {
 }
 
 .effect-toggle__btn--drain.is-active {
-  background: rgba(232, 160, 192, 0.55);
-  color: #9a3d5c;
-  box-shadow: 0 1px 4px rgba(196, 92, 92, 0.12);
+  background: rgba(173, 129, 190, 0.35);
+  color: #5e4a6c;
+  box-shadow: 0 1px 4px rgba(173, 129, 190, 0.15);
 }
 
 .effect-toggle__btn--restore.is-active {
-  background: rgba(149, 209, 170, 0.55);
-  color: #2f6b4a;
-  box-shadow: 0 1px 4px rgba(90, 158, 120, 0.12);
+  background: rgba(143, 162, 212, 0.4);
+  color: #445570;
+  box-shadow: 0 1px 4px rgba(143, 162, 212, 0.15);
 }
 
 .primary-btn,
@@ -676,48 +676,47 @@ onMounted(async () => {
   border-color: rgba(213, 181, 234, 0.28);
 }
 
-/* Dépense : rose de plus en plus soutenu (1 → 5) */
+/* Dépense : lilas doux · Regain : bleu perle (palette app) */
 .item--drain-1 {
-  background: rgba(250, 230, 238, 0.85);
-  border-color: rgba(232, 160, 192, 0.4);
+  background: rgba(236, 228, 242, 0.9);
+  border-color: rgba(173, 129, 190, 0.28);
 }
 .item--drain-2 {
-  background: rgba(244, 200, 218, 0.7);
-  border-color: rgba(232, 160, 192, 0.55);
+  background: rgba(224, 210, 234, 0.75);
+  border-color: rgba(173, 129, 190, 0.36);
 }
 .item--drain-3 {
-  background: rgba(232, 160, 192, 0.45);
-  border-color: rgba(217, 120, 160, 0.65);
+  background: rgba(205, 184, 222, 0.55);
+  border-color: rgba(173, 129, 190, 0.45);
 }
 .item--drain-4 {
-  background: rgba(212, 120, 150, 0.4);
-  border-color: rgba(196, 92, 120, 0.7);
+  background: rgba(186, 158, 206, 0.45);
+  border-color: rgba(173, 129, 190, 0.55);
 }
 .item--drain-5 {
-  background: rgba(180, 70, 100, 0.38);
-  border-color: rgba(160, 50, 80, 0.75);
+  background: rgba(168, 138, 192, 0.4);
+  border-color: rgba(150, 115, 175, 0.6);
 }
 
-/* Regain : vert de plus en plus soutenu (1 → 5) */
 .item--restore-1 {
-  background: rgba(232, 245, 236, 0.9);
-  border-color: rgba(149, 209, 170, 0.4);
+  background: rgba(232, 238, 248, 0.95);
+  border-color: rgba(143, 162, 212, 0.28);
 }
 .item--restore-2 {
-  background: rgba(200, 232, 210, 0.75);
-  border-color: rgba(149, 209, 170, 0.55);
+  background: rgba(214, 224, 240, 0.8);
+  border-color: rgba(143, 162, 212, 0.38);
 }
 .item--restore-3 {
-  background: rgba(149, 209, 170, 0.45);
-  border-color: rgba(90, 170, 120, 0.65);
+  background: rgba(190, 206, 230, 0.55);
+  border-color: rgba(143, 162, 212, 0.48);
 }
 .item--restore-4 {
-  background: rgba(90, 170, 120, 0.4);
-  border-color: rgba(60, 140, 95, 0.7);
+  background: rgba(166, 186, 220, 0.45);
+  border-color: rgba(120, 145, 195, 0.55);
 }
 .item--restore-5 {
-  background: rgba(45, 120, 80, 0.4);
-  border-color: rgba(35, 100, 65, 0.75);
+  background: rgba(148, 172, 210, 0.42);
+  border-color: rgba(110, 135, 185, 0.6);
 }
 
 .item__top {
@@ -802,32 +801,32 @@ onMounted(async () => {
 
 .item__badge--drain-1,
 .item__badge--drain-2 {
-  background: rgba(232, 160, 192, 0.35);
-  color: #9a3d5c;
+  background: rgba(173, 129, 190, 0.22);
+  color: #6b5a78;
 }
 .item__badge--drain-3 {
-  background: rgba(217, 120, 160, 0.45);
-  color: #8a2d4c;
+  background: rgba(173, 129, 190, 0.32);
+  color: #5e4a6c;
 }
 .item__badge--drain-4,
 .item__badge--drain-5 {
-  background: rgba(180, 70, 100, 0.55);
-  color: #5c1830;
+  background: rgba(173, 129, 190, 0.42);
+  color: #4f3d5c;
 }
 
 .item__badge--restore-1,
 .item__badge--restore-2 {
-  background: rgba(149, 209, 170, 0.35);
-  color: #2f6b4a;
+  background: rgba(143, 162, 212, 0.22);
+  color: #4f5f7a;
 }
 .item__badge--restore-3 {
-  background: rgba(90, 170, 120, 0.45);
-  color: #1e5a38;
+  background: rgba(143, 162, 212, 0.32);
+  color: #445570;
 }
 .item__badge--restore-4,
 .item__badge--restore-5 {
-  background: rgba(45, 120, 80, 0.55);
-  color: #0f3d28;
+  background: rgba(143, 162, 212, 0.42);
+  color: #3a4a66;
 }
 
 .item__actions {
@@ -850,8 +849,8 @@ onMounted(async () => {
 }
 
 .action-btn--actual {
-  background: rgba(149, 209, 170, 0.45);
-  color: #2f6b4a;
+  background: rgba(173, 129, 190, 0.32);
+  color: #5e4a6c;
 }
 
 .action-btn:disabled {
@@ -969,34 +968,34 @@ onMounted(async () => {
     background: rgba(173, 129, 190, 0.12);
   }
 
-  .item--drain-1 { background: rgba(232, 160, 192, 0.1); }
-  .item--drain-2 { background: rgba(232, 160, 192, 0.16); }
-  .item--drain-3 { background: rgba(232, 160, 192, 0.24); }
-  .item--drain-4 { background: rgba(196, 92, 120, 0.28); }
-  .item--drain-5 { background: rgba(160, 50, 80, 0.32); }
+  .item--drain-1 { background: rgba(173, 129, 190, 0.1); }
+  .item--drain-2 { background: rgba(173, 129, 190, 0.16); }
+  .item--drain-3 { background: rgba(173, 129, 190, 0.24); }
+  .item--drain-4 { background: rgba(173, 129, 190, 0.3); }
+  .item--drain-5 { background: rgba(173, 129, 190, 0.36); }
 
-  .item--restore-1 { background: rgba(149, 209, 170, 0.1); }
-  .item--restore-2 { background: rgba(149, 209, 170, 0.16); }
-  .item--restore-3 { background: rgba(149, 209, 170, 0.24); }
-  .item--restore-4 { background: rgba(60, 140, 95, 0.28); }
-  .item--restore-5 { background: rgba(35, 100, 65, 0.32); }
+  .item--restore-1 { background: rgba(143, 162, 212, 0.1); }
+  .item--restore-2 { background: rgba(143, 162, 212, 0.16); }
+  .item--restore-3 { background: rgba(143, 162, 212, 0.24); }
+  .item--restore-4 { background: rgba(143, 162, 212, 0.3); }
+  .item--restore-5 { background: rgba(143, 162, 212, 0.36); }
 
   .item__badge--drain-4,
   .item__badge--drain-5 {
-    color: #f5c4d4;
+    color: #e2c8f0;
   }
 
   .item__badge--restore-4,
   .item__badge--restore-5 {
-    color: #b8e0c4;
+    color: #c5d2ea;
   }
 
   .effect-toggle__btn--drain.is-active {
-    color: #f5c4d4;
+    color: #d5b5ea;
   }
 
   .effect-toggle__btn--restore.is-active {
-    color: #b8e0c4;
+    color: #b8c6e0;
   }
 }
 </style>
