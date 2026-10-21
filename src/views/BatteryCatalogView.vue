@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { BATTERY_ENTRY_KINDS } from '../constants/battery/battery.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
@@ -12,7 +12,8 @@ import {
   updateBatteryActivity,
 } from '../services/battery/batteryActivities.js'
 import { addBatteryEntry } from '../services/battery/batteryDays.js'
-import { costStyleClass } from '../utils/battery/batteryMath.js'
+import { costStyleClass, normalizeBatteryCost } from '../utils/battery/batteryMath.js'
+import { addDaysISO } from '../utils/habit/habitCalendar.js'
 
 defineOptions({ name: 'BatteryCatalogView' })
 
@@ -20,7 +21,6 @@ const pageTitle = 'Catalogue'
 
 /** @typedef {'drain'|'restore'} EnergyEffect */
 
-const route = useRoute()
 const router = useRouter()
 
 const userId = ref(null)
@@ -39,6 +39,9 @@ const newAmount = ref(1)
 const newEffect = ref('drain')
 const formError = ref('')
 const busyId = ref(null)
+const newNameInputRef = ref(null)
+const editingCostActivityId = ref(null)
+const editingCostValue = ref(0)
 
 const SORT_OPTIONS = [
   { id: 'alpha', label: 'A → Z' },
@@ -46,22 +49,21 @@ const SORT_OPTIONS = [
   { id: 'cost-asc', label: 'Moins coûteuse → plus' },
 ]
 
-const targetDate = computed(() => {
-  const raw = String(route.query.date || '')
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
-  return getLocalTodayISO()
-})
+/** Planification catalogue = toujours demain. */
+const planningDate = computed(() => addDaysISO(getLocalTodayISO(), 1))
+/** Ajout « Réel » = aujourd’hui. */
+const actualDate = computed(() => getLocalTodayISO())
 
-const targetDateLabel = computed(() => {
+const planningDateLabel = computed(() => {
   try {
-    const [y, m, d] = targetDate.value.split('-').map(Number)
+    const [y, m, d] = planningDate.value.split('-').map(Number)
     return new Date(y, m - 1, d).toLocaleDateString('fr-FR', {
       weekday: 'long',
       day: 'numeric',
       month: 'long',
     })
   } catch {
-    return targetDate.value
+    return planningDate.value
   }
 })
 
@@ -95,14 +97,16 @@ const filtered = computed(() => {
  * @param {number} amount
  */
 function toSignedCost(effect, amount) {
-  const mag = Math.abs(Math.round(Number(amount) || 0))
+  const mag = Math.abs(normalizeBatteryCost(amount))
   return effect === 'restore' ? -mag : mag
 }
 
 function formatCost(n) {
   const v = Number(n) || 0
-  if (v > 0) return `−${v}`
-  if (v < 0) return `+${Math.abs(v)}`
+  const abs = Math.abs(v)
+  const label = Number.isInteger(abs) ? String(abs) : abs.toFixed(1)
+  if (v > 0) return `−${label}`
+  if (v < 0) return `+${label}`
   return '0'
 }
 
@@ -139,11 +143,42 @@ async function createItem() {
       default_cost: toSignedCost(newEffect.value, newAmount.value),
     })
     newName.value = ''
-    newAmount.value = 1
-    newEffect.value = 'drain'
+    // Conserve effet + points pour enchaîner plusieurs créations similaires.
     await loadActivities()
+    await nextTick()
+    newNameInputRef.value?.focus()
   } catch (err) {
     formError.value = err?.message || 'Erreur.'
+  }
+}
+
+function startEditCost(activity) {
+  editingCostActivityId.value = activity.id
+  editingCostValue.value = Number(activity.default_cost) || 0
+  void nextTick(() => {
+    const el = document.querySelector(`[data-catalog-cost-edit="${activity.id}"]`)
+    if (el instanceof HTMLInputElement) {
+      el.focus()
+      el.select()
+    }
+  })
+}
+
+function cancelEditCost() {
+  editingCostActivityId.value = null
+}
+
+async function commitEditCost(activity) {
+  if (editingCostActivityId.value !== activity.id) return
+  const cost = normalizeBatteryCost(editingCostValue.value)
+  editingCostActivityId.value = null
+  if (cost === normalizeBatteryCost(activity.default_cost)) return
+  try {
+    await updateBatteryActivity(supabase, userId.value, activity.id, { default_cost: cost })
+    await loadActivities()
+  } catch (err) {
+    console.error(err)
+    formError.value = err?.message || 'Impossible de modifier le coût.'
   }
 }
 
@@ -176,8 +211,10 @@ async function addToDay(activity, kind) {
   if (!userId.value || busyId.value) return
   busyId.value = activity.id
   statusMessage.value = ''
+  const dayIso =
+    kind === BATTERY_ENTRY_KINDS.PLANNED ? planningDate.value : actualDate.value
   try {
-    await addBatteryEntry(supabase, userId.value, targetDate.value, {
+    await addBatteryEntry(supabase, userId.value, dayIso, {
       label: activity.name,
       cost: activity.default_cost,
       kind,
@@ -185,8 +222,8 @@ async function addToDay(activity, kind) {
     })
     statusMessage.value =
       kind === BATTERY_ENTRY_KINDS.PLANNED
-        ? `« ${activity.name} » planifié pour ${targetDateLabel.value}`
-        : `« ${activity.name} » ajouté au réel`
+        ? `« ${activity.name} » planifié pour ${planningDateLabel.value}`
+        : `« ${activity.name} » ajouté au réel d’aujourd’hui`
   } catch (err) {
     console.error(err)
     statusMessage.value = err?.message || 'Erreur'
@@ -196,10 +233,7 @@ async function addToDay(activity, kind) {
 }
 
 function goBack() {
-  router.push({
-    name: 'battery',
-    query: { date: targetDate.value },
-  })
+  router.push({ name: 'battery' })
 }
 
 onMounted(async () => {
@@ -220,8 +254,8 @@ onMounted(async () => {
       <button type="button" class="page-back" @click="goBack">← Batterie</button>
       <h1 class="page-title">{{ pageTitle }}</h1>
       <p class="page-subtitle">
-        Activités réutilisables · planifier pour
-        <strong class="date-em">{{ targetDateLabel }}</strong>
+        Activités réutilisables · planifier pour demain
+        <strong class="date-em">({{ planningDateLabel }})</strong>
       </p>
     </header>
 
@@ -233,7 +267,13 @@ onMounted(async () => {
       <section class="panel create-panel">
         <h2 class="panel__title">Nouvelle activité</h2>
         <form class="create-form" @submit.prevent="createItem">
-          <input v-model="newName" type="text" placeholder="Nom de l’activité" required />
+          <input
+            ref="newNameInputRef"
+            v-model="newName"
+            type="text"
+            placeholder="Nom de l’activité"
+            required
+          />
           <div class="effect-toggle" role="group" aria-label="Effet sur l’énergie">
             <button
               type="button"
@@ -256,17 +296,17 @@ onMounted(async () => {
             v-model.number="newAmount"
             type="number"
             min="0"
-            step="1"
-            title="Points d’énergie"
+            step="0.5"
+            title="Points d’énergie (ex. 0.5)"
             aria-label="Points d’énergie"
           />
           <button type="submit" class="primary-btn">Ajouter</button>
         </form>
         <p v-if="formError" class="flash flash--error">{{ formError }}</p>
         <p class="hint">
-          Choisis Dépense ou Regain, puis les points à la création. Ensuite tu peux renommer ou
-          supprimer ; le coût par défaut évolue tout seul via les activités réelles du jour (même
-          coût pendant 2 semaines d’affilée).
+          Choisis Dépense ou Regain, puis les points (entiers ou 0.5). « Planifier » ajoute à
+          demain ; « Réel » à aujourd’hui. Le coût par défaut évolue via les activités réelles
+          (même coût pendant 2 semaines d’affilée).
         </p>
       </section>
 
@@ -302,17 +342,34 @@ onMounted(async () => {
                 title="Renommer"
                 @change="renameItem(activity, $event)"
               />
-              <span
-                class="item__badge"
+              <input
+                v-if="editingCostActivityId === activity.id"
+                :data-catalog-cost-edit="activity.id"
+                v-model.number="editingCostValue"
+                class="item__badge item__badge--edit"
+                :class="`item__badge--${costStyleClass(editingCostValue)}`"
+                type="number"
+                step="0.5"
+                aria-label="Modifier le coût par défaut"
+                title="Positif = dépense, négatif = regain (ex. 0.5 ou −1)"
+                @keydown.enter.prevent="commitEditCost(activity)"
+                @keydown.escape.prevent="cancelEditCost"
+                @blur="commitEditCost(activity)"
+              />
+              <button
+                v-else
+                type="button"
+                class="item__badge item__badge--btn"
                 :class="`item__badge--${costStyleClass(activity.default_cost)}`"
                 :title="
                   effectOf(activity.default_cost) === 'restore'
-                    ? 'Regain (coût par défaut)'
-                    : 'Dépense (coût par défaut)'
+                    ? 'Modifier le regain (cliquer)'
+                    : 'Modifier la dépense (cliquer)'
                 "
+                @click="startEditCost(activity)"
               >
                 {{ formatCost(activity.default_cost) }}
-              </span>
+              </button>
             </div>
 
             <div class="item__actions">
@@ -609,6 +666,9 @@ onMounted(async () => {
   border: 1.5px solid rgba(213, 181, 234, 0.28);
   background: rgba(213, 181, 234, 0.1);
   transition: border-color 0.15s ease, background 0.15s ease;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .item--neutral {
@@ -665,6 +725,8 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .item__name-input {
@@ -687,12 +749,50 @@ onMounted(async () => {
 }
 
 .item__badge {
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  max-width: 4.5rem;
   font-size: 0.82rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   border-radius: 999px;
   padding: 0.2rem 0.55rem;
+  box-sizing: border-box;
+}
+
+.item__badge--btn {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.item__badge--btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 1px 4px rgba(44, 62, 80, 0.12);
+}
+
+.item__badge--edit {
+  width: 3.25rem;
+  max-width: 3.25rem;
+  min-width: 0;
+  border: 1px solid rgba(173, 129, 190, 0.55);
+  border-radius: 999px;
+  text-align: center;
+  padding: 0.15rem 0.3rem;
+  outline: none;
+  /* Les flèches natives élargissent le champ hors carte sur desktop. */
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.item__badge--edit::-webkit-outer-spin-button,
+.item__badge--edit::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .item__badge--neutral {

@@ -22,8 +22,10 @@ const SETTINGS_TABLE = 'settings'
 const DAYS_TABLE = 'battery_days'
 const ENTRIES_TABLE = 'battery_day_entries'
 
+const BATTERY_PLANNING_TITLE = 'Planning'
+
 const BATTERY_PLANNING_BODY =
-  'La journée de demain n’est pas encore planifiée sur Batterie. Penses à prévoir ton énergie 💜'
+  'Vous n’avez encore rien planifié pour demain. Faites-le maintenant pour découvrir ce que votre énergie vous permet de faire ✨'
 
 const BATTERY_DEFAULT_LABEL =
   APP_MAIN_PAGES.find((p) => p.id === APP_PAGE_IDS.BATTERY)?.defaultLabel ?? 'Batterie'
@@ -208,14 +210,13 @@ export async function rescheduleBatteryPlanningReminder(userId, options = {}) {
 
   const hhmm = settings.todo_promesse_reminder_time
   const scheduledAt = getPlanningScheduledAt(todayISO, hhmm)
-  const title = await getBatteryPageLabelForUser(supabase, userId)
 
   await insertPendingNotifications(supabase, userId, [
     {
       user_id: userId,
       event_id: null,
       kind: SCHEDULED_KIND.BATTERY_PLANNING_REMINDER,
-      title,
+      title: BATTERY_PLANNING_TITLE,
       body: BATTERY_PLANNING_BODY,
       scheduled_at: scheduledAt.toISOString(),
     },

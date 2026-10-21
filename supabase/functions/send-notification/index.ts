@@ -236,21 +236,47 @@ function formatDateInTimeZone(iso: string | null | undefined, timeZoneInput: unk
   return new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(iso))
 }
 
-function getTodoPageLabel(pageVisibility: unknown): string {
-  if (!pageVisibility || typeof pageVisibility !== 'object' || Array.isArray(pageVisibility)) {
-    return 'TODO'
-  }
-  const entry = (pageVisibility as Record<string, { label?: string | null }>).todo
-  const custom = typeof entry?.label === 'string' ? entry.label.trim() : ''
-  return custom || 'TODO'
-}
-
-const TODO_PROMESSE_KIND = 'todo_promesse_reminder'
-const TODO_PROMESSE_BODY =
-  'Tu n’as pas encore de promesse pour demain. Penses à en ajouter une 💜'
+const BATTERY_PLANNING_KIND = 'battery_planning_reminder'
+/** Ancien kind encore nettoyé pour éviter les vieux messages « promesses ». */
+const LEGACY_TODO_PROMESSE_KIND = 'todo_promesse_reminder'
+const BATTERY_PLANNING_TITLE = 'Planning'
+const BATTERY_PLANNING_BODY =
+  'Vous n’avez encore rien planifié pour demain. Faites-le maintenant pour découvrir ce que votre énergie vous permet de faire ✨'
 /** Au-delà de cette latence, on annule l’envoi (pas de rattrapage). */
 const SCHEDULED_SEND_GRACE_MS = 5 * 60 * 1000
 
+async function userHasBatteryPlannedForDay(userId: string, dayIso: string): Promise<boolean> {
+  const { data: day, error: dayError } = await supabase
+    .from('battery_days')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('day_date', dayIso)
+    .maybeSingle()
+
+  if (dayError) {
+    if (String(dayError.message || '').includes('battery_days')) return false
+    console.error('Lecture battery_days (planning) :', dayError)
+    return false
+  }
+  if (!day?.id) return false
+
+  const { data, error } = await supabase
+    .from('battery_day_entries')
+    .select('id')
+    .eq('day_id', day.id)
+    .eq('kind', 'planned')
+    .limit(1)
+
+  if (error) {
+    if (String(error.message || '').includes('battery_day_entries')) return false
+    console.error('Lecture battery_day_entries (planning) :', error)
+    return false
+  }
+
+  return Boolean(data?.length)
+}
+
+/** Filet cron : rappel Planning Batterie si demain n’a aucune activité prévue. */
 async function ensureTodoPromesseReminders() {
   let settingsRows = null
   let settingsError = null
@@ -258,7 +284,7 @@ async function ensureTodoPromesseReminders() {
   ;({ data: settingsRows, error: settingsError } = await supabase
     .from('settings')
     .select(
-      'user_id, todo_promesse_reminder_enabled, todo_promesse_reminder_time, page_visibility, notification_timezone, notification_utc_offset_minutes',
+      'user_id, todo_promesse_reminder_enabled, todo_promesse_reminder_time, notification_timezone, notification_utc_offset_minutes',
     )
     .eq('todo_promesse_reminder_enabled', true))
 
@@ -269,14 +295,12 @@ async function ensureTodoPromesseReminders() {
   ) {
     ;({ data: settingsRows, error: settingsError } = await supabase
       .from('settings')
-      .select(
-        'user_id, todo_promesse_reminder_enabled, todo_promesse_reminder_time, page_visibility',
-      )
+      .select('user_id, todo_promesse_reminder_enabled, todo_promesse_reminder_time')
       .eq('todo_promesse_reminder_enabled', true))
   }
 
   if (settingsError) {
-    console.error('Erreur récupération réglages promesses TODO :', settingsError)
+    console.error('Erreur récupération réglages planification Batterie :', settingsError)
     return
   }
 
@@ -285,48 +309,23 @@ async function ensureTodoPromesseReminders() {
 
   const userIds = [...new Set(rows.map((row) => String(row.user_id)))]
   const nowMs = Date.now()
-
-  // Lectures batchées (O(1) requêtes) au lieu de O(N) par utilisateur
-  const { data: allItems, error: itemsError } = await supabase
-    .from('todo_items')
-    .select('user_id, frequence, jour_semaine, date_echeance, is_promesse')
-    .in('user_id', userIds)
-    .eq('is_promesse', true)
-
-  if (itemsError) {
-    console.error('Erreur lecture promesses TODO :', itemsError)
-    return
-  }
-
-  /** Fenêtre UTC large pour couvrir « aujourd’hui local » quel que soit le fuseau. */
   const windowStartMs = nowMs - 48 * 60 * 60 * 1000
   const windowEndMs = nowMs + 48 * 60 * 60 * 1000
 
-  // Une seule lecture scheduled_notifications du kind (volume faible : app perso + purge 30j)
   const { data: scheduledRows, error: scheduledError } = await supabase
     .from('scheduled_notifications')
-    .select('id, user_id, sent, scheduled_at')
+    .select('id, user_id, sent, scheduled_at, kind')
     .in('user_id', userIds)
-    .eq('kind', TODO_PROMESSE_KIND)
+    .in('kind', [BATTERY_PLANNING_KIND, LEGACY_TODO_PROMESSE_KIND])
 
   if (scheduledError) {
-    console.error('Lecture rappels promesses TODO :', scheduledError)
+    console.error('Lecture rappels planification Batterie :', scheduledError)
     return
   }
 
-  /** @type {Map<string, Array<{ frequence?: string, jour_semaine?: number|null, date_echeance?: string, is_promesse?: boolean }>>} */
-  const itemsByUser = new Map()
-  for (const item of allItems ?? []) {
-    const uid = String(item.user_id || '')
-    if (!uid) continue
-    const list = itemsByUser.get(uid) || []
-    list.push(item)
-    itemsByUser.set(uid, list)
-  }
-
-  /** @type {Map<string, Array<{ id: string, scheduled_at: string }>>} */
+  /** @type {Map<string, Array<{ id: string, scheduled_at: string, kind?: string }>>} */
   const pendingByUser = new Map()
-  /** @type {Map<string, Array<{ id: string, scheduled_at: string }>>} */
+  /** @type {Map<string, Array<{ id: string, scheduled_at: string, kind?: string }>>} */
   const sentByUser = new Map()
   for (const row of scheduledRows ?? []) {
     const uid = String(row.user_id || '')
@@ -390,37 +389,41 @@ async function ensureTodoPromesseReminders() {
     )
     const scheduledMs = new Date(scheduledAtISO).getTime()
 
-    const items = itemsByUser.get(userId) || []
+    const pending = pendingByUser.get(userId) || []
+    const hasLegacyPending = pending.some((n) => n.kind === LEGACY_TODO_PROMESSE_KIND)
 
-    if (countDayScopedPromessesForDate(items, tomorrowISO) > 0) {
-      if ((pendingByUser.get(userId) || []).length > 0) {
-        userIdsToCancel.push(userId)
-      }
+    if (await userHasBatteryPlannedForDay(userId, tomorrowISO)) {
+      if (pending.length > 0) userIdsToCancel.push(userId)
       continue
     }
 
+    // Toujours purger l’ancien kind « promesses » s’il traine en pending.
+    if (hasLegacyPending) userIdsToCancel.push(userId)
+
     const hasSentToday = (sentByUser.get(userId) || []).some((n) => {
       const t = new Date(n.scheduled_at).getTime()
-      return t >= dayStartMs && t <= dayEndMs
+      return (
+        (n.kind === BATTERY_PLANNING_KIND || n.kind === LEGACY_TODO_PROMESSE_KIND) &&
+        t >= dayStartMs &&
+        t <= dayEndMs
+      )
     })
     if (hasSentToday) continue
 
-    const hasPendingToday = (pendingByUser.get(userId) || []).some((n) => {
+    const hasPendingPlanningToday = pending.some((n) => {
       const t = new Date(n.scheduled_at).getTime()
-      return t >= dayStartMs && t <= dayEndMs
+      return n.kind === BATTERY_PLANNING_KIND && t >= dayStartMs && t <= dayEndMs
     })
-    if (hasPendingToday) continue
+    if (hasPendingPlanningToday) continue
 
-    // Pas de rattrapage : si l’heure du jour est déjà passée, on attend demain
-    // (le cron / l’ouverture de l’app replanifiera pour le prochain créneau).
     if (scheduledMs <= nowMs) continue
 
     inserts.push({
       user_id: userId,
       event_id: null,
-      kind: TODO_PROMESSE_KIND,
-      title: getTodoPageLabel(row.page_visibility),
-      body: TODO_PROMESSE_BODY,
+      kind: BATTERY_PLANNING_KIND,
+      title: BATTERY_PLANNING_TITLE,
+      body: BATTERY_PLANNING_BODY,
       scheduled_at: scheduledAtISO,
       sent: false,
     })
@@ -431,11 +434,11 @@ async function ensureTodoPromesseReminders() {
       .from('scheduled_notifications')
       .delete()
       .in('user_id', userIdsToCancel)
-      .eq('kind', TODO_PROMESSE_KIND)
+      .in('kind', [BATTERY_PLANNING_KIND, LEGACY_TODO_PROMESSE_KIND])
       .eq('sent', false)
 
     if (deleteError) {
-      console.error('Annulation rappel promesses TODO :', deleteError)
+      console.error('Annulation rappel planification Batterie :', deleteError)
     }
   }
 
@@ -443,9 +446,9 @@ async function ensureTodoPromesseReminders() {
     const { error: insertError } = await supabase.from('scheduled_notifications').insert(inserts)
 
     if (insertError) {
-      console.error('Planification rappel promesses TODO :', insertError)
+      console.error('Planification rappel Batterie :', insertError)
     } else {
-      logDebug('Rappels promesses TODO planifiés :', inserts.length)
+      logDebug('Rappels planification Batterie planifiés :', inserts.length)
     }
   }
 }
@@ -517,7 +520,9 @@ function mapNotificationKindToDeviceCategory(kind: unknown): string | null {
   }
   if (raw === 'timer' || raw === 'timer_start') return 'timer'
   if (raw === 'todo_item_reminder') return 'todo_item'
-  if (raw === 'todo_promesse_reminder') return 'todo_promesse'
+  if (raw === 'todo_promesse_reminder' || raw === 'battery_planning_reminder') {
+    return 'todo_promesse'
+  }
   if (raw === 'reconfort') return 'reconfort'
   if (raw.startsWith('menstruation_')) return 'menstruation'
   if (
@@ -1243,11 +1248,9 @@ Deno.serve(async (req) => {
       }
       } // fin if (dueList.length)
 
-      // Filet « rappel promesses » : crée le pending avant l’heure du rappel.
-      // Pas à chaque minute idle (settings + todo_items) — le client replanifie aussi
-      // à l’ouverture / changement TODO / settings. Toutes les 15 min UTC suffit.
-      const PROMESSE_ENSURE_EVERY_UTC_MINUTES = 15
-      if (new Date().getUTCMinutes() % PROMESSE_ENSURE_EVERY_UTC_MINUTES === 0) {
+      // Filet « rappel Planning Batterie » : crée le pending avant l’heure du rappel.
+      const PLANNING_ENSURE_EVERY_UTC_MINUTES = 15
+      if (new Date().getUTCMinutes() % PLANNING_ENSURE_EVERY_UTC_MINUTES === 0) {
         await ensureTodoPromesseReminders()
       }
 

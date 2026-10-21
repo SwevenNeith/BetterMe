@@ -70,12 +70,24 @@ export function computeDayBudget(input = {}) {
 }
 
 /**
+ * Normalise un coût Batterie à 1 décimale (ex. 0.5).
+ * @param {unknown} value
+ */
+export function normalizeBatteryCost(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  return Math.round(n * 10) / 10
+}
+
+/**
  * Somme des coûts (positif = dépense d’énergie).
  * @param {{ cost?: number }[]} entries
  */
 export function sumEntryCosts(entries) {
   if (!Array.isArray(entries)) return 0
-  return entries.reduce((sum, entry) => sum + (Number(entry?.cost) || 0), 0)
+  return normalizeBatteryCost(
+    entries.reduce((sum, entry) => sum + (Number(entry?.cost) || 0), 0),
+  )
 }
 
 /**
@@ -83,7 +95,7 @@ export function sumEntryCosts(entries) {
  * @param {number} spent
  */
 export function remainingEnergy(budget, spent) {
-  return (Number(budget) || 0) - (Number(spent) || 0)
+  return normalizeBatteryCost((Number(budget) || 0) - (Number(spent) || 0))
 }
 
 /**

@@ -18,14 +18,14 @@ CREATE TABLE IF NOT EXISTS public.battery_activities (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
   name text NOT NULL CHECK (char_length(trim(name)) > 0),
-  default_cost integer NOT NULL DEFAULT 1,
+  default_cost numeric(8, 1) NOT NULL DEFAULT 1,
   created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
   updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
 
 COMMENT ON TABLE public.battery_activities IS 'Catalogue d’activités énergivores / restauratrices.';
 COMMENT ON COLUMN public.battery_activities.default_cost IS
-  'Coût par défaut : positif = dépense, négatif = regain d’énergie.';
+  'Coût par défaut signé (positif = dépense, négatif = regain), précision 0.1.';
 
 CREATE UNIQUE INDEX IF NOT EXISTS battery_activities_user_name_uidx
   ON public.battery_activities (user_id, lower(trim(name)));
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS public.battery_day_entries (
   day_id uuid NOT NULL REFERENCES public.battery_days (id) ON DELETE CASCADE,
   activity_id uuid NULL REFERENCES public.battery_activities (id) ON DELETE SET NULL,
   label text NOT NULL CHECK (char_length(trim(label)) > 0),
-  cost integer NOT NULL DEFAULT 0,
+  cost numeric(8, 1) NOT NULL DEFAULT 0, -- précision 0.1 (ex. 0.5)
   kind text NOT NULL CHECK (kind IN ('planned', 'actual')),
   sort_order integer NOT NULL DEFAULT 0,
   source_type text NULL CHECK (source_type IS NULL OR source_type IN ('todo', 'timetable')),

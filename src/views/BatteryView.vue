@@ -26,6 +26,7 @@ import {
 } from '../services/battery/batteryActivities.js'
 import {
   addBatteryEntry,
+  completePlannedBatteryEntry,
   copyPlannedToActual,
   deleteBatteryEntry,
   ensureBatteryDay,
@@ -39,6 +40,7 @@ import {
   formatMinutesAsHm,
   hoursBetweenTimes,
   lieInMinutes,
+  normalizeBatteryCost,
   remainingEnergy,
   shiftDayIso,
   sumEntryCosts,
@@ -100,6 +102,8 @@ const entryActivityId = ref('')
 const entryKind = ref(BATTERY_ENTRY_KINDS.ACTUAL)
 const entrySearch = ref('')
 const entrySuggestions = ref([])
+const showEntrySuggestions = ref(false)
+let suggestionsBlurTimer = null
 
 const todayIso = computed(() => getLocalTodayISO())
 const isToday = computed(() => selectedDate.value === todayIso.value)
@@ -159,8 +163,10 @@ const periodLabel = computed(() => {
 
 function formatCost(n) {
   const v = Number(n) || 0
-  if (v > 0) return `−${v}`
-  if (v < 0) return `+${Math.abs(v)}`
+  const abs = Math.abs(v)
+  const label = Number.isInteger(abs) ? String(abs) : abs.toFixed(1)
+  if (v > 0) return `−${label}`
+  if (v < 0) return `+${label}`
   return '0'
 }
 
@@ -239,18 +245,36 @@ async function onEveningChange(value) {
 async function refreshEntrySuggestions() {
   if (!userId.value) {
     entrySuggestions.value = []
+    showEntrySuggestions.value = false
     return
   }
-  const q = entrySearch.value.trim() || entryLabel.value.trim()
-  if (!q) {
-    entrySuggestions.value = activities.value.slice(0, 8)
+  const q = entrySearch.value.trim()
+  if (q.length < 1) {
+    entrySuggestions.value = []
+    showEntrySuggestions.value = false
     return
   }
   try {
     entrySuggestions.value = await searchBatteryActivities(supabase, userId.value, q)
+    showEntrySuggestions.value = entrySuggestions.value.length > 0
   } catch {
     entrySuggestions.value = []
+    showEntrySuggestions.value = false
   }
+}
+
+function onEntrySearchFocus() {
+  if (suggestionsBlurTimer) {
+    clearTimeout(suggestionsBlurTimer)
+    suggestionsBlurTimer = null
+  }
+  void refreshEntrySuggestions()
+}
+
+function onEntrySearchBlur() {
+  suggestionsBlurTimer = window.setTimeout(() => {
+    showEntrySuggestions.value = false
+  }, 160)
 }
 
 function pickSuggestion(activity) {
@@ -259,6 +283,7 @@ function pickSuggestion(activity) {
   entryActivityId.value = activity.id
   entrySearch.value = activity.name
   entrySuggestions.value = []
+  showEntrySuggestions.value = false
 }
 
 async function submitEntry() {
@@ -268,7 +293,7 @@ async function submitEntry() {
   try {
     const result = await addBatteryEntry(supabase, userId.value, selectedDate.value, {
       label: entryLabel.value,
-      cost: Math.round(Number(entryCost.value) || 0),
+      cost: normalizeBatteryCost(entryCost.value),
       kind: entryKind.value,
       activity_id: entryActivityId.value || null,
     })
@@ -291,6 +316,24 @@ async function submitEntry() {
 
 const editingCostEntryId = ref(null)
 const editingCostValue = ref(0)
+const completingPlannedId = ref(null)
+
+async function markPlannedDone(entry) {
+  if (!userId.value || !entry?.id || completingPlannedId.value) return
+  if (isPlannedEntryDone(entry)) return
+  completingPlannedId.value = entry.id
+  statusMessage.value = ''
+  try {
+    await completePlannedBatteryEntry(supabase, userId.value, entry.id)
+    await loadDay()
+    statusMessage.value = 'Marqué comme fait'
+  } catch (err) {
+    console.error(err)
+    statusMessage.value = err?.message || 'Impossible de marquer comme fait'
+  } finally {
+    completingPlannedId.value = null
+  }
+}
 
 function startEditActualCost(entry) {
   if (entry.kind !== BATTERY_ENTRY_KINDS.ACTUAL) return
@@ -311,9 +354,9 @@ function cancelEditActualCost() {
 
 async function commitEditActualCost(entry) {
   if (editingCostEntryId.value !== entry.id) return
-  const cost = Math.round(Number(editingCostValue.value) || 0)
+  const cost = normalizeBatteryCost(editingCostValue.value)
   editingCostEntryId.value = null
-  if (cost === Math.round(Number(entry.cost) || 0)) return
+  if (cost === normalizeBatteryCost(entry.cost)) return
   try {
     const result = await updateBatteryEntry(supabase, userId.value, entry.id, { cost })
     day.value = result.day
@@ -428,10 +471,8 @@ function goToday() {
 }
 
 function goCatalog() {
-  router.push({
-    name: 'battery-catalogue',
-    query: { date: selectedDate.value },
-  })
+  // Le catalogue planifie pour demain (pas le jour affiché).
+  router.push({ name: 'battery-catalogue' })
 }
 
 function goHistory() {
@@ -457,8 +498,8 @@ watch(selectedDate, () => {
   loadDay()
 })
 
-watch([entrySearch, entryLabel], () => {
-  refreshEntrySuggestions()
+watch(entrySearch, () => {
+  void refreshEntrySuggestions()
 })
 
 onMounted(async () => {
@@ -482,6 +523,10 @@ onUnmounted(() => {
     window.clearInterval(eveningClockTimer)
     eveningClockTimer = null
   }
+  if (suggestionsBlurTimer != null) {
+    clearTimeout(suggestionsBlurTimer)
+    suggestionsBlurTimer = null
+  }
 })
 </script>
 
@@ -498,42 +543,43 @@ onUnmounted(() => {
     </header>
 
     <div class="calendar-controls">
-      <div class="navigation-group">
-        <button type="button" class="nav-arrow" aria-label="Jour précédent" @click="shiftSelected(-1)">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
-
-        <div class="nav-title">
-          <button type="button" class="nav-title__date-btn" :title="`Choisir une date — ${periodLabel}`" @click="openDayPicker">
-            <span class="nav-title__main">{{ periodLabel }}</span>
-            <span v-if="isToday" class="nav-title__badge">Aujourd’hui</span>
+      <div class="calendar-controls__nav-row">
+        <div class="navigation-group">
+          <button type="button" class="nav-arrow" aria-label="Jour précédent" @click="shiftSelected(-1)">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
           </button>
-          <input
-            ref="dayPickerRef"
-            type="date"
-            class="nav-date-input"
-            :value="selectedDate"
-            tabindex="-1"
-            aria-label="Choisir une date"
-            @change="onDayPickerChange"
-          />
+
+          <div class="nav-title">
+            <button type="button" class="nav-title__date-btn" :title="`Choisir une date — ${periodLabel}`" @click="openDayPicker">
+              <span class="nav-title__main">{{ periodLabel }}</span>
+              <span v-if="isToday" class="nav-title__badge">Aujourd’hui</span>
+            </button>
+            <input
+              ref="dayPickerRef"
+              type="date"
+              class="nav-date-input"
+              :value="selectedDate"
+              tabindex="-1"
+              aria-label="Choisir une date"
+              @change="onDayPickerChange"
+            />
+          </div>
+
+          <button type="button" class="nav-arrow" aria-label="Jour suivant" @click="shiftSelected(1)">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
         </div>
 
-        <button type="button" class="nav-arrow" aria-label="Jour suivant" @click="shiftSelected(1)">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </button>
+        <button v-if="!isToday" type="button" class="today-btn" @click="goToday">Aujourd’hui</button>
       </div>
 
-      <div class="action-group">
-        <button v-if="!isToday" type="button" class="today-btn" @click="goToday">Aujourd’hui</button>
-        <div class="action-stack">
-          <button type="button" class="catalog-btn" @click="goCatalog">Catalogue</button>
-          <button type="button" class="history-btn" @click="goHistory">Historique</button>
-        </div>
+      <div class="action-stack">
+        <button type="button" class="catalog-btn" @click="goCatalog">Catalogue</button>
+        <button type="button" class="history-btn" @click="goHistory">Historique</button>
       </div>
     </div>
 
@@ -670,13 +716,22 @@ onUnmounted(() => {
             <input
               v-model="entrySearch"
               type="search"
-              placeholder="Chercher dans le catalogue…"
+              class="entry-search-input"
+              placeholder="Rechercher une activité du catalogue…"
               autocomplete="off"
-              @focus="refreshEntrySuggestions"
+              aria-autocomplete="list"
+              :aria-expanded="showEntrySuggestions ? 'true' : 'false'"
+              @focus="onEntrySearchFocus"
+              @blur="onEntrySearchBlur"
+              @input="entryActivityId = ''"
             />
-            <ul v-if="entrySuggestions.length" class="suggestions">
-              <li v-for="a in entrySuggestions" :key="a.id">
-                <button type="button" @click="pickSuggestion(a)">
+            <ul
+              v-if="showEntrySuggestions && entrySuggestions.length"
+              class="suggestions"
+              role="listbox"
+            >
+              <li v-for="a in entrySuggestions" :key="a.id" role="option">
+                <button type="button" @mousedown.prevent="pickSuggestion(a)">
                   <span>{{ a.name }}</span>
                   <span class="cost-tag" :class="`cost-tag--${costStyleClass(a.default_cost)}`">
                     {{ formatCost(a.default_cost) }}
@@ -697,8 +752,8 @@ onUnmounted(() => {
               v-model.number="entryCost"
               class="entry-form__cost"
               type="number"
-              step="1"
-              title="Positif = dépense, négatif = regain"
+              step="0.5"
+              title="Positif = dépense, négatif = regain (ex. 0.5)"
             />
             <button type="submit" class="primary-btn entry-form__submit" :disabled="isSaving">
               {{ entryKind === BATTERY_ENTRY_KINDS.PLANNED ? 'Planifier' : 'Ajouter' }}
@@ -726,6 +781,16 @@ onUnmounted(() => {
                 <span class="cost-tag" :class="`cost-tag--${costStyleClass(entry.cost)}`">
                   {{ formatCost(entry.cost) }}
                 </span>
+                <button
+                  v-if="!isPlannedEntryDone(entry)"
+                  type="button"
+                  class="fait-btn"
+                  :disabled="completingPlannedId === entry.id"
+                  :aria-label="`Marquer « ${entry.label} » comme fait`"
+                  @click="markPlannedDone(entry)"
+                >
+                  {{ completingPlannedId === entry.id ? '…' : 'Fait' }}
+                </button>
                 <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
               </li>
               <li v-if="!plannedEntries.length" class="empty-line">Rien de planifié</li>
@@ -748,7 +813,7 @@ onUnmounted(() => {
                   class="cost-tag cost-tag--edit"
                   :class="`cost-tag--${costStyleClass(editingCostValue)}`"
                   type="number"
-                  step="1"
+                  step="0.5"
                   aria-label="Modifier le coût"
                   @keydown.enter.prevent="commitEditActualCost(entry)"
                   @keydown.escape.prevent="cancelEditActualCost"
@@ -943,17 +1008,23 @@ onUnmounted(() => {
 
 .calendar-controls {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.65rem;
   margin-bottom: 1.25rem;
-  flex-wrap: wrap;
+}
+
+.calendar-controls__nav-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
 }
 
 .navigation-group {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
   flex: 1;
   min-width: 0;
   justify-content: space-between;
@@ -1030,18 +1101,11 @@ onUnmounted(() => {
   height: 0;
 }
 
-.action-group {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  align-items: flex-start;
-}
-
 .action-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  min-width: 8.5rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  width: 100%;
 }
 
 .today-btn,
@@ -1056,10 +1120,12 @@ onUnmounted(() => {
 }
 
 .today-btn {
-  padding: 0.55rem 0.95rem;
+  flex-shrink: 0;
+  padding: 0.55rem 0.85rem;
   background: rgba(255, 255, 255, 0.85);
   color: #ad81be;
   border: 1px solid rgba(213, 181, 234, 0.4);
+  white-space: nowrap;
 }
 
 .catalog-btn {
@@ -1076,7 +1142,7 @@ onUnmounted(() => {
 
 .history-btn {
   width: 100%;
-  padding: 0.35rem 0.75rem;
+  padding: 0.55rem 0.75rem;
   font-size: 0.8rem;
   font-weight: 600;
   color: #8a7a98;
@@ -1436,9 +1502,20 @@ onUnmounted(() => {
   font: inherit;
 }
 
-.entry-search-wrap input {
+.entry-search-input {
   width: 100%;
   box-sizing: border-box;
+  border-radius: 999px !important;
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+  background: rgba(255, 255, 255, 0.95) !important;
+  box-shadow: 0 2px 10px rgba(173, 129, 190, 0.08);
+}
+
+.entry-search-input:focus {
+  outline: none;
+  border-color: rgba(173, 129, 190, 0.65);
+  box-shadow: 0 0 0 3px rgba(173, 129, 190, 0.18);
 }
 
 .suggestions {
@@ -1446,15 +1523,15 @@ onUnmounted(() => {
   z-index: 6;
   left: 0;
   right: 0;
-  margin: 0.25rem 0 0;
-  padding: 0.25rem;
+  margin: 0.4rem 0 0;
+  padding: 0.35rem;
   list-style: none;
   background: #fff;
   border: 1px solid rgba(213, 181, 234, 0.45);
-  border-radius: 12px;
-  max-height: 200px;
+  border-radius: 14px;
+  max-height: 220px;
   overflow: auto;
-  box-shadow: 0 10px 28px rgba(44, 62, 80, 0.12);
+  box-shadow: 0 12px 28px rgba(44, 62, 80, 0.14);
 }
 
 .suggestions button {
@@ -1521,6 +1598,34 @@ onUnmounted(() => {
   gap: 0.4rem;
   border-radius: 10px;
   padding: 0.25rem 0.35rem;
+}
+
+.entry-row--plan:not(.entry-row--done) {
+  grid-template-columns: 1fr auto auto auto;
+}
+
+.fait-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 0.28rem 0.65rem;
+  background: rgba(255, 255, 255, 0.8);
+  color: #2f6b4a;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.fait-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.98);
+  transform: translateY(-1px);
+}
+
+.fait-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .entry-row--drain-1 { background: rgba(250, 230, 238, 0.7); }
@@ -1842,6 +1947,30 @@ onUnmounted(() => {
   .sleep-times {
     grid-template-columns: 1fr;
   }
+
+  .calendar-controls__nav-row {
+    flex-wrap: nowrap;
+  }
+
+  .navigation-group {
+    padding: 0.45rem 0.65rem;
+    gap: 0.4rem;
+  }
+
+  .nav-title__main {
+    font-size: 0.92rem;
+  }
+
+  .today-btn {
+    padding: 0.5rem 0.65rem;
+    font-size: 0.82rem;
+  }
+
+  .history-btn {
+    background: rgba(213, 181, 234, 0.12);
+    border-color: rgba(213, 181, 234, 0.35);
+    color: #6b4f7c;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1850,7 +1979,10 @@ onUnmounted(() => {
   .hero-meta strong,
   .panel__title,
   .entry-label,
-  .evening-card__label {
+  .evening-card__label,
+  .sleep-metric strong,
+  .plan-summary strong,
+  .hero-kicker {
     color: #f0e8f8;
   }
 
@@ -1860,8 +1992,14 @@ onUnmounted(() => {
   .list-col__title,
   .empty-line,
   .flash,
-  .evening-card__hint {
-    color: #adb5bd;
+  .evening-card__hint,
+  .hero-meta span,
+  .sleep-metric,
+  .sleep-time-field,
+  .plan-summary,
+  .chart-legend,
+  .subtle {
+    color: #c5c0cb;
   }
 
   .navigation-group,
@@ -1871,24 +2009,46 @@ onUnmounted(() => {
   .evening-card,
   .mini-chip,
   .entry-form input,
+  .entry-search-wrap input,
   .sleep-time-field input,
   .today-btn,
-  .cost-tag--edit {
-    background: rgba(35, 30, 48, 0.78);
-    border-color: rgba(213, 181, 234, 0.22);
+  .cost-tag--edit,
+  .history-btn {
+    background: rgba(35, 30, 48, 0.88);
+    border-color: rgba(213, 181, 234, 0.28);
     color: #f0e8f8;
   }
 
-  .sleep-metric strong {
-    color: #f0e8f8;
+  .nav-arrow {
+    background: rgba(213, 181, 234, 0.18);
+    color: #d5b5ea;
+  }
+
+  .nav-title__badge {
+    color: #d5b5ea;
+    background: rgba(213, 181, 234, 0.22);
+  }
+
+  .hero-status {
+    color: #95d1aa;
   }
 
   .plan-hint {
-    color: #d4b56a;
+    color: #e8c04a;
+  }
+
+  .kind-toggle {
+    background: rgba(213, 181, 234, 0.12);
+    border-color: rgba(213, 181, 234, 0.25);
+  }
+
+  .kind-toggle__btn {
+    color: #c5c0cb;
   }
 
   .kind-toggle__btn.is-active {
     background: rgba(55, 45, 70, 0.95);
+    color: #f0e8f8;
   }
 
   .suggestions {
@@ -1896,12 +2056,67 @@ onUnmounted(() => {
     border-color: rgba(213, 181, 234, 0.25);
   }
 
+  .suggestions button {
+    color: #f0e8f8;
+  }
+
+  .fait-btn {
+    background: rgba(25, 20, 35, 0.55);
+    color: #95d1aa;
+  }
+
   .list-col--plan {
-    background: rgba(143, 162, 212, 0.12);
+    background: rgba(143, 162, 212, 0.14);
+    border-color: rgba(143, 162, 212, 0.28);
   }
 
   .list-col--actual {
-    background: rgba(149, 209, 170, 0.1);
+    background: rgba(149, 209, 170, 0.12);
+    border-color: rgba(149, 209, 170, 0.28);
+  }
+
+  .entry-row--done .entry-label {
+    color: #adb5bd;
+  }
+
+  .link-btn {
+    color: #d5b5ea;
+  }
+
+  .cost-tag--drain-1,
+  .cost-tag--drain-2,
+  .cost-tag--drain-3 {
+    color: #f0b8d0;
+  }
+
+  .cost-tag--drain-4,
+  .cost-tag--drain-5 {
+    color: #f5c4d4;
+  }
+
+  .cost-tag--restore-1,
+  .cost-tag--restore-2,
+  .cost-tag--restore-3 {
+    color: #b8e0c4;
+  }
+
+  .cost-tag--restore-4,
+  .cost-tag--restore-5 {
+    color: #95d1aa;
+  }
+
+  .battery-confirm-dialog {
+    background: rgba(35, 30, 48, 0.96);
+    border-color: rgba(213, 181, 234, 0.28);
+    color: #f0e8f8;
+  }
+
+  .battery-confirm-title {
+    color: #f0e8f8;
+  }
+
+  .battery-confirm-message {
+    color: #c5c0cb;
   }
 }
 </style>

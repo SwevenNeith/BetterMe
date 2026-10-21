@@ -13,6 +13,7 @@ import {
   iterateISODateRange,
   normalizeDateISO,
 } from '../../utils/habit/habitCalendar.js'
+import { normalizeBatteryCost } from '../../utils/battery/batteryMath.js'
 import { ensureBatteryDay } from './batteryDays.js'
 
 const ENTRIES_TABLE = 'battery_day_entries'
@@ -182,7 +183,7 @@ export async function syncPlannedEntriesForSource(supabase, userId, input) {
   if (!userId || !sourceType || !sourceId || !label) return []
 
   const dayIsos = [...new Set((input.dayIsos ?? []).map(normalizeDateISO).filter(Boolean))].sort()
-  const cost = Math.round(Number(input.cost) || 0)
+  const cost = normalizeBatteryCost(input.cost)
   const preserveCost = input.preserveExistingCost !== false
 
   const existing = await listBatteryEntriesForSource(supabase, userId, sourceType, sourceId)

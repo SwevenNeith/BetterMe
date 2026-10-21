@@ -1,5 +1,7 @@
 const TABLE = 'battery_activities'
 
+import { normalizeBatteryCost } from '../../utils/battery/batteryMath.js'
+
 const COLUMNS = 'id, user_id, name, default_cost, created_at, updated_at'
 
 /**
@@ -48,7 +50,7 @@ export async function createBatteryActivity(supabase, userId, payload) {
   if (!name) throw new Error('Indique un nom d’activité.')
 
   const default_cost = Number.isFinite(Number(payload.default_cost))
-    ? Math.round(Number(payload.default_cost))
+    ? normalizeBatteryCost(payload.default_cost)
     : 1
 
   const { data, error } = await supabase
@@ -84,7 +86,7 @@ export async function updateBatteryActivity(supabase, userId, activityId, patch)
     payload.name = name
   }
   if (patch.default_cost != null) {
-    payload.default_cost = Math.round(Number(patch.default_cost))
+    payload.default_cost = normalizeBatteryCost(patch.default_cost)
   }
 
   const { data, error } = await supabase

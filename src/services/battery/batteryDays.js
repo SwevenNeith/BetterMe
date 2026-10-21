@@ -7,6 +7,7 @@ import {
   hoursBetweenTimes,
   shiftDayIso,
   learnedDefaultFromTwoWeeks,
+  normalizeBatteryCost,
   sumEntryCosts,
   toDayDateIso,
   toTimeInputValue,
@@ -332,7 +333,7 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
     payload.kind === BATTERY_ENTRY_KINDS.PLANNED
       ? BATTERY_ENTRY_KINDS.PLANNED
       : BATTERY_ENTRY_KINDS.ACTUAL
-  const cost = Math.round(Number(payload.cost) || 0)
+  const cost = normalizeBatteryCost(payload.cost)
   const sort_order = entries.filter((e) => e.kind === kind).length
 
   const { data, error } = await supabase
@@ -387,7 +388,7 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
     payload.label = label
   }
   if (patch.cost != null) {
-    payload.cost = Math.round(Number(patch.cost) || 0)
+    payload.cost = normalizeBatteryCost(patch.cost)
   }
 
   const { data, error } = await supabase
@@ -512,8 +513,8 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
 
   const cost =
     opts.cost == null
-      ? Math.round(Number(existing.cost) || 0)
-      : Math.round(Number(opts.cost) || 0)
+      ? normalizeBatteryCost(existing.cost)
+      : normalizeBatteryCost(opts.cost)
 
   const { data: actualRows, error: countError } = await supabase
     .from(ENTRIES_TABLE)
@@ -717,20 +718,23 @@ export async function listBatteryHistory(supabase, userId, opts = {}) {
     }
   }
 
-  return (dayRows ?? []).map((day) => {
-    const entries = entriesByDay[day.id] ?? []
-    const actual = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL)
-    const planned = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED)
-    const spent = sumEntryCosts(actual)
-    const plannedSpent = sumEntryCosts(planned)
-    return {
-      ...day,
-      entries,
-      spent,
-      plannedSpent,
-      remaining: Number(day.computed_budget) - spent,
-    }
-  })
+  return (dayRows ?? [])
+    .map((day) => {
+      const entries = entriesByDay[day.id] ?? []
+      const actual = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL)
+      const planned = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED)
+      const spent = sumEntryCosts(actual)
+      const plannedSpent = sumEntryCosts(planned)
+      return {
+        ...day,
+        entries,
+        spent,
+        plannedSpent,
+        remaining: Number(day.computed_budget) - spent,
+      }
+    })
+    // Pas de jour « vide » (0 dépensé sans activité réelle) dans l’historique.
+    .filter((day) => (day.entries ?? []).some((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL))
 }
 
 /**

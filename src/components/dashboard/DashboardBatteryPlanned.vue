@@ -15,7 +15,12 @@ import {
   isPlannedEntryDone,
   listBatteryPlannedForDay,
 } from '../../services/battery/batteryDays.js'
-import { costIntensity, costStyleClass, sumEntryCosts } from '../../utils/battery/batteryMath.js'
+import {
+  costIntensity,
+  costStyleClass,
+  normalizeBatteryCost,
+  sumEntryCosts,
+} from '../../utils/battery/batteryMath.js'
 import { normalizeDateISO } from '../../utils/habit/habitCalendar.js'
 
 const props = defineProps({
@@ -50,8 +55,10 @@ const planOverBudget = computed(
 
 function formatCost(n) {
   const v = Number(n) || 0
-  if (v > 0) return `−${v}`
-  if (v < 0) return `+${Math.abs(v)}`
+  const abs = Math.abs(v)
+  const label = Number.isInteger(abs) ? String(abs) : abs.toFixed(1)
+  if (v > 0) return `−${label}`
+  if (v < 0) return `+${label}`
   return '0'
 }
 
@@ -73,9 +80,9 @@ function defaultAmount(cost) {
 function resolveActualCost(entry) {
   const raw = costDrafts[entry.id]
   if (raw == null || String(raw).trim() === '') {
-    return Math.round(Number(entry.cost) || 0)
+    return normalizeBatteryCost(entry.cost)
   }
-  const amount = Math.abs(Math.round(Number(raw) || 0))
+  const amount = Math.abs(normalizeBatteryCost(raw))
   const planned = Number(entry.cost) || 0
   if (planned < 0) return -amount
   return amount
@@ -250,8 +257,8 @@ watch(
                 v-model="costDrafts[entry.id]"
                 type="number"
                 min="0"
-                step="1"
-                inputmode="numeric"
+                step="0.5"
+                inputmode="decimal"
                 :placeholder="String(defaultAmount(entry.cost))"
                 :disabled="completingId === entry.id"
                 :aria-label="`Coût réel pour ${entry.label}`"

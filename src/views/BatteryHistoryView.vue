@@ -127,9 +127,92 @@ const chartSeries = computed(() => seriesForChart(history.value))
 const costliestDays = computed(() => topCostliestDays(history.value, 5))
 const greedyActivities = computed(() => topGreedyActivities(history.value, 8))
 const correlations = computed(() => correlateWithMood(history.value, emotionLogs.value))
-const chartMax = computed(() => {
+
+const CHART_W = 640
+const CHART_H = 220
+const CHART_PAD = { top: 16, right: 12, bottom: 28, left: 36 }
+
+const chartDomain = computed(() => {
   const vals = chartSeries.value.flatMap((p) => [p.spent, p.budget])
-  return Math.max(10, ...vals, 1)
+  if (!vals.length) return { min: 0, max: 10 }
+  const rawMin = Math.min(0, ...vals)
+  const rawMax = Math.max(...vals, 1)
+  const pad = Math.max(0.5, (rawMax - rawMin) * 0.08)
+  return { min: rawMin - (rawMin < 0 ? pad : 0), max: rawMax + pad }
+})
+
+/**
+ * Polyline lissée (Catmull-Rom → cubic Bézier).
+ * @param {{ x: number, y: number }[]} points
+ */
+function smoothPath(points) {
+  if (!points.length) return ''
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`
+  if (points.length === 2) {
+    return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`
+  }
+
+  let d = `M ${points[0].x} ${points[0].y}`
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p0 = points[i - 1] || points[i]
+    const p1 = points[i]
+    const p2 = points[i + 1]
+    const p3 = points[i + 2] || p2
+    const cp1x = p1.x + (p2.x - p0.x) / 6
+    const cp1y = p1.y + (p2.y - p0.y) / 6
+    const cp2x = p2.x - (p3.x - p1.x) / 6
+    const cp2y = p2.y - (p3.y - p1.y) / 6
+    d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`
+  }
+  return d
+}
+
+const chartGeometry = computed(() => {
+  const series = chartSeries.value
+  const { min, max } = chartDomain.value
+  const innerW = CHART_W - CHART_PAD.left - CHART_PAD.right
+  const innerH = CHART_H - CHART_PAD.top - CHART_PAD.bottom
+  const range = Math.max(max - min, 0.1)
+  const n = series.length
+
+  const toX = (i) =>
+    CHART_PAD.left + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW)
+  const toY = (v) => CHART_PAD.top + innerH - ((Number(v) - min) / range) * innerH
+
+  const budgetPts = series.map((p, i) => ({ x: toX(i), y: toY(p.budget) }))
+  const spentPts = series.map((p, i) => ({ x: toX(i), y: toY(p.spent) }))
+
+  const spentArea =
+    spentPts.length > 0
+      ? `${smoothPath(spentPts)} L ${spentPts[spentPts.length - 1].x} ${CHART_PAD.top + innerH} L ${spentPts[0].x} ${CHART_PAD.top + innerH} Z`
+      : ''
+
+  const tickCount = 4
+  const yTicks = Array.from({ length: tickCount + 1 }, (_, i) => {
+    const value = min + (range * i) / tickCount
+    return { value, y: toY(value) }
+  })
+
+  const labelStep = n <= 8 ? 1 : Math.ceil(n / 6)
+  const xLabels = series
+    .map((p, i) => ({
+      date: p.date,
+      x: toX(i),
+      short: String(p.date).slice(5),
+      show: i === 0 || i === n - 1 || i % labelStep === 0,
+    }))
+    .filter((l) => l.show)
+
+  return {
+    budgetPath: smoothPath(budgetPts),
+    spentPath: smoothPath(spentPts),
+    spentArea,
+    budgetPts,
+    spentPts,
+    yTicks,
+    xLabels,
+    zeroY: toY(0),
+  }
 })
 
 async function loadHistory() {
@@ -250,24 +333,90 @@ onMounted(async () => {
     <template v-else>
       <section class="panel chart-panel">
         <h2 class="panel__title">Dépenses · {{ periodLabel }}</h2>
-        <div class="chart" role="img" :aria-label="`Dépenses · ${periodLabel}`">
-          <div
-            v-for="point in chartSeries"
-            :key="point.date"
-            class="chart-col"
-            :title="`${point.date} : ${point.spent} / ${point.budget}`"
+        <div
+          v-if="chartSeries.length"
+          class="chart"
+          role="img"
+          :aria-label="`Dépenses · ${periodLabel}`"
+        >
+          <svg
+            class="chart-svg"
+            :viewBox="`0 0 ${CHART_W} ${CHART_H}`"
+            preserveAspectRatio="xMidYMid meet"
           >
-            <div class="chart-bars">
-              <div
-                class="chart-bar chart-bar--budget"
-                :style="{ height: `${(point.budget / chartMax) * 100}%` }"
-              />
-              <div
-                class="chart-bar chart-bar--spent"
-                :style="{ height: `${(point.spent / chartMax) * 100}%` }"
-              />
-            </div>
-          </div>
+            <defs>
+              <linearGradient id="hist-spent-stroke" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#ad81be" />
+                <stop offset="100%" stop-color="#8fa2d4" />
+              </linearGradient>
+              <linearGradient id="hist-spent-fill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#ad81be" stop-opacity="0.28" />
+                <stop offset="100%" stop-color="#ad81be" stop-opacity="0.02" />
+              </linearGradient>
+            </defs>
+
+            <line
+              v-for="tick in chartGeometry.yTicks"
+              :key="`grid-${tick.y}`"
+              class="chart-grid"
+              :x1="CHART_PAD.left"
+              :x2="CHART_W - CHART_PAD.right"
+              :y1="tick.y"
+              :y2="tick.y"
+            />
+
+            <text
+              v-for="tick in chartGeometry.yTicks"
+              :key="`ylab-${tick.y}`"
+              class="chart-axis-label"
+              :x="CHART_PAD.left - 8"
+              :y="tick.y + 3"
+              text-anchor="end"
+            >
+              {{ Number(tick.value.toFixed(1)) }}
+            </text>
+
+            <text
+              v-for="label in chartGeometry.xLabels"
+              :key="`xlab-${label.date}`"
+              class="chart-axis-label chart-axis-label--x"
+              :x="label.x"
+              :y="CHART_H - 8"
+              text-anchor="middle"
+            >
+              {{ label.short }}
+            </text>
+
+            <path
+              v-if="chartGeometry.spentArea"
+              class="chart-area chart-area--spent"
+              :d="chartGeometry.spentArea"
+            />
+            <path
+              class="chart-line chart-line--budget"
+              fill="none"
+              :d="chartGeometry.budgetPath"
+            />
+            <path
+              class="chart-line chart-line--spent"
+              fill="none"
+              :d="chartGeometry.spentPath"
+            />
+
+            <circle
+              v-for="(pt, i) in chartGeometry.spentPts"
+              :key="`spent-dot-${chartSeries[i].date}`"
+              class="chart-dot chart-dot--spent"
+              :cx="pt.x"
+              :cy="pt.y"
+              r="3.2"
+            >
+              <title>
+                {{ chartSeries[i].date }} · dépensé {{ chartSeries[i].spent }} / budget
+                {{ chartSeries[i].budget }}
+              </title>
+            </circle>
+          </svg>
         </div>
         <p class="chart-legend">
           <span class="leg leg-budget">Budget</span>
@@ -544,40 +693,58 @@ onMounted(async () => {
 }
 
 .chart {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 180px;
-  padding: 0.35rem 0;
-  overflow-x: auto;
+  width: 100%;
+  height: 220px;
+  padding: 0.15rem 0 0.35rem;
 }
 
-.chart-col {
-  flex: 1 0 8px;
-  min-width: 5px;
-  height: 100%;
-}
-
-.chart-bars {
-  position: relative;
+.chart-svg {
   width: 100%;
   height: 100%;
+  display: block;
+  overflow: visible;
 }
 
-.chart-bar {
-  position: absolute;
-  left: 12%;
-  right: 12%;
-  bottom: 0;
-  border-radius: 3px 3px 0 0;
+.chart-grid {
+  stroke: rgba(173, 129, 190, 0.18);
+  stroke-width: 1;
+  stroke-dasharray: 4 5;
 }
 
-.chart-bar--budget {
-  background: rgba(173, 129, 190, 0.28);
+.chart-axis-label {
+  fill: #8a9098;
+  font-size: 11px;
+  font-weight: 600;
 }
 
-.chart-bar--spent {
-  background: linear-gradient(180deg, #ad81be, #8fa2d4);
+.chart-axis-label--x {
+  font-size: 10px;
+}
+
+.chart-area--spent {
+  fill: url(#hist-spent-fill);
+}
+
+.chart-line {
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart-line--budget {
+  stroke: rgba(173, 129, 190, 0.55);
+  stroke-dasharray: 6 5;
+  stroke-width: 2;
+}
+
+.chart-line--spent {
+  stroke: url(#hist-spent-stroke);
+}
+
+.chart-dot--spent {
+  fill: #ad81be;
+  stroke: #fff;
+  stroke-width: 1.5;
 }
 
 .chart-legend {
@@ -591,19 +758,25 @@ onMounted(async () => {
 .leg::before {
   content: '';
   display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
+  width: 14px;
+  height: 3px;
+  border-radius: 999px;
   margin-right: 0.35rem;
   vertical-align: middle;
 }
 
 .leg-budget::before {
-  background: rgba(173, 129, 190, 0.35);
+  background: rgba(173, 129, 190, 0.55);
+  box-shadow: inset 0 0 0 0 transparent;
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(173, 129, 190, 0.7) 0 6px,
+    transparent 6px 10px
+  );
 }
 
 .leg-spent::before {
-  background: #ad81be;
+  background: linear-gradient(90deg, #ad81be, #8fa2d4);
 }
 
 .insights-grid {
@@ -765,8 +938,21 @@ onMounted(async () => {
   .meta,
   .subtle,
   .empty,
-  .flash {
+  .flash,
+  .chart-axis-label {
     color: #adb5bd;
+  }
+
+  .chart-axis-label {
+    fill: #adb5bd;
+  }
+
+  .chart-grid {
+    stroke: rgba(213, 181, 234, 0.16);
+  }
+
+  .chart-dot--spent {
+    stroke: #2a2438;
   }
 
   .panel,
