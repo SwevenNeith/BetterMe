@@ -6,6 +6,7 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024
 import { buildTagsFromGenreAndExtra, formToBookPayload } from '../../utils/lecture/readingBookForm.js'
 import { mergeOpenLibrarySubjectsIntoTags, normalizeOpenLibrarySubjects } from '../../utils/bibliotheque/openLibrarySubjects.js'
 import { readingBookCoverCandidates } from '../bibliotheque/openLibrary.js'
+import { isReliableCoverUrl } from '../bibliotheque/reliableBookCovers.js'
 import { ensureReadingCollection } from './readingCollections.js'
 
 const ALLOWED_MIME = new Set([
@@ -198,24 +199,30 @@ export async function resolveReadingCoverUrl(supabase, book) {
   }
 
   const { customUrl, openLibraryUrl } = splitReadingCoverFields(book)
-  // Ne pas réécrire vers archive.org (timeout fréquent) : l’UI bascule via candidats.
-  return customUrl || openLibraryUrl || null
+  // Ignore les hôtes qui timeout (covers.openlibrary.org / archive.org).
+  if (customUrl && isReliableCoverUrl(customUrl)) return customUrl
+  if (openLibraryUrl && isReliableCoverUrl(openLibraryUrl)) return openLibraryUrl
+  // URL flaky → null : l’UI résoudra via ISBN → Google Books (sans API 429).
+  return null
 }
 
 /**
- * Métadonnées d’affichage couverture (candidats Google Books + OL).
+ * Métadonnées d’affichage couverture (candidats fiables uniquement).
  * @param {object} book
  * @param {string|null} [coverUrl]
  */
 export function withCoverDisplayMeta(book, coverUrl = null) {
   const resolved = coverUrl ?? book?.coverUrl ?? null
+  const reliable = resolved && isReliableCoverUrl(resolved) ? resolved : null
+  const candidates = readingBookCoverCandidates(
+    { ...book, coverUrl: reliable },
+    { isbns: book?.coverIsbns || [] },
+  ).filter((url) => isReliableCoverUrl(url))
+
   return {
     ...book,
-    coverUrl: resolved,
-    coverCandidates: readingBookCoverCandidates(
-      { ...book, coverUrl: resolved },
-      { isbns: book?.coverIsbns || [] },
-    ),
+    coverUrl: reliable,
+    coverCandidates: candidates,
   }
 }
 

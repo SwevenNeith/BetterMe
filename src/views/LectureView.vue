@@ -697,7 +697,7 @@ watch(booksPerPage, () => {
                   @click="openBookPage(book)"
                 >
                   <OpenLibraryCoverImg
-                    v-if="book.coverUrl || book.open_library_cover_url || book.open_library_work_key"
+                    v-if="book.coverUrl || book.open_library_work_key || book.coverCandidates?.length"
                     :src="book.coverUrl"
                     :candidates="book.coverCandidates"
                     :work-key="book.open_library_work_key"
@@ -729,7 +729,7 @@ watch(booksPerPage, () => {
                   @click="openBookPage(book)"
                 >
                   <OpenLibraryCoverImg
-                    v-if="book.coverUrl || book.open_library_cover_url || book.open_library_work_key"
+                    v-if="book.coverUrl || book.open_library_work_key || book.coverCandidates?.length"
                     :src="book.coverUrl"
                     :candidates="book.coverCandidates"
                     :work-key="book.open_library_work_key"

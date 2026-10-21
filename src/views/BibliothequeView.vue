@@ -79,6 +79,11 @@ function openBook(doc) {
     return
   }
 
+  // Secours Google Books : pas de fiche /works/…
+  if (doc?.source === 'google' || String(doc.key).startsWith('/google/')) {
+    return
+  }
+
   const workKey = String(doc.key).replace(/^\/works\//, '')
   router.push({
     name: 'bibliotheque-livre',
@@ -171,7 +176,13 @@ function resultKey(doc) {
 
 function hasCover(doc) {
   if (failedCoverKeys.value.has(resultKey(doc))) return false
-  return Boolean(doc?.coverUrl || doc?.coverCandidates?.length || doc?.coverId || doc?.isbn)
+  return Boolean(
+    doc?.coverUrl ||
+      doc?.coverCandidates?.length ||
+      doc?.coverId ||
+      doc?.isbn ||
+      doc?.title,
+  )
 }
 
 function onCoverError(doc) {
@@ -305,7 +316,8 @@ onUnmounted(() => {
                   :cover-id="doc.coverId"
                   :isbn="doc.isbn"
                   :isbns="doc.isbns"
-                  :work-key="doc.key"
+                  :title="doc.title"
+                  :author="doc.authorLabel"
                   :alt="`Couverture de ${doc.title}`"
                   img-class="bibliotheque-book__cover"
                   loading="lazy"

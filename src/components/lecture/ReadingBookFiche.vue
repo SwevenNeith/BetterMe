@@ -230,11 +230,7 @@ function fieldClass(field) {
             class="reading-fiche-cover"
           />
           <OpenLibraryCoverImg
-            v-else-if="
-              book?.coverUrl ||
-              book?.open_library_cover_url ||
-              book?.open_library_work_key
-            "
+            v-else-if="book?.coverUrl || book?.open_library_work_key || book?.coverCandidates?.length"
             :src="book?.coverUrl"
             :candidates="book?.coverCandidates"
             :work-key="book?.open_library_work_key"

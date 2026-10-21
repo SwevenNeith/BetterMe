@@ -3,6 +3,7 @@ import {
   parseOpenLibrarySeries,
 } from '../../utils/bibliotheque/openLibrarySeries.js'
 import { normalizeOpenLibrarySubjects } from '../../utils/bibliotheque/openLibrarySubjects.js'
+import { searchGoogleBooks } from './googleBooks.js'
 
 const OPEN_LIBRARY_SEARCH_URL = 'https://openlibrary.org/search.json'
 const OPEN_LIBRARY_COVER_BASE = 'https://covers.openlibrary.org/b/id'
@@ -374,35 +375,68 @@ export async function searchOpenLibrary(query, options = {}) {
 
   const url = `${OPEN_LIBRARY_SEARCH_URL}?${params.toString()}`
 
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
-    signal: options.signal,
-  })
+  async function fetchOpenLibraryOnce() {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+      signal: options.signal,
+    })
 
-  const text = await response.text()
-  let data = null
+    const text = await response.text()
+    let data = null
+    try {
+      data = text ? JSON.parse(text) : null
+    } catch {
+      data = null
+    }
+
+    if (!response.ok) {
+      throw new Error(`Open Library a renvoyé une erreur (${response.status}).`)
+    }
+
+    const docs = Array.isArray(data?.docs) ? data.docs.map(normalizeOpenLibraryDoc) : []
+    const numFound = Number(data?.numFound ?? data?.num_found) || docs.length
+
+    return {
+      docs,
+      numFound,
+      page,
+      limit,
+      start: Number(data?.start) || (page - 1) * limit,
+      source: 'openlibrary',
+    }
+  }
+
   try {
-    data = text ? JSON.parse(text) : null
-  } catch {
-    data = null
-  }
-
-  if (!response.ok) {
-    throw new Error(`Open Library a renvoyé une erreur (${response.status}).`)
-  }
-
-  const docs = Array.isArray(data?.docs) ? data.docs.map(normalizeOpenLibraryDoc) : []
-  const numFound = Number(data?.numFound ?? data?.num_found) || docs.length
-
-  return {
-    docs,
-    numFound,
-    page,
-    limit,
-    start: Number(data?.start) || (page - 1) * limit,
+    return await fetchOpenLibraryOnce()
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err
+    // 1 retry rapide (souvent un timeout ponctuel)
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      if (options.signal?.aborted) throw err
+      return await fetchOpenLibraryOnce()
+    } catch (retryErr) {
+      if (retryErr?.name === 'AbortError') throw retryErr
+    }
+    // openlibrary.org timeout / Failed to fetch → secours Google Books
+    try {
+      return await searchGoogleBooks(base || title || author || subject, {
+        page,
+        limit,
+        signal: options.signal,
+        title: title || null,
+        author: author || null,
+        language: language || null,
+      })
+    } catch (fallbackErr) {
+      if (fallbackErr?.name === 'AbortError') throw fallbackErr
+      throw new Error(
+        'Catalogue indisponible pour le moment (Open Library et Google Books injoignables). Réessaie dans un instant.',
+      )
+    }
   }
 }
 

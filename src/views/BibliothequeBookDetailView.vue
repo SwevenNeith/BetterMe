@@ -206,13 +206,14 @@ watch(workKeyParam, () => loadWork())
 
       <template #cover>
         <OpenLibraryCoverImg
-          v-if="work.coverUrl || work.coverCandidates?.length || work.coverId || work.isbn || work.key"
+          v-if="work.coverUrl || work.coverCandidates?.length || work.coverId || work.isbn || work.title"
           :src="work.coverUrl"
           :candidates="work.coverCandidates"
           :cover-id="work.coverId"
           :isbn="work.isbn"
           :isbns="work.isbns"
-          :work-key="work.key"
+          :title="work.title"
+          :author="work.authorLabel"
           size="L"
           :alt="`Couverture de ${work.title}`"
           img-class="reading-fiche-cover"

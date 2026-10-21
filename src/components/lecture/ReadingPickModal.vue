@@ -238,8 +238,9 @@ onUnmounted(() => {
         <template v-else-if="currentBook">
           <div class="reading-pick-cover-wrap">
             <OpenLibraryCoverImg
-              v-if="currentBook.coverUrl || currentBook.open_library_cover_url || currentBook.open_library_work_key"
+              v-if="currentBook.coverUrl || currentBook.open_library_work_key || currentBook.coverCandidates?.length"
               :src="currentBook.coverUrl"
+              :candidates="currentBook.coverCandidates"
               :work-key="currentBook.open_library_work_key"
               :alt="`Couverture de ${currentBook.title}`"
               img-class="reading-pick-cover"

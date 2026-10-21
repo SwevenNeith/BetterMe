@@ -1,13 +1,13 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
 import {
-  fetchOpenLibraryIsbnsForWork,
-  googleBooksCoverCandidates,
-  openLibraryCoverCandidates,
-  readingBookCoverCandidates,
-} from '../../services/bibliotheque/openLibrary.js'
+  buildReliableCoverCandidates,
+  googleCoverUrlsFromIsbns,
+  resolveIsbnsForWorkCached,
+} from '../../services/bibliotheque/reliableBookCovers.js'
 
-const COVER_ATTEMPT_TIMEOUT_MS = 3500
+/** Timeout uniquement pour les (rares) URLs non-Google encore tentées. */
+const COVER_ATTEMPT_TIMEOUT_MS = 4000
 
 const props = defineProps({
   src: {
@@ -30,10 +30,17 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
-  /** Clé work OL pour résoudre des ISBN → Google Books si besoin. */
   workKey: {
     type: String,
     default: null,
+  },
+  title: {
+    type: String,
+    default: '',
+  },
+  author: {
+    type: String,
+    default: '',
   },
   size: {
     type: String,
@@ -61,21 +68,6 @@ const exhausted = ref(false)
 let attemptTimer = null
 let isbnAbort = null
 
-function coverIdFromUrl(url) {
-  const raw = String(url ?? '')
-  const match =
-    raw.match(/\/b\/id\/(\d+)/i) ||
-    raw.match(/\/0*(\d{4,})-(?:S|M|L)\.jpg/i) ||
-    raw.match(/olcovers\d+[^/]*\/(\d+)-(?:S|M|L)\.jpg/i)
-  if (!match) return null
-  const id = Number(match[1])
-  return Number.isFinite(id) && id > 0 ? id : null
-}
-
-function isFlakyHost(url) {
-  return /covers\.openlibrary\.org/i.test(url) || /archive\.org\/download\//i.test(url)
-}
-
 const allIsbns = computed(() => {
   const list = []
   for (const value of [...(props.isbns || []), props.isbn, ...dynamicIsbns.value]) {
@@ -86,41 +78,13 @@ const allIsbns = computed(() => {
 })
 
 const resolvedCandidates = computed(() => {
-  const primary = String(props.src || '').trim()
-  const fromProp = (props.candidates || []).filter((u) => typeof u === 'string' && u.trim())
-  const inferredId = props.coverId ?? coverIdFromUrl(primary) ?? coverIdFromUrl(fromProp[0])
-  const built = openLibraryCoverCandidates(inferredId, props.size, {
+  const fromIsbns = googleCoverUrlsFromIsbns(allIsbns.value, props.size)
+  return buildReliableCoverCandidates({
+    src: props.src,
+    candidates: [...fromIsbns, ...(props.candidates || [])],
     isbns: allIsbns.value,
-    includeFlakyHosts: true,
+    size: props.size,
   })
-  const reading = readingBookCoverCandidates(
-    { coverUrl: primary },
-    { isbns: allIsbns.value },
-  )
-
-  /** @type {string[]} */
-  const reliable = []
-  /** @type {string[]} */
-  const flaky = []
-  const push = (url) => {
-    const value = String(url || '').trim()
-    if (!value) return
-    if (isFlakyHost(value)) {
-      if (!flaky.includes(value) && !reliable.includes(value)) flaky.push(value)
-    } else if (!reliable.includes(value)) {
-      reliable.push(value)
-    }
-  }
-
-  for (const url of googleBooksCoverCandidates(allIsbns.value, props.size === 'L' ? 2 : 1)) {
-    push(url)
-  }
-  for (const url of built) push(url)
-  for (const url of reading) push(url)
-  for (const url of fromProp) push(url)
-  if (primary) push(primary)
-
-  return [...reliable, ...flaky]
 })
 
 const currentSrc = computed(() => {
@@ -138,12 +102,13 @@ function clearAttemptTimer() {
 function scheduleAttemptTimeout() {
   clearAttemptTimer()
   if (!currentSrc.value) return
+  // Les URL Google Books content sont en général rapides ; timeout de secours.
   attemptTimer = window.setTimeout(() => {
-    advance('timeout')
+    advance()
   }, COVER_ATTEMPT_TIMEOUT_MS)
 }
 
-function advance(_reason) {
+function advance() {
   clearAttemptTimer()
   if (attemptIndex.value < resolvedCandidates.value.length - 1) {
     attemptIndex.value += 1
@@ -155,14 +120,14 @@ function advance(_reason) {
 }
 
 function onError() {
-  advance('error')
+  advance()
 }
 
 function onLoad(event) {
   clearAttemptTimer()
   const img = event?.target
   if (img && (img.naturalWidth < 8 || img.naturalHeight < 8)) {
-    advance('tiny')
+    advance()
     return
   }
   emit('load', event)
@@ -171,39 +136,52 @@ function onLoad(event) {
 async function ensureIsbnsFromWork() {
   isbnAbort?.abort()
   isbnAbort = null
-  if (allIsbns.value.length || !props.workKey) return
+
+  if (allIsbns.value.length) return
+  if (!props.workKey || String(props.workKey).startsWith('/google/')) return
+
+  // S’il y a déjà une URL fiable (upload, Google déjà stocké), pas besoin d’ISBN.
+  if (resolvedCandidates.value.length) return
 
   isbnAbort = new AbortController()
   try {
-    const isbns = await fetchOpenLibraryIsbnsForWork(props.workKey, {
+    const isbns = await resolveIsbnsForWorkCached(props.workKey, {
       signal: isbnAbort.signal,
     })
     if (isbns.length) {
       dynamicIsbns.value = isbns
-      // Reprend depuis le début pour prioriser Google Books.
       attemptIndex.value = 0
       exhausted.value = false
       scheduleAttemptTimeout()
+    } else if (!resolvedCandidates.value.length) {
+      exhausted.value = true
+      emit('error')
     }
   } catch {
-    /* ignore */
+    if (!resolvedCandidates.value.length) {
+      exhausted.value = true
+      emit('error')
+    }
   }
 }
 
 watch(
-  () => [props.src, props.coverId, props.isbn, props.isbns, props.candidates, props.workKey],
+  () => [props.src, props.isbn, props.isbns, props.candidates, props.workKey, props.size],
   () => {
     attemptIndex.value = 0
     exhausted.value = false
     dynamicIsbns.value = []
-    ensureIsbnsFromWork()
     scheduleAttemptTimeout()
+    void ensureIsbnsFromWork()
   },
   { immediate: true, deep: true },
 )
 
 watch(currentSrc, () => {
   if (currentSrc.value) scheduleAttemptTimeout()
+  else if (!exhausted.value && !resolvedCandidates.value.length) {
+    // En attente des ISBN async
+  }
 })
 
 onUnmounted(() => {

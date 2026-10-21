@@ -154,8 +154,20 @@ async function loadLectureBooks() {
   }
 }
 
+function isGoogleDoc(doc) {
+  return doc?.source === 'google' || String(doc?.key || '').startsWith('/google/')
+}
+
 function isLinkedDoc(doc) {
   return Boolean(findLectureBookForOpenLibraryDoc(books.value, doc))
+}
+
+function preferredCoverUrl(doc) {
+  return (
+    (doc?.coverCandidates || []).find((url) => /books\.google\.com/i.test(url)) ||
+    doc?.coverUrl ||
+    ''
+  )
 }
 
 function openBook(doc) {
@@ -164,6 +176,12 @@ function openBook(doc) {
   const linked = findLectureBookForOpenLibraryDoc(books.value, doc)
   if (linked?.id) {
     router.push({ name: 'lecture-livre', params: { bookId: linked.id } })
+    return
+  }
+
+  // Résultats Google Books : pas de fiche Open Library → ajout direct
+  if (isGoogleDoc(doc)) {
+    void quickAddToLibrary(doc)
     return
   }
 
@@ -201,16 +219,31 @@ async function quickAddToLibrary(doc) {
       books.value.find((book) => isExactOpenLibraryMatch(book, doc)) ||
       null
 
+    const cover = preferredCoverUrl(doc)
+
+    if (isGoogleDoc(doc)) {
+      if (!matched) {
+        await createReadingBook(supabase, userId.value, {
+          title: doc.title,
+          author: doc.authorLabel === 'Auteur inconnu' ? '' : doc.authorLabel,
+          collection: READING_COLLECTION_WISHLIST,
+          pages: doc.pageCount ?? '',
+          publicationYear: doc.firstPublishYear ?? '',
+          imageUrl: cover,
+          tags: Array.isArray(doc.subjects) ? doc.subjects : [],
+        })
+      }
+      await refreshLectureBooksAfterAdd()
+      return
+    }
+
     if (matched) {
       const series = await getOpenLibraryWorkSeriesInfo(doc.key)
       const seriesFields = seriesToReadingBookFields(series)
       const subjects = await resolveSubjectsForWork(doc.key, doc.subjects)
       await linkReadingBookToOpenLibrary(supabase, userId.value, matched.id, {
         workKey: doc.key,
-        coverUrl:
-          (doc.coverCandidates || []).find((url) => /books\.google\.com/i.test(url)) ||
-          doc.coverUrl ||
-          null,
+        coverUrl: cover || null,
         pages: doc.pageCount,
         publicationYear: doc.firstPublishYear,
         subjects,
@@ -228,10 +261,7 @@ async function quickAddToLibrary(doc) {
         collection: READING_COLLECTION_WISHLIST,
         pages: doc.pageCount ?? '',
         publicationYear: doc.firstPublishYear ?? '',
-        imageUrl:
-          (doc.coverCandidates || []).find((url) => /books\.google\.com/i.test(url)) ||
-          doc.coverUrl ||
-          '',
+        imageUrl: cover,
         openLibraryWorkKey: doc.key,
         // Tableau de tags direct (évite le round-trip genre/extraTags qui re-coupe les virgules)
         tags: subjects,
@@ -345,7 +375,13 @@ function resultKey(doc) {
 
 function hasCover(doc) {
   if (failedCoverKeys.value.has(resultKey(doc))) return false
-  return Boolean(doc?.coverUrl || doc?.coverCandidates?.length || doc?.coverId || doc?.isbn)
+  return Boolean(
+    doc?.coverUrl ||
+      doc?.coverCandidates?.length ||
+      doc?.coverId ||
+      doc?.isbn ||
+      doc?.title,
+  )
 }
 
 function onCoverError(doc) {
@@ -634,7 +670,8 @@ onUnmounted(() => {
                 :cover-id="doc.coverId"
                 :isbn="doc.isbn"
                 :isbns="doc.isbns"
-                :work-key="doc.key"
+                :title="doc.title"
+                :author="doc.authorLabel"
                 :alt="`Couverture de ${doc.title}`"
                 img-class="catalog-book__cover"
                 loading="lazy"

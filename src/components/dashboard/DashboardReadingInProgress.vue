@@ -153,9 +153,9 @@ onUnmounted(() => {
           >
             <div class="dashboard-reading__cover-wrap">
               <OpenLibraryCoverImg
-                v-if="book.coverUrl || book.open_library_cover_url || book.open_library_work_key || book.cover_image_url"
+                v-if="book.coverUrl || book.open_library_work_key || book.cover_image_url"
                 :src="book.coverUrl"
-                :candidates="[book.open_library_cover_url, book.cover_image_url].filter(Boolean)"
+                :candidates="[book.cover_image_url].filter(Boolean)"
                 :work-key="book.open_library_work_key"
                 :alt="`Couverture de ${book.title}`"
                 img-class="dashboard-reading__cover"
