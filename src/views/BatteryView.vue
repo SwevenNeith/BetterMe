@@ -135,20 +135,6 @@ const lieInGapMinutes = computed(() =>
   lieInMinutes(sleepWakeTime.value, sleepOutOfBedTime.value),
 )
 
-/** Horloge locale pour la fenêtre 20h → 1h. */
-const nowMs = ref(Date.now())
-let eveningClockTimer = null
-
-function isEveningFeelingWindow(date = new Date()) {
-  const hour = date.getHours()
-  return hour >= 20 || hour < 1
-}
-
-const showEveningFeeling = computed(() => {
-  if (!isToday.value) return false
-  return isEveningFeelingWindow(new Date(nowMs.value))
-})
-
 const periodLabel = computed(() => {
   try {
     const [y, m, d] = selectedDate.value.split('-').map(Number)
@@ -568,11 +554,6 @@ onMounted(async () => {
   const qDate = String(route.query.date || '')
   if (/^\d{4}-\d{2}-\d{2}$/.test(qDate)) selectedDate.value = qDate
 
-  nowMs.value = Date.now()
-  eveningClockTimer = window.setInterval(() => {
-    nowMs.value = Date.now()
-  }, 60_000)
-
   const user = await resolveSessionUser()
   if (!user) return
   userId.value = user.id
@@ -581,10 +562,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  if (eveningClockTimer != null) {
-    window.clearInterval(eveningClockTimer)
-    eveningClockTimer = null
-  }
   if (suggestionsBlurTimer != null) {
     clearTimeout(suggestionsBlurTimer)
     suggestionsBlurTimer = null
@@ -907,8 +884,8 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <!-- Ressenti du soir : visible de 20h à 1h (jour courant) -->
-      <section v-if="showEveningFeeling" class="panel evening-panel">
+      <!-- Ressenti du soir : disponible pour tous les jours -->
+      <section class="panel evening-panel">
         <h2 class="panel__title">Ressenti du soir</h2>
         <p class="panel__hint">Comment tu as fini la journée ?</p>
         <div class="evening-cards">
@@ -2090,8 +2067,8 @@ onUnmounted(() => {
   .hero-card,
   .check-panel,
   .panel,
-  .evening-card,
-  .mini-chip,
+  .evening-card:not(.is-active),
+  .mini-chip:not(.is-active),
   .entry-form input,
   .entry-search-wrap input,
   .sleep-time-field input,
@@ -2101,6 +2078,57 @@ onUnmounted(() => {
     background: rgba(35, 30, 48, 0.88);
     border-color: rgba(213, 181, 234, 0.28);
     color: #f0e8f8;
+  }
+
+  .mini-chip:not(.is-active) {
+    background: rgba(40, 32, 52, 0.95);
+    border-color: rgba(213, 181, 234, 0.38);
+    color: #f0e8f8;
+  }
+
+  .mini-chip:hover:not(.is-active) {
+    background: rgba(213, 181, 234, 0.22);
+    border-color: rgba(213, 181, 234, 0.5);
+  }
+
+  .mini-chip.is-active {
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+    border-color: var(--color-primary-dark);
+    color: #fff;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary-dark) 30%, transparent);
+  }
+
+  .evening-card:not(.is-active) {
+    background: rgba(40, 32, 52, 0.95);
+    border-color: rgba(213, 181, 234, 0.38);
+    color: #f0e8f8;
+  }
+
+  .evening-card.is-active {
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--color-primary-dark) 28%, transparent);
+  }
+
+  .evening-card--empty.is-active {
+    background: linear-gradient(135deg, rgba(232, 160, 192, 0.55), rgba(196, 92, 92, 0.45));
+    border-color: #e8a0c0;
+    color: #fff;
+  }
+
+  .evening-card--just.is-active {
+    background: linear-gradient(135deg, rgba(143, 162, 212, 0.55), rgba(173, 129, 190, 0.5));
+    border-color: #8fa2d4;
+    color: #fff;
+  }
+
+  .evening-card--left.is-active {
+    background: linear-gradient(135deg, rgba(149, 209, 170, 0.55), rgba(114, 160, 152, 0.5));
+    border-color: #95d1aa;
+    color: #fff;
+  }
+
+  .evening-card.is-active .evening-card__label,
+  .evening-card.is-active .evening-card__hint {
+    color: #fff;
   }
 
   .nav-arrow {
@@ -2131,8 +2159,10 @@ onUnmounted(() => {
   }
 
   .kind-toggle__btn.is-active {
-    background: rgba(55, 45, 70, 0.95);
-    color: #f0e8f8;
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+    border-color: var(--color-primary-dark);
+    color: #fff;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary-dark) 28%, transparent);
   }
 
   .suggestions {

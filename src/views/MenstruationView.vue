@@ -49,6 +49,10 @@ import {
   resolveMenstruationCycleMode,
   saveMenstruationCycleModePreference,
 } from '../services/menstruation/menstruationCycleModePreference.js'
+import {
+  computeMenstruationDurationAverages,
+  formatAverageDaysLabel,
+} from '../utils/menstruation/cycleDurationAverages.js'
 
 const { pageTitle } = usePageDisplayLabel(APP_PAGE_IDS.MENSTRUATION, undefined, {
   setDocumentTitle: true,
@@ -123,6 +127,29 @@ function currentTypeCycle() {
 function currentCycleList() {
   return cycleMode.value === 'pilule' ? cycles.value : cyclesNaturel.value
 }
+
+const durationAverages = computed(() =>
+  computeMenstruationDurationAverages({
+    mode: cycleMode.value,
+    cyclesPilule: cycles.value,
+    cyclesNaturel: cyclesNaturel.value,
+  }),
+)
+
+const avgCycleLabel = computed(() =>
+  formatAverageDaysLabel(durationAverages.value.avgCycleDays, durationAverages.value.cycleSampleSize),
+)
+
+const avgPeriodLabel = computed(() =>
+  formatAverageDaysLabel(
+    durationAverages.value.avgPeriodDays,
+    durationAverages.value.periodSampleSize,
+  ),
+)
+
+const showDurationAverages = computed(
+  () => Boolean(avgCycleLabel.value || avgPeriodLabel.value),
+)
 
 async function hydrateStoredPatterns() {
   if (!userId.value || !cycleMode.value) return
@@ -605,6 +632,16 @@ onUnmounted(() => {
             {{ isSwitchingMode ? 'Changement…' : 'Passer au cycle pilule' }}
           </button>
         </div>
+        <dl v-if="showDurationAverages" class="cycle-averages">
+          <div v-if="avgCycleLabel" class="cycle-averages__item">
+            <dt>Durée moyenne du cycle</dt>
+            <dd>{{ avgCycleLabel }}</dd>
+          </div>
+          <div v-if="avgPeriodLabel" class="cycle-averages__item">
+            <dt>Durée moyenne des règles</dt>
+            <dd>{{ avgPeriodLabel }}</dd>
+          </div>
+        </dl>
       </div>
       <MenstruationCycleCalendar
         v-if="cycleMode === 'pilule'"
@@ -857,6 +894,55 @@ onUnmounted(() => {
 .card-head__intro {
   flex: 1;
   min-width: min(100%, 16rem);
+}
+
+.cycle-averages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1.25rem;
+  margin: 1rem 0 0;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: rgba(173, 129, 190, 0.1);
+  border: 1px solid rgba(173, 129, 190, 0.22);
+}
+
+.cycle-averages__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 8rem;
+}
+
+.cycle-averages__item dt {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #8a9098;
+}
+
+.cycle-averages__item dd {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #ad81be;
+}
+
+@media (prefers-color-scheme: dark) {
+  .cycle-averages {
+    background: rgba(213, 181, 234, 0.1);
+    border-color: rgba(213, 181, 234, 0.22);
+  }
+
+  .cycle-averages__item dt {
+    color: #c5c0cb;
+  }
+
+  .cycle-averages__item dd {
+    color: #d5b5ea;
+  }
 }
 
 .btn--cycle-switch {
