@@ -304,14 +304,16 @@ async function submitEntry() {
 const editingCostEntryId = ref(null)
 const editingCostValue = ref(0)
 const completingPlannedId = ref(null)
-const draggingPlannedId = ref(null)
+const draggingEntryId = ref(null)
+const draggingEntryKind = ref(null)
 
-function onPlannedDragStart(entryId, event) {
+function onEntryDragStart(kind, entryId, event) {
   if (event.target?.closest('button, input, label')) {
     event.preventDefault()
     return
   }
-  draggingPlannedId.value = entryId
+  draggingEntryId.value = entryId
+  draggingEntryKind.value = kind
   try {
     event.dataTransfer?.setData('text/plain', entryId)
     event.dataTransfer.effectAllowed = 'move'
@@ -320,8 +322,8 @@ function onPlannedDragStart(entryId, event) {
   }
 }
 
-function onPlannedDragOver(entryId, event) {
-  if (!draggingPlannedId.value || draggingPlannedId.value === entryId) return
+function onEntryDragOver(entryId, event) {
+  if (!draggingEntryId.value || draggingEntryId.value === entryId) return
   event.preventDefault()
   try {
     event.dataTransfer.dropEffect = 'move'
@@ -330,8 +332,9 @@ function onPlannedDragOver(entryId, event) {
   }
 }
 
-function onPlannedDragEnd() {
-  draggingPlannedId.value = null
+function onEntryDragEnd() {
+  draggingEntryId.value = null
+  draggingEntryKind.value = null
 }
 
 function reorderById(list, sourceId, targetId) {
@@ -343,20 +346,27 @@ function reorderById(list, sourceId, targetId) {
   return true
 }
 
-async function onPlannedDrop(targetId, event) {
+async function onEntryDrop(kind, targetId, event) {
   event.preventDefault()
-  const sourceId = draggingPlannedId.value || event.dataTransfer?.getData('text/plain')
-  draggingPlannedId.value = null
-  if (!sourceId || sourceId === targetId || !userId.value) return
+  const sourceId = draggingEntryId.value || event.dataTransfer?.getData('text/plain')
+  const dragKind = draggingEntryKind.value || kind
+  draggingEntryId.value = null
+  draggingEntryKind.value = null
+  if (!sourceId || sourceId === targetId || !userId.value || dragKind !== kind) return
 
   const planned = entries.value.filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED)
-  const actual = entries.value.filter((e) => e.kind !== BATTERY_ENTRY_KINDS.PLANNED)
-  if (!planned.some((e) => e.id === sourceId) || !planned.some((e) => e.id === targetId)) return
+  const actual = entries.value.filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL)
+  const list = kind === BATTERY_ENTRY_KINDS.PLANNED ? planned : actual
+  if (!list.some((e) => e.id === sourceId) || !list.some((e) => e.id === targetId)) return
 
-  const reordered = [...planned]
+  const reordered = [...list]
   if (!reorderById(reordered, sourceId, targetId)) return
 
-  entries.value = [...reordered, ...actual]
+  entries.value =
+    kind === BATTERY_ENTRY_KINDS.PLANNED
+      ? [...reordered, ...actual]
+      : [...planned, ...reordered]
+
   try {
     await persistBatteryEntryOrders(supabase, userId.value, reordered)
   } catch (err) {
@@ -365,7 +375,6 @@ async function onPlannedDrop(targetId, event) {
     await loadDay()
   }
 }
-
 async function markPlannedDone(entry) {
   if (!userId.value || !entry?.id || completingPlannedId.value) return
   if (isPlannedEntryDone(entry)) return
@@ -812,14 +821,14 @@ onUnmounted(() => {
                   `entry-row--${costStyleClass(entry.cost)}`,
                   {
                     'entry-row--done': isPlannedEntryDone(entry),
-                    'entry-row--dragging': draggingPlannedId === entry.id,
+                    'entry-row--dragging': draggingEntryId === entry.id,
                   },
                 ]"
                 draggable="true"
-                @dragstart="onPlannedDragStart(entry.id, $event)"
-                @dragover="onPlannedDragOver(entry.id, $event)"
-                @drop="onPlannedDrop(entry.id, $event)"
-                @dragend="onPlannedDragEnd"
+                @dragstart="onEntryDragStart(BATTERY_ENTRY_KINDS.PLANNED, entry.id, $event)"
+                @dragover="onEntryDragOver(entry.id, $event)"
+                @drop="onEntryDrop(BATTERY_ENTRY_KINDS.PLANNED, entry.id, $event)"
+                @dragend="onEntryDragEnd"
               >
                 <span class="entry-label" title="Glisser pour réordonner">
                   {{ entry.label }}
@@ -850,9 +859,19 @@ onUnmounted(() => {
                 v-for="entry in actualEntries"
                 :key="entry.id"
                 class="entry-row entry-row--actual"
-                :class="`entry-row--${costStyleClass(entry.cost)}`"
+                :class="[
+                  `entry-row--${costStyleClass(entry.cost)}`,
+                  { 'entry-row--dragging': draggingEntryId === entry.id },
+                ]"
+                draggable="true"
+                @dragstart="onEntryDragStart(BATTERY_ENTRY_KINDS.ACTUAL, entry.id, $event)"
+                @dragover="onEntryDragOver(entry.id, $event)"
+                @drop="onEntryDrop(BATTERY_ENTRY_KINDS.ACTUAL, entry.id, $event)"
+                @dragend="onEntryDragEnd"
               >
-                <span class="entry-label">{{ entry.label }}</span>
+                <span class="entry-label" title="Glisser pour réordonner chronologiquement">
+                  {{ entry.label }}
+                </span>
                 <input
                   v-if="editingCostEntryId === entry.id"
                   :data-cost-edit="entry.id"
@@ -1651,12 +1670,14 @@ onUnmounted(() => {
   grid-template-columns: 1fr auto auto auto;
 }
 
-.entry-row--plan {
+.entry-row--plan,
+.entry-row--actual {
   cursor: grab;
   touch-action: manipulation;
 }
 
-.entry-row--plan:active {
+.entry-row--plan:active,
+.entry-row--actual:active {
   cursor: grabbing;
 }
 
@@ -2073,7 +2094,6 @@ onUnmounted(() => {
   .entry-search-wrap input,
   .sleep-time-field input,
   .today-btn,
-  .cost-tag--edit,
   .history-btn {
     background: rgba(35, 30, 48, 0.88);
     border-color: rgba(213, 181, 234, 0.28);
@@ -2197,26 +2217,72 @@ onUnmounted(() => {
     color: #d5b5ea;
   }
 
+  .entry-row--drain-1 { background: rgba(173, 129, 190, 0.18); }
+  .entry-row--drain-2 { background: rgba(173, 129, 190, 0.26); }
+  .entry-row--drain-3 { background: rgba(173, 129, 190, 0.34); }
+  .entry-row--drain-4 { background: rgba(173, 129, 190, 0.42); }
+  .entry-row--drain-5 { background: rgba(173, 129, 190, 0.5); }
+
+  .entry-row--restore-1 { background: rgba(143, 162, 212, 0.18); }
+  .entry-row--restore-2 { background: rgba(143, 162, 212, 0.26); }
+  .entry-row--restore-3 { background: rgba(143, 162, 212, 0.34); }
+  .entry-row--restore-4 { background: rgba(143, 162, 212, 0.42); }
+  .entry-row--restore-5 { background: rgba(143, 162, 212, 0.5); }
+
+  .cost-tag,
+  .cost-tag--btn,
+  .cost-tag--edit {
+    border: 1px solid transparent;
+  }
+
+  .cost-tag--neutral {
+    background: rgba(213, 181, 234, 0.28);
+    border-color: rgba(213, 181, 234, 0.45);
+    color: #f5eafc;
+  }
+
   .cost-tag--drain-1,
-  .cost-tag--drain-2,
+  .cost-tag--drain-2 {
+    background: rgba(173, 129, 190, 0.42);
+    border-color: rgba(213, 181, 234, 0.5);
+    color: #f8efff;
+  }
+
   .cost-tag--drain-3 {
-    color: #d5b5ea;
+    background: rgba(173, 129, 190, 0.55);
+    border-color: rgba(213, 181, 234, 0.6);
+    color: #fff;
   }
 
   .cost-tag--drain-4,
   .cost-tag--drain-5 {
-    color: #e2c8f0;
+    background: rgba(186, 140, 210, 0.65);
+    border-color: rgba(230, 200, 245, 0.65);
+    color: #fff;
   }
 
   .cost-tag--restore-1,
-  .cost-tag--restore-2,
+  .cost-tag--restore-2 {
+    background: rgba(143, 162, 212, 0.42);
+    border-color: rgba(180, 200, 235, 0.5);
+    color: #eef3ff;
+  }
+
   .cost-tag--restore-3 {
-    color: #b8c6e0;
+    background: rgba(143, 162, 212, 0.55);
+    border-color: rgba(180, 200, 235, 0.6);
+    color: #fff;
   }
 
   .cost-tag--restore-4,
   .cost-tag--restore-5 {
-    color: #c5d2ea;
+    background: rgba(150, 175, 230, 0.65);
+    border-color: rgba(200, 220, 250, 0.65);
+    color: #fff;
+  }
+
+  .cost-tag--edit {
+    background-clip: padding-box;
   }
 
   .battery-confirm-dialog {

@@ -17,7 +17,6 @@ import {
   persistBatteryEntryOrders,
 } from '../../services/battery/batteryDays.js'
 import {
-  costIntensity,
   costStyleClass,
   normalizeBatteryCost,
   sumEntryCosts,
@@ -59,6 +58,15 @@ function defaultAmount(cost) {
   return Math.abs(Number(cost) || 0)
 }
 
+function formatCost(n) {
+  const v = Number(n) || 0
+  const abs = Math.abs(v)
+  const label = Number.isInteger(abs) ? String(abs) : abs.toFixed(1)
+  if (v > 0) return `−${label}`
+  if (v < 0) return `+${label}`
+  return '0'
+}
+
 /**
  * Résout le coût réel : vide → défaut prévu ; sinon magnitude + même signe que le prévu.
  * @param {object} entry
@@ -72,30 +80,6 @@ function resolveActualCost(entry) {
   const planned = Number(entry.cost) || 0
   if (planned < 0) return -amount
   return amount
-}
-
-/** Fond pastel doux (lilas dépense / bleu perle regain), aligné palette app. */
-function costCardStyle(cost) {
-  const v = Number(cost) || 0
-  const intensity = costIntensity(v)
-  if (v === 0) {
-    return {
-      background: 'hsla(280, 22%, 90%, 0.88)',
-      color: '#5a4a66',
-    }
-  }
-  if (v > 0) {
-    const lightness = 90 - intensity * 3
-    return {
-      background: `hsla(285, 28%, ${lightness}%, 0.9)`,
-      color: '#5e4a6c',
-    }
-  }
-  const lightness = 90 - intensity * 3
-  return {
-    background: `hsla(220, 30%, ${lightness}%, 0.9)`,
-    color: '#445570',
-  }
 }
 
 async function loadPageVisibilityState() {
@@ -280,7 +264,6 @@ watch(
               'dashboard-event-card--dragging': draggingId === entry.id,
             },
           ]"
-          :style="isPlannedEntryDone(entry) ? undefined : costCardStyle(entry.cost)"
           draggable="true"
           title="Glisser pour réordonner"
           @dragstart="onDragStart(entry.id, $event)"
@@ -289,6 +272,13 @@ watch(
           @dragend="onDragEnd"
         >
           <h4 class="event-title">{{ entry.label }}</h4>
+
+          <span
+            class="event-cost"
+            :class="`event-cost--${costStyleClass(entry.cost)}`"
+          >
+            {{ formatCost(entry.cost) }}
+          </span>
 
           <span
             v-if="isPlannedEntryDone(entry)"
@@ -441,6 +431,7 @@ watch(
   min-width: 0;
   cursor: grab;
   touch-action: manipulation;
+  color: #5e4a6c;
 }
 
 .dashboard-event-card:active {
@@ -450,6 +441,23 @@ watch(
 .dashboard-event-card--dragging {
   opacity: 0.55;
 }
+
+.dashboard-event-card--neutral {
+  background: rgba(236, 228, 242, 0.88);
+  color: #5a4a66;
+}
+
+.dashboard-event-card--drain-1 { background: rgba(236, 228, 242, 0.9); }
+.dashboard-event-card--drain-2 { background: rgba(224, 210, 234, 0.85); }
+.dashboard-event-card--drain-3 { background: rgba(205, 184, 222, 0.75); }
+.dashboard-event-card--drain-4 { background: rgba(186, 158, 206, 0.65); }
+.dashboard-event-card--drain-5 { background: rgba(168, 138, 192, 0.58); }
+
+.dashboard-event-card--restore-1 { background: rgba(232, 238, 248, 0.92); color: #445570; }
+.dashboard-event-card--restore-2 { background: rgba(214, 224, 240, 0.85); color: #445570; }
+.dashboard-event-card--restore-3 { background: rgba(190, 206, 230, 0.75); color: #445570; }
+.dashboard-event-card--restore-4 { background: rgba(166, 186, 220, 0.65); color: #445570; }
+.dashboard-event-card--restore-5 { background: rgba(148, 172, 210, 0.58); color: #445570; }
 
 .dashboard-event-card--done {
   background: rgba(173, 129, 190, 0.08) !important;
@@ -474,6 +482,55 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.event-cost {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid transparent;
+}
+
+.event-cost--neutral {
+  background: rgba(173, 129, 190, 0.22);
+  color: #6c757d;
+}
+
+.event-cost--drain-1,
+.event-cost--drain-2 {
+  background: rgba(173, 129, 190, 0.28);
+  color: #5e4a6c;
+}
+
+.event-cost--drain-3 {
+  background: rgba(173, 129, 190, 0.38);
+  color: #4f3d5c;
+}
+
+.event-cost--drain-4,
+.event-cost--drain-5 {
+  background: rgba(173, 129, 190, 0.48);
+  color: #3f2f4c;
+}
+
+.event-cost--restore-1,
+.event-cost--restore-2 {
+  background: rgba(143, 162, 212, 0.28);
+  color: #445570;
+}
+
+.event-cost--restore-3 {
+  background: rgba(143, 162, 212, 0.38);
+  color: #3a4a66;
+}
+
+.event-cost--restore-4,
+.event-cost--restore-5 {
+  background: rgba(143, 162, 212, 0.48);
+  color: #31405a;
 }
 
 .event-done-pill {
@@ -557,6 +614,26 @@ watch(
     border-color: rgba(213, 181, 234, 0.15);
   }
 
+  .dashboard-event-card {
+    color: #f0e8f8;
+  }
+
+  .dashboard-event-card--neutral {
+    background: rgba(173, 129, 190, 0.2);
+  }
+
+  .dashboard-event-card--drain-1 { background: rgba(173, 129, 190, 0.22); }
+  .dashboard-event-card--drain-2 { background: rgba(173, 129, 190, 0.3); }
+  .dashboard-event-card--drain-3 { background: rgba(173, 129, 190, 0.38); }
+  .dashboard-event-card--drain-4 { background: rgba(173, 129, 190, 0.46); }
+  .dashboard-event-card--drain-5 { background: rgba(173, 129, 190, 0.54); }
+
+  .dashboard-event-card--restore-1 { background: rgba(143, 162, 212, 0.22); }
+  .dashboard-event-card--restore-2 { background: rgba(143, 162, 212, 0.3); }
+  .dashboard-event-card--restore-3 { background: rgba(143, 162, 212, 0.38); }
+  .dashboard-event-card--restore-4 { background: rgba(143, 162, 212, 0.46); }
+  .dashboard-event-card--restore-5 { background: rgba(143, 162, 212, 0.54); }
+
   .dashboard-event-card--done {
     background: rgba(173, 129, 190, 0.1) !important;
     color: #adb5bd !important;
@@ -564,6 +641,52 @@ watch(
 
   .dashboard-event-card--done .event-title {
     color: #adb5bd;
+  }
+
+  .event-cost--neutral {
+    background: rgba(213, 181, 234, 0.28);
+    border-color: rgba(213, 181, 234, 0.45);
+    color: #f5eafc;
+  }
+
+  .event-cost--drain-1,
+  .event-cost--drain-2 {
+    background: rgba(173, 129, 190, 0.45);
+    border-color: rgba(213, 181, 234, 0.5);
+    color: #f8efff;
+  }
+
+  .event-cost--drain-3 {
+    background: rgba(173, 129, 190, 0.58);
+    border-color: rgba(213, 181, 234, 0.6);
+    color: #fff;
+  }
+
+  .event-cost--drain-4,
+  .event-cost--drain-5 {
+    background: rgba(186, 140, 210, 0.68);
+    border-color: rgba(230, 200, 245, 0.65);
+    color: #fff;
+  }
+
+  .event-cost--restore-1,
+  .event-cost--restore-2 {
+    background: rgba(143, 162, 212, 0.45);
+    border-color: rgba(180, 200, 235, 0.5);
+    color: #eef3ff;
+  }
+
+  .event-cost--restore-3 {
+    background: rgba(143, 162, 212, 0.58);
+    border-color: rgba(180, 200, 235, 0.6);
+    color: #fff;
+  }
+
+  .event-cost--restore-4,
+  .event-cost--restore-5 {
+    background: rgba(150, 175, 230, 0.68);
+    border-color: rgba(200, 220, 250, 0.65);
+    color: #fff;
   }
 
   .event-done-pill {
