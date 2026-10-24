@@ -206,9 +206,11 @@ onUnmounted(() => {
               :src="option.coverUrl"
               :candidates="option.coverCandidates"
               :cover-id="option.coverId"
+              :isbn="option.isbn"
+              :isbns="option.isbns"
               :alt="option.label"
               img-class="reading-editions__cover"
-              loading="lazy"
+              loading="eager"
             />
             <span class="reading-editions__option-label">{{ option.label }}</span>
           </button>

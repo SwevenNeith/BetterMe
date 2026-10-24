@@ -1,13 +1,13 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { resolveGoogleBooksThumbnailsByIsbnsQueued } from '../../services/bibliotheque/googleBooks.js'
 import {
   buildReliableCoverCandidates,
-  googleCoverUrlsFromIsbns,
   resolveIsbnsForWorkCached,
 } from '../../services/bibliotheque/reliableBookCovers.js'
 
-/** Timeout uniquement pour les (rares) URLs non-Google encore tentées. */
-const COVER_ATTEMPT_TIMEOUT_MS = 4000
+/** Timeout uniquement pour les (rares) URLs encore tentées en <img>. */
+const COVER_ATTEMPT_TIMEOUT_MS = 5000
 
 const props = defineProps({
   src: {
@@ -56,7 +56,7 @@ const props = defineProps({
   },
   loading: {
     type: String,
-    default: 'lazy',
+    default: 'eager',
   },
 })
 
@@ -64,9 +64,11 @@ const emit = defineEmits(['error', 'load'])
 
 const attemptIndex = ref(0)
 const dynamicIsbns = ref([])
+const verifiedThumbs = ref([])
 const exhausted = ref(false)
 let attemptTimer = null
-let isbnAbort = null
+let resolveAbort = null
+let resolveGen = 0
 
 const allIsbns = computed(() => {
   const list = []
@@ -78,13 +80,14 @@ const allIsbns = computed(() => {
 })
 
 const resolvedCandidates = computed(() => {
-  const fromIsbns = googleCoverUrlsFromIsbns(allIsbns.value, props.size)
-  return buildReliableCoverCandidates({
+  const base = buildReliableCoverCandidates({
     src: props.src,
-    candidates: [...fromIsbns, ...(props.candidates || [])],
-    isbns: allIsbns.value,
+    candidates: [...verifiedThumbs.value, ...(props.candidates || [])],
+    // Pas d’URL ISBN aveugles ici — uniquement vignettes View API vérifiées.
+    isbns: [],
     size: props.size,
   })
+  return base
 })
 
 const currentSrc = computed(() => {
@@ -102,7 +105,6 @@ function clearAttemptTimer() {
 function scheduleAttemptTimeout() {
   clearAttemptTimer()
   if (!currentSrc.value) return
-  // Les URL Google Books content sont en général rapides ; timeout de secours.
   attemptTimer = window.setTimeout(() => {
     advance()
   }, COVER_ATTEMPT_TIMEOUT_MS)
@@ -133,31 +135,64 @@ function onLoad(event) {
   emit('load', event)
 }
 
-async function ensureIsbnsFromWork() {
-  isbnAbort?.abort()
-  isbnAbort = null
+async function resolveCovers() {
+  resolveAbort?.abort()
+  const controller = new AbortController()
+  resolveAbort = controller
+  const gen = ++resolveGen
 
-  if (allIsbns.value.length) return
-  if (!props.workKey || String(props.workKey).startsWith('/google/')) return
+  attemptIndex.value = 0
+  exhausted.value = false
+  dynamicIsbns.value = []
+  verifiedThumbs.value = []
+  clearAttemptTimer()
 
-  // S’il y a déjà une URL fiable (upload, Google déjà stocké), pas besoin d’ISBN.
-  if (resolvedCandidates.value.length) return
+  // Affiche tout de suite les URL déjà fiables (imageLinks Google, upload…).
+  if (resolvedCandidates.value.length) {
+    scheduleAttemptTimeout()
+  }
 
-  isbnAbort = new AbortController()
   try {
-    const isbns = await resolveIsbnsForWorkCached(props.workKey, {
-      signal: isbnAbort.signal,
-    })
-    if (isbns.length) {
-      dynamicIsbns.value = isbns
+    let isbns = [...allIsbns.value]
+
+    if (
+      !isbns.length &&
+      props.workKey &&
+      !String(props.workKey).startsWith('/google/')
+    ) {
+      const fromWork = await resolveIsbnsForWorkCached(props.workKey, {
+        signal: controller.signal,
+      })
+      if (gen !== resolveGen) return
+      if (fromWork.length) {
+        dynamicIsbns.value = fromWork
+        isbns = fromWork
+      }
+    }
+
+    // Si une couverture fiable est déjà affichée, pas besoin de View API.
+    if (!resolvedCandidates.value.length && isbns.length) {
+      const thumbs = await resolveGoogleBooksThumbnailsByIsbnsQueued(isbns.slice(0, 4), {
+        signal: controller.signal,
+      })
+      if (gen !== resolveGen) return
+      verifiedThumbs.value = thumbs
       attemptIndex.value = 0
-      exhausted.value = false
-      scheduleAttemptTimeout()
-    } else if (!resolvedCandidates.value.length) {
+      if (resolvedCandidates.value.length) {
+        exhausted.value = false
+        scheduleAttemptTimeout()
+      }
+    }
+
+    if (gen !== resolveGen) return
+
+    if (!resolvedCandidates.value.length) {
       exhausted.value = true
       emit('error')
     }
-  } catch {
+  } catch (err) {
+    if (err?.name === 'AbortError') return
+    if (gen !== resolveGen) return
     if (!resolvedCandidates.value.length) {
       exhausted.value = true
       emit('error')
@@ -166,27 +201,28 @@ async function ensureIsbnsFromWork() {
 }
 
 watch(
-  () => [props.src, props.isbn, props.isbns, props.candidates, props.workKey, props.size],
+  () => [
+    props.src,
+    props.isbn,
+    props.isbns,
+    props.candidates,
+    props.workKey,
+    props.size,
+  ],
   () => {
-    attemptIndex.value = 0
-    exhausted.value = false
-    dynamicIsbns.value = []
-    scheduleAttemptTimeout()
-    void ensureIsbnsFromWork()
+    void resolveCovers()
   },
   { immediate: true, deep: true },
 )
 
-watch(currentSrc, () => {
-  if (currentSrc.value) scheduleAttemptTimeout()
-  else if (!exhausted.value && !resolvedCandidates.value.length) {
-    // En attente des ISBN async
-  }
+watch(currentSrc, (url) => {
+  if (url) scheduleAttemptTimeout()
 })
 
 onUnmounted(() => {
   clearAttemptTimer()
-  isbnAbort?.abort()
+  resolveAbort?.abort()
+  resolveGen += 1
 })
 </script>
 
@@ -200,6 +236,8 @@ onUnmounted(() => {
     :loading="loading"
     decoding="async"
     referrerpolicy="no-referrer"
+    width="120"
+    height="180"
     @error="onError"
     @load="onLoad"
   />

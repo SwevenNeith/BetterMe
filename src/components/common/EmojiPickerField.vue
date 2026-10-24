@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   configureEmojiPickerElement,
   FRENCH_EMOJI_DATA,
@@ -23,15 +23,33 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /** N’affiche pas l’emoji sélectionné : sert à en insérer un (ex. dans un champ texte). */
+  insertOnly: {
+    type: Boolean,
+    default: false,
+  },
+  /** Affiche le panneau en Teleport (évite overflow:hidden des parents). */
+  teleport: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'select'])
 
 const rootRef = ref(null)
+const triggerRef = ref(null)
+const panelRef = ref(null)
 const pickerRef = ref(null)
 const showPicker = ref(false)
 const pickerReady = ref(false)
 const isLoadingPicker = ref(false)
+const panelStyle = ref(/** @type {Record<string, string>} */ ({}))
+
+const previewGlyph = computed(() => {
+  if (props.insertOnly) return '☺'
+  return props.modelValue || null
+})
 
 async function togglePicker() {
   if (!showPicker.value) {
@@ -47,7 +65,11 @@ async function togglePicker() {
 }
 
 function onEmojiClick(event) {
-  emit('update:modelValue', event.detail.unicode)
+  const unicode = event.detail?.unicode || ''
+  if (unicode) {
+    emit('select', unicode)
+    if (!props.insertOnly) emit('update:modelValue', unicode)
+  }
   showPicker.value = false
 }
 
@@ -57,26 +79,72 @@ function clearIcon(event) {
   showPicker.value = false
 }
 
+function updatePanelPosition() {
+  if (!props.teleport || !showPicker.value || !triggerRef.value) return
+  const rect = triggerRef.value.getBoundingClientRect()
+  const panelWidth = Math.min(352, window.innerWidth - 16)
+  const panelHeight = 380
+  let left = rect.left
+  if (left + panelWidth > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - panelWidth - 8)
+  }
+  let top = rect.bottom + 6
+  if (top + panelHeight > window.innerHeight - 8) {
+    top = Math.max(8, rect.top - panelHeight - 6)
+  }
+  panelStyle.value = {
+    position: 'fixed',
+    top: `${Math.round(top)}px`,
+    left: `${Math.round(left)}px`,
+    width: `${panelWidth}px`,
+    zIndex: '5000',
+  }
+}
+
 watch(showPicker, async (open) => {
   if (!open) return
   await nextTick()
+  updatePanelPosition()
   configureEmojiPickerElement(pickerRef.value)
 })
 
 function onDocumentClick(event) {
   if (!showPicker.value) return
-  if (rootRef.value?.contains(event.target)) return
+  const target = /** @type {Node} */ (event.target)
+  if (rootRef.value?.contains(target)) return
+  if (panelRef.value?.contains(target)) return
   showPicker.value = false
 }
 
-onMounted(() => document.addEventListener('click', onDocumentClick))
-onUnmounted(() => document.removeEventListener('click', onDocumentClick))
+function onViewportChange() {
+  if (showPicker.value) updatePanelPosition()
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+  window.addEventListener('resize', onViewportChange)
+  window.addEventListener('scroll', onViewportChange, true)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick)
+  window.removeEventListener('resize', onViewportChange)
+  window.removeEventListener('scroll', onViewportChange, true)
+})
 </script>
 
 <template>
-  <div ref="rootRef" class="emoji-picker-field" :class="{ 'emoji-picker-field--compact': compact }">
+  <div
+    ref="rootRef"
+    class="emoji-picker-field"
+    :class="{
+      'emoji-picker-field--compact': compact,
+      'emoji-picker-field--insert': insertOnly,
+    }"
+  >
     <div class="emoji-picker-field__row">
       <button
+        ref="triggerRef"
         type="button"
         class="emoji-picker-field__trigger"
         :aria-expanded="showPicker"
@@ -86,17 +154,28 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
       >
         <span
           class="emoji-picker-field__preview"
-          :class="{ 'emoji-picker-field__preview--empty': !modelValue }"
+          :class="{ 'emoji-picker-field__preview--empty': !previewGlyph || insertOnly }"
           aria-hidden="true"
         >
           <template v-if="isLoadingPicker">…</template>
+          <template v-else-if="insertOnly">☺</template>
           <template v-else-if="modelValue">{{ modelValue }}</template>
           <template v-else>—</template>
         </span>
         <span v-if="!compact" class="emoji-picker-field__label">{{ label }}</span>
       </button>
       <button
-        v-if="clearable && modelValue && !compact"
+        v-if="clearable && modelValue && compact && !insertOnly"
+        type="button"
+        class="emoji-picker-field__clear-compact"
+        aria-label="Retirer l’emoji"
+        title="Retirer"
+        @click="clearIcon"
+      >
+        ×
+      </button>
+      <button
+        v-if="clearable && modelValue && !compact && !insertOnly"
         type="button"
         class="emoji-picker-field__clear"
         @click="clearIcon"
@@ -105,23 +184,28 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
       </button>
     </div>
 
-    <div
-      v-if="showPicker"
-      class="emoji-picker-field__panel"
-      role="dialog"
-      aria-label="Choisir un emoji"
-      @click.stop
-    >
-      <p v-if="!pickerReady" class="emoji-picker-field__loading">Chargement des emojis…</p>
-      <emoji-picker
-        v-else
-        ref="pickerRef"
-        class="emoji-picker-field__picker"
-        locale="fr"
-        :data-source="FRENCH_EMOJI_DATA"
-        @emoji-click="onEmojiClick"
-      />
-    </div>
+    <Teleport to="body" :disabled="!teleport">
+      <div
+        v-if="showPicker"
+        ref="panelRef"
+        class="emoji-picker-field__panel"
+        :class="{ 'emoji-picker-field__panel--teleport': teleport }"
+        :style="teleport ? panelStyle : undefined"
+        role="dialog"
+        aria-label="Choisir un emoji"
+        @click.stop
+      >
+        <p v-if="!pickerReady" class="emoji-picker-field__loading">Chargement des emojis…</p>
+        <emoji-picker
+          v-else
+          ref="pickerRef"
+          class="emoji-picker-field__picker"
+          locale="fr"
+          :data-source="FRENCH_EMOJI_DATA"
+          @emoji-click="onEmojiClick"
+        />
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -142,7 +226,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   font-size: 1.2rem;
 }
 
-.emoji-picker-field--compact .emoji-picker-field__panel {
+.emoji-picker-field--compact .emoji-picker-field__panel:not(.emoji-picker-field__panel--teleport) {
   left: 0;
   right: auto;
 }
@@ -200,6 +284,26 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   color: #9b7aab;
 }
 
+.emoji-picker-field__clear-compact {
+  flex-shrink: 0;
+  align-self: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  padding: 0;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #ad81be;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.emoji-picker-field__clear-compact:hover {
+  background: rgba(213, 181, 234, 0.2);
+}
+
 .emoji-picker-field__clear {
   flex-shrink: 0;
   align-self: center;
@@ -236,6 +340,12 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   overflow: hidden;
   border: 1px solid rgba(213, 181, 234, 0.35);
   box-shadow: 0 8px 24px rgba(44, 62, 80, 0.12);
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.emoji-picker-field__panel--teleport {
+  right: auto;
+  max-height: min(380px, calc(100vh - 16px));
 }
 
 .emoji-picker-field__loading {
@@ -294,11 +404,20 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   .emoji-picker-field__panel {
     border-color: rgba(213, 181, 234, 0.2);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    background: rgba(30, 25, 40, 0.98);
   }
 
   .emoji-picker-field__picker {
     --input-font-color: #f0e8f8;
     --input-placeholder-color: #b8a0c8;
   }
+}
+</style>
+
+<!-- Styles non-scopés : le panneau téléporté sort du scope Vue -->
+<style>
+.emoji-picker-field__panel--teleport emoji-picker {
+  width: 100%;
+  max-height: min(380px, calc(100vh - 16px));
 }
 </style>

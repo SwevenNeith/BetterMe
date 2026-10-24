@@ -40,15 +40,29 @@ function close() {
   emit('close')
 }
 
+const failedCoverKeys = ref(new Set())
+
+function resultKey(doc) {
+  return doc?.key || `${doc?.title}-${doc?.firstPublishYear}`
+}
+
 function hasCover(doc) {
-  return Boolean(doc?.coverUrl || doc?.coverCandidates?.length || doc?.coverId || doc?.isbn)
+  if (failedCoverKeys.value.has(resultKey(doc))) return false
+  return Boolean(
+    doc?.coverUrl ||
+      (doc?.coverCandidates && doc.coverCandidates.length) ||
+      doc?.isbn ||
+      (Array.isArray(doc?.isbns) && doc.isbns.length) ||
+      doc?.key,
+  )
 }
 
 function onCoverError(doc) {
-  if (!doc) return
-  doc.coverUrl = null
-  doc.coverCandidates = []
-  doc.coverId = null
+  const key = resultKey(doc)
+  if (!key || failedCoverKeys.value.has(key)) return
+  const next = new Set(failedCoverKeys.value)
+  next.add(key)
+  failedCoverKeys.value = next
 }
 
 function canSearch(title, author) {
@@ -266,11 +280,12 @@ onUnmounted(() => {
               :cover-id="doc.coverId"
               :isbn="doc.isbn"
               :isbns="doc.isbns"
+              :work-key="doc.key"
               :title="doc.title"
               :author="doc.authorLabel"
               :alt="`Couverture de ${doc.title}`"
               img-class="ol-link-picker__cover"
-              loading="lazy"
+              loading="eager"
               @error="onCoverError(doc)"
             />
             <div

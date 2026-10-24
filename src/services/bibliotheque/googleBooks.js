@@ -3,20 +3,44 @@
  */
 
 const GOOGLE_BOOKS_API = 'https://www.googleapis.com/books/v1/volumes'
+const GOOGLE_VIEWAPI_URL = 'https://books.google.com/books'
+const THUMB_CACHE_KEY = 'betterme-gbooks-isbn-thumbs-v1'
+const THUMB_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30
 
 /** @type {Map<string, string|null>} */
 const coverByQueryCache = new Map()
+
+/** @type {Map<string, string|null>} */
+const isbnThumbMemory = new Map()
 
 /** File d’attente pour limiter les appels API (évite quota / Failed to fetch). */
 let coverQueue = Promise.resolve()
 let coverInFlight = 0
 const COVER_MAX_CONCURRENT = 2
 
+/** File View API (JSONP) — 1 lot à la fois. */
+let viewApiChain = Promise.resolve()
+
 /**
  * @param {string|null|undefined} raw
  */
 function cleanText(raw) {
   return String(raw ?? '').trim()
+}
+
+/**
+ * @param {string|string[]|null|undefined} value
+ * @returns {string[]}
+ */
+function normalizeIsbnListLocal(value) {
+  const raw = Array.isArray(value) ? value : [value]
+  /** @type {string[]} */
+  const out = []
+  for (const item of raw) {
+    const clean = String(item ?? '').replace(/[^0-9Xx]/g, '')
+    if (clean.length >= 10 && !out.includes(clean)) out.push(clean)
+  }
+  return out
 }
 
 /**
@@ -49,21 +73,17 @@ function normalizeGoogleBooksVolume(item) {
     .filter((isbn) => isbn.length >= 10)
 
   const imageLinks = info.imageLinks || {}
-  const coverUrl =
-    upgradeGoogleBooksImageUrl(imageLinks.thumbnail || imageLinks.smallThumbnail, 1) ||
-    (isbns[0]
-      ? `https://books.google.com/books/content?vid=ISBN${isbns[0]}&printsec=frontcover&img=1&zoom=1`
-      : null)
+  // Uniquement les imageLinks (id volume) — pas content?vid=ISBN… (404 fréquent).
+  const coverUrl = upgradeGoogleBooksImageUrl(
+    imageLinks.thumbnail || imageLinks.smallThumbnail,
+    1,
+  )
 
   const coverUrlLarge =
     upgradeGoogleBooksImageUrl(
       imageLinks.large || imageLinks.medium || imageLinks.thumbnail || imageLinks.smallThumbnail,
       2,
-    ) ||
-    (isbns[0]
-      ? `https://books.google.com/books/content?vid=ISBN${isbns[0]}&printsec=frontcover&img=1&zoom=2`
-      : coverUrl)
-
+    ) || coverUrl
   const yearMatch = String(info.publishedDate || '').match(/(\d{4})/)
   const volumeId = String(item?.id || '')
 
@@ -229,4 +249,146 @@ export async function resolveGoogleBooksCoverByTitle(input = {}) {
       return null
     }
   })
+}
+
+function readThumbCache() {
+  try {
+    const raw = localStorage.getItem(THUMB_CACHE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeThumbCache(map) {
+  try {
+    localStorage.setItem(THUMB_CACHE_KEY, JSON.stringify(map))
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function getCachedIsbnThumb(isbn) {
+  if (isbnThumbMemory.has(isbn)) return isbnThumbMemory.get(isbn)
+  const map = readThumbCache()
+  const entry = map[isbn]
+  if (!entry || typeof entry !== 'object') return undefined
+  if (Date.now() - Number(entry.at || 0) > THUMB_CACHE_TTL_MS) return undefined
+  const url = entry.url == null ? null : String(entry.url)
+  isbnThumbMemory.set(isbn, url)
+  return url
+}
+
+function setCachedIsbnThumb(isbn, url) {
+  isbnThumbMemory.set(isbn, url)
+  const map = readThumbCache()
+  map[isbn] = { url, at: Date.now() }
+  writeThumbCache(map)
+}
+
+/**
+ * Dynamic Links View API (JSONP) — renvoie thumbnail_url seulement si Google a une couverture.
+ * Évite les GET img ISBN → 404 dans la console.
+ * @param {string[]} isbns
+ * @param {{ signal?: AbortSignal }} [opts]
+ * @returns {Promise<string[]>} URLs https uniques
+ */
+export async function resolveGoogleBooksThumbnailsByIsbns(isbns, opts = {}) {
+  const list = normalizeIsbnListLocal(isbns).slice(0, 8)
+  if (!list.length) return []
+
+  /** @type {string[]} */
+  const found = []
+  /** @type {string[]} */
+  const missing = []
+
+  for (const isbn of list) {
+    const cached = getCachedIsbnThumb(isbn)
+    if (cached === undefined) {
+      missing.push(isbn)
+    } else if (cached) {
+      if (!found.includes(cached)) found.push(cached)
+    }
+  }
+
+  if (!missing.length) return found
+  if (opts.signal?.aborted) {
+    const err = new Error('Aborted')
+    err.name = 'AbortError'
+    throw err
+  }
+
+  const batchResult = await new Promise((resolve, reject) => {
+    const onAbort = () => {
+      cleanup()
+      const err = new Error('Aborted')
+      err.name = 'AbortError'
+      reject(err)
+    }
+
+    if (opts.signal?.aborted) {
+      onAbort()
+      return
+    }
+
+    const cbName = `__gbsThumb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    const script = document.createElement('script')
+    let settled = false
+
+    function cleanup() {
+      opts.signal?.removeEventListener('abort', onAbort)
+      try {
+        delete window[cbName]
+      } catch {
+        window[cbName] = undefined
+      }
+      script.remove()
+    }
+
+    function finish(data) {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(data && typeof data === 'object' ? data : {})
+    }
+
+    window[cbName] = finish
+    opts.signal?.addEventListener('abort', onAbort, { once: true })
+
+    script.async = true
+    script.src = `${GOOGLE_VIEWAPI_URL}?jscmd=viewapi&bibkeys=${encodeURIComponent(
+      missing.map((isbn) => `ISBN:${isbn}`).join(','),
+    )}&callback=${encodeURIComponent(cbName)}`
+    script.onerror = () => finish({})
+
+    // Timeout de secours si callback jamais appelé
+    window.setTimeout(() => finish({}), 6000)
+    document.head.appendChild(script)
+  })
+
+  for (const isbn of missing) {
+    const row = batchResult[`ISBN:${isbn}`] || batchResult[isbn] || null
+    const rawThumb = row?.thumbnail_url ? String(row.thumbnail_url).trim() : ''
+    const thumb = rawThumb ? upgradeGoogleBooksImageUrl(rawThumb, 1) : null
+    setCachedIsbnThumb(isbn, thumb)
+    if (thumb && !found.includes(thumb)) found.push(thumb)
+  }
+
+  return found
+}
+
+/**
+ * Version sérialisée (évite trop de scripts JSONP en parallèle sur une grille).
+ * @param {string[]} isbns
+ * @param {{ signal?: AbortSignal }} [opts]
+ */
+export function resolveGoogleBooksThumbnailsByIsbnsQueued(isbns, opts = {}) {
+  const job = viewApiChain.then(() => resolveGoogleBooksThumbnailsByIsbns(isbns, opts))
+  viewApiChain = job.then(
+    () => undefined,
+    () => undefined,
+  )
+  return job
 }

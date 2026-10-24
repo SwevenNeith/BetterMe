@@ -152,9 +152,11 @@ onUnmounted(() => {
               :src="option.coverUrl"
               :candidates="option.coverCandidates"
               :cover-id="option.coverId"
+              :isbn="option.isbn"
+              :isbns="option.isbns"
               :alt="option.label"
               img-class="ol-cover-picker__cover"
-              loading="lazy"
+              loading="eager"
             />
             <span class="ol-cover-picker__label">{{ option.label }}</span>
           </button>

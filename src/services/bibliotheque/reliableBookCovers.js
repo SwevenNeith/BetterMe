@@ -8,8 +8,6 @@
 
 import {
   fetchOpenLibraryIsbnsForWork,
-  googleBooksCoverByIsbn,
-  googleBooksCoverCandidates,
   normalizeIsbnList,
 } from './openLibrary.js'
 
@@ -25,7 +23,9 @@ function isFlakyCoverHost(url) {
   const value = String(url ?? '')
   return (
     /covers\.openlibrary\.org/i.test(value) ||
-    /archive\.org\/download\//i.test(value)
+    /archive\.org\/download\//i.test(value) ||
+    // ISBN CDN aveugle → 404 fréquents (préférer View API / imageLinks).
+    /books\.google\.com\/books\/content\?[^#]*vid=ISBN/i.test(value)
   )
 }
 
@@ -119,7 +119,7 @@ export async function resolveIsbnsForWorkCached(workKey, opts = {}) {
  * @returns {string[]}
  */
 export function buildReliableCoverCandidates(input = {}) {
-  const zoom = input.size === 'L' ? 2 : 1
+  void input.size
   /** @type {string[]} */
   const urls = []
   const push = (url) => {
@@ -128,12 +128,10 @@ export function buildReliableCoverCandidates(input = {}) {
     if (!urls.includes(value)) urls.push(value)
   }
 
-  for (const url of googleBooksCoverCandidates(
-    [...normalizeIsbnList(input.isbns), ...normalizeIsbnList(input.isbn)],
-    zoom,
-  )) {
-    push(url)
-  }
+  // Les ISBN ne génèrent plus d’URL content?vid=ISBN… ici (404).
+  // OpenLibraryCoverImg résout via Google Books Dynamic Links.
+  void input.isbns
+  void input.isbn
 
   for (const url of input.candidates || []) push(url)
   push(input.src)
@@ -150,15 +148,12 @@ export function isReliableCoverUrl(url) {
 }
 
 /**
- * @param {string[]} isbns
- * @param {'S'|'M'|'L'} [size]
+ * @deprecated Les URL ISBN aveugles provoquent des 404 — utiliser resolveGoogleBooksThumbnailsByIsbns.
+ * @param {string[]} _isbns
+ * @param {'S'|'M'|'L'} [_size]
  */
-export function googleCoverUrlsFromIsbns(isbns, size = 'M') {
-  const zoom = size === 'L' ? 2 : 1
-  return normalizeIsbnList(isbns)
-    .slice(0, 4)
-    .map((isbn) => googleBooksCoverByIsbn(isbn, zoom))
-    .filter(Boolean)
+export function googleCoverUrlsFromIsbns(_isbns, _size = 'M') {
+  return []
 }
 
 export { isFlakyCoverHost }

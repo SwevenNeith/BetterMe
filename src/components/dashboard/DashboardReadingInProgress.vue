@@ -159,7 +159,7 @@ onUnmounted(() => {
                 :work-key="book.open_library_work_key"
                 :alt="`Couverture de ${book.title}`"
                 img-class="dashboard-reading__cover"
-                loading="lazy"
+                loading="eager"
               />
               <div v-else class="dashboard-reading__cover dashboard-reading__cover--placeholder">
                 {{ book.title?.charAt(0)?.toUpperCase() || '?' }}

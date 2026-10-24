@@ -124,8 +124,8 @@ function formatDateFr(iso) {
 }
 
 const chartSeries = computed(() => seriesForChart(history.value))
-const costliestDays = computed(() => topCostliestDays(history.value, 5))
-const greedyActivities = computed(() => topGreedyActivities(history.value, 8))
+const costliestDays = computed(() => topCostliestDays(history.value, 3))
+const greedyActivities = computed(() => topGreedyActivities(history.value, 10))
 const correlations = computed(() => correlateWithMood(history.value, emotionLogs.value))
 
 const CHART_W = 640
@@ -427,7 +427,7 @@ onMounted(async () => {
 
       <div class="insights-grid">
         <section class="panel">
-          <h2 class="panel__title">Jours les plus coûteux</h2>
+          <h2 class="panel__title">Top 3 jours les plus coûteux</h2>
           <ul class="plain-list">
             <li v-for="d in costliestDays" :key="d.day_date">
               <button type="button" class="link-btn" @click="openDay(d.day_date)">
@@ -440,7 +440,7 @@ onMounted(async () => {
         </section>
 
         <section class="panel">
-          <h2 class="panel__title">Activités gourmandes</h2>
+          <h2 class="panel__title">Top 10 activités gourmandes</h2>
           <ul class="plain-list">
             <li v-for="a in greedyActivities" :key="a.label + a.total">
               <span class="item-name">{{ a.label }}</span>

@@ -377,10 +377,10 @@ function hasCover(doc) {
   if (failedCoverKeys.value.has(resultKey(doc))) return false
   return Boolean(
     doc?.coverUrl ||
-      doc?.coverCandidates?.length ||
-      doc?.coverId ||
+      (doc?.coverCandidates && doc.coverCandidates.length) ||
       doc?.isbn ||
-      doc?.title,
+      (Array.isArray(doc?.isbns) && doc.isbns.length) ||
+      doc?.key,
   )
 }
 
@@ -670,11 +670,12 @@ onUnmounted(() => {
                 :cover-id="doc.coverId"
                 :isbn="doc.isbn"
                 :isbns="doc.isbns"
+                :work-key="doc.key"
                 :title="doc.title"
                 :author="doc.authorLabel"
                 :alt="`Couverture de ${doc.title}`"
                 img-class="catalog-book__cover"
-                loading="lazy"
+                loading="eager"
                 @error="onCoverError(doc)"
               />
               <div

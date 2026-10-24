@@ -3,7 +3,10 @@ import {
   parseOpenLibrarySeries,
 } from '../../utils/bibliotheque/openLibrarySeries.js'
 import { normalizeOpenLibrarySubjects } from '../../utils/bibliotheque/openLibrarySubjects.js'
-import { searchGoogleBooks } from './googleBooks.js'
+import {
+  resolveGoogleBooksThumbnailsByIsbns,
+  searchGoogleBooks,
+} from './googleBooks.js'
 
 const OPEN_LIBRARY_SEARCH_URL = 'https://openlibrary.org/search.json'
 const OPEN_LIBRARY_COVER_BASE = 'https://covers.openlibrary.org/b/id'
@@ -163,52 +166,46 @@ export async function fetchOpenLibraryIsbnsForWork(workKey, opts = {}) {
 }
 
 /**
- * Candidats de couverture.
- * Priorité : Google Books (ISBN) — archive.org / covers.openlibrary.org timeout souvent.
- * @param {number|string|null|undefined} coverId
+ * Candidats de couverture fiables uniquement (pas covers.openlibrary.org / archive.org).
+ * Les URL ISBN Google « aveugles » ne sont plus injectées ici : elles 404 souvent.
+ * La résolution passe par Dynamic Links (voir OpenLibraryCoverImg / googleBooks.js).
+ * @param {number|string|null|undefined} _coverId
  * @param {'S'|'M'|'L'} [size]
- * @param {{ isbn?: string|null, isbns?: string[]|null, includeFlakyHosts?: boolean }} [opts]
+ * @param {{ isbn?: string|null, isbns?: string[]|null, includeFlakyHosts?: boolean, knownCoverUrls?: string[]|null }} [opts]
  * @returns {string[]}
  */
-export function openLibraryCoverCandidates(coverId, size = 'M', opts = {}) {
-  const id = Number(coverId)
-  const safeSize = normalizeCoverSize(size)
-  const zoom = safeSize === 'L' ? 2 : 1
-  const includeFlaky = opts.includeFlakyHosts === true
+export function openLibraryCoverCandidates(_coverId, size = 'M', opts = {}) {
+  void size
+  void _coverId
+  void opts.isbn
+  void opts.isbns
+  void opts.includeFlakyHosts
   /** @type {string[]} */
   const urls = []
   const push = (url) => {
-    if (url && !urls.includes(url)) urls.push(url)
+    const value = String(url ?? '').trim()
+    if (!value) return
+    // Hôtes OL/IA : timeouts chroniques — jamais.
+    if (/covers\.openlibrary\.org/i.test(value) || /archive\.org\/download\//i.test(value)) return
+    // ISBN CDN aveugle : 404 fréquent — résolu via View API ailleurs.
+    if (/books\.google\.com\/books\/content\?[^#]*vid=ISBN/i.test(value)) return
+    if (!urls.includes(value)) urls.push(value)
   }
 
-  const isbnList = [
-    ...normalizeIsbnList(opts.isbns),
-    ...normalizeIsbnList(opts.isbn),
-  ]
-
-  for (const url of googleBooksCoverCandidates(isbnList, zoom)) push(url)
-
-  // Hôtes OL/IA souvent injoignables : seulement en secours explicite.
-  if (includeFlaky && Number.isFinite(id) && id > 0) {
-    push(archiveOrgModernCoverUrl(id, safeSize))
-    push(archiveOrgLegacyCoverUrl(id, safeSize))
-    push(classicOpenLibraryCoverUrl(id, safeSize))
-  }
+  for (const url of opts.knownCoverUrls || []) push(url)
 
   return urls
 }
 
 /**
- * URL de couverture préférée (1er candidat fiable).
+ * URL de couverture préférée (1er candidat fiable), ou null.
  * @param {number|string|null|undefined} coverId
  * @param {'S'|'M'|'L'} [size]
- * @param {{ isbn?: string|null, isbns?: string[]|null, includeFlakyHosts?: boolean }} [opts]
+ * @param {{ isbn?: string|null, isbns?: string[]|null, includeFlakyHosts?: boolean, knownCoverUrls?: string[]|null }} [opts]
  */
 export function openLibraryCoverUrl(coverId, size = 'M', opts = {}) {
   const candidates = openLibraryCoverCandidates(coverId, size, opts)
-  if (candidates[0]) return candidates[0]
-  // Dernier recours si aucun ISBN : URL OL classique (peut timeout côté client).
-  return classicOpenLibraryCoverUrl(coverId, size)
+  return candidates[0] || null
 }
 
 /**
@@ -224,31 +221,25 @@ export function openLibraryCoverUrl(coverId, size = 'M', opts = {}) {
 export function readingBookCoverCandidates(book, opts = {}) {
   /** @type {string[]} */
   const urls = []
+  const isFlakyHost = (url) =>
+    /covers\.openlibrary\.org/i.test(url) || /archive\.org\/download\//i.test(url)
   const push = (url) => {
     const value = String(url ?? '').trim()
-    if (value && !urls.includes(value)) urls.push(value)
+    if (!value || isFlakyHost(value)) return
+    // ISBN CDN aveugle : résolu via View API côté composant image
+    if (/books\.google\.com\/books\/content\?[^#]*vid=ISBN/i.test(value)) return
+    if (!urls.includes(value)) urls.push(value)
   }
-
-  for (const url of googleBooksCoverCandidates(opts.isbns, 1)) push(url)
 
   const primary = String(book?.coverUrl ?? '').trim()
   const custom = String(book?.cover_image_url ?? '').trim()
   const ol = String(book?.open_library_cover_url ?? '').trim()
 
-  // Couverture perso / signed URL d’abord si ce n’est pas un hôte OL/IA flaky
-  const isFlakyHost = (url) =>
-    /covers\.openlibrary\.org/i.test(url) || /archive\.org\/download\//i.test(url)
-
-  if (primary && !isFlakyHost(primary)) push(primary)
-  if (custom && !isFlakyHost(custom)) push(custom)
-
-  for (const url of googleBooksCoverCandidates(opts.isbns, 1)) push(url)
-
-  // OL/IA en dernier (timeout fréquent)
   if (primary) push(primary)
-  if (ol) push(ol)
   if (custom) push(custom)
+  if (ol) push(ol)
 
+  void opts.isbns
   return urls
 }
 
@@ -271,7 +262,6 @@ export function normalizeOpenLibraryDoc(doc) {
   const coverCandidates = openLibraryCoverCandidates(coverId, 'M', {
     isbn,
     isbns,
-    includeFlakyHosts: true,
   })
 
   return {
@@ -282,7 +272,7 @@ export function normalizeOpenLibraryDoc(doc) {
     authorLabel: authors.length ? authors.join(', ') : 'Auteur inconnu',
     firstPublishYear: doc?.first_publish_year || null,
     coverId,
-    coverUrl: coverCandidates[0] || openLibraryCoverUrl(coverId, 'M', { isbn, isbns }),
+    coverUrl: coverCandidates[0] || null,
     coverCandidates,
     editionCount: Number(doc?.edition_count) || 0,
     languages,
@@ -514,12 +504,10 @@ export async function getOpenLibraryWork(workKey, options = {}) {
     coverUrl: openLibraryCoverUrl(coverId || searchDoc?.coverId, 'L', {
       isbn: searchDoc?.isbn || null,
       isbns: searchDoc?.isbns || null,
-      includeFlakyHosts: true,
     }),
     coverCandidates: openLibraryCoverCandidates(coverId || searchDoc?.coverId, 'L', {
       isbn: searchDoc?.isbn || null,
       isbns: searchDoc?.isbns || null,
-      includeFlakyHosts: true,
     }),
     coverIds: covers.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
     editionCount: searchDoc?.editionCount || 0,
@@ -603,15 +591,12 @@ export function normalizeOpenLibraryEdition(entry) {
     coverId,
     coverUrl: openLibraryCoverUrl(coverId, 'M', {
       isbns: [...isbn13, ...isbn10],
-      includeFlakyHosts: true,
     }),
     coverUrlLarge: openLibraryCoverUrl(coverId, 'L', {
       isbns: [...isbn13, ...isbn10],
-      includeFlakyHosts: true,
     }),
     coverCandidates: openLibraryCoverCandidates(coverId, 'M', {
       isbns: [...isbn13, ...isbn10],
-      includeFlakyHosts: true,
     }),
     openLibraryUrl: entry?.key ? `https://openlibrary.org${entry.key}` : null,
   }
@@ -673,17 +658,19 @@ export async function listOpenLibraryCoverOptions(workKey, options = {}) {
   function pushCover(coverId, label, source, editionKey, isbn = null) {
     const id = Number(coverId)
     if (!Number.isFinite(id) || id <= 0 || seen.has(id)) return
-    const coverOpts = { isbn, includeFlakyHosts: true }
-    const coverUrl = openLibraryCoverUrl(id, 'M', coverOpts)
-    const coverUrlLarge = openLibraryCoverUrl(id, 'L', coverOpts)
-    if (!coverUrl || !coverUrlLarge) return
+    const isbnList = normalizeIsbnList(isbn)
+    // Sans ISBN fiable, pas d’URL stable (on n’utilise plus covers.openlibrary.org).
+    if (!isbnList.length) return
+    const coverOpts = { isbn: isbnList[0], isbns: isbnList }
     seen.add(id)
     optionsList.push({
       id: `${source}-${id}`,
       coverId: id,
-      coverUrl,
-      coverUrlLarge,
-      coverCandidates: openLibraryCoverCandidates(id, 'M', coverOpts),
+      coverUrl: null,
+      coverUrlLarge: null,
+      coverCandidates: [],
+      isbns: isbnList,
+      isbn: isbnList[0],
       label,
       source,
       editionKey,
@@ -719,9 +706,29 @@ export async function listOpenLibraryCoverOptions(workKey, options = {}) {
       bits.length ? bits.join(' · ') : edition.title,
       'edition',
       edition.key,
-      edition.isbn,
+      edition.isbns?.length ? edition.isbns : edition.isbn,
     )
   }
 
-  return optionsList
+  // Résout les vignettes Google (View API) pour éviter les 404 img ISBN.
+  try {
+    const isbnPool = [...new Set(optionsList.flatMap((opt) => opt.isbns || []))]
+    if (isbnPool.length) {
+      await resolveGoogleBooksThumbnailsByIsbns(isbnPool, { signal: options.signal })
+      for (const opt of optionsList) {
+        const resolved = await resolveGoogleBooksThumbnailsByIsbns(opt.isbns || [], {
+          signal: options.signal,
+        })
+        if (resolved[0]) {
+          opt.coverUrl = resolved[0]
+          opt.coverUrlLarge = resolved[0]
+          opt.coverCandidates = resolved
+        }
+      }
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err
+  }
+
+  return optionsList.filter((opt) => opt.coverUrl || (opt.coverCandidates || []).length)
 }

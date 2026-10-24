@@ -14,6 +14,7 @@ import {
 import { addBatteryEntry } from '../services/battery/batteryDays.js'
 import { costStyleClass, normalizeBatteryCost } from '../utils/battery/batteryMath.js'
 import { addDaysISO } from '../utils/habit/habitCalendar.js'
+import EmojiPickerField from '../components/common/EmojiPickerField.vue'
 
 defineOptions({ name: 'BatteryCatalogView' })
 
@@ -128,6 +129,60 @@ async function loadActivities() {
         : 'Impossible de charger le catalogue.'
   } finally {
     isLoading.value = false
+  }
+}
+
+/**
+ * Insère un emoji dans un <input> (au curseur si possible).
+ * @param {HTMLInputElement|null|undefined} input
+ * @param {string} emoji
+ * @param {(next: string) => void} [onUpdate]
+ */
+function insertEmojiInTextInput(input, emoji, onUpdate) {
+  const glyph = String(emoji ?? '')
+  if (!glyph) return
+  if (!(input instanceof HTMLInputElement)) {
+    onUpdate?.(glyph)
+    return
+  }
+  const value = input.value ?? ''
+  const start = input.selectionStart ?? value.length
+  const end = input.selectionEnd ?? start
+  const next = `${value.slice(0, start)}${glyph}${value.slice(end)}`
+  input.value = next
+  onUpdate?.(next)
+  void nextTick(() => {
+    input.focus()
+    const pos = start + glyph.length
+    try {
+      input.setSelectionRange(pos, pos)
+    } catch {
+      /* ignore */
+    }
+  })
+}
+
+function insertEmojiInNewName(emoji) {
+  insertEmojiInTextInput(newNameInputRef.value, emoji, (next) => {
+    newName.value = next
+  })
+}
+
+async function insertEmojiInActivityName(activity, emoji) {
+  const input = document.querySelector(`[data-catalog-name-edit="${activity.id}"]`)
+  if (!(input instanceof HTMLInputElement)) return
+
+  insertEmojiInTextInput(input, emoji)
+  const nextName = String(input.value || '').trim()
+  if (!nextName || nextName === activity.name) return
+
+  try {
+    await updateBatteryActivity(supabase, userId.value, activity.id, { name: nextName })
+    await loadActivities()
+  } catch (err) {
+    console.error(err)
+    formError.value = err?.message || 'Impossible d’ajouter l’emoji.'
+    input.value = activity.name
   }
 }
 
@@ -267,13 +322,25 @@ onMounted(async () => {
       <section class="panel create-panel">
         <h2 class="panel__title">Nouvelle activité</h2>
         <form class="create-form" @submit.prevent="createItem">
-          <input
-            ref="newNameInputRef"
-            v-model="newName"
-            type="text"
-            placeholder="Nom de l’activité"
-            required
-          />
+          <div class="name-field">
+            <input
+              ref="newNameInputRef"
+              v-model="newName"
+              type="text"
+              class="name-field__input"
+              placeholder="Nom de l’activité"
+              required
+            />
+            <EmojiPickerField
+              class="name-field__emoji"
+              insert-only
+              compact
+              teleport
+              :clearable="false"
+              label="Insérer un emoji dans le nom"
+              @select="insertEmojiInNewName"
+            />
+          </div>
           <div class="effect-toggle" role="group" aria-label="Effet sur l’énergie">
             <button
               type="button"
@@ -334,14 +401,26 @@ onMounted(async () => {
             :class="`item--${costStyleClass(activity.default_cost)}`"
           >
             <div class="item__top">
-              <input
-                class="item__name-input"
-                type="text"
-                :value="activity.name"
-                aria-label="Nom de l’activité"
-                title="Renommer"
-                @change="renameItem(activity, $event)"
-              />
+              <div class="name-field name-field--item">
+                <input
+                  class="name-field__input"
+                  type="text"
+                  :data-catalog-name-edit="activity.id"
+                  :value="activity.name"
+                  aria-label="Nom de l’activité"
+                  title="Renommer"
+                  @change="renameItem(activity, $event)"
+                />
+                <EmojiPickerField
+                  class="name-field__emoji"
+                  insert-only
+                  compact
+                  teleport
+                  :clearable="false"
+                  label="Insérer un emoji dans le nom"
+                  @select="insertEmojiInActivityName(activity, $event)"
+                />
+              </div>
               <input
                 v-if="editingCostActivityId === activity.id"
                 :data-catalog-cost-edit="activity.id"
@@ -522,7 +601,7 @@ onMounted(async () => {
   align-items: stretch;
 }
 
-.create-form input,
+.create-form input:not(.name-field__input),
 .search {
   border: 1px solid rgba(213, 181, 234, 0.45);
   border-radius: 10px;
@@ -531,6 +610,85 @@ onMounted(async () => {
   color: #2c3e50;
   font: inherit;
   box-sizing: border-box;
+}
+
+.name-field {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  border-radius: 10px;
+  padding: 0.15rem 0.2rem 0.15rem 0.55rem;
+  background: rgba(255, 255, 255, 0.9);
+  box-sizing: border-box;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.name-field:focus-within {
+  border-color: rgba(173, 129, 190, 0.7);
+  box-shadow: 0 0 0 3px rgba(173, 129, 190, 0.12);
+}
+
+.name-field__input {
+  flex: 1;
+  min-width: 0;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0.4rem 0.25rem !important;
+  margin: 0;
+  font: inherit;
+  color: #2c3e50;
+  outline: none;
+}
+
+.name-field__emoji {
+  flex: 0 0 auto;
+}
+
+.name-field__emoji :deep(.emoji-picker-field__trigger) {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  padding: 0.2rem;
+  min-height: 0;
+}
+
+.name-field__emoji :deep(.emoji-picker-field__trigger:hover:not(:disabled)) {
+  background: rgba(213, 181, 234, 0.18);
+  transform: none;
+}
+
+.name-field__emoji :deep(.emoji-picker-field__preview) {
+  width: 1.85rem;
+  height: 1.85rem;
+  font-size: 1.05rem;
+  background: transparent;
+  border-radius: 8px;
+}
+
+.name-field--item {
+  flex: 1;
+  min-width: 0;
+  padding: 0.1rem 0.15rem 0.1rem 0.4rem;
+  background: rgba(255, 255, 255, 0.55);
+  border-color: transparent;
+}
+
+.name-field--item:hover,
+.name-field--item:focus-within {
+  border-color: rgba(213, 181, 234, 0.55);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.name-field--item .name-field__input {
+  font-weight: 700;
+  padding: 0.3rem 0.2rem !important;
 }
 
 .effect-toggle {
@@ -723,28 +881,9 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.45rem;
   min-width: 0;
   max-width: 100%;
-}
-
-.item__name-input {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 0.35rem 0.45rem;
-  background: rgba(255, 255, 255, 0.55);
-  font: inherit;
-  font-weight: 700;
-  color: #2c3e50;
-}
-
-.item__name-input:hover,
-.item__name-input:focus {
-  border-color: rgba(213, 181, 234, 0.55);
-  background: rgba(255, 255, 255, 0.92);
-  outline: none;
 }
 
 .item__badge {
@@ -921,19 +1060,8 @@ onMounted(async () => {
 
 @media (prefers-color-scheme: dark) {
   .page-title,
-  .panel__title,
-  .item__name-input {
+  .panel__title {
     color: #f0e8f8;
-  }
-
-  .item__name-input {
-    background: rgba(35, 30, 48, 0.55);
-  }
-
-  .item__name-input:hover,
-  .item__name-input:focus {
-    background: rgba(35, 30, 48, 0.85);
-    border-color: rgba(213, 181, 234, 0.35);
   }
 
   .page-back {
@@ -952,12 +1080,32 @@ onMounted(async () => {
   }
 
   .panel,
-  .create-form input,
+  .create-form input:not(.name-field__input),
   .search,
-  .sort-select {
+  .sort-select,
+  .name-field {
     background: rgba(35, 30, 48, 0.78);
     border-color: rgba(213, 181, 234, 0.22);
     color: #f0e8f8;
+  }
+
+  .name-field__input {
+    color: #f0e8f8;
+  }
+
+  .name-field--item {
+    background: rgba(35, 30, 48, 0.55);
+    border-color: transparent;
+  }
+
+  .name-field--item:hover,
+  .name-field--item:focus-within {
+    background: rgba(35, 30, 48, 0.85);
+    border-color: rgba(213, 181, 234, 0.35);
+  }
+
+  .name-field__emoji :deep(.emoji-picker-field__trigger:hover:not(:disabled)) {
+    background: rgba(213, 181, 234, 0.2);
   }
 
   .sort-field__label {
@@ -965,37 +1113,110 @@ onMounted(async () => {
   }
 
   .item--neutral {
-    background: rgba(173, 129, 190, 0.12);
+    background: rgba(173, 129, 190, 0.18);
   }
 
-  .item--drain-1 { background: rgba(173, 129, 190, 0.1); }
-  .item--drain-2 { background: rgba(173, 129, 190, 0.16); }
-  .item--drain-3 { background: rgba(173, 129, 190, 0.24); }
-  .item--drain-4 { background: rgba(173, 129, 190, 0.3); }
-  .item--drain-5 { background: rgba(173, 129, 190, 0.36); }
+  .item--drain-1 { background: rgba(173, 129, 190, 0.18); }
+  .item--drain-2 { background: rgba(173, 129, 190, 0.26); }
+  .item--drain-3 { background: rgba(173, 129, 190, 0.34); }
+  .item--drain-4 { background: rgba(173, 129, 190, 0.42); }
+  .item--drain-5 { background: rgba(173, 129, 190, 0.5); }
 
-  .item--restore-1 { background: rgba(143, 162, 212, 0.1); }
-  .item--restore-2 { background: rgba(143, 162, 212, 0.16); }
-  .item--restore-3 { background: rgba(143, 162, 212, 0.24); }
-  .item--restore-4 { background: rgba(143, 162, 212, 0.3); }
-  .item--restore-5 { background: rgba(143, 162, 212, 0.36); }
+  .item--restore-1 { background: rgba(143, 162, 212, 0.18); }
+  .item--restore-2 { background: rgba(143, 162, 212, 0.26); }
+  .item--restore-3 { background: rgba(143, 162, 212, 0.34); }
+  .item--restore-4 { background: rgba(143, 162, 212, 0.42); }
+  .item--restore-5 { background: rgba(143, 162, 212, 0.5); }
+
+  .item__badge,
+  .item__badge--btn,
+  .item__badge--edit {
+    border: 1px solid transparent;
+  }
+
+  .item__badge--neutral {
+    background: rgba(213, 181, 234, 0.28);
+    border-color: rgba(213, 181, 234, 0.45);
+    color: #f5eafc;
+  }
+
+  .item__badge--drain-1,
+  .item__badge--drain-2 {
+    background: rgba(173, 129, 190, 0.45);
+    border-color: rgba(213, 181, 234, 0.5);
+    color: #f8efff;
+  }
+
+  .item__badge--drain-3 {
+    background: rgba(173, 129, 190, 0.58);
+    border-color: rgba(213, 181, 234, 0.6);
+    color: #fff;
+  }
 
   .item__badge--drain-4,
   .item__badge--drain-5 {
-    color: #e2c8f0;
+    background: rgba(186, 140, 210, 0.68);
+    border-color: rgba(230, 200, 245, 0.65);
+    color: #fff;
+  }
+
+  .item__badge--restore-1,
+  .item__badge--restore-2 {
+    background: rgba(143, 162, 212, 0.45);
+    border-color: rgba(180, 200, 235, 0.5);
+    color: #eef3ff;
+  }
+
+  .item__badge--restore-3 {
+    background: rgba(143, 162, 212, 0.58);
+    border-color: rgba(180, 200, 235, 0.6);
+    color: #fff;
   }
 
   .item__badge--restore-4,
   .item__badge--restore-5 {
-    color: #c5d2ea;
+    background: rgba(150, 175, 230, 0.68);
+    border-color: rgba(200, 220, 250, 0.65);
+    color: #fff;
+  }
+
+  .action-btn--plan {
+    background: linear-gradient(135deg, rgba(143, 162, 212, 0.7), rgba(120, 145, 200, 0.85));
+    border: 1px solid rgba(180, 200, 235, 0.55);
+    color: #fff;
+    font-weight: 800;
+  }
+
+  .action-btn--actual {
+    background: linear-gradient(135deg, rgba(173, 129, 190, 0.7), rgba(150, 110, 175, 0.85));
+    border: 1px solid rgba(213, 181, 234, 0.55);
+    color: #fff;
+    font-weight: 800;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+    color: #fff;
+    border-color: var(--color-primary-dark);
+  }
+
+  .effect-toggle {
+    background: rgba(213, 181, 234, 0.12);
+    border-color: rgba(213, 181, 234, 0.28);
+  }
+
+  .effect-toggle__btn {
+    color: #c5c0cb;
   }
 
   .effect-toggle__btn--drain.is-active {
-    color: #d5b5ea;
+    background: rgba(173, 129, 190, 0.45);
+    color: #f8efff;
   }
 
   .effect-toggle__btn--restore.is-active {
-    color: #b8c6e0;
+    background: rgba(143, 162, 212, 0.45);
+    color: #eef3ff;
   }
 }
 </style>
