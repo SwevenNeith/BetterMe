@@ -225,6 +225,68 @@ export function generateWorkoutSelection(candidates, opts = {}) {
 }
 
 /**
+ * Choisit un remplaçant pour un exercice dans une proposition.
+ * Déterministe : meilleur score hors exercices déjà présents / exclus.
+ * @returns {object|null}
+ */
+export function pickReplacementExercise(candidates, opts = {}) {
+  const {
+    replaceExercise = null,
+    currentExercises = [],
+    excludeIds = [],
+    muscleIds = [],
+    favoriteWgerIds = [],
+    preferFavorites = true,
+  } = opts
+
+  const usedIds = new Set(
+    [
+      ...currentExercises.map((ex) => Number(ex.id || ex.wger_id)),
+      ...excludeIds.map(Number),
+    ].filter(Boolean),
+  )
+
+  const usedVariations = new Set(
+    currentExercises
+      .map((ex) => ex.variationGroup || ex.variation_group || null)
+      .filter(Boolean),
+  )
+
+  const focusMuscles =
+    muscleIds.length > 0
+      ? muscleIds
+      : replaceExercise?.muscleIds || replaceExercise?.muscle_ids || []
+
+  const scored = (candidates || [])
+    .map((ex) => {
+      const id = Number(ex.id || ex.wger_id)
+      if (!id || usedIds.has(id)) return null
+      const variation = ex.variationGroup || ex.variation_group || null
+      if (variation && usedVariations.has(variation)) return null
+
+      let score = scoreExerciseForGenerator(ex, {
+        muscleIds: focusMuscles,
+        favoriteWgerIds,
+        preferFavorites,
+      })
+      if (!Number.isFinite(score) || score === -Infinity) return null
+
+      // Bonus si on garde au moins un muscle primaire de l’exercice remplacé
+      const replacedPrimary = new Set(
+        replaceExercise?.muscleIds || replaceExercise?.muscle_ids || [],
+      )
+      const primary = ex.muscleIds || ex.muscle_ids || []
+      if (primary.some((m) => replacedPrimary.has(Number(m)))) score += 5
+
+      return { ex, score }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score || Number(a.ex.id) - Number(b.ex.id))
+
+  return scored[0]?.ex || null
+}
+
+/**
  * Estimation durée (min) à partir des séries / repos.
  */
 export function estimateWorkoutDurationMin(exercises, opts = {}) {

@@ -241,6 +241,22 @@ function formatDate(iso) {
   filter: brightness(1.03);
 }
 
+@media (max-width: 640px) {
+  .sdp__grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.55rem;
+  }
+  .sdp-card__value {
+    font-size: 1.25rem;
+  }
+  .sdp__actions {
+    flex-direction: column;
+  }
+  .sdp-btn {
+    width: 100%;
+    min-height: 2.75rem;
+  }
+}
 @media (prefers-color-scheme: dark) {
   .sdp-card,
   .sdp-empty {
@@ -258,8 +274,11 @@ function formatDate(iso) {
   .sdp-card__label {
     color: #adb5bd;
   }
-  .sdp-btn {
+  .sdp-btn:not(.sdp-btn--primary) {
     background: rgba(42, 36, 56, 0.9);
+    color: #e9d5f5;
+  }
+  .sdp__active {
     color: #e9d5f5;
   }
 }

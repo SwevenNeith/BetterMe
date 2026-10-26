@@ -600,8 +600,9 @@ onUnmounted(() => {
   min-height: 2.75rem;
 }
 .swv-btn--primary {
-  background: rgba(173, 129, 190, 0.32);
-  border-color: rgba(173, 129, 190, 0.55);
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  border-color: transparent;
+  color: #fff;
 }
 .swv-btn--danger {
   color: #c0392b;
@@ -618,16 +619,55 @@ onUnmounted(() => {
   color: #c0392b;
   font-weight: 650;
 }
+@media (max-width: 640px) {
+  .swv {
+    padding: 0.85rem 0.75rem 5.5rem;
+  }
+  .swv__footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin: 1rem -0.75rem -0.5rem;
+    padding: 0.65rem 0.75rem calc(0.65rem + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.92) 28%);
+    backdrop-filter: blur(8px);
+  }
+  .swv__footer .swv-btn {
+    flex: 1 1 calc(50% - 0.45rem);
+  }
+}
 @media (prefers-color-scheme: dark) {
   .swv__title,
   .swv-card__name {
     color: #f0e8f8;
   }
+  .swv__timer,
+  .swv__progress,
+  .swv__muted,
+  .swv-card__desc,
+  .swv-form label,
+  .swv-last__title {
+    color: #c9b8d8;
+  }
   .swv-card,
-  .swv-input,
-  .swv-btn {
+  .swv-input {
     background: #2a2438;
     color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.25);
+  }
+  .swv-btn:not(.swv-btn--primary) {
+    background: #2a2438;
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.25);
+  }
+  .swv-rest {
+    background: rgba(143, 162, 212, 0.18);
+    color: #f0e8f8;
+  }
+  @media (max-width: 640px) {
+    .swv__footer {
+      background: linear-gradient(180deg, transparent, rgba(26, 22, 36, 0.96) 28%);
+    }
   }
 }
 </style>

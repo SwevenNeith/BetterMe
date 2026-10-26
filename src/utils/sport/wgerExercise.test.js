@@ -6,6 +6,7 @@ import {
   generateWorkoutSelection,
   normalizeWgerExercise,
   pickPreferredTranslation,
+  pickReplacementExercise,
   scoreExerciseForGenerator,
 } from './wgerExercise.js'
 
@@ -75,6 +76,23 @@ describe('generateWorkoutSelection', () => {
     assert.equal(a.exercises.length, 2)
     // Same variation group should not both be picked first
     assert.notEqual(a.exercises[0].variationGroup, a.exercises[1]?.variationGroup)
+  })
+})
+
+describe('pickReplacementExercise', () => {
+  it('returns another exercise and avoids current ids', () => {
+    const candidates = [
+      { id: 1, muscleIds: [10], variationGroup: 'a' },
+      { id: 2, muscleIds: [10], variationGroup: 'b' },
+      { id: 3, muscleIds: [4], variationGroup: 'c' },
+    ]
+    const next = pickReplacementExercise(candidates, {
+      replaceExercise: candidates[0],
+      currentExercises: [candidates[0]],
+      muscleIds: [10],
+    })
+    assert.ok(next)
+    assert.notEqual(next.id, 1)
   })
 })
 

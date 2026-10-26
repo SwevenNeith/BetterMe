@@ -146,34 +146,54 @@ export function clearWgerCache() {
   }
 }
 
-export async function listWgerMuscles(opts = {}) {
-  const rows = await fetchAllPages('/muscle/', { limit: 100 }, opts)
-  return rows.map((m) => ({
-    id: Number(m.id),
-    name: muscleLabelFr(m),
-    nameFull: m.name || '',
-    nameEn: m.name_en || '',
-    isFront: Boolean(m.is_front),
-    imageUrlMain: m.image_url_main || null,
-  }))
+function sortByFrName(a, b) {
+  return String(a.name || '').localeCompare(String(b.name || ''), 'fr', {
+    sensitivity: 'base',
+  })
 }
 
+export async function listWgerMuscles(opts = {}) {
+  const rows = await fetchAllPages('/muscle/', { limit: 100 }, opts)
+  return rows
+    .map((m) => ({
+      id: Number(m.id),
+      name: muscleLabelFr(m),
+      nameFull: m.name || '',
+      nameEn: m.name_en || '',
+      isFront: Boolean(m.is_front),
+      imageUrlMain: m.image_url_main || null,
+    }))
+    .sort(sortByFrName)
+}
+
+/**
+ * Catalogue matériel Wger complet (`/equipment/`).
+ * Wger n’en expose actuellement que ~12 — on paginer pour tout récupérer.
+ */
 export async function listWgerEquipment(opts = {}) {
   const rows = await fetchAllPages('/equipment/', { limit: 100 }, opts)
-  return rows.map((e) => ({
+  const mapped = rows.map((e) => ({
     id: Number(e.id),
     name: equipmentLabelFr(e),
     nameEn: e.name || '',
   }))
+  // Poids du corps (id 7) en premier, puis tri alpha FR
+  return mapped.sort((a, b) => {
+    if (a.id === 7) return -1
+    if (b.id === 7) return 1
+    return sortByFrName(a, b)
+  })
 }
 
 export async function listWgerCategories(opts = {}) {
   const rows = await fetchAllPages('/exercisecategory/', { limit: 100 }, opts)
-  return rows.map((c) => ({
-    id: Number(c.id),
-    name: categoryLabelFr(c),
-    nameEn: c.name || '',
-  }))
+  return rows
+    .map((c) => ({
+      id: Number(c.id),
+      name: categoryLabelFr(c),
+      nameEn: c.name || '',
+    }))
+    .sort(sortByFrName)
 }
 
 /**

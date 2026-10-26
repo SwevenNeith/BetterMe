@@ -135,7 +135,9 @@ function confirmDelete(id) {
   cursor: pointer;
 }
 .stp-btn--primary {
-  background: rgba(173, 129, 190, 0.3);
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  border-color: transparent;
+  color: #fff;
 }
 .stp-btn--danger {
   color: #c0392b;
@@ -159,12 +161,40 @@ function confirmDelete(id) {
   padding-left: 1.2rem;
   line-height: 1.5;
 }
+@media (max-width: 640px) {
+  .stp__create {
+    flex-direction: column;
+  }
+  .stp-input,
+  .stp-btn {
+    width: 100%;
+    min-height: 2.5rem;
+  }
+  .stp-card__actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .stp-card__actions .stp-btn--danger {
+    grid-column: 1 / -1;
+  }
+}
 @media (prefers-color-scheme: dark) {
+  .stp__muted {
+    color: #c9b8d8;
+  }
   .stp-card,
   .stp-input,
-  .stp-btn,
   .stp__detail {
     background: #2a2438;
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.22);
+  }
+  .stp-btn:not(.stp-btn--primary) {
+    background: #2a2438;
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.25);
+  }
+  .stp__detail-title {
     color: #f0e8f8;
   }
 }

@@ -248,12 +248,42 @@ function formatDate(iso) {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+@media (max-width: 640px) {
+  .shp__filters {
+    flex-direction: column;
+  }
+  .shp-field,
+  .shp-input {
+    width: 100%;
+  }
+  .shp-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .shp-btn {
+    min-height: 2.4rem;
+  }
+}
 @media (prefers-color-scheme: dark) {
+  .shp__muted,
+  .shp-field,
+  .shp-chart__title {
+    color: #c9b8d8;
+  }
   .shp-card,
   .shp-input,
-  .shp-btn,
   .shp__detail {
     background: #2a2438;
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.22);
+  }
+  .shp-btn {
+    background: #2a2438;
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.25);
+  }
+  .shp__detail-title,
+  .shp-ex h4 {
     color: #f0e8f8;
   }
 }

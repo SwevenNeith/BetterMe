@@ -6,6 +6,7 @@ import {
   estimateWorkoutDurationMin,
   exerciseMatchesEquipment,
   generateWorkoutSelection,
+  pickReplacementExercise,
   toExerciseSnapshot,
 } from '../../utils/sport/wgerExercise.js'
 
@@ -23,13 +24,17 @@ const selectedMuscles = ref([])
 const place = ref('gym') // gym | home | none
 const durationMin = ref(45)
 const exerciseCount = ref(6)
-const excludeIds = ref('')
 const preferFavorites = ref(true)
 const loading = ref(false)
+const replacingIndex = ref(/** @type {number|null} */ (null))
 const error = ref('')
 const warning = ref('')
 const proposal = ref([])
 const proposalName = ref('Séance générée')
+/** Pool filtré de la dernière génération (pour remplacements). */
+const candidatePool = ref([])
+/** Exercices écartés via « Remplacer » (évite de les reproposer tout de suite). */
+const rejectedIds = ref(/** @type {number[]} */ ([]))
 
 const allowedEquipment = computed(() => {
   if (place.value === 'none') return [WGER_EQUIPMENT.NONE]
@@ -53,51 +58,57 @@ function toggleMuscle(id) {
   selectedMuscles.value = arr
 }
 
+function toProposalItem(ex, previous = null) {
+  return {
+    ...ex,
+    target_sets: previous?.target_sets ?? 3,
+    target_reps: previous?.target_reps ?? 10,
+    rest_seconds: previous?.rest_seconds ?? 90,
+    target_weight: previous?.target_weight ?? null,
+    weight_unit: previous?.weight_unit || props.profile?.weight_unit || 'kg',
+    snapshot: toExerciseSnapshot(ex),
+  }
+}
+
+function filterCandidates(collected) {
+  let candidates = collected
+  const allowed = allowedEquipment.value
+  if (allowed) {
+    candidates = candidates.filter((ex) => exerciseMatchesEquipment(ex, allowed))
+  }
+  if (selectedMuscles.value.length) {
+    const want = new Set(selectedMuscles.value.map(Number))
+    candidates = candidates.filter(
+      (ex) =>
+        (ex.muscleIds || []).some((m) => want.has(Number(m))) ||
+        (ex.secondaryMuscleIds || []).some((m) => want.has(Number(m))),
+    )
+  }
+  return candidates
+}
+
 async function generate() {
   loading.value = true
   error.value = ''
   warning.value = ''
+  rejectedIds.value = []
   try {
     const muscleFilter = selectedMuscles.value[0] || null
     const collected = await collectWgerExercisesForGenerator(
       { muscleId: muscleFilter, pageSize: 40 },
       { maxPages: 3 },
     )
-    let candidates = collected
-    const allowed = allowedEquipment.value
-    if (allowed) {
-      candidates = candidates.filter((ex) => exerciseMatchesEquipment(ex, allowed))
-    }
-    // Filtre muscles client si plusieurs
-    if (selectedMuscles.value.length) {
-      const want = new Set(selectedMuscles.value.map(Number))
-      candidates = candidates.filter((ex) =>
-        (ex.muscleIds || []).some((m) => want.has(Number(m))) ||
-        (ex.secondaryMuscleIds || []).some((m) => want.has(Number(m))),
-      )
-    }
-    const exclude = String(excludeIds.value)
-      .split(',')
-      .map((s) => Number(s.trim()))
-      .filter(Boolean)
+    const candidates = filterCandidates(collected)
+    candidatePool.value = candidates
 
     const result = generateWorkoutSelection(candidates, {
       muscleIds: selectedMuscles.value,
       count: Number(exerciseCount.value) || 6,
       favoriteWgerIds: props.favoriteWgerIds || [],
-      excludeIds: exclude,
       preferFavorites: preferFavorites.value,
     })
 
-    proposal.value = result.exercises.map((ex) => ({
-      ...ex,
-      target_sets: 3,
-      target_reps: 10,
-      rest_seconds: 90,
-      target_weight: null,
-      weight_unit: props.profile?.weight_unit || 'kg',
-      snapshot: toExerciseSnapshot(ex),
-    }))
+    proposal.value = result.exercises.map((ex) => toProposalItem(ex))
 
     if (!proposal.value.length) {
       error.value =
@@ -119,13 +130,48 @@ async function generate() {
   } catch (err) {
     error.value = err?.message || 'Génération impossible (Wger ?).'
     proposal.value = []
+    candidatePool.value = []
   } finally {
     loading.value = false
   }
 }
 
 function removeAt(index) {
+  const removed = proposal.value[index]
+  if (removed?.id) {
+    rejectedIds.value = [...rejectedIds.value, Number(removed.id)]
+  }
   proposal.value = proposal.value.filter((_, i) => i !== index)
+}
+
+function replaceAt(index) {
+  const current = proposal.value[index]
+  if (!current) return
+  warning.value = ''
+  replacingIndex.value = index
+
+  const others = proposal.value.filter((_, i) => i !== index)
+  const replacement = pickReplacementExercise(candidatePool.value, {
+    replaceExercise: current,
+    currentExercises: others,
+    excludeIds: [...rejectedIds.value, Number(current.id)],
+    muscleIds: selectedMuscles.value,
+    favoriteWgerIds: props.favoriteWgerIds || [],
+    preferFavorites: preferFavorites.value,
+  })
+
+  if (!replacement) {
+    warning.value =
+      'Pas d’autre exercice compatible dans le catalogue chargé. Élargis les critères ou relance une génération.'
+    replacingIndex.value = null
+    return
+  }
+
+  rejectedIds.value = [...rejectedIds.value, Number(current.id)]
+  const next = [...proposal.value]
+  next[index] = toProposalItem(replacement, current)
+  proposal.value = next
+  replacingIndex.value = null
 }
 
 function move(index, dir) {
@@ -199,10 +245,6 @@ function asTemplatePayload() {
         </label>
       </div>
 
-      <label class="sgp-field">
-        Exclure IDs Wger (séparés par des virgules)
-        <input v-model="excludeIds" class="sgp-input" placeholder="9, 42" />
-      </label>
       <label class="sgp-check">
         <input v-model="preferFavorites" type="checkbox" />
         Prioriser mes favoris
@@ -222,7 +264,7 @@ function asTemplatePayload() {
         <input v-model="proposalName" class="sgp-input" />
       </label>
       <ul class="sgp__list">
-        <li v-for="(ex, index) in proposal" :key="ex.id" class="sgp-item">
+        <li v-for="(ex, index) in proposal" :key="`${ex.id}-${index}`" class="sgp-item">
           <div class="sgp-item__media" aria-hidden="true">
             <img
               v-if="ex.imageUrl || ex.snapshot?.image_url"
@@ -255,6 +297,15 @@ function asTemplatePayload() {
             <div class="sgp-item__actions">
               <button type="button" class="sgp-btn" :disabled="index === 0" @click="move(index, -1)">↑</button>
               <button type="button" class="sgp-btn" :disabled="index === proposal.length - 1" @click="move(index, 1)">↓</button>
+              <button
+                type="button"
+                class="sgp-btn"
+                :disabled="loading || replacingIndex === index || !candidatePool.length"
+                title="Proposer un autre exercice compatible"
+                @click="replaceAt(index)"
+              >
+                {{ replacingIndex === index ? '…' : 'Remplacer' }}
+              </button>
               <button type="button" class="sgp-btn" @click="removeAt(index)">Retirer</button>
             </div>
           </div>
@@ -434,13 +485,58 @@ function asTemplatePayload() {
   flex-wrap: wrap;
   gap: 0.4rem;
 }
+@media (max-width: 640px) {
+  .sgp__row {
+    grid-template-columns: 1fr;
+  }
+  .sgp-item {
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 0.55rem;
+  }
+  .sgp-item__media {
+    width: 52px;
+    height: 52px;
+  }
+  .sgp-chip {
+    min-height: 2.35rem;
+  }
+  .sgp-btn {
+    min-height: 2.5rem;
+  }
+  .sgp__actions {
+    flex-direction: column;
+  }
+  .sgp__actions .sgp-btn {
+    width: 100%;
+  }
+}
 @media (prefers-color-scheme: dark) {
+  .sgp__disclaimer,
+  .sgp__muted,
+  .sgp-field,
+  .sgp-item__targets label {
+    color: #c9b8d8;
+  }
+  .sgp-set {
+    border-color: rgba(213, 181, 234, 0.22);
+  }
+  .sgp-set legend {
+    color: #f0e8f8;
+  }
   .sgp-input,
   .sgp-chip,
-  .sgp-item,
-  .sgp-btn {
+  .sgp-item {
     background: #2a2438;
     color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.25);
+  }
+  .sgp-btn:not(.sgp-btn--primary) {
+    background: #2a2438;
+    color: #f0e8f8;
+    border-color: rgba(213, 181, 234, 0.25);
+  }
+  .sgp-chip--on {
+    background: rgba(173, 129, 190, 0.35);
   }
 }
 </style>

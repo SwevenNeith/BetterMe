@@ -152,8 +152,26 @@ function equipmentLabel(ex) {
   cursor: pointer;
 }
 .sec-btn--primary {
-  background: rgba(173, 129, 190, 0.28);
+  background: linear-gradient(135deg, rgba(213, 181, 234, 0.55), rgba(173, 129, 190, 0.45));
   border-color: rgba(173, 129, 190, 0.5);
+}
+@media (max-width: 640px) {
+  .sec {
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 0.65rem;
+    padding: 0.7rem;
+  }
+  .sec__media {
+    width: 64px;
+    height: 64px;
+  }
+  .sec__actions {
+    gap: 0.35rem;
+  }
+  .sec-btn {
+    min-height: 2.35rem;
+    padding: 0.4rem 0.55rem;
+  }
 }
 @media (prefers-color-scheme: dark) {
   .sec {
@@ -167,6 +185,9 @@ function equipmentLabel(ex) {
   .sec__line,
   .sec__desc {
     color: #c9b8d8;
+  }
+  .sec__badge {
+    color: #e9d5f5;
   }
   .sec-btn {
     background: #2a2438;

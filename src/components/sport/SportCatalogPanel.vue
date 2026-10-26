@@ -442,16 +442,50 @@ onUnmounted(() => {
   color: #3b2a4a;
   font-size: 0.92rem;
 }
+@media (max-width: 640px) {
+  .scp__filters {
+    grid-template-columns: 1fr;
+  }
+  .scp-check {
+    align-self: start;
+    padding-bottom: 0;
+  }
+  .scp-btn {
+    min-height: 2.5rem;
+  }
+  .scp-modal {
+    padding: 0.5rem;
+    align-items: end;
+  }
+  .scp-modal__card {
+    width: 100%;
+    max-height: 88vh;
+    border-radius: 16px 16px 12px 12px;
+  }
+}
 @media (prefers-color-scheme: dark) {
+  .scp-field,
+  .scp__hint,
+  .scp__muted,
+  .scp-check,
+  .scp__line {
+    color: #c9b8d8;
+  }
   .scp-input,
   .scp-btn,
-  .scp-modal__card {
+  .scp-modal__card,
+  .scp-custom {
     background: #2a2438;
     color: #f0e8f8;
     border-color: rgba(213, 181, 234, 0.25);
   }
-  .scp-modal__title {
+  .scp-modal__title,
+  .scp-custom__title {
     color: #f0e8f8;
+  }
+  .scp-modal__html :deep(p),
+  .scp-modal__text {
+    color: #e8d4f8;
   }
 }
 </style>

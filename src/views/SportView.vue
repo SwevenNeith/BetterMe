@@ -70,6 +70,8 @@ const profileSaving = ref(false)
 
 const muscles = ref([])
 const equipment = ref([])
+const refsLoading = ref(false)
+const refsError = ref('')
 const storedExercises = ref([])
 const templates = ref([])
 const templatesLoading = ref(false)
@@ -127,13 +129,25 @@ async function boot() {
   }
 }
 
-async function loadRefs() {
+async function loadRefs(force = false) {
+  refsLoading.value = true
+  refsError.value = ''
   try {
-    const [m, e] = await Promise.all([listWgerMuscles(), listWgerEquipment()])
+    const [m, e] = await Promise.all([
+      listWgerMuscles({ bypassCache: force }),
+      listWgerEquipment({ bypassCache: force }),
+    ])
     muscles.value = m
     equipment.value = e
+    if (!e.length) {
+      refsError.value = 'Aucun matériel renvoyé par Wger.'
+    }
   } catch (err) {
     console.warn('wger refs:', err)
+    refsError.value =
+      err?.message || 'Impossible de charger muscles / matériel depuis Wger.'
+  } finally {
+    refsLoading.value = false
   }
 }
 
@@ -388,6 +402,9 @@ watch(tab, (id) => {
   if (id === 'history') void loadHistory()
   if (id === 'workouts') void loadTemplates()
   if (id === 'dashboard') void refreshDashboard()
+  if ((id === 'profile' || id === 'generator') && (!equipment.value.length || !muscles.value.length)) {
+    void loadRefs(true)
+  }
 })
 
 onMounted(() => {
@@ -489,8 +506,11 @@ onMounted(() => {
           :profile="profile"
           :muscles="muscles"
           :equipment="equipment"
+          :refs-loading="refsLoading"
+          :refs-error="refsError"
           :saving="profileSaving"
           @save="saveProfile"
+          @reload-refs="loadRefs(true)"
         />
       </section>
     </template>
@@ -614,6 +634,41 @@ onMounted(() => {
   color: #6b4f7c;
 }
 
+@media (max-width: 720px) {
+  .sport-wrapper {
+    padding: 1rem 0.85rem 2.5rem;
+  }
+
+  .sport-title {
+    font-size: 1.55rem;
+  }
+
+  .sport-subtitle {
+    font-size: 0.92rem;
+  }
+
+  .sport-tabs {
+    gap: 0.25rem;
+    width: 100%;
+  }
+
+  .sport-tab {
+    flex: 1 1 auto;
+    padding: 0.5rem 0.55rem;
+    font-size: 0.78rem;
+    text-align: center;
+  }
+
+  .sport-card {
+    padding: 0.9rem 0.8rem;
+    border-radius: 14px;
+  }
+
+  .sport-basket {
+    font-size: 0.82rem;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   .sport-title {
     color: #f0e8f8;
@@ -641,6 +696,8 @@ onMounted(() => {
   }
   .sport-basket {
     color: #f0e8f8;
+    background: rgba(143, 162, 212, 0.14);
+    border-color: rgba(213, 181, 234, 0.22);
   }
 }
 </style>
