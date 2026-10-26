@@ -48,6 +48,7 @@ import {
   validateRankedResetDate,
 } from '../constants/jeux/lolRankedReset.js'
 import {
+  archiveLolSeason,
   candidateNewMatchIds,
   ensureLolSettings,
   fetchNewestStoredMatchMs,
@@ -413,7 +414,7 @@ async function applyRankedResetDate(dateYmd) {
 
   const label = formatRankedResetDateFr(checked.date)
   const ok = window.confirm(
-    `Les parties antérieures au ${label} seront supprimées définitivement. Continuer ?`,
+    `La saison actuelle sera archivée (si des parties existent), puis les parties antérieures au ${label} seront supprimées. Continuer ?`,
   )
   if (!ok) return
 
@@ -421,6 +422,24 @@ async function applyRankedResetDate(dateYmd) {
   rankedResetError.value = ''
   championsProgress.value = { inserted: 0, remaining: 0, pass: 0 }
   try {
+    // Snapshot avant purge : stats + rangs actuels
+    try {
+      await archiveLolSeason(account.puuid, {
+        seasonEnd: checked.date,
+        rankSolo: leagueSolo.value,
+        rankFlex: leagueFlex.value,
+        topChampions: topChampions.value,
+        label: `Saison jusqu’au ${label}`,
+      })
+    } catch (archiveErr) {
+      // Ne bloque pas le reset si l’historique n’est pas encore migré / 0 partie
+      if (archiveErr?.message?.includes('create-lol-season-history')) {
+        rankedResetError.value = archiveErr.message
+      } else {
+        console.warn('archive season:', archiveErr)
+      }
+    }
+
     await setRankedResetDateRemote(account.puuid, checked.date)
     rankedResetDate.value = checked.date
     rankedResetDraft.value = checked.date
@@ -876,6 +895,15 @@ onMounted(async () => {
                   championsTotalGames > 1 ? 's' : ''
                 }}
               </p>
+              <RouterLink
+                class="lol-champs__history-link"
+                :to="{
+                  path: '/league-of-legends/saisons',
+                  query: selectedAccount?.puuid ? { puuid: selectedAccount.puuid } : undefined,
+                }"
+              >
+                Saisons précédentes
+              </RouterLink>
             </div>
             <form class="lol-champs__reset-form" @submit.prevent="saveRankedResetFromUi">
               <label class="lol-champs__reset-label">
@@ -938,7 +966,7 @@ onMounted(async () => {
       <!-- Filtres + liste -->
       <section class="lol-card" aria-labelledby="lol-matches-title">
         <div class="lol-matches__head">
-          <h2 id="lol-matches-title" class="lol-card__title">Historique</h2>
+          <h2 id="lol-matches-title" class="lol-card__title">Historique des parties</h2>
           <button
             type="button"
             class="lol-btn"
@@ -1710,6 +1738,20 @@ a.lol-btn:focus-visible {
   gap: 0.45rem 0.55rem;
 }
 
+.lol-champs__history-link {
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: #8a739c;
+  text-decoration: none;
+  width: fit-content;
+}
+
+.lol-champs__history-link:hover {
+  color: #5e4a6c;
+  text-decoration: underline;
+}
+
 .lol-champs__reset-label {
   display: flex;
   flex-direction: column;
@@ -2277,8 +2319,13 @@ a.lol-btn:focus-visible {
   .lol-match__role,
   .lol-field__label,
   .lol-filter,
-  .lol-rank-card__queue {
+  .lol-rank-card__queue,
+  .lol-champs__history-link {
     color: #c9b8d8;
+  }
+
+  .lol-champs__history-link:hover {
+    color: #f0e8f8;
   }
 
   .lol-rank-card__wl {
@@ -2297,7 +2344,8 @@ a.lol-btn:focus-visible {
 
   .lol-card,
   .lol-rank-card,
-  .lol-tab {
+  .lol-tab,
+  .lol-champs__panel {
     background: rgba(35, 30, 48, 0.8);
     border-color: rgba(213, 181, 234, 0.22);
   }

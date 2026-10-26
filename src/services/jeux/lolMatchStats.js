@@ -128,6 +128,102 @@ export async function setRankedResetDateRemote(puuid, dateYmd) {
 }
 
 /**
+ * Compacte une entrée league Riot pour le snapshot saison.
+ * @param {object|null|undefined} entry
+ */
+export function serializeLolRankForHistory(entry) {
+  if (!entry || typeof entry !== 'object') return null
+  return {
+    queueType: entry.queueType || null,
+    tier: entry.tier || null,
+    rank: entry.rank || null,
+    leaguePoints: entry.leaguePoints ?? entry.lp ?? null,
+    wins: entry.wins ?? null,
+    losses: entry.losses ?? null,
+  }
+}
+
+/**
+ * Archive la saison courante avant un reset (0 partie → null).
+ * @param {string} puuid
+ * @param {{
+ *   seasonEnd: string,
+ *   rankSolo?: object|null,
+ *   rankFlex?: object|null,
+ *   label?: string|null,
+ *   topChampions?: object[]|null,
+ * }} payload
+ */
+export async function archiveLolSeason(puuid, payload) {
+  const champs = Array.isArray(payload?.topChampions)
+    ? payload.topChampions.map((c) => ({
+        champion_id: Number(c.championId) || Number(c.champion_id) || 0,
+        champion_name: String(c.championName || c.champion_name || ''),
+        games: Number(c.games) || 0,
+        wins: Number(c.wins) || 0,
+        win_rate: c.winRate ?? c.win_rate ?? null,
+        play_share: c.playShare ?? c.play_share ?? null,
+      }))
+    : null
+
+  const { data, error } = await supabase.rpc('archive_lol_season', {
+    p_puuid: puuid,
+    p_season_end: payload.seasonEnd,
+    p_rank_solo: serializeLolRankForHistory(payload.rankSolo),
+    p_rank_flex: serializeLolRankForHistory(payload.rankFlex),
+    p_label: payload.label || null,
+    p_top_champions: champs,
+  })
+  if (error) {
+    if (
+      error.message?.includes('archive_lol_season') ||
+      error.code === 'PGRST202' ||
+      error.code === '42883'
+    ) {
+      throw new Error(
+        'Table / fonction historique saisons introuvable. Applique scripts/create-lol-season-history.sql dans Supabase.',
+      )
+    }
+    throw error
+  }
+  return data
+}
+
+/**
+ * @param {string} puuid
+ * @returns {Promise<object[]>}
+ */
+export async function listLolSeasonHistory(puuid) {
+  const { data, error } = await supabase
+    .from('lol_season_history')
+    .select('*')
+    .eq('puuid', puuid)
+    .order('season_end', { ascending: false })
+    .limit(40)
+
+  if (error) {
+    if (error.code === '42P01' || error.message?.includes('lol_season_history')) {
+      return []
+    }
+    throw error
+  }
+  return data ?? []
+}
+
+/**
+ * @param {string} puuid
+ * @param {string} historyId
+ */
+export async function deleteLolSeasonHistory(puuid, historyId) {
+  const { error } = await supabase
+    .from('lol_season_history')
+    .delete()
+    .eq('id', historyId)
+    .eq('puuid', puuid)
+  if (error) throw error
+}
+
+/**
  * Déclenche l’Edge Function de synchro (JWT utilisateur).
  * @param {string} [puuid]
  * @param {{ matchIds?: string[], full?: boolean }} [options]

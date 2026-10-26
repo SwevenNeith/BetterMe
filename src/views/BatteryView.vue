@@ -2092,12 +2092,23 @@ onUnmounted(() => {
   .mini-chip:not(.is-active),
   .entry-form input,
   .entry-search-wrap input,
+  .entry-search-input,
   .sleep-time-field input,
   .today-btn,
   .history-btn {
-    background: rgba(35, 30, 48, 0.88);
+    background: rgba(35, 30, 48, 0.92) !important;
     border-color: rgba(213, 181, 234, 0.28);
-    color: #f0e8f8;
+    color: #f0e8f8 !important;
+    box-shadow: none;
+  }
+
+  .entry-search-input:focus {
+    border-color: rgba(213, 181, 234, 0.55);
+    box-shadow: 0 0 0 3px rgba(173, 129, 190, 0.22);
+  }
+
+  .entry-search-input::placeholder {
+    color: #9a8fa8;
   }
 
   .mini-chip:not(.is-active) {
