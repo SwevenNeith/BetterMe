@@ -22,6 +22,7 @@ const LeagueOfLegendsView = () => import('../views/LeagueOfLegendsView.vue')
 const LolMatchTrackerView = () => import('../views/LolMatchTrackerView.vue')
 const LolSeasonHistoryView = () => import('../views/LolSeasonHistoryView.vue')
 const SportView = () => import('../views/SportView.vue')
+const SportWorkoutView = () => import('../views/SportWorkoutView.vue')
 const WishListView = () => import('../views/WishListView.vue')
 const FinancesView = () => import('../views/FinancesView.vue')
 const CreationView = () => import('../views/CreationView.vue')
@@ -148,6 +149,11 @@ function createAppChildRoutes(namePrefix = '') {
       path: 'sport',
       name: n('sport'),
       component: SportView,
+    },
+    {
+      path: 'sport/seance/:sessionId',
+      name: n('sport-seance'),
+      component: SportWorkoutView,
     },
     {
       path: 'wishlist',
