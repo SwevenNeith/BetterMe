@@ -588,12 +588,17 @@ onMounted(() => {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.sport-tab:hover {
+.sport-tab:hover:not(.sport-tab--active) {
   background: rgba(255, 255, 255, 0.55);
 }
 
 .sport-tab--active {
   background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  color: #fff;
+}
+
+.sport-tab--active:hover {
+  background: linear-gradient(135deg, #c9a3e0, #9a6fb0);
   color: #fff;
 }
 
@@ -683,8 +688,12 @@ onMounted(() => {
   .sport-tab {
     color: #e9d5f5;
   }
-  .sport-tab:hover {
+  .sport-tab:hover:not(.sport-tab--active) {
     background: rgba(255, 255, 255, 0.08);
+  }
+
+  .sport-tab--active:hover {
+    color: #fff;
   }
   .sport-card {
     background: rgba(35, 30, 48, 0.75);

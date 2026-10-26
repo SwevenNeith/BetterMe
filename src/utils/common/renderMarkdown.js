@@ -7,6 +7,7 @@ import {
   NOTE_WIDGET_PLACEHOLDER_CLASS,
 } from '../notes/noteWidgets.js'
 import { extractNoteTierLists } from '../notes/noteTierLists.js'
+import { extractNoteCharts } from '../notes/noteCharts.js'
 import { injectHeadingIdsIntoHtml } from '../notes/noteTableOfContents.js'
 
 marked.setOptions({
@@ -75,7 +76,13 @@ const ALLOWED_ATTRS = {
   SPAN: new Set(['class', 'style', 'data-dict-id', 'data-dict-word', 'data-dict-alias']),
   MARK: new Set(['class', 'style']),
   U: new Set(['class']),
-  DIV: new Set(['class', 'data-widget-index', 'data-full-page', 'data-tierlist-index']),
+  DIV: new Set([
+    'class',
+    'data-widget-index',
+    'data-full-page',
+    'data-tierlist-index',
+    'data-chart-index',
+  ]),
   ABBR: new Set(['title']),
   H1: new Set(['id']),
   H2: new Set(['id']),
@@ -292,8 +299,9 @@ export function expandNoteWikiLinks(text, notes = []) {
  *   breaks?: boolean,
  *   enableHtmlWidgets?: boolean,
  *   enableTierLists?: boolean,
+ *   enableCharts?: boolean,
  * }} [options]
- * @returns {{ html: string, widgets: string[], tierLists: object[] }}
+ * @returns {{ html: string, widgets: string[], tierLists: object[], charts: object[] }}
  */
 export function renderMarkdownToSafeHtml(markdown, options = {}) {
   let source = String(markdown ?? '')
@@ -301,8 +309,10 @@ export function renderMarkdownToSafeHtml(markdown, options = {}) {
   let widgets = []
   /** @type {ReturnType<typeof extractNoteTierLists>['tierLists']} */
   let tierLists = []
+  /** @type {ReturnType<typeof extractNoteCharts>['charts']} */
+  let charts = []
 
-  if (!source.trim()) return { html: '', widgets, tierLists }
+  if (!source.trim()) return { html: '', widgets, tierLists, charts }
 
   // Note entière = document HTML : aperçu iframe (CSS/layout natifs)
   if (options.enableHtmlWidgets && isCompleteHtmlDocument(source)) {
@@ -315,14 +325,21 @@ export function renderMarkdownToSafeHtml(markdown, options = {}) {
       html: `<div class="${NOTE_WIDGET_PLACEHOLDER_CLASS} notes-html-widget--full-page" ${NOTE_WIDGET_INDEX_ATTR}="0" ${NOTE_WIDGET_FULL_PAGE_ATTR}="1"></div>`,
       widgets,
       tierLists,
+      charts,
     }
   }
 
-  // Extraire les tier lists avant le reste (sinon le fence devient un bloc de code)
+  // Extraire les tier lists / charts avant le reste (sinon le fence devient un bloc de code)
   if (options.enableTierLists) {
     const extractedTiers = extractNoteTierLists(source)
     source = extractedTiers.text
     tierLists = extractedTiers.tierLists
+  }
+
+  if (options.enableCharts) {
+    const extractedCharts = extractNoteCharts(source)
+    source = extractedCharts.text
+    charts = extractedCharts.charts
   }
 
   if (options.enableHtmlWidgets) {
@@ -346,6 +363,7 @@ export function renderMarkdownToSafeHtml(markdown, options = {}) {
     html: sanitizeMarkdownHtml(withHeadingIds),
     widgets,
     tierLists,
+    charts,
   }
 }
 

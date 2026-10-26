@@ -42,6 +42,13 @@ import {
   resolveTierListTheme,
 } from '../utils/notes/noteTierLists.js'
 import { mountNoteTierLists } from '../utils/notes/noteTierListsMount.js'
+import {
+  buildNoteChartFence,
+  createDefaultNoteChart,
+  replaceNoteChartAt,
+} from '../utils/notes/noteCharts.js'
+import { mountNoteCharts } from '../utils/notes/noteChartsMount.js'
+import { exportNoteAsPdf } from '../utils/notes/notePdfExport.js'
 import NotesTreeNode from '../components/notes/NotesTreeNode.vue'
 import NotesEditorContextMenu from '../components/notes/NotesEditorContextMenu.vue'
 import NotesTableOfContentsTree from '../components/notes/NotesTableOfContentsTree.vue'
@@ -837,11 +844,13 @@ const renderedPreview = computed(() =>
     breaks: isExtEnabled('line-breaks'),
     enableHtmlWidgets: isExtEnabled('html-widgets'),
     enableTierLists: isExtEnabled('tier-lists'),
+    enableCharts: isExtEnabled('charts'),
   }),
 )
 
 const previewWidgets = computed(() => renderedPreview.value.widgets)
 const previewTierLists = computed(() => renderedPreview.value.tierLists ?? [])
+const previewCharts = computed(() => renderedPreview.value.charts ?? [])
 
 const previewHtml = computed(() => {
   let html = renderedPreview.value.html
@@ -853,13 +862,17 @@ const previewHtml = computed(() => {
 
 let unmountPreviewWidgets = /** @type {null | (() => void)} */ (null)
 let unmountPreviewTierLists = /** @type {null | (() => void)} */ (null)
+let unmountPreviewCharts = /** @type {null | (() => void)} */ (null)
 /**
- * Évite de démonter les tier lists quand on synchronise depuis le widget.
+ * Évite de démonter les tier lists / charts quand on synchronise depuis le widget.
  * Reste true jusqu’au prochain cycle de watch (sinon le flush post remonte et vole le focus).
  */
 let syncingTierListFromPreview = false
+let syncingChartFromPreview = false
 /** Après un remontage forcé, refocus l’input d’ajout si l’utilisateur était en train d’ajouter. */
 let pendingTierListDraftFocus = false
+const pdfExportBusy = ref(false)
+const pdfExportError = ref('')
 
 function remountPreviewWidgets() {
   if (unmountPreviewWidgets) {
@@ -897,9 +910,29 @@ function remountPreviewTierLists() {
   })
 }
 
+function remountPreviewCharts() {
+  if (unmountPreviewCharts) {
+    unmountPreviewCharts()
+    unmountPreviewCharts = null
+  }
+  if (!previewEl.value || !isExtEnabled('charts')) return
+  unmountPreviewCharts = mountNoteCharts(previewEl.value, previewCharts.value, {
+    readonly: false,
+    onChange: (index, data) => {
+      syncingChartFromPreview = true
+      const result = replaceNoteChartAt(draftContent.value, index, data)
+      if (result.changed) {
+        draftContent.value = result.content
+        markDirty()
+      }
+    },
+  })
+}
+
 function remountPreviewInteractive() {
   remountPreviewWidgets()
   remountPreviewTierLists()
+  remountPreviewCharts()
 }
 
 const dictionaryLookup = computed(() =>
@@ -1974,6 +2007,59 @@ function insertTierListFromContextMenu() {
   viewMode.value = 'preview'
 }
 
+/**
+ * Insère un graphique (fence ```chart) et bascule en aperçu pour l’édition visuelle.
+ */
+function insertChartFromContextMenu() {
+  if (!isExtEnabled('charts') || !selectedNoteId.value) return
+  const menu = editorContextMenu.value
+  closeEditorContextMenu()
+
+  const editor = editorEl.value
+  if (
+    editor &&
+    menu?.source === 'editor' &&
+    Number.isFinite(menu.selectionStart)
+  ) {
+    const start = menu.selectionStart
+    const end = Number.isFinite(menu.selectionEnd) ? menu.selectionEnd : start
+    editor.focus()
+    editor.setSelectionRange(start, end)
+  }
+
+  insertMarkdownAtCursor(buildNoteChartFence(createDefaultNoteChart()))
+  viewMode.value = 'preview'
+}
+
+async function onExportNotePdf() {
+  if (!selectedNote.value || pdfExportBusy.value) return
+  pdfExportBusy.value = true
+  pdfExportError.value = ''
+  // Snapshot synchrone (pas besoin d’attendre la sauvegarde pour l’export)
+  const snapshot = {
+    title: draftTitle.value || selectedNote.value.title || 'Note',
+    markdown: draftContent.value,
+    notes: contextNotes.value,
+    enableWikiLinks: isExtEnabled('wikilinks'),
+    breaks: isExtEnabled('line-breaks'),
+    enableHtmlWidgets: isExtEnabled('html-widgets'),
+    enableTierLists: isExtEnabled('tier-lists'),
+    enableCharts: isExtEnabled('charts'),
+    vaultStyle: activeVaultStyle.value,
+  }
+  try {
+    // Sauvegarde en parallèle : l’export PDF n’utilise plus de pop-up
+    const savePromise = dirty.value ? flushSave() : Promise.resolve()
+    await exportNoteAsPdf(snapshot)
+    await savePromise
+  } catch (error) {
+    pdfExportError.value =
+      error instanceof Error ? error.message : 'Impossible d’exporter la note en PDF.'
+  } finally {
+    pdfExportBusy.value = false
+  }
+}
+
 function onContextWikiLink() {
   applyEditorSelectionFormat('wiki')
 }
@@ -2996,6 +3082,10 @@ onUnmounted(() => {
     unmountPreviewTierLists()
     unmountPreviewTierLists = null
   }
+  if (unmountPreviewCharts) {
+    unmountPreviewCharts()
+    unmountPreviewCharts = null
+  }
   if (cursorPreviewSyncTimer) {
     window.clearTimeout(cursorPreviewSyncTimer)
     cursorPreviewSyncTimer = 0
@@ -3031,11 +3121,15 @@ watch(userId, (id) => {
 })
 
 watch(
-  [previewHtml, previewWidgets, effectiveViewMode, activeVaultStyle],
+  [previewHtml, previewWidgets, previewCharts, effectiveViewMode, activeVaultStyle],
   async () => {
     if (syncingTierListFromPreview) {
       // La note a été mise à jour depuis la TierList : ne pas démonter (garde le focus).
       syncingTierListFromPreview = false
+      return
+    }
+    if (syncingChartFromPreview) {
+      syncingChartFromPreview = false
       return
     }
     await nextTick()
@@ -3519,6 +3613,20 @@ watch(draftFolderId, (value) => {
                 <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
               </svg>
             </button>
+            <button
+              type="button"
+              class="notes-page__pin-btn"
+              title="Exporter en PDF (même rendu que l’aperçu)"
+              :disabled="pdfExportBusy"
+              :aria-busy="pdfExportBusy"
+              @click="onExportNotePdf"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </button>
             <div class="notes-page__mode-switch" role="group" aria-label="Mode d’affichage">
               <button
                 type="button"
@@ -3545,6 +3653,7 @@ watch(draftFolderId, (value) => {
             </button>
           </div>
           <p v-if="saveError" class="notes-page__save-msg notes-page__save-msg--error">{{ saveError }}</p>
+          <p v-else-if="pdfExportError" class="notes-page__save-msg notes-page__save-msg--error">{{ pdfExportError }}</p>
           <p v-else-if="saveStatus" class="notes-page__save-msg">{{ saveStatus }}</p>
         </header>
 
@@ -3733,6 +3842,7 @@ watch(draftFolderId, (value) => {
       :dictionary-hit-label="editorContextSelectionHit?.word || ''"
       :rabbit-hole-enabled="isExtEnabled(RABBIT_HOLE_EXTENSION_ID)"
       :tier-lists-enabled="isExtEnabled('tier-lists')"
+      :charts-enabled="isExtEnabled('charts')"
       :can-paste="contextMenuCanPaste"
       :spellcheck="spellcheckMenu"
       :text-color-presets="TEXT_COLOR_PRESETS.slice(0, 20)"
@@ -3755,6 +3865,7 @@ watch(draftFolderId, (value) => {
       @dictionary-link="openDictionaryLinkModal(editorContextMenu?.word || '')"
       @rabbit-hole="openRabbitHoleModal"
       @tier-list="insertTierListFromContextMenu"
+      @chart="insertChartFromContextMenu"
       @dashboard-pin="pinNoteToDashboard"
       @open-tab="openNoteInNewTab(editorContextMenu?.noteId)"
       @spell-suggestion="applySpellSuggestion"
@@ -4486,6 +4597,11 @@ watch(draftFolderId, (value) => {
   background: rgba(213, 181, 234, 0.25);
 }
 
+.notes-page__pin-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 .notes-page__mode-switch {
   display: inline-flex;
   border: 1px solid var(--color-tertiary, #72a098);
@@ -4823,6 +4939,18 @@ watch(draftFolderId, (value) => {
 }
 
 :deep(.markdown-body .notes-tierlist-host) {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+}
+
+:deep(.markdown-body .notes-chart-widget) {
+  margin: 0.85em 0;
+  max-width: 100%;
+  min-width: 0;
+}
+
+:deep(.markdown-body .notes-chart-host) {
   display: block;
   max-width: 100%;
   min-width: 0;

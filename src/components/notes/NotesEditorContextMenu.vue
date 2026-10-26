@@ -23,6 +23,7 @@ const props = defineProps({
   dictionaryHitLabel: { type: String, default: '' },
   rabbitHoleEnabled: { type: Boolean, default: false },
   tierListsEnabled: { type: Boolean, default: false },
+  chartsEnabled: { type: Boolean, default: false },
   canPaste: { type: Boolean, default: false },
   spellcheck: {
     type: Object,
@@ -69,6 +70,7 @@ const emit = defineEmits([
   'dictionary-link',
   'rabbit-hole',
   'tier-list',
+  'chart',
   'dashboard-pin',
   'open-tab',
   'spell-suggestion',
@@ -595,6 +597,17 @@ function onEmojiClick(event) {
       >
         <span class="notes-ctx__ico" aria-hidden="true">▣</span>
         <span class="notes-ctx__label">Faire une TierList</span>
+      </button>
+      <button
+        v-if="isEditor && chartsEnabled"
+        type="button"
+        class="notes-ctx__item"
+        role="menuitem"
+        @mousedown.prevent
+        @click="run('chart')"
+      >
+        <span class="notes-ctx__ico" aria-hidden="true">▤</span>
+        <span class="notes-ctx__label">Insérer un graphique</span>
       </button>
       <button
         v-if="rabbitHoleEnabled && hasSelection"
