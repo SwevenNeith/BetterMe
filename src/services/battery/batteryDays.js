@@ -461,6 +461,16 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
 
   if (error) throw error
 
+  const durationPatched =
+    patch.durationChoice != null ||
+    'has_duration_override' in patch ||
+    'duration_minutes' in patch ||
+    'duration_all_day' in patch
+
+  if (durationPatched) {
+    await syncLinkedEntryDuration(supabase, userId, data)
+  }
+
   if (
     data.kind === BATTERY_ENTRY_KINDS.ACTUAL &&
     data.activity_id &&
@@ -468,13 +478,7 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
   ) {
     await maybeLearnDefaultCost(supabase, userId, data.activity_id, data.cost, data.id)
   }
-  if (
-    data.kind === BATTERY_ENTRY_KINDS.ACTUAL &&
-    data.activity_id &&
-    (patch.durationChoice != null ||
-      'has_duration_override' in patch ||
-      'duration_minutes' in patch)
-  ) {
+  if (data.kind === BATTERY_ENTRY_KINDS.ACTUAL && data.activity_id && durationPatched) {
     await maybeLearnDefaultDuration(supabase, userId, data.activity_id, data, data.id)
   }
 
@@ -486,6 +490,50 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
 
   if (day.error) throw day.error
   return recomputeAndPersistDay(supabase, userId, day.data)
+}
+
+/**
+ * Aligne la durée entre une entrée prévue et son réel lié (dans les deux sens).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {object} entry
+ */
+async function syncLinkedEntryDuration(supabase, userId, entry) {
+  const durationPayload = {
+    has_duration_override: Boolean(entry.has_duration_override),
+    duration_minutes: entry.duration_all_day
+      ? null
+      : entry.duration_minutes == null
+        ? null
+        : Number(entry.duration_minutes),
+    duration_all_day: Boolean(entry.duration_all_day),
+  }
+
+  if (entry.kind === BATTERY_ENTRY_KINDS.PLANNED && entry.completed_actual_id) {
+    await supabase
+      .from(ENTRIES_TABLE)
+      .update(durationPayload)
+      .eq('id', entry.completed_actual_id)
+      .eq('user_id', userId)
+    return
+  }
+
+  if (entry.kind === BATTERY_ENTRY_KINDS.ACTUAL) {
+    const { data: planned } = await supabase
+      .from(ENTRIES_TABLE)
+      .select('id')
+      .eq('user_id', userId)
+      .eq('kind', BATTERY_ENTRY_KINDS.PLANNED)
+      .eq('completed_actual_id', entry.id)
+      .maybeSingle()
+    if (planned?.id) {
+      await supabase
+        .from(ENTRIES_TABLE)
+        .update(durationPayload)
+        .eq('id', planned.id)
+        .eq('user_id', userId)
+    }
+  }
 }
 
 /**
@@ -786,6 +834,8 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
       cost,
       kind: BATTERY_ENTRY_KINDS.ACTUAL,
       sort_order: (actualRows ?? []).length,
+      source_type: existing.source_type || null,
+      source_id: existing.source_id || null,
       ...durationStamp,
     })
     .select(ENTRY_COLUMNS)
@@ -812,6 +862,7 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
           kind: BATTERY_ENTRY_KINDS.ACTUAL,
           cost,
           sort_order: (actualRows ?? []).length,
+          ...durationStamp,
         })
         .eq('id', entryId)
         .eq('user_id', userId)
@@ -824,6 +875,13 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
           userId,
           converted.activity_id,
           converted.cost,
+          converted.id,
+        )
+        await maybeLearnDefaultDuration(
+          supabase,
+          userId,
+          converted.activity_id,
+          converted,
           converted.id,
         )
       }
@@ -955,6 +1013,8 @@ export async function copyPlannedToActual(supabase, userId, dayIso) {
       cost: e.cost,
       kind: BATTERY_ENTRY_KINDS.ACTUAL,
       sort_order: i,
+      source_type: e.source_type || null,
+      source_id: e.source_id || null,
       ...durationStamp,
     })
   }

@@ -10,17 +10,29 @@ import {
   PAGE_VISIBILITY_UPDATED_EVENT,
 } from '../../services/settings/pageVisibility.js'
 import {
+  BATTERY_DURATION_ALL_DAY_ID,
+  BATTERY_DURATION_PRESETS,
+  BATTERY_SOURCE_TYPES,
+} from '../../constants/battery/battery.js'
+import {
+  attachEdtDurationsToEntries,
   BATTERY_UPDATED_EVENT,
   completePlannedBatteryEntry,
   isPlannedEntryDone,
   listBatteryPlannedForDay,
   persistBatteryEntryOrders,
+  updateBatteryEntry,
 } from '../../services/battery/batteryDays.js'
 import {
   costStyleClass,
   normalizeBatteryCost,
   sumEntryCosts,
 } from '../../utils/battery/batteryMath.js'
+import {
+  activeDurationPresetId,
+  formatBatteryDuration,
+  resolveBatteryDuration,
+} from '../../utils/battery/batteryDuration.js'
 import { normalizeDateISO } from '../../utils/habit/habitCalendar.js'
 
 const props = defineProps({
@@ -42,6 +54,8 @@ const dayBudget = ref(0)
 const completingId = ref(null)
 const actionError = ref('')
 const draggingId = ref(null)
+const durationEntryId = ref(null)
+const durationBusyId = ref(null)
 /** Coût saisi par entrée (chaîne vide = défaut). */
 const costDrafts = reactive(/** @type {Record<string, string>} */ ({}))
 
@@ -109,9 +123,9 @@ async function loadPlanned() {
   loadError.value = ''
   try {
     const { planned, day } = await listBatteryPlannedForDay(supabase, props.userId, dayIso)
-    plannedEntries.value = planned
+    plannedEntries.value = await attachEdtDurationsToEntries(supabase, props.userId, planned)
     dayBudget.value = Number(day?.computed_budget) || 0
-    for (const entry of planned) {
+    for (const entry of plannedEntries.value) {
       if (!(entry.id in costDrafts)) costDrafts[entry.id] = ''
     }
   } catch (err) {
@@ -124,9 +138,56 @@ async function loadPlanned() {
   }
 }
 
+/**
+ * @param {object} entry
+ */
+function entryResolvedDuration(entry) {
+  return resolveBatteryDuration(entry, entry?.edt_duration || null)
+}
+
+/**
+ * @param {object} entry
+ */
+function entryDurationLabel(entry) {
+  const resolved = entryResolvedDuration(entry)
+  if (resolved.source === 'none') return ''
+  return formatBatteryDuration(resolved)
+}
+
+/**
+ * @param {object} entry
+ */
+function entryDurationPresetActive(entry) {
+  return activeDurationPresetId(entryResolvedDuration(entry))
+}
+
+function toggleDurationPicker(entry) {
+  if (isPlannedEntryDone(entry)) return
+  durationEntryId.value = durationEntryId.value === entry.id ? null : entry.id
+}
+
+async function applyEntryDuration(entry, choice) {
+  if (!props.userId || !entry?.id || durationBusyId.value || isPlannedEntryDone(entry)) return
+  durationBusyId.value = entry.id
+  actionError.value = ''
+  try {
+    await updateBatteryEntry(supabase, props.userId, entry.id, {
+      durationChoice: choice,
+    })
+    durationEntryId.value = null
+    await loadPlanned()
+  } catch (err) {
+    console.error(err)
+    actionError.value = err?.message || 'Impossible d’enregistrer la durée.'
+  } finally {
+    durationBusyId.value = null
+  }
+}
+
 async function markDone(entry) {
   if (!props.userId || completingId.value) return
   completingId.value = entry.id
+  durationEntryId.value = null
   actionError.value = ''
   try {
     await completePlannedBatteryEntry(supabase, props.userId, entry.id, {
@@ -271,41 +332,120 @@ watch(
           @drop="onDrop(entry.id, $event)"
           @dragend="onDragEnd"
         >
-          <h4 class="event-title">{{ entry.label }}</h4>
+          <div class="event-row">
+            <h4 class="event-title">{{ entry.label }}</h4>
 
-          <span
-            class="event-cost"
-            :class="`event-cost--${costStyleClass(entry.cost)}`"
-          >
-            {{ formatCost(entry.cost) }}
-          </span>
-
-          <span
-            v-if="isPlannedEntryDone(entry)"
-            class="event-done-pill"
-          >
-            Fait
-          </span>
-          <div v-else class="event-complete">
-            <input
-              v-model="costDrafts[entry.id]"
-              class="event-complete__input"
-              type="number"
-              min="0"
-              step="0.5"
-              inputmode="decimal"
-              :placeholder="String(defaultAmount(entry.cost))"
-              :disabled="completingId === entry.id"
-              :aria-label="`Coût réel pour ${entry.label}`"
-              :title="`Coût réel (défaut ${defaultAmount(entry.cost)})`"
-            />
             <button
               type="button"
-              class="event-complete__btn"
-              :disabled="completingId === entry.id"
-              @click="markDone(entry)"
+              class="event-duration"
+              :class="{
+                'is-active': durationEntryId === entry.id,
+                'is-overridden': entryResolvedDuration(entry).overriddenFromEdt,
+              }"
+              :disabled="isPlannedEntryDone(entry)"
+              :title="
+                entryResolvedDuration(entry).overriddenFromEdt
+                  ? 'Durée modifiée par rapport à l’EDT'
+                  : 'Modifier la durée'
+              "
+              @click="toggleDurationPicker(entry)"
             >
-              {{ completingId === entry.id ? '…' : 'Fait' }}
+              {{ entryDurationLabel(entry) || 'Durée' }}
+            </button>
+
+            <span
+              class="event-cost"
+              :class="`event-cost--${costStyleClass(entry.cost)}`"
+            >
+              {{ formatCost(entry.cost) }}
+            </span>
+
+            <span
+              v-if="isPlannedEntryDone(entry)"
+              class="event-done-pill"
+            >
+              Fait
+            </span>
+            <div v-else class="event-complete">
+              <input
+                v-model="costDrafts[entry.id]"
+                class="event-complete__input"
+                type="number"
+                min="0"
+                step="0.5"
+                inputmode="decimal"
+                :placeholder="String(defaultAmount(entry.cost))"
+                :disabled="completingId === entry.id"
+                :aria-label="`Coût réel pour ${entry.label}`"
+                :title="`Coût réel (défaut ${defaultAmount(entry.cost)})`"
+              />
+              <button
+                type="button"
+                class="event-complete__btn"
+                :disabled="completingId === entry.id"
+                @click="markDone(entry)"
+              >
+                {{ completingId === entry.id ? '…' : 'Fait' }}
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="durationEntryId === entry.id"
+            class="event-duration-chips"
+            role="group"
+            :aria-label="`Durée pour ${entry.label}`"
+          >
+            <button
+              v-for="preset in BATTERY_DURATION_PRESETS"
+              :key="preset.id"
+              type="button"
+              class="event-duration-chip"
+              :class="{ 'is-active': entryDurationPresetActive(entry) === preset.id }"
+              :disabled="durationBusyId === entry.id"
+              @click="
+                applyEntryDuration(
+                  entry,
+                  preset.id === 'over_2h' ? 'over_2h' : preset.minutes,
+                )
+              "
+            >
+              {{ preset.label }}
+            </button>
+            <button
+              v-if="
+                entryDurationPresetActive(entry) &&
+                String(entryDurationPresetActive(entry)).startsWith('custom:')
+              "
+              type="button"
+              class="event-duration-chip is-active"
+              disabled
+            >
+              {{ entryDurationLabel(entry) }}
+            </button>
+            <button
+              type="button"
+              class="event-duration-chip"
+              :class="{
+                'is-active': entryDurationPresetActive(entry) === BATTERY_DURATION_ALL_DAY_ID,
+              }"
+              :disabled="durationBusyId === entry.id"
+              @click="applyEntryDuration(entry, 'all_day')"
+            >
+              Journée entière
+            </button>
+            <button
+              type="button"
+              class="event-duration-chip event-duration-chip--reset"
+              :disabled="durationBusyId === entry.id"
+              :title="
+                entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE
+                  ? 'Revenir à la durée de l’EDT'
+                  : 'Effacer la durée'
+              "
+              @click="applyEntryDuration(entry, 'reset')"
+            >
+              Défaut
             </button>
           </div>
         </div>
@@ -422,9 +562,8 @@ watch(
   border-radius: 10px;
   padding: 0.45rem 0.6rem;
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.35rem;
   box-shadow: none;
   position: relative;
   overflow: hidden;
@@ -432,6 +571,15 @@ watch(
   cursor: grab;
   touch-action: manipulation;
   color: #5e4a6c;
+}
+
+.event-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
 }
 
 .dashboard-event-card:active {
@@ -482,6 +630,67 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.event-duration {
+  flex-shrink: 0;
+  border: 1px solid rgba(143, 162, 212, 0.4);
+  background: rgba(143, 162, 212, 0.14);
+  color: #5a6b8a;
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.event-duration:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.event-duration.is-active,
+.event-duration:hover:not(:disabled) {
+  background: rgba(143, 162, 212, 0.26);
+  border-color: rgba(143, 162, 212, 0.65);
+}
+
+.event-duration.is-overridden {
+  border-style: dashed;
+}
+
+.event-duration-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: 0.1rem;
+}
+
+.event-duration-chip {
+  flex: 0 0 auto;
+  border: 1px solid rgba(143, 162, 212, 0.35);
+  background: rgba(255, 255, 255, 0.75);
+  color: #5a6b8a;
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.event-duration-chip.is-active {
+  background: rgba(143, 162, 212, 0.28);
+  border-color: rgba(143, 162, 212, 0.65);
+  color: #3d4f6f;
+}
+
+.event-duration-chip--reset {
+  border-style: dashed;
+  color: #8a9098;
 }
 
 .event-cost {

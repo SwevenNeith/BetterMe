@@ -40,7 +40,6 @@ import {
   persistBatteryEntryOrders,
   updateBatteryDay,
   updateBatteryEntry,
-  updatePlannedSkipReason,
 } from '../services/battery/batteryDays.js'
 import { getBatterySettings } from '../services/battery/batterySettings.js'
 import {
@@ -192,9 +191,6 @@ const pendingPlannedEntries = computed(() =>
 )
 
 /** Id de l’entrée dont on choisit la raison « non fait ». */
-const skipReasonEntryId = ref(null)
-const skipReasonBusyId = ref(null)
-
 function skipReasonLabel(reasonId) {
   return BATTERY_SKIP_REASONS.find((r) => r.id === reasonId)?.label || ''
 }
@@ -418,7 +414,6 @@ async function submitEntry() {
 
 function toggleDurationPicker(entry) {
   durationEntryId.value = durationEntryId.value === entry.id ? null : entry.id
-  if (durationEntryId.value) skipReasonEntryId.value = null
 }
 
 async function applyEntryDuration(entry, choice) {
@@ -519,7 +514,6 @@ async function markPlannedDone(entry) {
   if (!userId.value || !entry?.id || completingPlannedId.value) return
   if (isPlannedEntryDone(entry)) return
   completingPlannedId.value = entry.id
-  skipReasonEntryId.value = null
   statusMessage.value = ''
   try {
     await completePlannedBatteryEntry(supabase, userId.value, entry.id)
@@ -530,33 +524,6 @@ async function markPlannedDone(entry) {
     statusMessage.value = err?.message || 'Impossible de marquer comme fait'
   } finally {
     completingPlannedId.value = null
-  }
-}
-
-function openSkipReasonPicker(entry) {
-  if (!isPlannedEntryPending(entry)) return
-  skipReasonEntryId.value = skipReasonEntryId.value === entry.id ? null : entry.id
-  if (skipReasonEntryId.value) durationEntryId.value = null
-}
-
-async function setPlannedSkipReason(entry, reasonId) {
-  if (!userId.value || !entry?.id || skipReasonBusyId.value) return
-  if (!isPlannedEntryPending(entry)) return
-  skipReasonBusyId.value = entry.id
-  statusMessage.value = ''
-  try {
-    const next = entry.skip_reason === reasonId ? null : reasonId
-    await updatePlannedSkipReason(supabase, userId.value, entry.id, next)
-    entries.value = entries.value.map((row) =>
-      row.id === entry.id ? { ...row, skip_reason: next } : row,
-    )
-    skipReasonEntryId.value = null
-    statusMessage.value = next ? 'Raison enregistrée' : 'Raison retirée'
-  } catch (err) {
-    console.error(err)
-    statusMessage.value = err?.message || 'Impossible d’enregistrer la raison'
-  } finally {
-    skipReasonBusyId.value = null
   }
 }
 
@@ -934,7 +901,6 @@ onUnmounted(() => {
           prévue{{ pendingPlannedEntries.length > 1 ? 's' : '' }} encore non faite{{
             pendingPlannedEntries.length > 1 ? 's' : ''
           }}.
-          Tu peux indiquer une raison (optionnel) via « Non fait ».
         </p>
         <p v-if="planOverBudget" class="plan-hint">
           Ton plan ({{ plannedSpent }} pts) dépasse ton budget du jour ({{ budget }}, soit
@@ -1087,17 +1053,6 @@ onUnmounted(() => {
                   >
                     {{ completingPlannedId === entry.id ? '…' : 'Fait' }}
                   </button>
-                  <button
-                    v-if="!isPlannedEntryDone(entry)"
-                    type="button"
-                    class="skip-btn"
-                    :class="{ 'is-active': skipReasonEntryId === entry.id || entry.skip_reason }"
-                    :disabled="skipReasonBusyId === entry.id"
-                    :aria-label="`Raison de non-réalisation pour « ${entry.label} »`"
-                    @click="openSkipReasonPicker(entry)"
-                  >
-                    Non fait
-                  </button>
                   <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
                 </div>
                 <div
@@ -1156,24 +1111,6 @@ onUnmounted(() => {
                     @click="applyEntryDuration(entry, 'reset')"
                   >
                     Défaut
-                  </button>
-                </div>
-                <div
-                  v-if="skipReasonEntryId === entry.id"
-                  class="skip-reasons"
-                  role="group"
-                  :aria-label="`Choisir une raison pour ${entry.label}`"
-                >
-                  <button
-                    v-for="reason in BATTERY_SKIP_REASONS"
-                    :key="reason.id"
-                    type="button"
-                    class="skip-chip"
-                    :class="{ 'is-active': entry.skip_reason === reason.id }"
-                    :disabled="skipReasonBusyId === entry.id"
-                    @click="setPlannedSkipReason(entry, reason.id)"
-                  >
-                    {{ reason.label }}
                   </button>
                 </div>
               </li>
@@ -2094,7 +2031,6 @@ onUnmounted(() => {
 .entry-row__main > .duration-tag,
 .entry-row__main > .cost-tag,
 .entry-row__main > .fait-btn,
-.entry-row__main > .skip-btn,
 .entry-row__main > .icon-btn {
   flex: 0 0 auto;
 }
