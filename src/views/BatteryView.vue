@@ -7,6 +7,7 @@ import {
   BATTERY_ENTRY_KINDS,
   BATTERY_EVENING_FEELINGS,
   BATTERY_MORNING_LABELS,
+  BATTERY_SKIP_REASONS,
   BATTERY_SLEEP_QUALITIES,
   BATTERY_SOURCE_TYPES,
 } from '../constants/battery/battery.js'
@@ -31,9 +32,11 @@ import {
   deleteBatteryEntry,
   ensureBatteryDay,
   isPlannedEntryDone,
+  isPlannedEntryPending,
   persistBatteryEntryOrders,
   updateBatteryDay,
   updateBatteryEntry,
+  updatePlannedSkipReason,
 } from '../services/battery/batteryDays.js'
 import { getBatterySettings } from '../services/battery/batterySettings.js'
 import {
@@ -42,11 +45,13 @@ import {
   hoursBetweenTimes,
   lieInMinutes,
   normalizeBatteryCost,
+  completionRatePercent,
   remainingEnergy,
   shiftDayIso,
   sumEntryCosts,
   toTimeInputValue,
 } from '../utils/battery/batteryMath.js'
+import { formatCompletionRate } from '../utils/battery/batteryInsights.js'
 import BatteryGauge from '../components/battery/BatteryGauge.vue'
 
 defineOptions({ name: 'BatteryView' })
@@ -127,6 +132,18 @@ const planOverBudget = computed(
 const planOverflow = computed(() =>
   planOverBudget.value ? plannedSpent.value - budget.value : 0,
 )
+const dayCompletionRate = computed(() => completionRatePercent(entries.value))
+const pendingPlannedEntries = computed(() =>
+  plannedEntries.value.filter((e) => isPlannedEntryPending(e)),
+)
+
+/** Id de l’entrée dont on choisit la raison « non fait ». */
+const skipReasonEntryId = ref(null)
+const skipReasonBusyId = ref(null)
+
+function skipReasonLabel(reasonId) {
+  return BATTERY_SKIP_REASONS.find((r) => r.id === reasonId)?.label || ''
+}
 
 const sleepDurationHours = computed(() =>
   hoursBetweenTimes(sleepBedtime.value, sleepWakeTime.value),
@@ -379,6 +396,7 @@ async function markPlannedDone(entry) {
   if (!userId.value || !entry?.id || completingPlannedId.value) return
   if (isPlannedEntryDone(entry)) return
   completingPlannedId.value = entry.id
+  skipReasonEntryId.value = null
   statusMessage.value = ''
   try {
     await completePlannedBatteryEntry(supabase, userId.value, entry.id)
@@ -389,6 +407,32 @@ async function markPlannedDone(entry) {
     statusMessage.value = err?.message || 'Impossible de marquer comme fait'
   } finally {
     completingPlannedId.value = null
+  }
+}
+
+function openSkipReasonPicker(entry) {
+  if (!isPlannedEntryPending(entry)) return
+  skipReasonEntryId.value = skipReasonEntryId.value === entry.id ? null : entry.id
+}
+
+async function setPlannedSkipReason(entry, reasonId) {
+  if (!userId.value || !entry?.id || skipReasonBusyId.value) return
+  if (!isPlannedEntryPending(entry)) return
+  skipReasonBusyId.value = entry.id
+  statusMessage.value = ''
+  try {
+    const next = entry.skip_reason === reasonId ? null : reasonId
+    await updatePlannedSkipReason(supabase, userId.value, entry.id, next)
+    entries.value = entries.value.map((row) =>
+      row.id === entry.id ? { ...row, skip_reason: next } : row,
+    )
+    skipReasonEntryId.value = null
+    statusMessage.value = next ? 'Raison enregistrée' : 'Raison retirée'
+  } catch (err) {
+    console.error(err)
+    statusMessage.value = err?.message || 'Impossible d’enregistrer la raison'
+  } finally {
+    skipReasonBusyId.value = null
   }
 }
 
@@ -745,6 +789,11 @@ onUnmounted(() => {
           <span>Total réel <strong>{{ spent }}</strong></span>
           <span class="dot">·</span>
           <span>Écart <strong>{{ spent - plannedSpent }}</strong></span>
+          <span class="dot">·</span>
+          <span>
+            Réalisation
+            <strong>{{ formatCompletionRate(dayCompletionRate) }}</strong>
+          </span>
           <button
             v-if="plannedEntries.length && !actualEntries.length"
             type="button"
@@ -754,6 +803,15 @@ onUnmounted(() => {
             Copier le plan → réel
           </button>
         </div>
+        <p v-if="pendingPlannedEntries.length" class="plan-hint plan-hint--soft">
+          {{ pendingPlannedEntries.length }} activité{{
+            pendingPlannedEntries.length > 1 ? 's' : ''
+          }}
+          prévue{{ pendingPlannedEntries.length > 1 ? 's' : '' }} encore non faite{{
+            pendingPlannedEntries.length > 1 ? 's' : ''
+          }}.
+          Tu peux indiquer une raison (optionnel) via « Non fait ».
+        </p>
         <p v-if="planOverBudget" class="plan-hint">
           Ton plan ({{ plannedSpent }} pts) dépasse ton budget du jour ({{ budget }}, soit
           {{ planOverflow }} de trop).
@@ -830,24 +888,62 @@ onUnmounted(() => {
                 @drop="onEntryDrop(BATTERY_ENTRY_KINDS.PLANNED, entry.id, $event)"
                 @dragend="onEntryDragEnd"
               >
-                <span class="entry-label" title="Glisser pour réordonner">
-                  {{ entry.label }}
-                  <span v-if="isPlannedEntryDone(entry)" class="entry-done-pill">fait</span>
-                </span>
-                <span class="cost-tag" :class="`cost-tag--${costStyleClass(entry.cost)}`">
-                  {{ formatCost(entry.cost) }}
-                </span>
-                <button
-                  v-if="!isPlannedEntryDone(entry)"
-                  type="button"
-                  class="fait-btn"
-                  :disabled="completingPlannedId === entry.id"
-                  :aria-label="`Marquer « ${entry.label} » comme fait`"
-                  @click="markPlannedDone(entry)"
+                <div class="entry-row__main">
+                  <span class="entry-label" title="Glisser pour réordonner">
+                    {{ entry.label }}
+                    <span v-if="isPlannedEntryDone(entry)" class="entry-done-pill">fait</span>
+                    <span
+                      v-else-if="entry.skip_reason"
+                      class="entry-skip-pill"
+                      :title="skipReasonLabel(entry.skip_reason)"
+                    >
+                      {{ skipReasonLabel(entry.skip_reason) }}
+                    </span>
+                  </span>
+                  <span class="cost-tag" :class="`cost-tag--${costStyleClass(entry.cost)}`">
+                    {{ formatCost(entry.cost) }}
+                  </span>
+                  <button
+                    v-if="!isPlannedEntryDone(entry)"
+                    type="button"
+                    class="fait-btn"
+                    :disabled="completingPlannedId === entry.id"
+                    :aria-label="`Marquer « ${entry.label} » comme fait`"
+                    @click="markPlannedDone(entry)"
+                  >
+                    {{ completingPlannedId === entry.id ? '…' : 'Fait' }}
+                  </button>
+                  <button
+                    v-if="!isPlannedEntryDone(entry)"
+                    type="button"
+                    class="skip-btn"
+                    :class="{ 'is-active': skipReasonEntryId === entry.id || entry.skip_reason }"
+                    :disabled="skipReasonBusyId === entry.id"
+                    :aria-label="`Raison de non-réalisation pour « ${entry.label} »`"
+                    @click="openSkipReasonPicker(entry)"
+                  >
+                    Non fait
+                  </button>
+                  <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
+                </div>
+                <div
+                  v-if="skipReasonEntryId === entry.id"
+                  class="skip-reasons"
+                  role="group"
+                  :aria-label="`Choisir une raison pour ${entry.label}`"
                 >
-                  {{ completingPlannedId === entry.id ? '…' : 'Fait' }}
-                </button>
-                <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
+                  <button
+                    v-for="reason in BATTERY_SKIP_REASONS"
+                    :key="reason.id"
+                    type="button"
+                    class="skip-chip"
+                    :class="{ 'is-active': entry.skip_reason === reason.id }"
+                    :disabled="skipReasonBusyId === entry.id"
+                    @click="setPlannedSkipReason(entry, reason.id)"
+                  >
+                    {{ reason.label }}
+                  </button>
+                </div>
               </li>
               <li v-if="!plannedEntries.length" class="empty-line">Rien de planifié</li>
             </ul>
@@ -869,33 +965,35 @@ onUnmounted(() => {
                 @drop="onEntryDrop(BATTERY_ENTRY_KINDS.ACTUAL, entry.id, $event)"
                 @dragend="onEntryDragEnd"
               >
-                <span class="entry-label" title="Glisser pour réordonner chronologiquement">
-                  {{ entry.label }}
-                </span>
-                <input
-                  v-if="editingCostEntryId === entry.id"
-                  :data-cost-edit="entry.id"
-                  v-model.number="editingCostValue"
-                  class="cost-tag cost-tag--edit"
-                  :class="`cost-tag--${costStyleClass(editingCostValue)}`"
-                  type="number"
-                  step="0.5"
-                  aria-label="Modifier le coût"
-                  @keydown.enter.prevent="commitEditActualCost(entry)"
-                  @keydown.escape.prevent="cancelEditActualCost"
-                  @blur="commitEditActualCost(entry)"
-                />
-                <button
-                  v-else
-                  type="button"
-                  class="cost-tag cost-tag--btn"
-                  :class="`cost-tag--${costStyleClass(entry.cost)}`"
-                  title="Modifier le coût"
-                  @click="startEditActualCost(entry)"
-                >
-                  {{ formatCost(entry.cost) }}
-                </button>
-                <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
+                <div class="entry-row__main">
+                  <span class="entry-label" title="Glisser pour réordonner chronologiquement">
+                    {{ entry.label }}
+                  </span>
+                  <input
+                    v-if="editingCostEntryId === entry.id"
+                    :data-cost-edit="entry.id"
+                    v-model.number="editingCostValue"
+                    class="cost-tag cost-tag--edit"
+                    :class="`cost-tag--${costStyleClass(editingCostValue)}`"
+                    type="number"
+                    step="0.5"
+                    aria-label="Modifier le coût"
+                    @keydown.enter.prevent="commitEditActualCost(entry)"
+                    @keydown.escape.prevent="cancelEditActualCost"
+                    @blur="commitEditActualCost(entry)"
+                  />
+                  <button
+                    v-else
+                    type="button"
+                    class="cost-tag cost-tag--btn"
+                    :class="`cost-tag--${costStyleClass(entry.cost)}`"
+                    title="Modifier le coût"
+                    @click="startEditActualCost(entry)"
+                  >
+                    {{ formatCost(entry.cost) }}
+                  </button>
+                  <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
+                </div>
               </li>
               <li v-if="!actualEntries.length" class="empty-line">Aucune activité réelle</li>
             </ul>
@@ -1317,6 +1415,10 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 
+.plan-hint--soft {
+  color: #6d5a7e;
+}
+
 .check-panel {
   margin-bottom: 1rem;
   padding: 1rem 1.15rem 1.1rem;
@@ -1658,16 +1760,26 @@ onUnmounted(() => {
 }
 
 .entry-row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
   border-radius: 10px;
   padding: 0.25rem 0.35rem;
 }
 
-.entry-row--plan:not(.entry-row--done) {
-  grid-template-columns: 1fr auto auto auto;
+.entry-row__main {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.entry-row--plan:not(.entry-row--done) .entry-row__main {
+  grid-template-columns: 1fr auto auto auto auto;
+}
+
+.entry-row--actual .entry-row__main {
+  grid-template-columns: 1fr auto auto;
 }
 
 .entry-row--plan,
@@ -1707,6 +1819,58 @@ onUnmounted(() => {
 .fait-btn:disabled {
   opacity: 0.6;
   cursor: wait;
+}
+
+.skip-btn {
+  border: 1px solid rgba(173, 129, 190, 0.35);
+  border-radius: 8px;
+  padding: 0.28rem 0.55rem;
+  background: rgba(255, 255, 255, 0.65);
+  color: #6d5a7e;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.skip-btn.is-active {
+  background: rgba(213, 181, 234, 0.35);
+  border-color: rgba(173, 129, 190, 0.55);
+}
+
+.skip-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0 0.15rem 0.25rem;
+}
+
+.skip-chip {
+  border: 1px solid rgba(173, 129, 190, 0.35);
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  background: rgba(255, 255, 255, 0.8);
+  color: #5e4a6c;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.skip-chip.is-active {
+  background: linear-gradient(135deg, #d5b5ea, #ad81be);
+  border-color: transparent;
+  color: #fff;
+}
+
+.entry-skip-pill {
+  text-decoration: none;
+  font-size: 0.68rem;
+  font-weight: 750;
+  color: #6d5a7e;
+  background: rgba(213, 181, 234, 0.35);
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
 }
 
 /* Dépense : lilas doux (palette app) — Restore : bleu perle */

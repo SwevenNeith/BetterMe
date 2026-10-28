@@ -25,6 +25,27 @@ export const BATTERY_ENTRY_KINDS = {
   ACTUAL: 'actual',
 }
 
+/**
+ * Raisons de non-réalisation d’une activité prévue (skip_reason).
+ * Libellés neutres (pas de ton culpabilisant).
+ */
+export const BATTERY_SKIP_REASONS = [
+  { id: 'no_energy', label: 'Pas la force' },
+  { id: 'no_desire', label: 'Pas envie' },
+  { id: 'unexpected', label: 'Imprévu' },
+  { id: 'no_time', label: 'Plus le temps' },
+  { id: 'other', label: 'Autre' },
+]
+
+export const BATTERY_SKIP_REASON_IDS = BATTERY_SKIP_REASONS.map((r) => r.id)
+
+/** Tranches de batterie de départ pour l’analyse de réalisation. */
+export const BATTERY_START_BUCKETS = [
+  { id: 'low', label: '≤ 6', min: 0, max: 6 },
+  { id: 'mid', label: '7 – 9', min: 7, max: 9 },
+  { id: 'high', label: '≥ 10', min: 10, max: Infinity },
+]
+
 /** Origine d’une entrée Batterie liée à TODO / EDT. */
 export const BATTERY_SOURCE_TYPES = {
   TODO: 'todo',

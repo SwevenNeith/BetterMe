@@ -1,4 +1,7 @@
-import { BATTERY_ENTRY_KINDS } from '../../constants/battery/battery.js'
+import {
+  BATTERY_ENTRY_KINDS,
+  BATTERY_SKIP_REASON_IDS,
+} from '../../constants/battery/battery.js'
 import {
   BATTERY_BASE_DEFAULT,
   calibrationSignalForDay,
@@ -33,7 +36,7 @@ const DAYS_TABLE = 'battery_days'
 const ENTRIES_TABLE = 'battery_day_entries'
 
 const DAY_COLUMNS =
-  'id, user_id, day_date, morning_energy, sleep_quality, sleep_bedtime, sleep_wake_time, sleep_out_of_bed_time, sleep_hours, evening_feeling, base_snapshot, carryover, computed_budget, calibration_signal, notes, created_at, updated_at'
+  'id, user_id, day_date, morning_energy, sleep_quality, sleep_bedtime, sleep_wake_time, sleep_out_of_bed_time, sleep_hours, evening_feeling, plan_review_at, base_snapshot, carryover, computed_budget, calibration_signal, notes, created_at, updated_at'
 
 /**
  * @param {unknown} value
@@ -47,7 +50,17 @@ function normalizeTimeValue(value) {
 }
 
 const ENTRY_COLUMNS =
-  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, created_at'
+  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, created_at'
+
+/**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+export function normalizeBatterySkipReason(value) {
+  if (value == null || value === '') return null
+  const id = String(value)
+  return BATTERY_SKIP_REASON_IDS.includes(id) ? id : null
+}
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
@@ -512,6 +525,163 @@ export function isPlannedEntryDone(entry) {
   )
 }
 
+/** @param {{ completed_actual_id?: string | null, kind?: string } | null | undefined} entry */
+export function isPlannedEntryPending(entry) {
+  return entry?.kind === BATTERY_ENTRY_KINDS.PLANNED && !entry?.completed_actual_id
+}
+
+/**
+ * Assigne / efface la raison de non-réalisation d’une activité prévue.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} entryId
+ * @param {string | null | undefined} skipReason
+ */
+export async function updatePlannedSkipReason(supabase, userId, entryId, skipReason) {
+  const reason = normalizeBatterySkipReason(skipReason)
+
+  const { data: existing, error: fetchError } = await supabase
+    .from(ENTRIES_TABLE)
+    .select(ENTRY_COLUMNS)
+    .eq('id', entryId)
+    .eq('user_id', userId)
+    .single()
+
+  if (fetchError) throw fetchError
+  if (!existing || existing.kind !== BATTERY_ENTRY_KINDS.PLANNED) {
+    throw new Error('Cette activité prévue est introuvable.')
+  }
+  if (existing.completed_actual_id) {
+    throw new Error('Cette activité est déjà marquée comme faite.')
+  }
+
+  const { data, error } = await supabase
+    .from(ENTRIES_TABLE)
+    .update({ skip_reason: reason })
+    .eq('id', entryId)
+    .eq('user_id', userId)
+    .select(ENTRY_COLUMNS)
+    .single()
+
+  if (error) {
+    if (
+      error.code === 'PGRST204' ||
+      String(error.message || '').includes('skip_reason')
+    ) {
+      throw new Error(
+        'Colonne skip_reason absente. Exécute scripts/migrate-battery-skip-reason.sql dans Supabase.',
+      )
+    }
+    throw error
+  }
+
+  notifyBatteryUpdated()
+  return data
+}
+
+/**
+ * Premier jour éligible à la revue du plan (≥ 23h → aujourd’hui, sinon → veille).
+ * @param {Date} [now]
+ */
+export function resolvePlanReviewDayIso(now = new Date()) {
+  const date = now instanceof Date ? now : new Date()
+  const hour = date.getHours()
+  const today = toDayDateIso(date)
+  if (hour >= 23) return today
+  return shiftDayIso(today, -1)
+}
+
+/**
+ * Charge le payload de revue si nécessaire (prévu non fait + revue non validée).
+ * Avant 23h : revue de la veille (ou d’un jour antérieur encore en attente).
+ * À partir de 23h : revue d’aujourd’hui en priorité.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {Date} [now]
+ * @returns {Promise<{
+ *   shouldShow: boolean,
+ *   dayIso: string,
+ *   day: object | null,
+ *   pending: object[],
+ * }>}
+ */
+export async function prepareBatteryPlanReview(supabase, userId, now = new Date()) {
+  const date = now instanceof Date ? now : new Date()
+  const today = toDayDateIso(date)
+  const startOffset = date.getHours() >= 23 ? 0 : 1
+
+  for (let offset = startOffset; offset <= 7; offset += 1) {
+    const dayIso = shiftDayIso(today, -offset)
+    const day = await fetchDayRow(supabase, userId, dayIso)
+    if (!day || day.plan_review_at) continue
+
+    const entries = await listDayEntries(supabase, day.id)
+    const pending = entries.filter((e) => isPlannedEntryPending(e))
+    if (!pending.length) continue
+
+    return { shouldShow: true, dayIso, day, pending }
+  }
+
+  return {
+    shouldShow: false,
+    dayIso: resolvePlanReviewDayIso(date),
+    day: null,
+    pending: [],
+  }
+}
+
+/**
+ * Enregistre les raisons / marques « fait », puis valide la revue du plan.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} dayIso
+ * @param {{ entryId: string, done?: boolean, skipReason?: string | null }[]} assignments
+ */
+export async function submitBatteryPlanReview(supabase, userId, dayIso, assignments = []) {
+  const day = await fetchDayRow(supabase, userId, dayIso)
+  if (!day) throw new Error('Journée Batterie introuvable.')
+
+  for (const row of assignments) {
+    if (!row?.entryId) continue
+    if (row.done) {
+      try {
+        await completePlannedBatteryEntry(supabase, userId, row.entryId)
+      } catch (err) {
+        // Déjà faite entre-temps : on ignore
+        if (!String(err?.message || '').includes('déjà marquée')) throw err
+      }
+      continue
+    }
+    await updatePlannedSkipReason(supabase, userId, row.entryId, row.skipReason ?? null)
+  }
+
+  const { data, error } = await supabase
+    .from(DAYS_TABLE)
+    .update({
+      plan_review_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', day.id)
+    .eq('user_id', userId)
+    .select(DAY_COLUMNS)
+    .single()
+
+  if (error) {
+    if (
+      error.code === 'PGRST204' ||
+      String(error.message || '').includes('plan_review_at')
+    ) {
+      throw new Error(
+        'Colonne plan_review_at absente. Exécute scripts/migrate-battery-skip-reason.sql dans Supabase.',
+      )
+    }
+    throw error
+  }
+
+  notifyBatteryUpdated()
+  return data
+}
+
 /**
  * Crée l’entrée réelle correspondante en laissant le prévu en place (lié via completed_actual_id).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
@@ -566,7 +736,7 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
 
   const { error: linkError } = await supabase
     .from(ENTRIES_TABLE)
-    .update({ completed_actual_id: actual.id })
+    .update({ completed_actual_id: actual.id, skip_reason: null })
     .eq('id', existing.id)
     .eq('user_id', userId)
 
@@ -757,8 +927,12 @@ export async function listBatteryHistory(supabase, userId, opts = {}) {
         remaining: Number(day.computed_budget) - spent,
       }
     })
-    // Pas de jour « vide » (0 dépensé sans activité réelle) dans l’historique.
-    .filter((day) => (day.entries ?? []).some((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL))
+    // Garde les jours avec réel ou prévu (nécessaire pour les taux de réalisation).
+    .filter((day) =>
+      (day.entries ?? []).some(
+        (e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL || e.kind === BATTERY_ENTRY_KINDS.PLANNED,
+      ),
+    )
 }
 
 /**

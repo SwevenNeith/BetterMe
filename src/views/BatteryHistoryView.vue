@@ -8,6 +8,7 @@ import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
 import { listBatteryHistory } from '../services/battery/batteryDays.js'
 import { listEmotionLogs } from '../services/mood/emotionLogs.js'
 import {
+  buildRealizationInsights,
   correlateWithMood,
   describeAvgLieIn,
   describeAvgSpentByLieIn,
@@ -16,6 +17,7 @@ import {
   describeLieInCorrelation,
   describeMoodCorrelation,
   describeSleepHoursCorrelation,
+  formatCompletionRate,
   seriesForChart,
   topCostliestDays,
   topGreedyActivities,
@@ -127,6 +129,11 @@ const chartSeries = computed(() => seriesForChart(history.value))
 const costliestDays = computed(() => topCostliestDays(history.value, 3))
 const greedyActivities = computed(() => topGreedyActivities(history.value, 10))
 const correlations = computed(() => correlateWithMood(history.value, emotionLogs.value))
+const realization = computed(() => buildRealizationInsights(history.value))
+
+const reasonBarMax = computed(() =>
+  Math.max(0, ...realization.value.reasonShares.map((r) => Number(r.cost) || 0), 0.1),
+)
 
 const CHART_W = 640
 const CHART_H = 220
@@ -425,6 +432,70 @@ onMounted(async () => {
         <p v-if="!chartSeries.length" class="empty">Pas encore de données sur cette période.</p>
       </section>
 
+      <section class="panel realization-panel">
+        <h2 class="panel__title">Réalisation du plan · {{ periodLabel }}</h2>
+        <p class="panel__intro">
+          Jours avec au moins une activité planifiée (dépense) :
+          <strong>{{ realization.sampleDays }}</strong>
+        </p>
+
+        <div v-if="realization.sampleDays" class="realization-kpis">
+          <div class="kpi">
+            <p class="kpi__label">Taux de réalisation moyen</p>
+            <p class="kpi__value">{{ formatCompletionRate(realization.avgCompletionRate) }}</p>
+          </div>
+          <div class="kpi">
+            <p class="kpi__label">Report lié à « pas envie »</p>
+            <p class="kpi__value">{{ formatCompletionRate(realization.desireDeferralRate) }}</p>
+            <p class="kpi__hint">Part du prévu reportée pour cette raison</p>
+          </div>
+        </div>
+        <p v-else class="empty">Pas encore de jours avec un plan sur cette période.</p>
+
+        <div v-if="realization.sampleDays" class="realization-split">
+          <div>
+            <h3 class="sub-title">Raisons de non-réalisation</h3>
+            <p class="panel__intro">Pondérées par le coût des activités non faites.</p>
+            <ul class="reason-bars">
+              <li v-for="reason in realization.reasonShares" :key="reason.id">
+                <div class="reason-bars__head">
+                  <span>{{ reason.label }}</span>
+                  <span class="meta">
+                    {{ reason.cost }} pts
+                    <template v-if="reason.share != null"> · {{ formatCompletionRate(reason.share) }}</template>
+                  </span>
+                </div>
+                <div class="reason-bars__track" aria-hidden="true">
+                  <span
+                    class="reason-bars__fill"
+                    :style="{ width: `${Math.round((reason.cost / reasonBarMax) * 100)}%` }"
+                  />
+                </div>
+              </li>
+            </ul>
+            <p
+              v-if="realization.reasonShares.every((r) => !r.cost)"
+              class="empty"
+            >
+              Aucune raison renseignée pour l’instant.
+            </p>
+          </div>
+
+          <div>
+            <h3 class="sub-title">Réalisation selon la batterie de départ</h3>
+            <ul class="bucket-list">
+              <li v-for="bucket in realization.completionByStartBucket" :key="bucket.id">
+                <span class="bucket-list__label">{{ bucket.label }}</span>
+                <span class="bucket-list__value">
+                  {{ formatCompletionRate(bucket.avgRate) }}
+                </span>
+                <span class="meta">{{ bucket.sampleDays }} j</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
       <div class="insights-grid">
         <section class="panel">
           <h2 class="panel__title">Top 3 jours les plus coûteux</h2>
@@ -686,6 +757,117 @@ onMounted(async () => {
   font-size: 1.1rem;
   font-weight: 800;
   color: #2c3e50;
+}
+
+.realization-panel {
+  margin-bottom: 1rem;
+}
+
+.realization-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.kpi {
+  padding: 0.85rem 0.95rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.kpi__label {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #6d5a7e;
+}
+
+.kpi__value {
+  margin: 0.25rem 0 0;
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: #3b2a4a;
+}
+
+.kpi__hint {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  color: #8a779c;
+}
+
+.realization-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.1rem;
+}
+
+.sub-title {
+  margin: 0 0 0.25rem;
+  font-size: 0.98rem;
+  color: #3b2a4a;
+}
+
+.reason-bars {
+  list-style: none;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.reason-bars__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: #3b2a4a;
+}
+
+.reason-bars__track {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: rgba(213, 181, 234, 0.25);
+  overflow: hidden;
+}
+
+.reason-bars__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #d5b5ea, #ad81be);
+  min-width: 0;
+}
+
+.bucket-list {
+  list-style: none;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.bucket-list li {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.45rem 0.55rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(213, 181, 234, 0.28);
+}
+
+.bucket-list__label {
+  font-weight: 750;
+  color: #5e4a6c;
+}
+
+.bucket-list__value {
+  font-weight: 800;
+  color: #3b2a4a;
 }
 
 .chart-panel {

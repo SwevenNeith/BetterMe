@@ -5,7 +5,12 @@ import AppSidebar from '../components/common/Sidebar.vue'
 import NotificationPrompt from '../components/common/NotificationPrompt.vue'
 import VisibilityOnboardingModal from '../components/common/VisibilityOnboardingModal.vue'
 import TodoSnoozePromptModal from '../components/todo/TodoSnoozePromptModal.vue'
+import BatteryPlanReviewModal from '../components/battery/BatteryPlanReviewModal.vue'
 import { supabase } from '../lib/supabase.js'
+import {
+  prepareBatteryPlanReview,
+  submitBatteryPlanReview,
+} from '../services/battery/batteryDays.js'
 import {
   declencherCronNotifications,
   notificationsActives,
@@ -34,6 +39,13 @@ const morningSnoozeOpen = ref(false)
 const morningSnoozeCandidates = ref([])
 const morningSnoozeSaving = ref(false)
 const morningSnoozeError = ref('')
+
+const planReviewOpen = ref(false)
+const planReviewDayIso = ref('')
+const planReviewPending = ref([])
+const planReviewSaving = ref(false)
+const planReviewError = ref('')
+let planReviewTimerId = null
 
 const startNotificationCron = () => {
   if (!notificationsActives() || cronIntervalId) return
@@ -69,9 +81,58 @@ async function maybeShowMorningSnoozePrompt() {
   }
 }
 
+async function maybeShowBatteryPlanReview() {
+  if (
+    !userId.value ||
+    showVisibilityOnboarding.value ||
+    morningSnoozeOpen.value ||
+    planReviewOpen.value
+  ) {
+    return
+  }
+
+  try {
+    const result = await prepareBatteryPlanReview(supabase, userId.value)
+    if (!result.shouldShow) return
+    planReviewDayIso.value = result.dayIso
+    planReviewPending.value = result.pending
+    planReviewError.value = ''
+    planReviewOpen.value = true
+  } catch (err) {
+    // Colonne absente / module non migré : silencieux
+    if (String(err?.message || '').includes('skip_reason') || String(err?.message || '').includes('plan_review_at')) {
+      return
+    }
+    console.error('battery plan review prompt:', err)
+  }
+}
+
+async function onPlanReviewSubmit(assignments) {
+  if (!userId.value || planReviewSaving.value || !planReviewDayIso.value) return
+  planReviewSaving.value = true
+  planReviewError.value = ''
+  try {
+    await submitBatteryPlanReview(supabase, userId.value, planReviewDayIso.value, assignments)
+    planReviewOpen.value = false
+    planReviewPending.value = []
+    window.dispatchEvent(new CustomEvent('betterme-battery-updated'))
+  } catch (err) {
+    console.error(err)
+    planReviewError.value = err?.message || 'Impossible d’enregistrer le bilan.'
+  } finally {
+    planReviewSaving.value = false
+  }
+}
+
+function onPlanReviewClose() {
+  // « Plus tard » : le popup reviendra au prochain passage / tick.
+  planReviewOpen.value = false
+}
+
 function onVisibilityOnboardingCompleted() {
   showVisibilityOnboarding.value = false
   void maybeShowMorningSnoozePrompt()
+  void maybeShowBatteryPlanReview()
 }
 
 async function onMorningSnoozeConfirm(selected) {
@@ -140,7 +201,12 @@ onMounted(() => {
 
       if (!showVisibilityOnboarding.value) {
         void maybeShowMorningSnoozePrompt()
+        void maybeShowBatteryPlanReview()
       }
+
+      planReviewTimerId = window.setInterval(() => {
+        void maybeShowBatteryPlanReview()
+      }, 60_000)
 
       // Diffère le sync notifications pour ne pas saturer le réseau au premier affichage.
       const runBackgroundNotificationSync = () => {
@@ -191,6 +257,10 @@ onMounted(() => {
 onUnmounted(() => {
   stopNotificationCron()
   window.removeEventListener('betterme-notifications-granted', startNotificationCron)
+  if (planReviewTimerId) {
+    clearInterval(planReviewTimerId)
+    planReviewTimerId = null
+  }
 })
 </script>
 
@@ -228,12 +298,27 @@ onUnmounted(() => {
       @confirm="onMorningSnoozeConfirm"
       @skip="onMorningSnoozeSkip"
     />
+    <BatteryPlanReviewModal
+      :open="planReviewOpen"
+      :day-iso="planReviewDayIso"
+      :pending="planReviewPending"
+      :saving="planReviewSaving"
+      @submit="onPlanReviewSubmit"
+      @close="onPlanReviewClose"
+    />
     <p
       v-if="morningSnoozeError"
       class="app-layout__snooze-error"
       role="alert"
     >
       {{ morningSnoozeError }}
+    </p>
+    <p
+      v-if="planReviewError"
+      class="app-layout__snooze-error"
+      role="alert"
+    >
+      {{ planReviewError }}
     </p>
   </div>
 </template>

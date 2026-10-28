@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS public.battery_days (
   evening_feeling text NULL CHECK (
     evening_feeling IS NULL OR evening_feeling IN ('empty', 'just', 'left')
   ),
+  plan_review_at timestamptz NULL,
   base_snapshot integer NOT NULL DEFAULT 10,
   carryover integer NOT NULL DEFAULT 0,
   computed_budget integer NOT NULL DEFAULT 10,
@@ -66,6 +67,8 @@ COMMENT ON COLUMN public.battery_days.sleep_hours IS
   'Durée de sommeil calculée (h), dérivée de sleep_bedtime → sleep_wake_time.';
 COMMENT ON COLUMN public.battery_days.evening_feeling IS
   'Ressenti du soir : empty = à sec, just = juste, left = il m’en restait.';
+COMMENT ON COLUMN public.battery_days.plan_review_at IS
+  'Horodatage de la revue du plan non fait (popup ≥ 23h). Null = revue encore attendue s’il reste du prévu non fait.';
 COMMENT ON COLUMN public.battery_days.carryover IS
   'Report négatif de la veille (moitié du dépassement, plafond −3).';
 
@@ -84,6 +87,10 @@ CREATE TABLE IF NOT EXISTS public.battery_day_entries (
   source_type text NULL CHECK (source_type IS NULL OR source_type IN ('todo', 'timetable')),
   source_id uuid NULL,
   completed_actual_id uuid NULL REFERENCES public.battery_day_entries (id) ON DELETE SET NULL,
+  skip_reason text NULL CHECK (
+    skip_reason IS NULL
+    OR skip_reason IN ('no_energy', 'no_desire', 'unexpected', 'no_time', 'other')
+  ),
   created_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
 
@@ -97,6 +104,8 @@ COMMENT ON COLUMN public.battery_day_entries.source_id IS
   'Id de la tâche TODO ou de l’événement EDT source.';
 COMMENT ON COLUMN public.battery_day_entries.completed_actual_id IS
   'Pour kind=planned : id de l’entrée réelle correspondante une fois faite (null = encore à faire).';
+COMMENT ON COLUMN public.battery_day_entries.skip_reason IS
+  'Pour kind=planned non fait : pas la force / pas envie / imprévu / plus le temps / autre (null = non renseigné).';
 
 CREATE INDEX IF NOT EXISTS battery_day_entries_day_kind_idx
   ON public.battery_day_entries (day_id, kind, sort_order);
@@ -104,6 +113,10 @@ CREATE INDEX IF NOT EXISTS battery_day_entries_day_kind_idx
 CREATE INDEX IF NOT EXISTS battery_day_entries_completed_actual_idx
   ON public.battery_day_entries (completed_actual_id)
   WHERE completed_actual_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS battery_day_entries_skip_reason_idx
+  ON public.battery_day_entries (user_id, skip_reason)
+  WHERE skip_reason IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS battery_day_entries_user_activity_idx
   ON public.battery_day_entries (user_id, activity_id, created_at DESC);

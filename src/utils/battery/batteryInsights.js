@@ -3,9 +3,17 @@
  */
 
 import {
+  BATTERY_SKIP_REASONS,
+  BATTERY_START_BUCKETS,
+} from '../../constants/battery/battery.js'
+import {
+  batteryStartBucket,
+  completionRatePercent,
+  entryDrainCost,
   hoursBetweenTimes,
   lieInBucket,
   lieInMinutes,
+  sumEntryDrainCosts,
 } from './batteryMath.js'
 
 /**
@@ -346,4 +354,131 @@ export function describeAvgLieIn(minutes) {
   const m = total % 60
   const label = h <= 0 ? `${m} min` : m === 0 ? `${h} h` : `${h} h ${m} min`
   return `En moyenne, tu restes ${label} au lit après ton réveil.`
+}
+
+/**
+ * Jours avec au moins une activité planifiée (drain > 0).
+ * @param {{ entries?: object[], computed_budget?: number }[]} history
+ */
+function daysWithPlanned(history) {
+  return (history ?? []).filter((day) => {
+    const planned = (day.entries ?? []).filter((e) => e?.kind === 'planned')
+    return sumEntryDrainCosts(planned) > 0
+  })
+}
+
+/**
+ * Indicateurs de réalisation / non-réalisation sur une période.
+ * Ignore les jours sans activité planifiée (dépense).
+ *
+ * @param {{
+ *   day_date?: string,
+ *   computed_budget?: number,
+ *   entries?: {
+ *     kind?: string,
+ *     cost?: number,
+ *     completed_actual_id?: string|null,
+ *     skip_reason?: string|null,
+ *   }[],
+ * }[]} history
+ */
+export function buildRealizationInsights(history) {
+  const days = daysWithPlanned(history)
+  if (!days.length) {
+    return {
+      sampleDays: 0,
+      avgCompletionRate: null,
+      desireDeferralRate: null,
+      reasonShares: BATTERY_SKIP_REASONS.map((r) => ({
+        id: r.id,
+        label: r.label,
+        cost: 0,
+        share: null,
+      })),
+      completionByStartBucket: BATTERY_START_BUCKETS.map((b) => ({
+        id: b.id,
+        label: b.label,
+        avgRate: null,
+        sampleDays: 0,
+      })),
+    }
+  }
+
+  /** @type {number[]} */
+  const rates = []
+  let plannedTotal = 0
+  let desireCost = 0
+  /** @type {Record<string, number>} */
+  const reasonCost = Object.fromEntries(BATTERY_SKIP_REASONS.map((r) => [r.id, 0]))
+  /** @type {Record<string, number[]>} */
+  const ratesByBucket = { low: [], mid: [], high: [] }
+
+  for (const day of days) {
+    const planned = (day.entries ?? []).filter((e) => e?.kind === 'planned')
+    const dayPlannedCost = sumEntryDrainCosts(planned)
+    if (dayPlannedCost <= 0) continue
+
+    plannedTotal += dayPlannedCost
+    const rate = completionRatePercent(day.entries)
+    if (rate != null) rates.push(rate)
+
+    const bucket = batteryStartBucket(day.computed_budget)
+    if (bucket && rate != null) ratesByBucket[bucket].push(rate)
+
+    for (const entry of planned) {
+      if (entry?.completed_actual_id) continue
+      const cost = entryDrainCost(entry)
+      if (cost <= 0) continue
+      const reason = String(entry.skip_reason || '')
+      if (reason === 'no_desire') desireCost += cost
+      if (reason && reason in reasonCost) reasonCost[reason] += cost
+    }
+  }
+
+  const unfinishedReasonTotal = Object.values(reasonCost).reduce((a, b) => a + b, 0)
+
+  return {
+    sampleDays: days.length,
+    avgCompletionRate:
+      rates.length > 0
+        ? Math.round((rates.reduce((a, b) => a + b, 0) / rates.length) * 10) / 10
+        : null,
+    desireDeferralRate:
+      plannedTotal > 0
+        ? Math.round((desireCost / plannedTotal) * 1000) / 10
+        : null,
+    reasonShares: BATTERY_SKIP_REASONS.map((r) => {
+      const cost = reasonCost[r.id] || 0
+      return {
+        id: r.id,
+        label: r.label,
+        cost: Math.round(cost * 10) / 10,
+        share:
+          unfinishedReasonTotal > 0
+            ? Math.round((cost / unfinishedReasonTotal) * 1000) / 10
+            : null,
+      }
+    }),
+    completionByStartBucket: BATTERY_START_BUCKETS.map((b) => {
+      const list = ratesByBucket[b.id] || []
+      return {
+        id: b.id,
+        label: b.label,
+        sampleDays: list.length,
+        avgRate:
+          list.length > 0
+            ? Math.round((list.reduce((a, c) => a + c, 0) / list.length) * 10) / 10
+            : null,
+      }
+    }),
+  }
+}
+
+/**
+ * @param {number | null | undefined} rate
+ */
+export function formatCompletionRate(rate) {
+  if (rate == null || !Number.isFinite(Number(rate))) return '—'
+  const n = Number(rate)
+  return `${Number.isInteger(n) ? String(n) : n.toFixed(1)} %`
 }

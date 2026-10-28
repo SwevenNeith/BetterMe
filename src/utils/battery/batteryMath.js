@@ -91,6 +91,51 @@ export function sumEntryCosts(entries) {
 }
 
 /**
+ * Coût « batterie » d’une entrée pour les taux (dépenses positives uniquement).
+ * @param {{ cost?: number } | null | undefined} entry
+ */
+export function entryDrainCost(entry) {
+  const n = Number(entry?.cost) || 0
+  return n > 0 ? normalizeBatteryCost(n) : 0
+}
+
+/**
+ * @param {{ cost?: number }[]} entries
+ */
+export function sumEntryDrainCosts(entries) {
+  if (!Array.isArray(entries)) return 0
+  return normalizeBatteryCost(entries.reduce((sum, entry) => sum + entryDrainCost(entry), 0))
+}
+
+/**
+ * Taux de réalisation = coût des prévues faites ÷ coût de toutes les prévues (dépenses).
+ * @param {{ kind?: string, cost?: number, completed_actual_id?: string|null }[]} entries
+ * @returns {number | null} pourcentage 0–100, ou null si rien de planifié
+ */
+export function completionRatePercent(entries) {
+  const planned = (Array.isArray(entries) ? entries : []).filter((e) => e?.kind === 'planned')
+  const plannedCost = sumEntryDrainCosts(planned)
+  if (plannedCost <= 0) return null
+  const doneCost = sumEntryDrainCosts(
+    planned.filter((e) => Boolean(e?.completed_actual_id)),
+  )
+  return Math.round((doneCost / plannedCost) * 1000) / 10
+}
+
+/**
+ * Tranche de batterie de départ (budget du jour).
+ * @param {number | null | undefined} budget
+ * @returns {'low'|'mid'|'high'|null}
+ */
+export function batteryStartBucket(budget) {
+  const n = Number(budget)
+  if (!Number.isFinite(n)) return null
+  if (n <= 6) return 'low'
+  if (n <= 9) return 'mid'
+  return 'high'
+}
+
+/**
  * @param {number} budget
  * @param {number} spent
  */
