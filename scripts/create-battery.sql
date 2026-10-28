@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS public.battery_activities (
   user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
   name text NOT NULL CHECK (char_length(trim(name)) > 0),
   default_cost numeric(8, 1) NOT NULL DEFAULT 1,
+  default_duration_minutes integer NULL CHECK (
+    default_duration_minutes IS NULL OR default_duration_minutes > 0
+  ),
+  default_all_day boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
   updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
@@ -26,6 +30,10 @@ CREATE TABLE IF NOT EXISTS public.battery_activities (
 COMMENT ON TABLE public.battery_activities IS 'Catalogue d’activités énergivores / restauratrices.';
 COMMENT ON COLUMN public.battery_activities.default_cost IS
   'Coût par défaut signé (positif = dépense, négatif = regain), précision 0.1.';
+COMMENT ON COLUMN public.battery_activities.default_duration_minutes IS
+  'Durée par défaut en minutes (null = non renseignée). Ignorée si default_all_day.';
+COMMENT ON COLUMN public.battery_activities.default_all_day IS
+  'Si true, la durée par défaut est « journée entière ».';
 
 CREATE UNIQUE INDEX IF NOT EXISTS battery_activities_user_name_uidx
   ON public.battery_activities (user_id, lower(trim(name)));
@@ -91,6 +99,11 @@ CREATE TABLE IF NOT EXISTS public.battery_day_entries (
     skip_reason IS NULL
     OR skip_reason IN ('no_energy', 'no_desire', 'unexpected', 'no_time', 'other')
   ),
+  duration_minutes integer NULL CHECK (
+    duration_minutes IS NULL OR duration_minutes > 0
+  ),
+  duration_all_day boolean NOT NULL DEFAULT false,
+  has_duration_override boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
 
@@ -106,6 +119,12 @@ COMMENT ON COLUMN public.battery_day_entries.completed_actual_id IS
   'Pour kind=planned : id de l’entrée réelle correspondante une fois faite (null = encore à faire).';
 COMMENT ON COLUMN public.battery_day_entries.skip_reason IS
   'Pour kind=planned non fait : pas la force / pas envie / imprévu / plus le temps / autre (null = non renseigné).';
+COMMENT ON COLUMN public.battery_day_entries.duration_minutes IS
+  'Durée saisie côté Batterie (minutes). Utilisée seulement si has_duration_override.';
+COMMENT ON COLUMN public.battery_day_entries.duration_all_day IS
+  'Journée entière saisie côté Batterie. Utilisée seulement si has_duration_override.';
+COMMENT ON COLUMN public.battery_day_entries.has_duration_override IS
+  'true = durée choisie sur Batterie ; false = suivre EDT (si lié) sinon vide.';
 
 CREATE INDEX IF NOT EXISTS battery_day_entries_day_kind_idx
   ON public.battery_day_entries (day_id, kind, sort_order);

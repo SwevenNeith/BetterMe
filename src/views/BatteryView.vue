@@ -4,6 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import {
+  BATTERY_DURATION_ALL_DAY_ID,
+  BATTERY_DURATION_PRESETS,
+  BATTERY_DURATION_RESET_ID,
   BATTERY_ENTRY_KINDS,
   BATTERY_EVENING_FEELINGS,
   BATTERY_MORNING_LABELS,
@@ -27,6 +30,7 @@ import {
 } from '../services/battery/batteryActivities.js'
 import {
   addBatteryEntry,
+  attachEdtDurationsToEntries,
   completePlannedBatteryEntry,
   copyPlannedToActual,
   deleteBatteryEntry,
@@ -52,6 +56,11 @@ import {
   toTimeInputValue,
 } from '../utils/battery/batteryMath.js'
 import { formatCompletionRate } from '../utils/battery/batteryInsights.js'
+import {
+  activeDurationPresetId,
+  formatBatteryDuration,
+  resolveBatteryDuration,
+} from '../utils/battery/batteryDuration.js'
 import BatteryGauge from '../components/battery/BatteryGauge.vue'
 
 defineOptions({ name: 'BatteryView' })
@@ -104,12 +113,57 @@ const eveningFeeling = ref(null)
 const entryLabel = ref('')
 /** Coût signé : positif = dépense, négatif = regain (couleur dans la liste). */
 const entryCost = ref(1)
+/** @type {import('vue').Ref<'reset' | 'all_day' | number | null>} */
+const entryDurationChoice = ref(null)
 const entryActivityId = ref('')
 const entryKind = ref(BATTERY_ENTRY_KINDS.ACTUAL)
 const entrySearch = ref('')
 const entrySuggestions = ref([])
 const showEntrySuggestions = ref(false)
 let suggestionsBlurTimer = null
+
+/** Id de l’entrée dont le sélecteur de durée est ouvert. */
+const durationEntryId = ref(null)
+const durationBusyId = ref(null)
+
+/**
+ * @param {object[]} list
+ */
+async function setEntriesWithEdt(list) {
+  if (!userId.value) {
+    entries.value = list ?? []
+    return
+  }
+  try {
+    entries.value = await attachEdtDurationsToEntries(supabase, userId.value, list ?? [])
+  } catch (err) {
+    console.warn('setEntriesWithEdt:', err)
+    entries.value = list ?? []
+  }
+}
+
+/**
+ * @param {object} entry
+ */
+function entryResolvedDuration(entry) {
+  return resolveBatteryDuration(entry, entry?.edt_duration || null)
+}
+
+/**
+ * @param {object} entry
+ */
+function entryDurationLabel(entry) {
+  const resolved = entryResolvedDuration(entry)
+  if (resolved.source === 'none') return ''
+  return formatBatteryDuration(resolved)
+}
+
+/**
+ * @param {object} entry
+ */
+function entryDurationPresetActive(entry) {
+  return activeDurationPresetId(entryResolvedDuration(entry))
+}
 
 const todayIso = computed(() => getLocalTodayISO())
 const isToday = computed(() => selectedDate.value === todayIso.value)
@@ -187,7 +241,7 @@ async function loadDay() {
     settings.value = await getBatterySettings(supabase, userId.value)
     const result = await ensureBatteryDay(supabase, userId.value, selectedDate.value)
     day.value = result.day
-    entries.value = result.entries
+    await setEntriesWithEdt(result.entries)
     morningEnergy.value = result.day.morning_energy
     sleepQuality.value = result.day.sleep_quality
     sleepBedtime.value = toTimeInputValue(result.day.sleep_bedtime)
@@ -212,7 +266,7 @@ async function persistDayFields(patch) {
   try {
     const result = await updateBatteryDay(supabase, userId.value, selectedDate.value, patch)
     day.value = result.day
-    entries.value = result.entries
+    await setEntriesWithEdt(result.entries)
     settings.value = await getBatterySettings(supabase, userId.value)
     statusMessage.value = 'Enregistré'
   } catch (err) {
@@ -288,6 +342,38 @@ function pickSuggestion(activity) {
   entrySearch.value = activity.name
   entrySuggestions.value = []
   showEntrySuggestions.value = false
+  if (activity.default_all_day) {
+    entryDurationChoice.value = 'all_day'
+  } else if (activity.default_duration_minutes) {
+    entryDurationChoice.value = Number(activity.default_duration_minutes)
+  } else {
+    entryDurationChoice.value = null
+  }
+}
+
+function setFormDurationChoice(choice) {
+  if (choice === BATTERY_DURATION_RESET_ID || choice == null) {
+    entryDurationChoice.value = null
+    return
+  }
+  if (choice === BATTERY_DURATION_ALL_DAY_ID) {
+    entryDurationChoice.value = 'all_day'
+    return
+  }
+  if (choice === 'over_2h' || Number(choice) > 120) {
+    entryDurationChoice.value = 150
+    return
+  }
+  entryDurationChoice.value = Number(choice)
+}
+
+function isFormDurationActive(choice) {
+  if (choice === BATTERY_DURATION_RESET_ID) return entryDurationChoice.value == null
+  if (choice === BATTERY_DURATION_ALL_DAY_ID) return entryDurationChoice.value === 'all_day'
+  if (choice === 'over_2h' || Number(choice) > 120) {
+    return Number(entryDurationChoice.value) > 120
+  }
+  return entryDurationChoice.value === Number(choice)
 }
 
 async function submitEntry() {
@@ -295,16 +381,28 @@ async function submitEntry() {
   isSaving.value = true
   statusMessage.value = ''
   try {
-    const result = await addBatteryEntry(supabase, userId.value, selectedDate.value, {
+    /** @type {Record<string, unknown>} */
+    const payload = {
       label: entryLabel.value,
       cost: normalizeBatteryCost(entryCost.value),
       kind: entryKind.value,
       activity_id: entryActivityId.value || null,
-    })
+    }
+    if (entryDurationChoice.value === 'all_day') {
+      payload.has_duration_override = true
+      payload.duration_all_day = true
+      payload.duration_minutes = null
+    } else if (entryDurationChoice.value != null) {
+      payload.has_duration_override = true
+      payload.duration_all_day = false
+      payload.duration_minutes = entryDurationChoice.value
+    }
+    const result = await addBatteryEntry(supabase, userId.value, selectedDate.value, payload)
     day.value = result.day
-    entries.value = result.entries
+    await setEntriesWithEdt(result.entries)
     entryLabel.value = ''
     entryCost.value = 1
+    entryDurationChoice.value = null
     entryActivityId.value = ''
     entrySearch.value = ''
     await loadActivities()
@@ -315,6 +413,31 @@ async function submitEntry() {
     statusMessage.value = err?.message || 'Erreur'
   } finally {
     isSaving.value = false
+  }
+}
+
+function toggleDurationPicker(entry) {
+  durationEntryId.value = durationEntryId.value === entry.id ? null : entry.id
+  if (durationEntryId.value) skipReasonEntryId.value = null
+}
+
+async function applyEntryDuration(entry, choice) {
+  if (!userId.value || !entry?.id || durationBusyId.value) return
+  durationBusyId.value = entry.id
+  statusMessage.value = ''
+  try {
+    const result = await updateBatteryEntry(supabase, userId.value, entry.id, {
+      durationChoice: choice,
+    })
+    day.value = result.day
+    await setEntriesWithEdt(result.entries)
+    durationEntryId.value = null
+    statusMessage.value = 'Durée enregistrée'
+  } catch (err) {
+    console.error(err)
+    statusMessage.value = err?.message || 'Impossible d’enregistrer la durée'
+  } finally {
+    durationBusyId.value = null
   }
 }
 
@@ -413,6 +536,7 @@ async function markPlannedDone(entry) {
 function openSkipReasonPicker(entry) {
   if (!isPlannedEntryPending(entry)) return
   skipReasonEntryId.value = skipReasonEntryId.value === entry.id ? null : entry.id
+  if (skipReasonEntryId.value) durationEntryId.value = null
 }
 
 async function setPlannedSkipReason(entry, reasonId) {
@@ -461,7 +585,7 @@ async function commitEditActualCost(entry) {
   try {
     const result = await updateBatteryEntry(supabase, userId.value, entry.id, { cost })
     day.value = result.day
-    entries.value = result.entries
+    await setEntriesWithEdt(result.entries)
     await loadActivities()
   } catch (err) {
     console.error(err)
@@ -556,7 +680,7 @@ async function doCopyPlanned() {
   try {
     const result = await copyPlannedToActual(supabase, userId.value, selectedDate.value)
     day.value = result.day
-    entries.value = result.entries
+    await setEntriesWithEdt(result.entries)
     statusMessage.value = 'Plan copié vers le réel'
   } catch (err) {
     console.error(err)
@@ -865,6 +989,35 @@ onUnmounted(() => {
               {{ entryKind === BATTERY_ENTRY_KINDS.PLANNED ? 'Planifier' : 'Ajouter' }}
             </button>
           </div>
+          <div class="duration-chips" role="group" aria-label="Durée (optionnelle)">
+            <button
+              v-for="preset in BATTERY_DURATION_PRESETS"
+              :key="preset.id"
+              type="button"
+              class="duration-chip"
+              :class="{ 'is-active': isFormDurationActive(preset.id) }"
+              @click="setFormDurationChoice(preset.id === 'over_2h' ? 'over_2h' : preset.minutes)"
+            >
+              {{ preset.label }}
+            </button>
+            <button
+              type="button"
+              class="duration-chip"
+              :class="{ 'is-active': isFormDurationActive(BATTERY_DURATION_ALL_DAY_ID) }"
+              @click="setFormDurationChoice(BATTERY_DURATION_ALL_DAY_ID)"
+            >
+              Journée entière
+            </button>
+            <button
+              type="button"
+              class="duration-chip duration-chip--reset"
+              :class="{ 'is-active': isFormDurationActive(BATTERY_DURATION_RESET_ID) }"
+              title="Sans durée"
+              @click="setFormDurationChoice(BATTERY_DURATION_RESET_ID)"
+            >
+              Défaut
+            </button>
+          </div>
         </form>
 
         <div class="lists-grid">
@@ -890,7 +1043,7 @@ onUnmounted(() => {
               >
                 <div class="entry-row__main">
                   <span class="entry-label" title="Glisser pour réordonner">
-                    {{ entry.label }}
+                    <span class="entry-label__text">{{ entry.label }}</span>
                     <span v-if="isPlannedEntryDone(entry)" class="entry-done-pill">fait</span>
                     <span
                       v-else-if="entry.skip_reason"
@@ -900,6 +1053,27 @@ onUnmounted(() => {
                       {{ skipReasonLabel(entry.skip_reason) }}
                     </span>
                   </span>
+                  <button
+                    type="button"
+                    class="duration-tag"
+                    :class="{
+                      'is-active': durationEntryId === entry.id,
+                      'is-overridden': entryResolvedDuration(entry).overriddenFromEdt,
+                    }"
+                    :title="
+                      entryResolvedDuration(entry).overriddenFromEdt
+                        ? 'Durée modifiée par rapport à l’EDT'
+                        : 'Modifier la durée'
+                    "
+                    @click="toggleDurationPicker(entry)"
+                  >
+                    {{ entryDurationLabel(entry) || 'Durée' }}
+                    <span
+                      v-if="entryResolvedDuration(entry).overriddenFromEdt"
+                      class="duration-tag__dot"
+                      aria-hidden="true"
+                    />
+                  </button>
                   <span class="cost-tag" :class="`cost-tag--${costStyleClass(entry.cost)}`">
                     {{ formatCost(entry.cost) }}
                   </span>
@@ -925,6 +1099,64 @@ onUnmounted(() => {
                     Non fait
                   </button>
                   <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
+                </div>
+                <div
+                  v-if="durationEntryId === entry.id"
+                  class="duration-chips"
+                  role="group"
+                  :aria-label="`Durée pour ${entry.label}`"
+                >
+                  <button
+                    v-for="preset in BATTERY_DURATION_PRESETS"
+                    :key="preset.id"
+                    type="button"
+                    class="duration-chip"
+                    :class="{ 'is-active': entryDurationPresetActive(entry) === preset.id }"
+                    :disabled="durationBusyId === entry.id"
+                    @click="
+                      applyEntryDuration(
+                        entry,
+                        preset.id === 'over_2h' ? 'over_2h' : preset.minutes,
+                      )
+                    "
+                  >
+                    {{ preset.label }}
+                  </button>
+                  <button
+                    v-if="
+                      entryDurationPresetActive(entry) &&
+                      String(entryDurationPresetActive(entry)).startsWith('custom:')
+                    "
+                    type="button"
+                    class="duration-chip is-active"
+                    disabled
+                  >
+                    {{ entryDurationLabel(entry) }}
+                  </button>
+                  <button
+                    type="button"
+                    class="duration-chip"
+                    :class="{
+                      'is-active': entryDurationPresetActive(entry) === BATTERY_DURATION_ALL_DAY_ID,
+                    }"
+                    :disabled="durationBusyId === entry.id"
+                    @click="applyEntryDuration(entry, 'all_day')"
+                  >
+                    Journée entière
+                  </button>
+                  <button
+                    type="button"
+                    class="duration-chip duration-chip--reset"
+                    :disabled="durationBusyId === entry.id"
+                    :title="
+                      entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE
+                        ? 'Revenir à la durée de l’EDT'
+                        : 'Effacer la durée'
+                    "
+                    @click="applyEntryDuration(entry, 'reset')"
+                  >
+                    Défaut
+                  </button>
                 </div>
                 <div
                   v-if="skipReasonEntryId === entry.id"
@@ -967,8 +1199,29 @@ onUnmounted(() => {
               >
                 <div class="entry-row__main">
                   <span class="entry-label" title="Glisser pour réordonner chronologiquement">
-                    {{ entry.label }}
+                    <span class="entry-label__text">{{ entry.label }}</span>
                   </span>
+                  <button
+                    type="button"
+                    class="duration-tag"
+                    :class="{
+                      'is-active': durationEntryId === entry.id,
+                      'is-overridden': entryResolvedDuration(entry).overriddenFromEdt,
+                    }"
+                    :title="
+                      entryResolvedDuration(entry).overriddenFromEdt
+                        ? 'Durée modifiée par rapport à l’EDT'
+                        : 'Modifier la durée'
+                    "
+                    @click="toggleDurationPicker(entry)"
+                  >
+                    {{ entryDurationLabel(entry) || 'Durée' }}
+                    <span
+                      v-if="entryResolvedDuration(entry).overriddenFromEdt"
+                      class="duration-tag__dot"
+                      aria-hidden="true"
+                    />
+                  </button>
                   <input
                     v-if="editingCostEntryId === entry.id"
                     :data-cost-edit="entry.id"
@@ -993,6 +1246,64 @@ onUnmounted(() => {
                     {{ formatCost(entry.cost) }}
                   </button>
                   <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
+                </div>
+                <div
+                  v-if="durationEntryId === entry.id"
+                  class="duration-chips"
+                  role="group"
+                  :aria-label="`Durée pour ${entry.label}`"
+                >
+                  <button
+                    v-for="preset in BATTERY_DURATION_PRESETS"
+                    :key="preset.id"
+                    type="button"
+                    class="duration-chip"
+                    :class="{ 'is-active': entryDurationPresetActive(entry) === preset.id }"
+                    :disabled="durationBusyId === entry.id"
+                    @click="
+                      applyEntryDuration(
+                        entry,
+                        preset.id === 'over_2h' ? 'over_2h' : preset.minutes,
+                      )
+                    "
+                  >
+                    {{ preset.label }}
+                  </button>
+                  <button
+                    v-if="
+                      entryDurationPresetActive(entry) &&
+                      String(entryDurationPresetActive(entry)).startsWith('custom:')
+                    "
+                    type="button"
+                    class="duration-chip is-active"
+                    disabled
+                  >
+                    {{ entryDurationLabel(entry) }}
+                  </button>
+                  <button
+                    type="button"
+                    class="duration-chip"
+                    :class="{
+                      'is-active': entryDurationPresetActive(entry) === BATTERY_DURATION_ALL_DAY_ID,
+                    }"
+                    :disabled="durationBusyId === entry.id"
+                    @click="applyEntryDuration(entry, 'all_day')"
+                  >
+                    Journée entière
+                  </button>
+                  <button
+                    type="button"
+                    class="duration-chip duration-chip--reset"
+                    :disabled="durationBusyId === entry.id"
+                    :title="
+                      entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE
+                        ? 'Revenir à la durée de l’EDT'
+                        : 'Effacer la durée'
+                    "
+                    @click="applyEntryDuration(entry, 'reset')"
+                  >
+                    Défaut
+                  </button>
                 </div>
               </li>
               <li v-if="!actualEntries.length" class="empty-line">Aucune activité réelle</li>
@@ -1768,18 +2079,24 @@ onUnmounted(() => {
 }
 
 .entry-row__main {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
+  display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.3rem;
+  min-width: 0;
 }
 
-.entry-row--plan:not(.entry-row--done) .entry-row__main {
-  grid-template-columns: 1fr auto auto auto auto;
+.entry-row__main > .entry-label {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-.entry-row--actual .entry-row__main {
-  grid-template-columns: 1fr auto auto;
+.entry-row__main > .duration-tag,
+.entry-row__main > .cost-tag,
+.entry-row__main > .fait-btn,
+.entry-row__main > .skip-btn,
+.entry-row__main > .icon-btn {
+  flex: 0 0 auto;
 }
 
 .entry-row--plan,
@@ -1863,6 +2180,76 @@ onUnmounted(() => {
   color: #fff;
 }
 
+.duration-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid rgba(143, 162, 212, 0.4);
+  background: rgba(143, 162, 212, 0.12);
+  color: #5a6b8a;
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.duration-tag.is-active,
+.duration-tag:hover {
+  border-color: rgba(143, 162, 212, 0.7);
+  background: rgba(143, 162, 212, 0.22);
+}
+
+.duration-tag.is-overridden {
+  border-style: dashed;
+}
+
+.duration-tag__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #8fa2d4;
+}
+
+.duration-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
+  padding: 0.15rem 0.15rem 0.4rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.duration-chip {
+  border: 1px solid rgba(143, 162, 212, 0.35);
+  background: rgba(255, 255, 255, 0.8);
+  color: #5a6b8a;
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.duration-chip:disabled {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.duration-chip.is-active {
+  background: rgba(143, 162, 212, 0.28);
+  border-color: rgba(143, 162, 212, 0.65);
+  color: #3d4f6f;
+}
+
+.duration-chip--reset {
+  color: #8a9098;
+  border-style: dashed;
+}
+
 .entry-skip-pill {
   text-decoration: none;
   font-size: 0.68rem;
@@ -1888,12 +2275,20 @@ onUnmounted(() => {
 
 .entry-label {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.3rem;
   font-weight: 600;
   color: #2c3e50;
   font-size: 0.92rem;
+  min-width: 0;
+}
+
+.entry-label__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .entry-row--done {

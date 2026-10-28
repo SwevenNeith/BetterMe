@@ -1,6 +1,7 @@
 import {
   BATTERY_ENTRY_KINDS,
   BATTERY_SKIP_REASON_IDS,
+  BATTERY_SOURCE_TYPES,
 } from '../../constants/battery/battery.js'
 import {
   BATTERY_BASE_DEFAULT,
@@ -16,6 +17,15 @@ import {
   toTimeInputValue,
   weeklyBaseAdjustment,
 } from '../../utils/battery/batteryMath.js'
+import {
+  durationFieldsFromSource,
+  durationFromTimetableEvent,
+  durationOverridePayload,
+  normalizeDurationMinutes,
+  numericDurationUsagesForLearning,
+  resolveBatteryDuration,
+  stampDurationFromResolved,
+} from '../../utils/battery/batteryDuration.js'
 import {
   listRecentActivityUsages,
   updateBatteryActivity,
@@ -50,7 +60,7 @@ function normalizeTimeValue(value) {
 }
 
 const ENTRY_COLUMNS =
-  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, created_at'
+  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, duration_minutes, duration_all_day, has_duration_override, created_at'
 
 /**
  * @param {unknown} value
@@ -335,6 +345,9 @@ async function maybeApplyWeeklyBaseAdjustment(supabase, userId, dayIso) {
  *   activity_id?: string | null,
  *   source_type?: string | null,
  *   source_id?: string | null,
+ *   duration_minutes?: number | null,
+ *   duration_all_day?: boolean,
+ *   has_duration_override?: boolean,
  * }} payload
  */
 export async function addBatteryEntry(supabase, userId, dayIso, payload) {
@@ -349,6 +362,22 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
   const cost = normalizeBatteryCost(payload.cost)
   const sort_order = entries.filter((e) => e.kind === kind).length
 
+  let durationFields = durationFieldsFromSource(payload)
+  // Si pas de surcharge explicite mais activité catalogue avec défaut durée → copie
+  if (!durationFields.has_duration_override && payload.activity_id) {
+    const { data: activity } = await supabase
+      .from('battery_activities')
+      .select('default_duration_minutes, default_all_day')
+      .eq('id', payload.activity_id)
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (activity?.default_all_day) {
+      durationFields = durationOverridePayload('all_day')
+    } else if (normalizeDurationMinutes(activity?.default_duration_minutes) != null) {
+      durationFields = durationOverridePayload(activity.default_duration_minutes)
+    }
+  }
+
   const { data, error } = await supabase
     .from(ENTRIES_TABLE)
     .insert({
@@ -361,6 +390,7 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
       sort_order,
       source_type: payload.source_type || null,
       source_id: payload.source_id || null,
+      ...durationFields,
     })
     .select(ENTRY_COLUMNS)
     .single()
@@ -369,6 +399,7 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
 
   if (kind === BATTERY_ENTRY_KINDS.ACTUAL && data.activity_id) {
     await maybeLearnDefaultCost(supabase, userId, data.activity_id, cost, data.id)
+    await maybeLearnDefaultDuration(supabase, userId, data.activity_id, data, data.id)
   }
 
   const result = await recomputeAndPersistDay(supabase, userId, day)
@@ -382,7 +413,14 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {string} entryId
- * @param {{ label?: string, cost?: number }} patch
+ * @param {{
+ *   label?: string,
+ *   cost?: number,
+ *   duration_minutes?: number | null,
+ *   duration_all_day?: boolean,
+ *   has_duration_override?: boolean,
+ *   durationChoice?: 'reset' | 'all_day' | number,
+ * }} patch
  */
 export async function updateBatteryEntry(supabase, userId, entryId, patch) {
   const { data: existing, error: fetchError } = await supabase
@@ -403,6 +441,15 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
   if (patch.cost != null) {
     payload.cost = normalizeBatteryCost(patch.cost)
   }
+  if (patch.durationChoice != null) {
+    Object.assign(payload, durationOverridePayload(patch.durationChoice))
+  } else if (
+    'has_duration_override' in patch ||
+    'duration_minutes' in patch ||
+    'duration_all_day' in patch
+  ) {
+    Object.assign(payload, durationFieldsFromSource(patch))
+  }
 
   const { data, error } = await supabase
     .from(ENTRIES_TABLE)
@@ -420,6 +467,15 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
     patch.cost != null
   ) {
     await maybeLearnDefaultCost(supabase, userId, data.activity_id, data.cost, data.id)
+  }
+  if (
+    data.kind === BATTERY_ENTRY_KINDS.ACTUAL &&
+    data.activity_id &&
+    (patch.durationChoice != null ||
+      'has_duration_override' in patch ||
+      'duration_minutes' in patch)
+  ) {
+    await maybeLearnDefaultDuration(supabase, userId, data.activity_id, data, data.id)
   }
 
   const day = await supabase
@@ -718,6 +774,8 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
 
   if (countError) throw countError
 
+  const durationStamp = await resolveDurationStampForEntry(supabase, userId, existing)
+
   const { data: actual, error: insertError } = await supabase
     .from(ENTRIES_TABLE)
     .insert({
@@ -728,6 +786,7 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
       cost,
       kind: BATTERY_ENTRY_KINDS.ACTUAL,
       sort_order: (actualRows ?? []).length,
+      ...durationStamp,
     })
     .select(ENTRY_COLUMNS)
     .single()
@@ -774,6 +833,7 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
     }
   } else if (actual.activity_id) {
     await maybeLearnDefaultCost(supabase, userId, actual.activity_id, actual.cost, actual.id)
+    await maybeLearnDefaultDuration(supabase, userId, actual.activity_id, actual, actual.id)
   }
 
   const { data: day, error: dayError } = await supabase
@@ -790,6 +850,88 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
 }
 
 /**
+ * Figé la durée effective (override / EDT / catalogue) pour une entrée réelle.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {object} entry
+ */
+async function resolveDurationStampForEntry(supabase, userId, entry) {
+  if (entry?.has_duration_override) {
+    return durationFieldsFromSource(entry)
+  }
+
+  let edtDuration = null
+  if (entry?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && entry?.source_id) {
+    const map = await fetchTimetableDurationMap(supabase, userId, [entry.source_id])
+    edtDuration = map.get(String(entry.source_id)) || null
+  }
+
+  let catalog = null
+  if (entry?.activity_id) {
+    const { data } = await supabase
+      .from('battery_activities')
+      .select('default_duration_minutes, default_all_day')
+      .eq('id', entry.activity_id)
+      .eq('user_id', userId)
+      .maybeSingle()
+    catalog = data
+  }
+
+  return stampDurationFromResolved(resolveBatteryDuration(entry, edtDuration, catalog))
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string[]} eventIds
+ * @returns {Promise<Map<string, { minutes: number | null, allDay: boolean }>>}
+ */
+export async function fetchTimetableDurationMap(supabase, userId, eventIds) {
+  /** @type {Map<string, { minutes: number | null, allDay: boolean }>} */
+  const map = new Map()
+  const ids = [...new Set((eventIds ?? []).map(String).filter(Boolean))]
+  if (!ids.length) return map
+
+  const { data, error } = await supabase
+    .from('timetable_events')
+    .select('id, all_day, time')
+    .eq('user_id', userId)
+    .in('id', ids)
+
+  if (error) {
+    console.warn('fetchTimetableDurationMap:', error)
+    return map
+  }
+
+  for (const event of data ?? []) {
+    const resolved = durationFromTimetableEvent(event)
+    if (resolved) map.set(String(event.id), resolved)
+  }
+  return map
+}
+
+/**
+ * Enrichit les entrées avec la durée EDT (lecture seule) pour l’affichage.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {object[]} entries
+ */
+export async function attachEdtDurationsToEntries(supabase, userId, entries) {
+  const list = Array.isArray(entries) ? entries : []
+  const timetableIds = list
+    .filter((e) => e?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && e?.source_id)
+    .map((e) => String(e.source_id))
+  const edtMap = await fetchTimetableDurationMap(supabase, userId, timetableIds)
+  return list.map((entry) => ({
+    ...entry,
+    edt_duration:
+      entry?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && entry?.source_id
+        ? edtMap.get(String(entry.source_id)) || null
+        : null,
+  }))
+}
+
+/**
  * Copie les entrées planifiées vers le réel (si le réel est vide).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
@@ -801,15 +943,21 @@ export async function copyPlannedToActual(supabase, userId, dayIso) {
   const actual = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL)
   if (!planned.length || actual.length) return { day, entries }
 
-  const rows = planned.map((e, i) => ({
-    user_id: userId,
-    day_id: day.id,
-    activity_id: e.activity_id,
-    label: e.label,
-    cost: e.cost,
-    kind: BATTERY_ENTRY_KINDS.ACTUAL,
-    sort_order: i,
-  }))
+  const rows = []
+  for (let i = 0; i < planned.length; i += 1) {
+    const e = planned[i]
+    const durationStamp = await resolveDurationStampForEntry(supabase, userId, e)
+    rows.push({
+      user_id: userId,
+      day_id: day.id,
+      activity_id: e.activity_id,
+      label: e.label,
+      cost: e.cost,
+      kind: BATTERY_ENTRY_KINDS.ACTUAL,
+      sort_order: i,
+      ...durationStamp,
+    })
+  }
 
   const { error } = await supabase.from(ENTRIES_TABLE).insert(rows)
   if (error) throw error
@@ -861,6 +1009,69 @@ async function maybeLearnDefaultCost(supabase, userId, activityId, cost, entryId
   const learned = learnedDefaultFromTwoWeeks(usages, defaultCost)
   if (learned == null) return
   await updateBatteryActivity(supabase, userId, activityId, { default_cost: learned })
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} activityId
+ * @param {{ duration_minutes?: number | null, duration_all_day?: boolean, has_duration_override?: boolean }} entry
+ * @param {string} entryId
+ */
+async function maybeLearnDefaultDuration(supabase, userId, activityId, entry, entryId) {
+  if (!entry?.has_duration_override || entry.duration_all_day) return
+  const minutes = normalizeDurationMinutes(entry.duration_minutes)
+  if (minutes == null) return
+
+  const { data: activity, error: activityError } = await supabase
+    .from('battery_activities')
+    .select('default_duration_minutes, default_all_day')
+    .eq('id', activityId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (activityError) throw activityError
+
+  const recent = await listRecentActivityUsages(supabase, userId, activityId, {
+    excludeEntryId: entryId,
+    limit: 40,
+  })
+
+  const { data: current, error: currentError } = await supabase
+    .from('battery_day_entries')
+    .select('id, duration_minutes, duration_all_day, day:battery_days!inner(day_date)')
+    .eq('id', entryId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (currentError) {
+    if (
+      currentError.code === 'PGRST204' ||
+      String(currentError.message || '').includes('duration_')
+    ) {
+      return
+    }
+    throw currentError
+  }
+
+  const usages = numericDurationUsagesForLearning([
+    {
+      day_date: current?.day?.day_date || toDayDateIso(new Date()),
+      duration_minutes: minutes,
+      duration_all_day: false,
+    },
+    ...recent,
+  ])
+
+  const currentDefault = activity?.default_all_day
+    ? 0
+    : Number(activity?.default_duration_minutes) || 0
+  const learned = learnedDefaultFromTwoWeeks(usages, currentDefault)
+  if (learned == null || learned <= 0) return
+  await updateBatteryActivity(supabase, userId, activityId, {
+    default_duration_minutes: learned,
+    default_all_day: false,
+  })
 }
 
 /**

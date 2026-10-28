@@ -8,9 +8,12 @@ import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
 import { listBatteryHistory } from '../services/battery/batteryDays.js'
 import { listEmotionLogs } from '../services/mood/emotionLogs.js'
 import {
+  activityDurationStats,
+  avgSpentByActivityDuration,
   buildRealizationInsights,
   correlateWithMood,
   describeAvgLieIn,
+  describeAvgSpentByActivityDuration,
   describeAvgSpentByLieIn,
   describeAvgSpentBySleep,
   describeEmotionalEnergyCorrelation,
@@ -22,6 +25,7 @@ import {
   topCostliestDays,
   topGreedyActivities,
 } from '../utils/battery/batteryInsights.js'
+import { formatDurationMinutesLabel } from '../utils/battery/batteryDuration.js'
 import { toDayDateIso } from '../utils/battery/batteryMath.js'
 import { toISODate } from '../utils/habit/habitCalendar.js'
 
@@ -128,8 +132,40 @@ function formatDateFr(iso) {
 const chartSeries = computed(() => seriesForChart(history.value))
 const costliestDays = computed(() => topCostliestDays(history.value, 3))
 const greedyActivities = computed(() => topGreedyActivities(history.value, 10))
+const activityStats = computed(() =>
+  activityDurationStats(history.value, { minSamples: 3, limit: 8 }).filter((row) => row.enoughData),
+)
+const durationEnergyAverages = computed(() => avgSpentByActivityDuration(history.value))
 const correlations = computed(() => correlateWithMood(history.value, emotionLogs.value))
 const realization = computed(() => buildRealizationInsights(history.value))
+
+/**
+ * @param {number | null | undefined} n
+ * @param {number} [digits]
+ */
+function formatStatNumber(n, digits = 1) {
+  if (n == null || !Number.isFinite(Number(n))) return null
+  const v = Number(n)
+  return Number.isInteger(v) ? String(v) : v.toFixed(digits)
+}
+
+/**
+ * Résumé compact : durée moyenne + coût moyen.
+ * @param {ReturnType<typeof activityDurationStats>[number]} row
+ */
+function activityStatSummary(row) {
+  if (!row.enoughData) return 'Pas assez de données'
+  const parts = []
+  if (row.enoughDurationData && row.avgDurationMinutes != null) {
+    parts.push(
+      formatDurationMinutesLabel(row.avgDurationMinutes, { compactOver2h: false }),
+    )
+  }
+  if (row.avgCost != null) {
+    parts.push(`${formatStatNumber(row.avgCost)} pts`)
+  }
+  return parts.length ? parts.join(' · ') : 'Pas assez de données'
+}
 
 const reasonBarMax = computed(() =>
   Math.max(0, ...realization.value.reasonShares.map((r) => Number(r.cost) || 0), 0.1),
@@ -508,6 +544,21 @@ onMounted(async () => {
             </li>
             <li v-if="!costliestDays.length" class="empty">Pas encore de données</li>
           </ul>
+
+          <h2 class="panel__title panel__title--nested">Durée par activité</h2>
+          <p class="panel__intro panel__intro--tight">
+            Moyenne durée · coût (activités faites, ≥ 3×).
+          </p>
+          <ul class="plain-list activity-stats">
+            <li v-for="row in activityStats" :key="(row.activity_id || row.label) + row.count">
+              <div class="activity-stats__head">
+                <span class="item-name">{{ row.label }}</span>
+                <span class="meta">{{ row.count }}×</span>
+              </div>
+              <p class="activity-stats__detail">{{ activityStatSummary(row) }}</p>
+            </li>
+            <li v-if="!activityStats.length" class="empty">Pas encore de données</li>
+          </ul>
         </section>
 
         <section class="panel">
@@ -534,6 +585,10 @@ onMounted(async () => {
             <li>
               <strong>Énergie émotionnelle</strong>
               <p>{{ describeEmotionalEnergyCorrelation(correlations.spentVsEmotionalEnergy) }}</p>
+            </li>
+            <li>
+              <strong>Énergie – Durée</strong>
+              <p>{{ describeAvgSpentByActivityDuration(durationEnergyAverages) }}</p>
             </li>
             <li>
               <strong>Qualité du sommeil</strong>
@@ -969,6 +1024,35 @@ onMounted(async () => {
 
 .insights-grid .panel {
   margin-bottom: 0;
+}
+
+.panel__title--nested {
+  margin-top: 1.15rem;
+}
+
+.panel__intro--tight {
+  margin: 0 0 0.55rem;
+  font-size: 0.8rem;
+}
+
+.activity-stats li {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.15rem;
+}
+
+.activity-stats__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.activity-stats__detail {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #6c757d;
+  line-height: 1.3;
 }
 
 .plain-list {

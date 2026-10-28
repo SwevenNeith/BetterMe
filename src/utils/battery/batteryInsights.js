@@ -3,6 +3,7 @@
  */
 
 import {
+  BATTERY_ACTIVITY_DURATION_BUCKETS,
   BATTERY_SKIP_REASONS,
   BATTERY_START_BUCKETS,
 } from '../../constants/battery/battery.js'
@@ -357,6 +358,82 @@ export function describeAvgLieIn(minutes) {
 }
 
 /**
+ * @param {number} minutes
+ * @returns {string | null}
+ */
+export function activityDurationBucketId(minutes) {
+  const n = Math.round(Number(minutes))
+  if (!Number.isFinite(n) || n <= 0) return null
+  const bucket = BATTERY_ACTIVITY_DURATION_BUCKETS.find((b) => n >= b.min && n <= b.max)
+  return bucket?.id ?? null
+}
+
+/**
+ * Coût moyen des activités faites selon la tranche de durée.
+ * @param {{ entries?: object[] }[]} history
+ * @returns {Record<string, number|null> & { sampleCount: number }}
+ */
+export function avgSpentByActivityDuration(history) {
+  /** @type {Record<string, number[]>} */
+  const byBucket = Object.fromEntries(BATTERY_ACTIVITY_DURATION_BUCKETS.map((b) => [b.id, []]))
+  let sampleCount = 0
+
+  for (const day of history ?? []) {
+    for (const entry of day.entries ?? []) {
+      if (entry?.kind !== 'actual') continue
+      if (entry.duration_all_day) continue
+      const minutes = Number(entry.duration_minutes)
+      if (!Number.isFinite(minutes) || minutes <= 0) continue
+      const cost = Number(entry.cost)
+      if (!Number.isFinite(cost) || cost <= 0) continue
+      const bucketId = activityDurationBucketId(minutes)
+      if (!bucketId || !byBucket[bucketId]) continue
+      byBucket[bucketId].push(cost)
+      sampleCount += 1
+    }
+  }
+
+  /** @type {Record<string, number|null> & { sampleCount: number }} */
+  const result = { sampleCount }
+  for (const bucket of BATTERY_ACTIVITY_DURATION_BUCKETS) {
+    const list = byBucket[bucket.id]
+    result[bucket.id] =
+      list.length > 0
+        ? Math.round((list.reduce((a, b) => a + b, 0) / list.length) * 10) / 10
+        : null
+  }
+  return result
+}
+
+/**
+ * @param {Record<string, number|null> & { sampleCount?: number }} averages
+ */
+export function describeAvgSpentByActivityDuration(averages) {
+  if (!averages || (averages.sampleCount ?? 0) < 3) {
+    return 'Pas assez d’activités faites avec une durée pour croiser énergie et durée.'
+  }
+
+  const values = BATTERY_ACTIVITY_DURATION_BUCKETS.map((b) => ({
+    id: b.id,
+    label: b.label,
+    value: averages[b.id],
+  })).filter((row) => row.value != null)
+
+  if (!values.length) {
+    return 'Pas assez d’activités faites avec une durée pour croiser énergie et durée.'
+  }
+
+  values.sort((a, b) => Number(b.value) - Number(a.value))
+  if (values.length === 1) {
+    return `Quand l’activité dure ${values[0].label}, tu dépenses en moyenne ${values[0].value} pts.`
+  }
+  if (values[0].value === values[values.length - 1].value) {
+    return `Le coût moyen reste proche quelle que soit la durée (≈ ${values[0].value} pts).`
+  }
+  return `Tu dépenses le plus quand l’activité dure ${values[0].label} (≈ ${values[0].value} pts) et le moins pour ${values[values.length - 1].label} (≈ ${values[values.length - 1].value} pts).`
+}
+
+/**
  * Jours avec au moins une activité planifiée (drain > 0).
  * @param {{ entries?: object[], computed_budget?: number }[]} history
  */
@@ -481,4 +558,105 @@ export function formatCompletionRate(rate) {
   if (rate == null || !Number.isFinite(Number(rate))) return '—'
   const n = Number(rate)
   return `${Number.isInteger(n) ? String(n) : n.toFixed(1)} %`
+}
+
+/**
+ * Stats par activité (catalogue / libellé) : durée, coût, intensité, dispersion.
+ * Intensité = coût ÷ durée en heures — uniquement sur les « faites » à durée numérique
+ * (exclut journée entière et null). Les occurrences sans durée restent dans `count`.
+ *
+ * @param {{ entries?: object[] }[]} history
+ * @param {{ minSamples?: number, limit?: number }} [opts]
+ */
+export function activityDurationStats(history, opts = {}) {
+  const minSamples = Math.max(1, Number(opts.minSamples) || 3)
+  const limit = Math.max(1, Number(opts.limit) || 20)
+
+  /** @type {Map<string, {
+   *   label: string,
+   *   activity_id: string|null,
+   *   count: number,
+   *   costs: number[],
+   *   durations: number[],
+   *   intensities: number[],
+   * }>} */
+  const map = new Map()
+
+  for (const day of history ?? []) {
+    for (const entry of day.entries ?? []) {
+      if (entry.kind !== 'actual') continue
+      const key = entry.activity_id || `label:${String(entry.label || '').toLowerCase()}`
+      const prev = map.get(key) || {
+        label: entry.label || 'Sans nom',
+        activity_id: entry.activity_id || null,
+        count: 0,
+        costs: [],
+        durations: [],
+        intensities: [],
+      }
+      prev.count += 1
+      if (entry.label) prev.label = entry.label
+
+      const cost = Number(entry.cost)
+      if (Number.isFinite(cost)) prev.costs.push(cost)
+
+      const allDay = Boolean(entry.duration_all_day)
+      const minutes =
+        !allDay && entry.duration_minutes != null && Number(entry.duration_minutes) > 0
+          ? Number(entry.duration_minutes)
+          : null
+
+      if (minutes != null) {
+        prev.durations.push(minutes)
+        if (Number.isFinite(cost)) {
+          const hours = minutes / 60
+          if (hours > 0) prev.intensities.push(cost / hours)
+        }
+      }
+
+      map.set(key, prev)
+    }
+  }
+
+  return [...map.values()]
+    .map((row) => {
+      const enough = row.count >= minSamples
+      const enoughDuration = row.durations.length >= minSamples
+      const avg = (arr) =>
+        arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : null
+      const costAvg = avg(row.costs)
+      const durationAvg = avg(row.durations)
+      const intensityAvg = avg(row.intensities)
+      const costMin = row.costs.length ? Math.min(...row.costs) : null
+      const costMax = row.costs.length ? Math.max(...row.costs) : null
+      let costStd = null
+      if (row.costs.length >= 2) {
+        const mean = row.costs.reduce((a, b) => a + b, 0) / row.costs.length
+        const variance =
+          row.costs.reduce((acc, c) => acc + (c - mean) ** 2, 0) / row.costs.length
+        costStd = Math.round(Math.sqrt(variance) * 10) / 10
+      }
+
+      return {
+        label: row.label,
+        activity_id: row.activity_id,
+        count: row.count,
+        numericDurationCount: row.durations.length,
+        enoughData: enough,
+        enoughDurationData: enoughDuration,
+        avgDurationMinutes: enoughDuration ? durationAvg : null,
+        avgCost: enough ? costAvg : null,
+        avgIntensityPerHour: enoughDuration ? intensityAvg : null,
+        costMin: enough ? costMin : null,
+        costMax: enough ? costMax : null,
+        costStdDev: enough && row.costs.length >= 2 ? costStd : null,
+      }
+    })
+    .sort((a, b) => {
+      const ia = a.avgIntensityPerHour ?? -Infinity
+      const ib = b.avgIntensityPerHour ?? -Infinity
+      if (ib !== ia) return ib - ia
+      return b.count - a.count
+    })
+    .slice(0, limit)
 }

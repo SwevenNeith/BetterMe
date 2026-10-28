@@ -18,7 +18,7 @@ import { ensureBatteryDay } from './batteryDays.js'
 
 const ENTRIES_TABLE = 'battery_day_entries'
 const ENTRY_COLUMNS =
-  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, created_at'
+  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, duration_minutes, duration_all_day, has_duration_override, created_at'
 
 /**
  * TODO synchronisable : ponctuel uniquement (hors « Cette semaine »).

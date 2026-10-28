@@ -2,7 +2,12 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
-import { BATTERY_ENTRY_KINDS } from '../constants/battery/battery.js'
+import {
+  BATTERY_DURATION_ALL_DAY_ID,
+  BATTERY_DURATION_PRESETS,
+  BATTERY_DURATION_RESET_ID,
+  BATTERY_ENTRY_KINDS,
+} from '../constants/battery/battery.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
 import {
@@ -13,6 +18,10 @@ import {
 } from '../services/battery/batteryActivities.js'
 import { addBatteryEntry } from '../services/battery/batteryDays.js'
 import { costStyleClass, normalizeBatteryCost } from '../utils/battery/batteryMath.js'
+import {
+  activeDurationPresetId,
+  formatBatteryDuration,
+} from '../utils/battery/batteryDuration.js'
 import { addDaysISO } from '../utils/habit/habitCalendar.js'
 import EmojiPickerField from '../components/common/EmojiPickerField.vue'
 
@@ -43,6 +52,10 @@ const busyId = ref(null)
 const newNameInputRef = ref(null)
 const editingCostActivityId = ref(null)
 const editingCostValue = ref(0)
+/** @type {import('vue').Ref<'all_day' | number | null>} */
+const newDurationChoice = ref(null)
+const durationEditActivityId = ref(null)
+const durationBusyId = ref(null)
 
 const SORT_OPTIONS = [
   { id: 'alpha', label: 'A → Z' },
@@ -186,6 +199,88 @@ async function insertEmojiInActivityName(activity, emoji) {
   }
 }
 
+function setNewDurationChoice(choice) {
+  if (choice === BATTERY_DURATION_RESET_ID || choice == null) {
+    newDurationChoice.value = null
+    return
+  }
+  if (choice === BATTERY_DURATION_ALL_DAY_ID) {
+    newDurationChoice.value = 'all_day'
+    return
+  }
+  if (choice === 'over_2h' || Number(choice) > 120) {
+    newDurationChoice.value = 150
+    return
+  }
+  newDurationChoice.value = Number(choice)
+}
+
+function isNewDurationActive(choice) {
+  if (choice === BATTERY_DURATION_RESET_ID) return newDurationChoice.value == null
+  if (choice === BATTERY_DURATION_ALL_DAY_ID) return newDurationChoice.value === 'all_day'
+  if (choice === 'over_2h' || Number(choice) > 120) {
+    return Number(newDurationChoice.value) > 120
+  }
+  return newDurationChoice.value === Number(choice)
+}
+
+/**
+ * @param {object} activity
+ */
+function catalogDurationLabel(activity) {
+  if (activity?.default_all_day) return formatBatteryDuration({ allDay: true })
+  if (activity?.default_duration_minutes) {
+    return formatBatteryDuration({ minutes: activity.default_duration_minutes, allDay: false })
+  }
+  return ''
+}
+
+/**
+ * @param {object} activity
+ */
+function catalogDurationPresetId(activity) {
+  return activeDurationPresetId({
+    minutes: activity?.default_all_day ? null : activity?.default_duration_minutes,
+    allDay: Boolean(activity?.default_all_day),
+  })
+}
+
+function toggleCatalogDurationEdit(activity) {
+  durationEditActivityId.value =
+    durationEditActivityId.value === activity.id ? null : activity.id
+}
+
+async function applyCatalogDuration(activity, choice) {
+  if (!userId.value || !activity?.id || durationBusyId.value) return
+  durationBusyId.value = activity.id
+  formError.value = ''
+  try {
+    /** @type {{ default_all_day?: boolean, default_duration_minutes?: number | null }} */
+    const patch = {}
+    if (choice === 'reset') {
+      patch.default_all_day = false
+      patch.default_duration_minutes = null
+    } else if (choice === 'all_day') {
+      patch.default_all_day = true
+      patch.default_duration_minutes = null
+    } else if (choice === 'over_2h' || Number(choice) > 120) {
+      patch.default_all_day = false
+      patch.default_duration_minutes = 150
+    } else {
+      patch.default_all_day = false
+      patch.default_duration_minutes = Number(choice)
+    }
+    await updateBatteryActivity(supabase, userId.value, activity.id, patch)
+    durationEditActivityId.value = null
+    await loadActivities()
+  } catch (err) {
+    console.error(err)
+    formError.value = err?.message || 'Impossible de modifier la durée.'
+  } finally {
+    durationBusyId.value = null
+  }
+}
+
 async function createItem() {
   formError.value = ''
   if (!newName.value.trim()) {
@@ -193,12 +288,21 @@ async function createItem() {
     return
   }
   try {
-    await createBatteryActivity(supabase, userId.value, {
+    /** @type {Record<string, unknown>} */
+    const payload = {
       name: newName.value,
       default_cost: toSignedCost(newEffect.value, newAmount.value),
-    })
+    }
+    if (newDurationChoice.value === 'all_day') {
+      payload.default_all_day = true
+      payload.default_duration_minutes = null
+    } else if (newDurationChoice.value != null) {
+      payload.default_all_day = false
+      payload.default_duration_minutes = newDurationChoice.value
+    }
+    await createBatteryActivity(supabase, userId.value, payload)
     newName.value = ''
-    // Conserve effet + points pour enchaîner plusieurs créations similaires.
+    // Conserve effet + points + durée pour enchaîner plusieurs créations similaires.
     await loadActivities()
     await nextTick()
     newNameInputRef.value?.focus()
@@ -369,11 +473,39 @@ onMounted(async () => {
           />
           <button type="submit" class="primary-btn">Ajouter</button>
         </form>
+        <div class="duration-chips" role="group" aria-label="Durée par défaut (optionnelle)">
+          <button
+            v-for="preset in BATTERY_DURATION_PRESETS"
+            :key="preset.id"
+            type="button"
+            class="duration-chip"
+            :class="{ 'is-active': isNewDurationActive(preset.id) }"
+            @click="setNewDurationChoice(preset.id === 'over_2h' ? 'over_2h' : preset.minutes)"
+          >
+            {{ preset.label }}
+          </button>
+          <button
+            type="button"
+            class="duration-chip"
+            :class="{ 'is-active': isNewDurationActive(BATTERY_DURATION_ALL_DAY_ID) }"
+            @click="setNewDurationChoice(BATTERY_DURATION_ALL_DAY_ID)"
+          >
+            Journée entière
+          </button>
+          <button
+            type="button"
+            class="duration-chip duration-chip--reset"
+            :class="{ 'is-active': isNewDurationActive(BATTERY_DURATION_RESET_ID) }"
+            @click="setNewDurationChoice(BATTERY_DURATION_RESET_ID)"
+          >
+            Sans durée
+          </button>
+        </div>
         <p v-if="formError" class="flash flash--error">{{ formError }}</p>
         <p class="hint">
-          Choisis Dépense ou Regain, puis les points (entiers ou 0.5). « Planifier » ajoute à
-          demain ; « Réel » à aujourd’hui. Le coût par défaut évolue via les activités réelles
-          (même coût pendant 2 semaines d’affilée).
+          Choisis Dépense ou Regain, puis les points (entiers ou 0.5). La durée est optionnelle.
+          « Planifier » ajoute à demain ; « Réel » à aujourd’hui. Le coût / la durée par défaut
+          évoluent via les activités réelles (même valeur pendant 2 semaines d’affilée).
         </p>
       </section>
 
@@ -448,6 +580,69 @@ onMounted(async () => {
                 @click="startEditCost(activity)"
               >
                 {{ formatCost(activity.default_cost) }}
+              </button>
+              <button
+                type="button"
+                class="duration-tag"
+                :class="{ 'is-active': durationEditActivityId === activity.id }"
+                title="Modifier la durée par défaut"
+                @click="toggleCatalogDurationEdit(activity)"
+              >
+                {{ catalogDurationLabel(activity) || 'Durée' }}
+              </button>
+            </div>
+
+            <div
+              v-if="durationEditActivityId === activity.id"
+              class="duration-chips"
+              role="group"
+              :aria-label="`Durée par défaut pour ${activity.name}`"
+            >
+              <button
+                v-for="preset in BATTERY_DURATION_PRESETS"
+                :key="preset.id"
+                type="button"
+                class="duration-chip"
+                :class="{ 'is-active': catalogDurationPresetId(activity) === preset.id }"
+                :disabled="durationBusyId === activity.id"
+                @click="
+                  applyCatalogDuration(
+                    activity,
+                    preset.id === 'over_2h' ? 'over_2h' : preset.minutes,
+                  )
+                "
+              >
+                {{ preset.label }}
+              </button>
+              <button
+                v-if="
+                  catalogDurationPresetId(activity) &&
+                  String(catalogDurationPresetId(activity)).startsWith('custom:')
+                "
+                type="button"
+                class="duration-chip is-active"
+                disabled
+              >
+                {{ catalogDurationLabel(activity) }}
+              </button>
+              <button
+                type="button"
+                class="duration-chip"
+                :class="{
+                  'is-active': catalogDurationPresetId(activity) === BATTERY_DURATION_ALL_DAY_ID,
+                }"
+                :disabled="durationBusyId === activity.id"
+                @click="applyCatalogDuration(activity, 'all_day')"
+              >
+                Journée entière
+              </button>
+              <button
+                type="button"
+                class="duration-chip duration-chip--reset"
+                :disabled="durationBusyId === activity.id"
+                @click="applyCatalogDuration(activity, 'reset')"
+              >
+                Sans durée
               </button>
             </div>
 
@@ -884,6 +1079,55 @@ onMounted(async () => {
   gap: 0.45rem;
   min-width: 0;
   max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.duration-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
+  margin: 0.35rem 0 0.15rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.duration-chip {
+  border: 1px solid rgba(143, 162, 212, 0.35);
+  background: rgba(255, 255, 255, 0.8);
+  color: #5a6b8a;
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.duration-chip.is-active {
+  background: rgba(143, 162, 212, 0.28);
+  border-color: rgba(143, 162, 212, 0.65);
+  color: #3d4f6f;
+}
+
+.duration-chip--reset {
+  color: #8a9098;
+  border-style: dashed;
+}
+
+.duration-tag {
+  flex: 0 0 auto;
+  border: 1px solid rgba(143, 162, 212, 0.4);
+  background: rgba(143, 162, 212, 0.12);
+  color: #5a6b8a;
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.duration-tag.is-active,
+.duration-tag:hover {
+  background: rgba(143, 162, 212, 0.22);
 }
 
 .item__badge {
