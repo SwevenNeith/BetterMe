@@ -576,9 +576,15 @@ watch(
 .event-row {
   display: flex;
   flex-direction: row;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem 0.4rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.event-row > .event-title {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -663,15 +669,15 @@ watch(
 
 .event-duration-chips {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 0.25rem;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  max-width: 100%;
+  box-sizing: border-box;
   padding-bottom: 0.1rem;
 }
 
 .event-duration-chip {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   border: 1px solid rgba(143, 162, 212, 0.35);
   background: rgba(255, 255, 255, 0.75);
   color: #5a6b8a;
@@ -680,6 +686,7 @@ watch(
   font-size: 0.68rem;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .event-duration-chip.is-active {

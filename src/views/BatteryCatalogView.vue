@@ -1084,14 +1084,15 @@ onMounted(async () => {
 
 .duration-chips {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 0.3rem;
   margin: 0.35rem 0 0.15rem;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .duration-chip {
+  flex: 0 1 auto;
   border: 1px solid rgba(143, 162, 212, 0.35);
   background: rgba(255, 255, 255, 0.8);
   color: #5a6b8a;
@@ -1100,6 +1101,7 @@ onMounted(async () => {
   font-size: 0.72rem;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .duration-chip.is-active {

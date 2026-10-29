@@ -1360,7 +1360,8 @@ onUnmounted(() => {
   margin: 0;
   padding: 1.5rem 1.25rem 3rem;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .bg-blob {
@@ -1786,6 +1787,10 @@ onUnmounted(() => {
   border-radius: 18px;
   padding: 1.15rem 1.1rem 1.3rem;
   margin-bottom: 1rem;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .panel__head {
@@ -1883,6 +1888,8 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.5rem;
   margin-bottom: 1rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .entry-form__row {
@@ -1972,12 +1979,17 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .list-col {
   border-radius: 14px;
   padding: 0.75rem;
   min-height: 4rem;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .list-col--plan {
@@ -2005,6 +2017,8 @@ onUnmounted(() => {
   padding: 0;
   display: grid;
   gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .entry-row {
@@ -2013,6 +2027,9 @@ onUnmounted(() => {
   gap: 0.35rem;
   border-radius: 10px;
   padding: 0.25rem 0.35rem;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .entry-row__main {
@@ -2021,6 +2038,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.3rem;
   min-width: 0;
+  max-width: 100%;
 }
 
 .entry-row__main > .entry-label {
@@ -2151,15 +2169,15 @@ onUnmounted(() => {
 
 .duration-chips {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 0.3rem;
   padding: 0.15rem 0.15rem 0.4rem;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .duration-chip {
+  flex: 0 1 auto;
   border: 1px solid rgba(143, 162, 212, 0.35);
   background: rgba(255, 255, 255, 0.8);
   color: #5a6b8a;
@@ -2168,6 +2186,7 @@ onUnmounted(() => {
   font-size: 0.72rem;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .duration-chip:disabled {
@@ -2547,6 +2566,58 @@ onUnmounted(() => {
     background: rgba(213, 181, 234, 0.12);
     border-color: rgba(213, 181, 234, 0.35);
     color: #6b4f7c;
+  }
+
+  .battery-page {
+    padding: 1rem 0.85rem 2.5rem;
+  }
+
+  .panel {
+    padding: 1rem 0.85rem 1.15rem;
+  }
+
+  .list-col {
+    padding: 0.55rem;
+  }
+
+  .entry-row__main {
+    flex-wrap: wrap;
+    gap: 0.3rem 0.35rem;
+  }
+
+  .entry-row__main > .entry-label {
+    flex: 1 1 100%;
+  }
+
+  .duration-tag {
+    padding: 0.1rem 0.35rem;
+    font-size: 0.68rem;
+  }
+
+  .cost-tag,
+  .cost-tag--btn {
+    padding: 0.1rem 0.35rem;
+    font-size: 0.78rem;
+  }
+
+  .fait-btn {
+    padding: 0.22rem 0.5rem;
+    font-size: 0.72rem;
+    margin-left: auto;
+  }
+
+  .entry-row--actual .entry-row__main > .icon-btn {
+    margin-left: auto;
+  }
+
+  .icon-btn {
+    padding: 0.1rem 0.25rem;
+    font-size: 1.1rem;
+  }
+
+  .duration-chip {
+    padding: 0.14rem 0.4rem;
+    font-size: 0.68rem;
   }
 }
 
