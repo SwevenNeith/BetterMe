@@ -824,6 +824,9 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
 
   const durationStamp = await resolveDurationStampForEntry(supabase, userId, existing)
 
+  // Ne pas recopier source_type/source_id : l’index unique
+  // battery_day_entries_source_day_uidx n’autorise qu’une entrée par source/jour
+  // (le prévu garde le lien EDT/TODO ; la durée est figée via durationStamp).
   const { data: actual, error: insertError } = await supabase
     .from(ENTRIES_TABLE)
     .insert({
@@ -834,8 +837,6 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
       cost,
       kind: BATTERY_ENTRY_KINDS.ACTUAL,
       sort_order: (actualRows ?? []).length,
-      source_type: existing.source_type || null,
-      source_id: existing.source_id || null,
       ...durationStamp,
     })
     .select(ENTRY_COLUMNS)
@@ -1013,8 +1014,7 @@ export async function copyPlannedToActual(supabase, userId, dayIso) {
       cost: e.cost,
       kind: BATTERY_ENTRY_KINDS.ACTUAL,
       sort_order: i,
-      source_type: e.source_type || null,
-      source_id: e.source_id || null,
+      // Pas de source_* : contrainte unique source/jour (lien reste sur le prévu).
       ...durationStamp,
     })
   }
