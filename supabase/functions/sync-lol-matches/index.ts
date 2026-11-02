@@ -434,9 +434,8 @@ async function syncOneAccount(
             // Examiné même si invalide (remake / mauvaise file) → pas d’insert
             if (!isValidGame(detail, puuid)) return { examined: true, row: null }
 
-            const me = (detail?.info?.participants ?? []).find(
-              (p) => String(p?.puuid ?? '') === puuid,
-            )
+            const participants = detail?.info?.participants ?? []
+            const me = participants.find((p) => String(p?.puuid ?? '') === puuid)
             if (!me) return { examined: true, row: null }
             const creationMs = Number(detail?.info?.gameCreation)
             if (!Number.isFinite(creationMs)) return { examined: true, row: null }

@@ -344,6 +344,24 @@ export async function fetchMatchDetail(matchId, puuid, platform = 'euw1') {
   })
 }
 
+/**
+ * Timeline Riot (frames gold / événements) — plus lourd, à la demande.
+ * @param {string} matchId
+ * @param {string} puuid
+ * @param {string} [platform]
+ */
+export async function fetchMatchTimeline(matchId, puuid, platform = 'euw1') {
+  return callRiotFunction(
+    {
+      action: 'match-timeline',
+      matchId,
+      puuid,
+      platform,
+    },
+    60_000,
+  )
+}
+
 export function lolProfileIconUrl(profileIconId, version = LOL_DDRAGON_VERSION) {
   const id = Number(profileIconId)
   if (!Number.isFinite(id) || id < 0) return null

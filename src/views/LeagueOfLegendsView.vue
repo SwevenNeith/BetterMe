@@ -1,8 +1,9 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import LolRadarChart from '../components/jeux/LolRadarChart.vue'
 import LolItemTooltipCard from '../components/jeux/LolItemTooltipCard.vue'
+import LolPoroAssistant from '../components/jeux/LolPoroAssistant.vue'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { supabase } from '../lib/supabase.js'
@@ -59,7 +60,7 @@ import {
   setRankedResetDateRemote,
   syncLolMatchesUntilDone,
 } from '../services/jeux/lolMatchStats.js'
-import { resolveSessionUser } from '../utils/auth/sessionUser.js'
+import { resolveSessionUser, syncSessionUserCache } from '../utils/auth/sessionUser.js'
 
 defineOptions({ name: 'LeagueOfLegendsView' })
 
@@ -104,6 +105,9 @@ const errorMessage = ref('')
 const matchesError = ref('')
 const rankedResetError = ref('')
 const showAddForm = ref(false)
+const showPoro = ref(false)
+/** Prompt à envoyer auto à l’ouverture de Poro (ex. analyse match). */
+const poroAutoPrompt = ref('')
 
 const selectedMatch = ref(null)
 /** Puuid du joueur dont les items sont dépliés dans le détail d’équipe. */
@@ -243,8 +247,18 @@ async function addAccount() {
 
 async function removeAccount(accountId) {
   if (!userId.value || !accountId) return
-  const ok = window.confirm('Retirer ce compte League of Legends ?')
+  const account = accounts.value.find((a) => a.id === accountId)
+  const label = account ? riotDisplayName(account) : 'ce compte'
+  const ok = window.confirm(
+    `Retirer définitivement ${label} ?\n\nLes stats synchronisées liées à ce compte resteront en base, mais l’onglet disparaîtra.`,
+  )
   if (!ok) return
+  const confirmName = window.prompt(`Pour confirmer, tape le pseudo exact :\n${label}`)
+  if (confirmName == null) return
+  if (String(confirmName).trim().toLowerCase() !== label.toLowerCase()) {
+    errorMessage.value = 'Suppression annulée — le pseudo ne correspond pas.'
+    return
+  }
   try {
     await deleteLolAccount(supabase, userId.value, accountId)
     if (selectedAccountId.value === accountId) {
@@ -579,6 +593,11 @@ function closeMatch() {
   selectedMatch.value = null
 }
 
+function openPoroMatchAnalysis() {
+  poroAutoPrompt.value = 'Analyse cette partie'
+  showPoro.value = true
+}
+
 /**
  * Déplie / replie les items d’un coéquipier ou adversaire (pas soi-même).
  * @param {string | null | undefined} puuid
@@ -680,15 +699,64 @@ watch([dateFrom, dateTo, queueFilter], () => {
   void loadMatchesForSelected()
 })
 
-onMounted(async () => {
+/** @type {{ unsubscribe: () => void } | null} */
+let authUnsub = null
+
+async function bootUserAndAccounts() {
   const user = await resolveSessionUser()
-  if (user) {
+  if (user?.id) {
     userId.value = user.id
     await loadAccounts()
-  } else {
-    isLoadingAccounts.value = false
+    return
   }
+
+  // Session parfois pas encore dispo (timeout 1,5 s) : un 2e essai direct getSession
+  try {
+    const { data } = await supabase.auth.getSession()
+    const sessionUser = data?.session?.user
+    if (sessionUser?.id) {
+      syncSessionUserCache('SIGNED_IN', data.session)
+      userId.value = sessionUser.id
+      await loadAccounts()
+      return
+    }
+  } catch (err) {
+    console.warn('LoL getSession retry:', err)
+  }
+
+  isLoadingAccounts.value = false
+  if (!userId.value) {
+    errorMessage.value =
+      'Session introuvable — reconnecte-toi pour retrouver tes comptes LoL sauvegardés.'
+  }
+}
+
+onMounted(() => {
+  void bootUserAndAccounts()
   void ensureLolItemCatalog()
+
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    syncSessionUserCache(event, session)
+    if (event === 'SIGNED_OUT') {
+      userId.value = null
+      accounts.value = []
+      selectedAccountId.value = null
+      return
+    }
+    if (session?.user?.id && session.user.id !== userId.value) {
+      userId.value = session.user.id
+      void loadAccounts()
+    } else if (session?.user?.id && !accounts.value.length) {
+      userId.value = session.user.id
+      void loadAccounts()
+    }
+  })
+  authUnsub = data?.subscription ?? null
+})
+
+onUnmounted(() => {
+  authUnsub?.unsubscribe?.()
+  authUnsub = null
 })
 </script>
 
@@ -703,11 +771,30 @@ onMounted(async () => {
         Suivi multi-comptes : elo, matchs, détail de partie et comparatif au niveau de ton rang.
       </p>
       <div class="lol-page__actions">
+        <button type="button" class="lol-btn lol-btn--poro" @click="showPoro = true">
+          🐾 Assistant Poro
+        </button>
         <RouterLink to="/league-of-legends/partie" class="lol-btn lol-btn--primary">
           Lancer une partie
         </RouterLink>
       </div>
     </header>
+
+    <LolPoroAssistant
+      :open="showPoro"
+      :user-id="userId"
+      :puuid="selectedAccount?.puuid || null"
+      :account-label="
+        selectedAccount
+          ? `${selectedAccount.game_name}#${selectedAccount.tag_line}`
+          : ''
+      "
+      :match="selectedMatch"
+      :recent-matches="matches"
+      :auto-prompt="poroAutoPrompt"
+      @close="showPoro = false"
+      @auto-prompt-done="poroAutoPrompt = ''"
+    />
 
     <p v-if="errorMessage" class="lol-page__error" role="alert">{{ errorMessage }}</p>
 
@@ -807,7 +894,12 @@ onMounted(async () => {
     </section>
 
     <p v-if="!isLoadingAccounts && !accounts.length && !showAddForm" class="lol-muted">
-      Aucun compte — clique sur « + Compte » pour commencer.
+      Aucun compte visible.
+      <template v-if="userId">
+        S’il était déjà enregistré, ré-ajoute-le avec le même Riot ID (« + Compte ») — Poro / stats
+        se rattacheront au même puuid. Sinon vérifie que tu es bien connecté au bon compte BetterMe.
+      </template>
+      <template v-else> Connecte-toi pour charger tes comptes Supabase. </template>
     </p>
 
     <template v-if="selectedAccount">
@@ -1144,7 +1236,12 @@ onMounted(async () => {
               {{ formatMatchDate(selectedMatch.gameCreation) }}
             </p>
           </div>
-          <button type="button" class="lol-btn" @click="closeMatch">Fermer</button>
+          <div class="lol-detail__actions">
+            <button type="button" class="lol-btn lol-btn--poro" @click="openPoroMatchAnalysis">
+              🐾 Analyser avec Poro
+            </button>
+            <button type="button" class="lol-btn" @click="closeMatch">Fermer</button>
+          </div>
         </header>
 
         <div class="lol-detail__hero">
@@ -1154,7 +1251,7 @@ onMounted(async () => {
             alt=""
             class="lol-detail__champ"
           />
-          <div>
+          <div class="lol-detail__hero-stats">
             <p class="lol-detail__kda">{{ kdaLabel(selectedMatch.participant) }}</p>
             <p class="lol-detail__kda-label">
               KILL / MORT / ASSIST ·
@@ -1164,24 +1261,24 @@ onMounted(async () => {
               {{ killParticipationPct(selectedMatch.participant, selectedMatch.teamKills) ?? '—' }}
               % KP
             </p>
-            <div class="lol-detail__items">
-              <span
-                v-for="(itemId, idx) in participantItems(selectedMatch.participant)"
-                :key="`d-${idx}`"
-                class="lol-item-tip"
-                tabindex="0"
-                @mouseenter="showItemTip($event, itemId)"
-                @mouseleave="hideItemTip"
-                @focus="showItemTip($event, itemId)"
-                @blur="hideItemTip"
-              >
-                <img
-                  :src="lolItemIconUrl(itemId)"
-                  :alt="lolItemName(itemId)"
-                  class="lol-detail__item"
-                />
-              </span>
-            </div>
+          </div>
+          <div class="lol-detail__items">
+            <span
+              v-for="(itemId, idx) in participantItems(selectedMatch.participant)"
+              :key="`d-${idx}`"
+              class="lol-item-tip"
+              tabindex="0"
+              @mouseenter="showItemTip($event, itemId)"
+              @mouseleave="hideItemTip"
+              @focus="showItemTip($event, itemId)"
+              @blur="hideItemTip"
+            >
+              <img
+                :src="lolItemIconUrl(itemId)"
+                :alt="lolItemName(itemId)"
+                class="lol-detail__item"
+              />
+            </span>
           </div>
         </div>
 
@@ -1606,6 +1703,12 @@ a.lol-btn:focus-visible {
   color: #fff;
 }
 
+.lol-btn--poro {
+  background: linear-gradient(135deg, rgba(143, 162, 212, 0.95), rgba(173, 129, 190, 0.95));
+  border-color: transparent;
+  color: #fff;
+}
+
 .lol-btn--ghost {
   background: transparent;
 }
@@ -1987,6 +2090,7 @@ a.lol-btn:focus-visible {
   align-items: flex-start;
   justify-content: center;
   padding: max(1rem, env(safe-area-inset-top, 0px)) 1rem 2rem;
+  overflow-x: hidden;
   overflow-y: auto;
   box-sizing: border-box;
 }
@@ -1994,13 +2098,18 @@ a.lol-btn:focus-visible {
 @media (max-width: 768px) {
   .lol-modal {
     left: 0;
+    padding-left: max(0.65rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.65rem, env(safe-area-inset-right, 0px));
   }
 }
 
 .lol-detail {
-  width: min(920px, calc(100vw - 2rem));
-  flex-shrink: 0;
-  overflow: auto;
+  width: 100%;
+  max-width: 920px;
+  min-width: 0;
+  flex-shrink: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
   border-radius: 18px;
   padding: 1.15rem 1.2rem 1.35rem;
   background: rgba(255, 255, 255, 0.94);
@@ -2024,10 +2133,26 @@ a.lol-btn:focus-visible {
 
 .lol-detail__header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.55rem;
   align-items: flex-start;
-  margin-bottom: 1rem;
+  margin-bottom: 0.65rem;
+  min-width: 0;
+}
+
+.lol-detail__header > div:first-child {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.lol-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+  flex: 0 1 auto;
+  max-width: 100%;
 }
 
 .lol-detail__title {
@@ -2035,45 +2160,63 @@ a.lol-btn:focus-visible {
   font-size: 1.35rem;
   font-weight: 800;
   color: #2c3e50;
+  overflow-wrap: anywhere;
 }
 
 .lol-detail__meta {
-  margin: 0.35rem 0 0;
-  color: #8b7a96;
-  font-size: 0.88rem;
+  margin: 0.3rem 0 0;
+  color: #4f3f5e;
+  font-size: 0.9rem;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .lol-detail__hero {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.9rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.55rem 0.75rem;
   align-items: center;
-  margin-bottom: 1.1rem;
+  margin-bottom: 0.85rem;
+  padding: 0.65rem 0.7rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(173, 129, 190, 0.22);
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .lol-detail__champ {
-  width: 4rem;
-  height: 4rem;
+  width: 3.5rem;
+  height: 3.5rem;
   border-radius: 12px;
   object-fit: cover;
 }
 
+.lol-detail__hero-stats {
+  min-width: 0;
+}
+
 .lol-detail__kda {
   margin: 0;
-  font-size: 2rem;
+  font-size: 1.75rem;
   font-weight: 800;
   letter-spacing: 0.02em;
   color: #2c3e50;
+  line-height: 1.1;
 }
 
 .lol-detail__kda-label {
-  margin: 0.2rem 0 0.45rem;
-  color: #8b7a96;
-  font-size: 0.8rem;
-  font-weight: 650;
+  margin: 0.25rem 0 0;
+  color: #4f3f5e;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .lol-detail__items {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
@@ -2109,12 +2252,16 @@ a.lol-btn:focus-visible {
   grid-template-columns: 1fr 1fr;
   gap: 0.75rem;
   margin-bottom: 1rem;
+  min-width: 0;
 }
 
 .lol-team {
   border-radius: 12px;
   padding: 0.65rem 0.7rem;
   background: rgba(255, 255, 255, 0.55);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .lol-team--blue {
@@ -2145,6 +2292,13 @@ a.lol-btn:focus-visible {
   gap: 0;
   padding: 0;
   border-radius: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.lol-team__info {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .lol-team__row--you {
@@ -2169,6 +2323,8 @@ a.lol-btn:focus-visible {
   gap: 0.45rem;
   align-items: center;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   margin: 0;
   padding: 0.3rem 0.35rem;
   border: none;
@@ -2178,6 +2334,7 @@ a.lol-btn:focus-visible {
   font: inherit;
   text-align: left;
   cursor: default;
+  box-sizing: border-box;
 }
 
 .lol-team__main:disabled {
@@ -2242,6 +2399,9 @@ a.lol-btn:focus-visible {
   font-weight: 750;
   font-variant-numeric: tabular-nums;
   font-size: 0.85rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+  justify-self: end;
 }
 
 .lol-you {
@@ -2288,8 +2448,86 @@ a.lol-btn:focus-visible {
 }
 
 @media (max-width: 720px) {
+  .lol-detail {
+    padding: 0.75rem 0.65rem 0.95rem;
+    margin: 0;
+    border-radius: 14px;
+  }
+
+  .lol-detail__header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .lol-detail__actions {
+    justify-content: stretch;
+    gap: 0.35rem;
+  }
+
+  .lol-detail__actions .lol-btn {
+    flex: 1 1 auto;
+    padding: 0.55rem 0.65rem;
+    font-size: 0.88rem;
+  }
+
+  .lol-detail__title {
+    font-size: 1.12rem;
+  }
+
+  .lol-detail__meta {
+    font-size: 0.86rem;
+    font-weight: 700;
+  }
+
+  .lol-detail__hero {
+    gap: 0.45rem 0.6rem;
+    margin-bottom: 0.65rem;
+    padding: 0.55rem 0.55rem;
+  }
+
+  .lol-detail__champ {
+    width: 3.15rem;
+    height: 3.15rem;
+  }
+
+  .lol-detail__kda {
+    font-size: 1.45rem;
+  }
+
+  .lol-detail__kda-label {
+    font-size: 0.82rem;
+    font-weight: 750;
+  }
+
+  .lol-detail__item {
+    width: 1.85rem;
+    height: 1.85rem;
+  }
+
   .lol-detail__teams {
     grid-template-columns: 1fr;
+    gap: 0.55rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .lol-team {
+    padding: 0.5rem 0.45rem;
+  }
+
+  .lol-team__kda {
+    font-size: 0.78rem;
+  }
+
+  .lol-team__name {
+    font-size: 0.74rem;
+  }
+
+  .lol-btn--poro {
+    white-space: normal;
+    text-align: center;
+    line-height: 1.25;
   }
 
   .lol-match {
@@ -2408,9 +2646,17 @@ a.lol-btn:focus-visible {
   }
 
   .lol-detail__meta,
-  .lol-detail__kda-label,
+  .lol-detail__kda-label {
+    color: #e4d6f0;
+  }
+
   .lol-team__champ-name {
-    color: #b8a8c8;
+    color: #c9b8d8;
+  }
+
+  .lol-detail__hero {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(213, 181, 234, 0.22);
   }
 
   .lol-team {

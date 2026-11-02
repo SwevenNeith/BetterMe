@@ -2,6 +2,8 @@
 
 ## Déploiment des fonctions :
 
+supabase functions deploy riot
+# (match-timeline inclus dans riot — gold 10/15/20 + morts/objectifs pour Poro)
 supabase functions deploy sync-lol-matches
 supabase functions deploy send-notification
 

@@ -127,7 +127,7 @@ function normalizeSummoners(payload) {
 }
 
 function normalizeRunes(trees) {
-  if (!Array.isArray(trees)) return { trees: [], keystones: [] }
+  if (!Array.isArray(trees)) return { trees: [], keystones: [], runesById: new Map() }
   const normalizedTrees = trees.map((t) => ({
     id: Number(t.id),
     key: String(t.key || ''),
@@ -135,20 +135,28 @@ function normalizeRunes(trees) {
     icon: String(t.icon || ''),
   }))
   const keystones = []
+  /** @type {Map<number, { id: number, key: string, name: string, icon: string, treeId: number, treeName: string, slot: number }>} */
+  const runesById = new Map()
   for (const t of trees) {
-    const runes = t.slots?.[0]?.runes ?? []
-    for (const r of runes) {
-      keystones.push({
-        id: Number(r.id),
-        key: String(r.key || ''),
-        name: String(r.name || r.key),
-        icon: String(r.icon || ''),
-        treeId: Number(t.id),
-        treeName: String(t.name || t.key),
-      })
-    }
+    const slots = Array.isArray(t.slots) ? t.slots : []
+    slots.forEach((slot, slotIndex) => {
+      for (const r of slot.runes ?? []) {
+        const entry = {
+          id: Number(r.id) || 0,
+          key: String(r.key || ''),
+          name: String(r.name || r.key),
+          icon: String(r.icon || ''),
+          treeId: Number(t.id),
+          treeName: String(t.name || t.key),
+          slot: slotIndex,
+        }
+        if (!entry.id) continue
+        runesById.set(entry.id, entry)
+        if (slotIndex === 0) keystones.push(entry)
+      }
+    })
   }
-  return { trees: normalizedTrees, keystones }
+  return { trees: normalizedTrees, keystones, runesById }
 }
 
 function normalizeBoots(payload) {
@@ -238,14 +246,18 @@ export async function loadLolMatchTrackerData() {
     }
     await Promise.all(fetches)
 
-    const { trees, keystones } = normalizeRunes(runesPayload)
+    const { trees, keystones, runesById } = normalizeRunes(runesPayload)
+    const summoners = normalizeSummoners(summonerPayload)
 
     return {
       version,
       champions: normalizeChampions(championsPayload),
-      summoners: normalizeSummoners(summonerPayload),
+      summoners,
+      /** @type {Map<number, object>} */
+      summonersByKey: new Map(summoners.map((s) => [Number(s.key) || 0, s])),
       runeTrees: trees,
       keystones,
+      runesById,
       boots: normalizeBoots(itemPayload),
     }
   })()

@@ -139,6 +139,43 @@ function encodePathSegment(value: string) {
 
 type ParticipantRaw = Record<string, unknown>
 
+function summarizePerks(p: ParticipantRaw) {
+  const perks = p.perks as
+    | {
+        styles?: Array<{
+          description?: string
+          style?: number
+          selections?: Array<{ perk?: number }>
+        }>
+        statPerks?: { offense?: number; flex?: number; defense?: number }
+      }
+    | undefined
+  if (!perks?.styles?.length) return null
+
+  const primary =
+    perks.styles.find((s) => s.description === 'primaryStyle') || perks.styles[0]
+  const sub = perks.styles.find((s) => s.description === 'subStyle') || perks.styles[1]
+  const perkIds: number[] = []
+  for (const style of perks.styles) {
+    for (const sel of style.selections ?? []) {
+      const id = Number(sel.perk) || 0
+      if (id) perkIds.push(id)
+    }
+  }
+
+  return {
+    primaryStyleId: Number(primary?.style) || 0,
+    subStyleId: Number(sub?.style) || 0,
+    keystoneId: Number(primary?.selections?.[0]?.perk) || 0,
+    perkIds,
+    statPerks: {
+      offense: Number(perks.statPerks?.offense) || 0,
+      flex: Number(perks.statPerks?.flex) || 0,
+      defense: Number(perks.statPerks?.defense) || 0,
+    },
+  }
+}
+
 function summarizeParticipant(p: ParticipantRaw) {
   const challenges = (p.challenges && typeof p.challenges === 'object'
     ? (p.challenges as Record<string, unknown>)
@@ -146,6 +183,7 @@ function summarizeParticipant(p: ParticipantRaw) {
 
   return {
     puuid: String(p.puuid ?? ''),
+    participantId: Number(p.participantId) || 0,
     riotIdGameName: String(p.riotIdGameName ?? p.summonerName ?? ''),
     riotIdTagline: String(p.riotIdTagline ?? ''),
     summonerName: String(p.summonerName ?? ''),
@@ -178,6 +216,9 @@ function summarizeParticipant(p: ParticipantRaw) {
     summoner1Id: Number(p.summoner1Id) || 0,
     summoner2Id: Number(p.summoner2Id) || 0,
     champLevel: Number(p.champLevel) || 0,
+    turretKills: Number(p.turretKills) || 0,
+    inhibitorKills: Number(p.inhibitorKills) || 0,
+    perks: summarizePerks(p),
     killParticipation: Number(challenges.killParticipation) || null,
     gameEndedInEarlySurrender: Boolean(p.gameEndedInEarlySurrender),
     gameEndedInSurrender: Boolean(p.gameEndedInSurrender),
@@ -224,6 +265,10 @@ function buildMatchSummary(
       queueId?: number
       mapId?: number
       participants?: ParticipantRaw[]
+      teams?: Array<{
+        teamId?: number
+        objectives?: Record<string, { kills?: number } | undefined>
+      }>
     }
   },
   puuid: string,
@@ -233,6 +278,23 @@ function buildMatchSummary(
   const teamKills = participants
     .filter((p) => p.teamId === participant?.teamId)
     .reduce((sum, p) => sum + p.kills, 0)
+
+  /** @type {Record<number, { tower: number, dragon: number, baron: number, inhibitor: number }>} */
+  const teamObjectives: Record<
+    number,
+    { tower: number; dragon: number; baron: number; inhibitor: number }
+  > = {}
+  for (const team of detail?.info?.teams ?? []) {
+    const id = Number(team.teamId) || 0
+    if (!id) continue
+    const obj = team.objectives || {}
+    teamObjectives[id] = {
+      tower: Number(obj.tower?.kills) || 0,
+      dragon: Number(obj.dragon?.kills) || 0,
+      baron: Number(obj.baron?.kills) || 0,
+      inhibitor: Number(obj.inhibitor?.kills) || 0,
+    }
+  }
 
   return {
     matchId: detail?.metadata?.matchId ?? matchId,
@@ -245,6 +307,7 @@ function buildMatchSummary(
     participant,
     teamKills,
     participants,
+    teamObjectives,
   }
 }
 
@@ -480,6 +543,151 @@ Deno.serve(async (req) => {
       })
     }
 
+    if (action === 'match-timeline') {
+      const matchId = String(body.matchId ?? body.match_id ?? '').trim()
+      const puuid = String(body.puuid ?? '').trim()
+      if (!matchId) {
+        return jsonResponse({ error: 'matchId requis.' }, 400)
+      }
+      const timelineUrl =
+        `https://${routing}.api.riotgames.com/lol/match/v5/matches/${encodePathSegment(matchId)}/timeline`
+      const timeline = (await riotFetch(timelineUrl)) as {
+        info?: {
+          frameInterval?: number
+          frames?: Array<{
+            timestamp?: number
+            participantFrames?: Record<
+              string,
+              { participantId?: number; totalGold?: number; xp?: number; level?: number; minionsKilled?: number; jungleMinionsKilled?: number }
+            >
+            events?: Array<Record<string, unknown>>
+          }>
+          participants?: Array<{ participantId?: number; puuid?: string }>
+        }
+      }
+
+      const frames = timeline?.info?.frames ?? []
+      const participants = timeline?.info?.participants ?? []
+      const myPid =
+        Number(participants.find((p) => String(p.puuid ?? '') === puuid)?.participantId) || 0
+
+      /** Gold total joueur à ~10/15/20 min */
+      const goldAt: Record<string, number | null> = { '10': null, '15': null, '20': null }
+      const teamGoldAt: Record<string, { ally: number; enemy: number } | null> = {
+        '10': null,
+        '15': null,
+        '20': null,
+      }
+
+      for (const targetMin of [10, 15, 20]) {
+        const targetMs = targetMin * 60_000
+        let best: (typeof frames)[number] | null = null
+        let bestDelta = Infinity
+        for (const frame of frames) {
+          const ts = Number(frame.timestamp) || 0
+          const delta = Math.abs(ts - targetMs)
+          if (delta < bestDelta) {
+            bestDelta = delta
+            best = frame
+          }
+        }
+        if (!best || bestDelta > 90_000) continue
+        const pframes = best.participantFrames || {}
+        let ally = 0
+        let enemy = 0
+        let myGold = 0
+        for (const pf of Object.values(pframes)) {
+          const pid = Number(pf.participantId) || 0
+          const g = Number(pf.totalGold) || 0
+          if (pid === myPid) myGold = g
+          // Approximation: participantId 1-5 = team 100, 6-10 = team 200 (standard SR)
+          if (pid >= 1 && pid <= 5) ally += g
+          else if (pid >= 6 && pid <= 10) enemy += g
+        }
+        // Si je suis team 200, inverser
+        if (myPid >= 6) {
+          const tmp = ally
+          ally = enemy
+          enemy = tmp
+        }
+        goldAt[String(targetMin)] = myGold || null
+        teamGoldAt[String(targetMin)] = { ally, enemy }
+      }
+
+      /** Moments clés : morts perso + objectifs */
+      const keyMoments: Array<{
+        tSec: number
+        kind: string
+        label: string
+      }> = []
+
+      for (const frame of frames) {
+        for (const ev of frame.events ?? []) {
+          const type = String(ev.type ?? '')
+          const tSec = Math.round((Number(ev.timestamp) || 0) / 1000)
+          if (type === 'CHAMPION_KILL') {
+            const victim = Number(ev.victimId) || 0
+            const killer = Number(ev.killerId) || 0
+            if (victim === myPid) {
+              keyMoments.push({
+                tSec,
+                kind: 'death',
+                label: `Mort (${Math.floor(tSec / 60)}:${String(tSec % 60).padStart(2, '0')})`,
+              })
+            } else if (killer === myPid) {
+              keyMoments.push({
+                tSec,
+                kind: 'kill',
+                label: `Kill (${Math.floor(tSec / 60)}:${String(tSec % 60).padStart(2, '0')})`,
+              })
+            }
+          }
+          if (type === 'ELITE_MONSTER_KILL') {
+            const monster = String(ev.monsterType ?? 'MONSTER')
+            const monSub = String(ev.monsterSubType ?? '')
+            const killerTeam = Number(ev.killerTeamId) || 0
+            keyMoments.push({
+              tSec,
+              kind: 'objective',
+              label: `${monster}${monSub ? `/${monSub}` : ''} · équipe ${killerTeam} (${Math.floor(tSec / 60)}:${String(tSec % 60).padStart(2, '0')})`,
+            })
+          }
+          if (type === 'BUILDING_KILL') {
+            const building = String(ev.buildingType ?? 'TOWER_BUILDING')
+            const towerType = String(ev.towerType ?? '') // OUTER_TURRET | INNER_TURRET | BASE_TURRET | NEXUS_TURRET
+            const laneType = String(ev.laneType ?? '') // TOP_LANE | MID_LANE | BOT_LANE
+            const teamId = Number(ev.teamId) || 0 // team that LOST the building
+            const detail = [building, towerType, laneType].filter(Boolean).join('/')
+            keyMoments.push({
+              tSec,
+              kind: 'tower',
+              label: `${detail} perdue par équipe ${teamId} (${Math.floor(tSec / 60)}:${String(tSec % 60).padStart(2, '0')})`,
+            })
+          }
+        }
+      }
+
+      // Garder un résumé compact
+      const deaths = keyMoments.filter((m) => m.kind === 'death')
+      const objectives = keyMoments.filter((m) => m.kind === 'objective' || m.kind === 'tower')
+      const compactMoments = [
+        ...deaths.slice(0, 6),
+        ...objectives.slice(0, 10),
+      ].sort((a, b) => a.tSec - b.tSec)
+
+      return jsonResponse({
+        platform,
+        routing,
+        matchId,
+        puuid,
+        myParticipantId: myPid,
+        goldAt,
+        teamGoldAt,
+        keyMoments: compactMoments,
+        frameCount: frames.length,
+      })
+    }
+
     if (action === 'champion-masteries') {
       const puuid = String(body.puuid ?? '').trim()
       if (!puuid) {
@@ -684,7 +892,7 @@ Deno.serve(async (req) => {
     return jsonResponse(
       {
         error:
-          'action invalide. Utilise "resolve-account", "league-entries", "champion-masteries", "champion-highlights", "match-ids", "match-summaries", "recent-matches", "match-detail" ou "summoner".',
+          'action invalide. Utilise "resolve-account", "league-entries", "champion-masteries", "champion-highlights", "match-ids", "match-summaries", "recent-matches", "match-detail", "match-timeline" ou "summoner".',
       },
       400,
     )

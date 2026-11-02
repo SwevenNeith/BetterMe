@@ -1,8 +1,58 @@
 /**
- * Persistance des comptes League of Legends (Supabase).
+ * Persistance des comptes League of Legends (Supabase + miroir local).
  */
 
 const TABLE = 'lol_accounts'
+const LOCAL_MIRROR_PREFIX = 'betterme_lol_accounts_mirror:'
+
+/**
+ * @param {string} userId
+ */
+function mirrorKey(userId) {
+  return `${LOCAL_MIRROR_PREFIX}${userId}`
+}
+
+/**
+ * @param {string} userId
+ * @returns {object[]}
+ */
+export function readLolAccountsMirror(userId) {
+  if (!userId || typeof localStorage === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(mirrorKey(userId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * @param {string} userId
+ * @param {object[]} accounts
+ */
+export function writeLolAccountsMirror(userId, accounts) {
+  if (!userId || typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(mirrorKey(userId), JSON.stringify(accounts ?? []))
+  } catch {
+    /* ignore quota */
+  }
+}
+
+/**
+ * @param {import('@supabase/supabase-js').PostgrestError | null | undefined} error
+ */
+function isMissingTableError(error) {
+  if (!error) return false
+  const msg = String(error.message || '')
+  return (
+    error.code === '42P01' ||
+    error.code === 'PGRST205' ||
+    (msg.includes(TABLE) && (msg.includes('schema cache') || msg.includes('does not exist')))
+  )
+}
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
@@ -17,15 +67,51 @@ export async function listLolAccounts(supabase, userId) {
     .order('updated_at', { ascending: false })
 
   if (error) {
-    if (error.code === 'PGRST205' || error.message?.includes(TABLE)) {
+    if (isMissingTableError(error)) {
       console.warn(
         'Table lol_accounts absente. Exécute scripts/create-lol-accounts.sql dans Supabase.',
       )
-      return []
+      return readLolAccountsMirror(userId)
     }
     throw error
   }
-  return data ?? []
+
+  const rows = data ?? []
+  if (rows.length) {
+    writeLolAccountsMirror(userId, rows)
+    return rows
+  }
+
+  // Serveur vide mais miroir local → tentative de restauration
+  const mirror = readLolAccountsMirror(userId)
+  if (mirror.length) {
+    console.warn('lol_accounts vide côté Supabase — restauration depuis le miroir local.')
+    const restored = []
+    for (const row of mirror) {
+      try {
+        const saved = await upsertLolAccount(supabase, userId, {
+          label: row.label,
+          gameName: row.game_name,
+          tagLine: row.tag_line,
+          puuid: row.puuid,
+          platform: row.platform,
+          routing: row.routing,
+          summonerId: row.summoner_id,
+          summonerLevel: row.summoner_level,
+          profileIconId: row.profile_icon_id,
+          metadata: row.metadata,
+        })
+        restored.push(saved)
+      } catch (err) {
+        console.warn('Restauration compte LoL:', err)
+        restored.push(row)
+      }
+    }
+    if (restored.length) writeLolAccountsMirror(userId, restored)
+    return restored
+  }
+
+  return []
 }
 
 /**
@@ -86,13 +172,19 @@ export async function upsertLolAccount(supabase, userId, input) {
     .single()
 
   if (error) {
-    if (error.code === 'PGRST205' || error.message?.includes(TABLE)) {
+    if (isMissingTableError(error)) {
       throw new Error(
         'Table lol_accounts absente. Exécute scripts/create-lol-accounts.sql dans Supabase.',
       )
     }
     throw error
   }
+
+  // Met à jour le miroir local (évite de « perdre » le compte si un list échoue plus tard)
+  const mirror = readLolAccountsMirror(userId).filter((a) => a.puuid !== data.puuid)
+  mirror.unshift(data)
+  writeLolAccountsMirror(userId, mirror)
+
   return data
 }
 
@@ -109,6 +201,9 @@ export async function deleteLolAccount(supabase, userId, accountId) {
     .eq('id', accountId)
     .eq('user_id', userId)
   if (error) throw error
+
+  const mirror = readLolAccountsMirror(userId).filter((a) => a.id !== accountId)
+  writeLolAccountsMirror(userId, mirror)
 }
 
 /**
