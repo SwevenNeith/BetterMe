@@ -176,7 +176,7 @@ const CHART_H = 220
 const CHART_PAD = { top: 16, right: 12, bottom: 28, left: 36 }
 
 const chartDomain = computed(() => {
-  const vals = chartSeries.value.flatMap((p) => [p.spent, p.budget])
+  const vals = chartSeries.value.flatMap((p) => [p.spent, p.budget, p.planned])
   if (!vals.length) return { min: 0, max: 10 }
   const rawMin = Math.min(0, ...vals)
   const rawMax = Math.max(...vals, 1)
@@ -224,6 +224,7 @@ const chartGeometry = computed(() => {
 
   const budgetPts = series.map((p, i) => ({ x: toX(i), y: toY(p.budget) }))
   const spentPts = series.map((p, i) => ({ x: toX(i), y: toY(p.spent) }))
+  const plannedPts = series.map((p, i) => ({ x: toX(i), y: toY(p.planned) }))
 
   const spentArea =
     spentPts.length > 0
@@ -249,9 +250,11 @@ const chartGeometry = computed(() => {
   return {
     budgetPath: smoothPath(budgetPts),
     spentPath: smoothPath(spentPts),
+    plannedPath: smoothPath(plannedPts),
     spentArea,
     budgetPts,
     spentPts,
+    plannedPts,
     yTicks,
     xLabels,
     zeroY: toY(0),
@@ -441,6 +444,11 @@ onMounted(async () => {
               :d="chartGeometry.budgetPath"
             />
             <path
+              class="chart-line chart-line--planned"
+              fill="none"
+              :d="chartGeometry.plannedPath"
+            />
+            <path
               class="chart-line chart-line--spent"
               fill="none"
               :d="chartGeometry.spentPath"
@@ -455,8 +463,8 @@ onMounted(async () => {
               r="3.2"
             >
               <title>
-                {{ chartSeries[i].date }} · dépensé {{ chartSeries[i].spent }} / budget
-                {{ chartSeries[i].budget }}
+                {{ chartSeries[i].date }} · budget {{ chartSeries[i].budget }} · dépensé
+                {{ chartSeries[i].spent }} · prévu {{ chartSeries[i].planned }}
               </title>
             </circle>
           </svg>
@@ -464,6 +472,7 @@ onMounted(async () => {
         <p class="chart-legend">
           <span class="leg leg-budget">Budget</span>
           <span class="leg leg-spent">Dépensé</span>
+          <span class="leg leg-planned">Prévu</span>
         </p>
         <p v-if="!chartSeries.length" class="empty">Pas encore de données sur cette période.</p>
       </section>
@@ -974,6 +983,13 @@ onMounted(async () => {
   stroke-width: 2;
 }
 
+.chart-line--planned {
+  stroke: #5b8def;
+  stroke-dasharray: 2 5;
+  stroke-width: 2;
+  opacity: 0.9;
+}
+
 .chart-line--spent {
   stroke: url(#hist-spent-stroke);
 }
@@ -986,6 +1002,7 @@ onMounted(async () => {
 
 .chart-legend {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   margin: 0.35rem 0 0;
   font-size: 0.8rem;
@@ -1014,6 +1031,14 @@ onMounted(async () => {
 
 .leg-spent::before {
   background: linear-gradient(90deg, #ad81be, #8fa2d4);
+}
+
+.leg-planned::before {
+  background-image: repeating-linear-gradient(
+    90deg,
+    #5b8def 0 3px,
+    transparent 3px 7px
+  );
 }
 
 .insights-grid {

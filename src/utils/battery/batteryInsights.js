@@ -59,13 +59,20 @@ export function topGreedyActivities(history, limit = 8) {
 }
 
 /**
- * Points pour courbe (spent / budget / remaining).
- * @param {{ day_date: string, spent: number, computed_budget: number, remaining: number }[]} history
+ * Points pour courbe (spent / budget / prévu / remaining).
+ * @param {{
+ *   day_date: string,
+ *   spent: number,
+ *   plannedSpent?: number,
+ *   computed_budget: number,
+ *   remaining: number,
+ * }[]} history
  */
 export function seriesForChart(history) {
   return (history ?? []).map((d) => ({
     date: d.day_date,
     spent: Number(d.spent) || 0,
+    planned: Number(d.plannedSpent) || 0,
     budget: Number(d.computed_budget) || 0,
     remaining: Number(d.remaining) || 0,
   }))
