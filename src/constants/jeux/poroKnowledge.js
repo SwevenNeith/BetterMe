@@ -48,7 +48,8 @@ export const PORO_ITEM_ADVICE_BY_TAG = {
   },
   cc: {
     title: 'Contre beaucoup de CC',
-    itemIds: [3111, 3139, 3222, 6035],
+    // Merc / QSS / Mercurial / Mikael / Silvermere / Banshee (filtre archétype au quiz)
+    itemIds: [3111, 3140, 3139, 3222, 6035, 3102],
     focus: 'Tenacity / QSS / purification des contrôles',
     tip: 'Vision + spacing. Un QSS bien timed peut gagner le fight à lui seul.',
   },
@@ -184,6 +185,45 @@ export const PORO_QUIZ_BANK = [
     explain: 'La vision et le tracking des cooldowns évitent les int gratuit.',
     tags: ['vision', 'macro'],
   },
+  {
+    id: 'q6',
+    question: 'Tu es derrière en gold en mid. Quelle priorité est souvent la plus saine ?',
+    choices: [
+      'Forcer des 1v1 dry chaque wave',
+      'Farm / wave + attendre un spike item / roam allié',
+      'Vendre ton premier item',
+      'FF immédiatement',
+    ],
+    answerIndex: 1,
+    explain: 'Quand tu es behind : stabilise le farm, évite les int, joue ton prochain spike.',
+    tags: ['macro', 'mid'],
+  },
+  {
+    id: 'q7',
+    question: 'Un assassin fed adverse (Zed / Rengar…). Quel réflexe item / play est utile ?',
+    choices: [
+      'Zhonya / GA / stopwatch + ne pas walk alone',
+      'Ignorer et full glass cannon',
+      'Toujours push sans ward',
+      'Vendre les bottes',
+    ],
+    answerIndex: 0,
+    explain: 'Survie au burst + vision / grouping : le glass cannon seul se fait one-shot.',
+    tags: ['items', 'assassin'],
+  },
+  {
+    id: 'q8',
+    question: 'À quoi sert surtout un **control ward** (pink) ?',
+    choices: [
+      'Vision durable + clear des wards adverses dans la zone',
+      'Augmenter ton AD de 50',
+      'Soigner les sbires',
+      'Réduire le CD de R',
+    ],
+    answerIndex: 0,
+    explain: 'Pink = contrôle de vision local. Place-les sur objectifs / river / pixel brush.',
+    tags: ['vision'],
+  },
 ]
 
 export const PORO_WELCOME = `Salut, moi c’est **Poro** — ton assistant LoL sur BetterMe.
@@ -193,8 +233,8 @@ Je peux t’aider à :
 • **Guides** + **sorts** (ex. « R de Wukong »)
 • **Debrief** d’une partie ouverte (tier de lane S→E, farm, runes, items)
 • **Pick / draft** : « quel champion avec … contre … » (croisé avec **ton pool**)
-• **Coach de pool / climb** : « je stagne mid », pause si session tilt
-• **Mémoire** riche (poste, mains, style, objectif) + **quiz**
+• **Mémoire** riche (poste, mains, style, objectif)
+• **Quiz** généraux (items / macro) + quiz liés à **ta dernière partie**
 
 Ouvre un match dans la liste LoL pour lier le contexte. **Effacer** remet la discussion à zéro.`
 
@@ -208,11 +248,5 @@ export const PORO_HELP = `Exemples :
 • « Draft ADC bans Aphelios Zeri, contre Ashe Nautilus »
 • « Comment jouer Zac en jungle ? »
 • « Analyse cette partie » / « Matchup lane » / « ma rune ? »
-• « Je stagne mid » / « coach pool » / « session perdue »
-• « Souviens-toi que je joue mid agressif pour grind LP »
-• « Souviens-toi que je main Orianna Ahri » / « Qu’est-ce que tu retiens sur moi ? »
-• « Quiz »
-
-Couleurs : items dorés, sorts cyan, champions rose, postes verts.
-Builds / picks / coach = heuristiques Data Dragon + ton historique (pas un scrape u.gg).
-Le **matchup lane** (tier S→E) porte sur la **partie ouverte**, pas une liste counters méta.`
+• « Souviens-toi que je main Orianna Ahri » / « Que retiens-tu sur moi ? »
+• « Quiz » (avec une partie ouverte → questions sur ta stuff vs leur compo)`

@@ -285,8 +285,7 @@ export function formatPoroMemories(memories, champions = []) {
   if (!list.length) {
     return (
       'Pour l’instant je n’ai rien mémorisé sur toi.\n' +
-      'Ex. : « souviens-toi que je joue mid agressif pour grind LP »\n' +
-      'ou « souviens-toi que je main Orianna Ahri ».'
+      'Ex. : « souviens-toi que je main Orianna Ahri ».'
     )
   }
 

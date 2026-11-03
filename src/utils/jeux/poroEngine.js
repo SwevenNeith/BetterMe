@@ -6,7 +6,6 @@ import {
   PORO_CHAMPION_GUIDES,
   PORO_HELP,
   PORO_ITEM_ADVICE_BY_TAG,
-  PORO_QUIZ_BANK,
   PORO_TEAM_TAGS,
   PORO_WELCOME,
 } from '../../constants/jeux/poroKnowledge.js'
@@ -22,10 +21,6 @@ import {
   isDraftPickQuery,
 } from './poroDraftPick.js'
 import {
-  formatPoolCoachReply,
-  isPoolCoachQuery,
-} from './poroCoach.js'
-import {
   buildPoroMatchSnapshot,
   formatMatchAdviceReply,
   getConversationHints,
@@ -37,10 +32,15 @@ import {
   parseRememberIntent,
   playstyleLabel,
 } from './poroMemoryProfile.js'
+import {
+  formatQuizQuestion,
+  gradePoroQuizAnswer as gradeQuizRaw,
+  pickPoroQuizQuestion,
+} from './poroQuiz.js'
 import { detectRoleInText, PORO_ROLES, resolvePreferredRole } from './poroRoles.js'
 
 export { formatPoroMemories, parseRememberIntent } from './poroMemoryProfile.js'
-export { isPoolCoachQuery, formatPoolCoachReply } from './poroCoach.js'
+export { pickPoroQuizQuestion, formatQuizQuestion } from './poroQuiz.js'
 
 /**
  * @typedef {{ kind: string, label: string, value: string }} PoroMemory
@@ -364,44 +364,11 @@ export function formatPlayerHistoryReply(player, patch = '') {
 }
 
 /**
- * @param {number} [seed]
- */
-export function pickPoroQuizQuestion(seed = Date.now()) {
-  const idx = Math.abs(Number(seed) || 0) % PORO_QUIZ_BANK.length
-  return PORO_QUIZ_BANK[idx]
-}
-
-/**
- * @param {ReturnType<typeof pickPoroQuizQuestion>} question
- */
-export function formatQuizQuestion(question) {
-  const choices = question.choices.map((c, i) => `${i + 1}. ${c}`).join('\n')
-  return (
-    `**Quiz Poro**\n${question.question}\n\n${choices}\n\n` +
-    `Réponds avec le **numéro** (1–${question.choices.length}) ou le texte du choix.`
-  )
-}
-
-/**
- * @param {ReturnType<typeof pickPoroQuizQuestion>} question
+ * @param {object} question
  * @param {string} userAnswer
  */
 export function gradePoroQuizAnswer(question, userAnswer) {
-  const n = normalizePoroText(userAnswer)
-  const asNum = Number.parseInt(n, 10)
-  let correct = false
-  if (Number.isFinite(asNum) && asNum >= 1 && asNum <= question.choices.length) {
-    correct = asNum - 1 === question.answerIndex
-  } else {
-    const expected = normalizePoroText(question.choices[question.answerIndex])
-    correct = n === expected || expected.includes(n) || n.includes(expected)
-  }
-  return {
-    correct,
-    reply: correct
-      ? `Exact !\n${question.explain}`
-      : `Pas tout à fait. La bonne réponse était : **${question.choices[question.answerIndex]}**.\n${question.explain}`,
-  }
+  return gradeQuizRaw(question, userAnswer, normalizePoroText)
 }
 
 /**
@@ -487,11 +454,32 @@ export function runPoroEngine(userText, ctx = {}) {
     }
   }
 
-  if (/\bquiz\b/.test(n) || n.includes('entraine') || n.includes('test moi')) {
-    const question = pickPoroQuizQuestion()
+  if (
+    /\bquiz\b/.test(n) ||
+    n.includes('entraine') ||
+    n.includes('test moi') ||
+    n.includes('question item')
+  ) {
+    const snap = ctx.matchSnapshot || null
+    const preferMatch =
+      Boolean(snap?.me) &&
+      !n.includes('general') &&
+      !n.includes('item seul') &&
+      !n.includes('hors partie')
+    const question = pickPoroQuizQuestion({
+      seed: Date.now(),
+      matchSnapshot: snap,
+      itemsById,
+      preferMatch,
+    })
     return {
       reply: formatQuizQuestion(question) + memoryContextBlurb(memories),
-      meta: { intent: 'quiz', quiz: question },
+      meta: {
+        intent: 'quiz',
+        quiz: question,
+        quizKind: question.kind || 'general',
+        hasMatch: Boolean(snap?.me),
+      },
     }
   }
 
@@ -672,22 +660,6 @@ export async function answerPoroQuery(userText, ctx = {}) {
     }
   }
 
-  // Coach pool / tilt (avant draft « quel champion contre »)
-  if (isPoolCoachQuery(raw)) {
-    return {
-      reply:
-        formatPoolCoachReply({
-          raw,
-          player: runtime?.player || null,
-          role,
-          memories,
-          recentMatches: runtime?.recentMatches || [],
-          champions: runtime?.champions || [],
-        }) + memoryContextBlurb(memories, runtime?.champions),
-      meta: { intent: 'pool_coach', role: role?.id || null },
-    }
-  }
-
   const champs = runtime?.champions ? findChampionsInCatalog(raw, runtime.champions) : []
   const spellKey = detectSpellKey(raw)
   const matchSnap =
@@ -695,6 +667,36 @@ export async function answerPoroQuery(userText, ctx = {}) {
     (runtime?.match
       ? buildPoroMatchSnapshot(runtime.match, runtime.itemsById, runtime.champions)
       : null)
+
+  // Quiz (avec partie ouverte → priorise questions sur ta stuff vs leur compo)
+  if (
+    /\bquiz\b/.test(n) ||
+    n.includes('entraine') ||
+    n.includes('test moi') ||
+    n.includes('question item') ||
+    (n.includes('quizz') && !n.includes('build'))
+  ) {
+    const preferMatch =
+      Boolean(matchSnap?.me) &&
+      !n.includes('general') &&
+      !n.includes('item seul') &&
+      !n.includes('hors partie')
+    const question = pickPoroQuizQuestion({
+      seed: Date.now(),
+      matchSnapshot: matchSnap,
+      itemsById: runtime?.itemsById || null,
+      preferMatch,
+    })
+    return {
+      reply: formatQuizQuestion(question) + memoryContextBlurb(memories, runtime?.champions),
+      meta: {
+        intent: 'quiz',
+        quiz: question,
+        quizKind: question.kind || 'general',
+        hasMatch: Boolean(matchSnap?.me),
+      },
+    }
+  }
 
   const asksItemsOrBuild =
     n.includes('item') || n.includes('build') || n.includes('stuff')
@@ -940,9 +942,7 @@ export function poroWelcomeMessage(patch = '', roleLabel = '') {
   let msg = PORO_WELCOME
   if (patch) msg += `\n\n_Catalogue chargé · patch **${patch}**._`
   if (roleLabel) {
-    msg +=
-      `\n_Poste de base actuel : ${markRole(roleLabel)}._` +
-      `\n_Mémoire : « souviens-toi que je joue mid agressif pour grind LP » · Coach : « je stagne mid »._`
+    msg += `\n_Poste de base actuel : ${markRole(roleLabel)}._`
   }
   return msg
 }

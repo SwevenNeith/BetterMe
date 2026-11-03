@@ -988,6 +988,6 @@ export function formatMatchAdviceReply(
     `---\n\n` +
     `### Lecture rapide\n` +
     tips.map((t) => `• ${t}`).join('\n') +
-    `\n\n_Essaie aussi : « matchup lane », « ma rune ? », « mon gold ? », « je stagne mid »._`
+    `\n\n_Essaie aussi : « matchup lane », « ma rune ? », « mon gold ? », « Quiz »._`
   )
 }

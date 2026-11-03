@@ -15,8 +15,6 @@ import {
   pickPoroQuizQuestion,
   pickSelfChampion,
   runPoroEngine,
-  formatPoolCoachReply,
-  isPoolCoachQuery,
 } from './poroEngine.js'
 import {
   assessKeystoneVsLane,
@@ -690,88 +688,88 @@ describe('poroEngine', () => {
     assert.ok(mem.memories.some((m) => m.label === 'goal' && /grind/i.test(m.value)))
   })
 
-  it('coach de pool : WR + volume + tilt pause', async () => {
-    assert.equal(isPoolCoachQuery('Je stagne mid'), true)
-    assert.equal(isPoolCoachQuery('Quel champion mid contre Yasuo'), false)
-
-    const player = {
-      totalGames: 40,
-      champions: [
-        {
-          championId: 61,
-          championName: 'Orianna',
-          games: 20,
-          winRate: 58,
-          championTags: ['Mage', 'Support'],
-        },
-        {
-          championId: 103,
-          championName: 'Ahri',
-          games: 12,
-          winRate: 55,
-          championTags: ['Mage', 'Assassin'],
-        },
-        {
-          championId: 238,
-          championName: 'Zed',
-          games: 8,
-          winRate: 35,
-          championTags: ['Assassin'],
-        },
-      ],
-    }
-    const reply = formatPoolCoachReply({
-      raw: 'Je stagne mid',
-      player,
-      role: { id: 'mid', label: 'Mid' },
-      memories: [
-        { label: 'playstyle', value: 'safe' },
-        { label: 'goal', value: 'Grind LP' },
-      ],
-      recentMatches: [
-        { participant: { win: false } },
-        { participant: { win: false } },
-        { participant: { win: false } },
-      ],
-      champions: [
-        { id: 'Orianna', key: 61, name: 'Orianna', tags: ['Mage', 'Support'] },
-        { id: 'Ahri', key: 103, name: 'Ahri', tags: ['Mage', 'Assassin'] },
-        { id: 'Zed', key: 238, name: 'Zed', tags: ['Assassin'] },
-      ],
-    })
-    assert.match(reply, /Coach de pool/)
-    assert.match(reply, /Orianna/)
-    assert.match(reply, /pause/i)
-    assert.match(reply, /Batterie|Mood|Journal/)
-
-    const { answerPoroQuery } = await import('./poroEngine.js')
-    const res = await answerPoroQuery('Je stagne mid', {
-      memories: [],
-      runtime: {
-        player,
-        champions: [
-          { id: 'Orianna', key: 61, name: 'Orianna', tags: ['Mage', 'Support'] },
-          { id: 'Ahri', key: 103, name: 'Ahri', tags: ['Mage', 'Assassin'] },
-          { id: 'Zed', key: 238, name: 'Zed', tags: ['Assassin'] },
-        ],
-        preferredRole: { id: 'mid', label: 'Mid' },
-        recentMatches: [
-          { participant: { win: false } },
-          { participant: { win: false } },
-          { participant: { win: false } },
-        ],
-      },
-    })
-    assert.equal(res.meta.intent, 'pool_coach')
-    assert.match(res.reply, /Orianna/)
-  })
-
   it('quiz + correction', () => {
     const q = pickPoroQuizQuestion(0)
     const start = runPoroEngine('quiz')
     assert.equal(start.meta.intent, 'quiz')
     const good = gradePoroQuizAnswer(q, String(q.answerIndex + 1))
     assert.equal(good.correct, true)
+  })
+
+  it('quiz lié à une partie (build vs compo)', async () => {
+    const { buildMatchBuildQuiz, pickPoroQuizQuestion: pick } = await import('./poroQuiz.js')
+    const snap = {
+      matchId: 'EUW1_Q',
+      me: {
+        championId: 61,
+        championName: 'Orianna',
+        role: 'Mid',
+        tags: ['Mage', 'Support'],
+        items: [
+          { id: 6655, name: 'Tempête' },
+          { id: 3089, name: 'Rabadon' },
+        ],
+      },
+      laneOpponent: {
+        championId: 45,
+        championName: 'Veigar',
+        tags: ['Mage'],
+      },
+      enemies: [
+        { name: 'Veigar', id: 45 },
+        { name: 'LeeSin', id: 64 },
+        { name: 'Jinx', id: 222 },
+      ],
+      enemyTags: ['Mage', 'Fighter', 'Marksman'],
+    }
+    const itemsById = new Map([
+      [3165, { name: 'Morellonomicon' }],
+      [3157, { name: 'Sablier de Zhonya' }],
+      [3036, { name: 'Lord Dominik' }],
+      [3135, { name: 'Bâton du Vide' }],
+      [3047, { name: 'Tabis' }],
+      [3111, { name: 'Chaussures de mercure' }],
+      [3140, { name: 'Quicksilver Sash' }],
+      [3102, { name: 'Voile de la banquise' }],
+      [3139, { name: 'Lame mercurielle' }],
+      [6035, { name: 'Aube d’argent' }],
+      [3222, { name: 'Bénédiction de Mikaël' }],
+    ])
+    const mq = buildMatchBuildQuiz(snap, itemsById, 42)
+    assert.ok(mq)
+    assert.match(mq.question, /Quiz partie|Orianna/i)
+    assert.doesNotMatch(mq.question, /hypercarry|où te placer/i)
+    assert.equal(mq.choices.length, 4)
+    assert.match(mq.explain, /Exemples adaptés à Orianna/i)
+    assert.doesNotMatch(mq.explain, /Ton stuff/i)
+
+    const { buildMatchFocusQuiz, pickQuizExampleItems } = await import('./poroQuiz.js')
+    const focus = buildMatchFocusQuiz(
+      { ...snap, enemyTags: ['Mage', 'Assassin'] },
+      itemsById,
+      3,
+    )
+    // Force tag cc via pickQuizExampleItems
+    const ccExamples = pickQuizExampleItems('cc', snap.me, itemsById, 3)
+    assert.ok(ccExamples.length >= 1)
+    assert.ok(ccExamples.every((it) => ![3139, 6035].includes(it.id)))
+    assert.ok(ccExamples.some((it) => [3111, 3140, 3102].includes(it.id)))
+    if (focus) {
+      assert.match(focus.explain, /Exemples adaptés à Orianna/i)
+      assert.doesNotMatch(focus.explain, /Ton stuff|Écho de Luden/i)
+    }
+
+    // Avec match ouvert : JAMAIS un quiz ADC générique hors contexte
+    for (let seed = 0; seed < 40; seed += 1) {
+      const picked = pick({
+        seed,
+        matchSnapshot: snap,
+        itemsById,
+        preferMatch: true,
+      })
+      assert.ok(picked?.kind?.startsWith('match'), `seed ${seed} → ${picked?.kind}`)
+      assert.doesNotMatch(String(picked.question), /ADC hypercarry|où te placer idéalement/i)
+    }
   })
 
   it('formate l’historique joueur', () => {
