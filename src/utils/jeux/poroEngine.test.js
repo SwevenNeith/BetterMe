@@ -634,6 +634,38 @@ describe('poroEngine', () => {
     assert.match(reply, /Ordre conseillé/)
   })
 
+  it('utilise la meta mid Storage quand dispo', () => {
+    const itemsById = new Map([
+      [1056, { name: 'Anneau de Doran' }],
+      [3158, { name: 'Bottes de lucidité' }],
+      [6655, { name: 'Tempête de lampe' }],
+      [4645, { name: 'Flameau sombre' }],
+      [3089, { name: 'Coiffe de Rabadon' }],
+    ])
+    const reply = buildChampionBuildReply({
+      champion: { name: 'Orianna', tags: ['Mage', 'Support'], key: 61 },
+      role: { id: 'mid', label: 'Mid' },
+      itemsById,
+      metaPatch: '16.3',
+      metaEntry: {
+        championId: 61,
+        winRate: 51.2,
+        games: 680,
+        start: [1056, 2003],
+        boots: [3158],
+        core: [6655, 4645],
+        late: [3089],
+        skillPriority: 'QWE',
+        skillOrder: ['Q', 'W', 'E', 'Q', 'Q', 'R'],
+      },
+    })
+    assert.match(reply, /Build méta/)
+    assert.match(reply, /Orianna/)
+    assert.match(reply, /QWE/)
+    assert.match(reply, /Tempête de lampe|6655/)
+    assert.match(reply, /51\.2/)
+  })
+
   it('mémorise une préférence + poste', () => {
     const result = runPoroEngine('Souviens-toi que je main Jinx ADC')
     assert.equal(result.meta.intent, 'remember')

@@ -189,7 +189,7 @@ export const PORO_QUIZ_BANK = [
 export const PORO_WELCOME = `Salut, moi c’est **Poro** — ton assistant LoL sur BetterMe.
 
 Je peux t’aider à :
-• **Builds** pour **ton** champion vs la compo (pas juste des catégories)
+• **Builds méta** mid / ADC / support / top / jungle (Storage)
 • **Guides** + **sorts** (ex. « R de Wukong »)
 • **Debrief** d’une partie ouverte (tier de lane S→E, farm, runes, items)
 • **Pick / draft** : « quel champion avec … contre … » (croisé avec **ton pool**)
@@ -199,7 +199,9 @@ Je peux t’aider à :
 Ouvre un match dans la liste LoL pour lier le contexte. **Effacer** remet la discussion à zéro.`
 
 export const PORO_HELP = `Exemples :
-• « Build Veigar ADC contre Miss Fortune »
+• « Build Orianna mid » / « Build Jinx adc » / « Build Leona support »
+• « Build Darius top » / « Build Lee Sin jungle »
+• « Actualise meta mid|adc|support|top|jungle » ou « Actualise meta » (les 5)
 • « Quels items j’aurais dû build ? » (après analyse d’une partie)
 • « Quel champion mid contre Yasuo Zed Katarina »
 • « Qui jouer avec Ornn Lulu contre Malphite Syndra Jinx »

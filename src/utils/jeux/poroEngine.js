@@ -435,6 +435,7 @@ export function runPoroEngine(userText, ctx = {}) {
 
   if (
     n.includes('que reten') ||
+    n.includes('retiens sur moi') ||
     n.includes('que sais tu de moi') ||
     n.includes('ma memoire') ||
     n.includes('mes infos') ||
@@ -583,6 +584,7 @@ export async function answerPoroQuery(userText, ctx = {}) {
 
   if (
     (n.includes('que reten') ||
+      n.includes('retiens sur moi') ||
       n.includes('que sais tu de moi') ||
       n.includes('ma memoire') ||
       n.includes('mes infos') ||
@@ -613,6 +615,60 @@ export async function answerPoroQuery(userText, ctx = {}) {
         formatPlayerHistoryReply(runtime.player, runtime.patch) +
         memoryContextBlurb(memories, runtime?.champions),
       meta: { intent: 'history' },
+    }
+  }
+
+  // Sync meta (Storage) à la demande — mid / adc / support / top / jungle
+  if (
+    n.includes('sync meta') ||
+    n.includes('actualise meta') ||
+    n.includes('maj meta') ||
+    n.includes('mettre a jour la meta') ||
+    n.includes('refresh meta')
+  ) {
+    const {
+      detectPoroMetaRoleInNormalizedText,
+      fetchPoroMetaRole,
+      applyMetaToRuntime,
+      PORO_META_ROLES,
+      PORO_META_ROLE_IDS,
+    } = await import('../../services/jeux/poroMeta.js')
+    const targetRole = detectPoroMetaRoleInNormalizedText(n)
+    // « actualise meta » sans poste → les 5
+    const rolesToSync = targetRole ? [targetRole] : [...PORO_META_ROLE_IDS]
+
+    if (typeof runtime?.syncMetaRole !== 'function') {
+      return {
+        reply:
+          'Sync meta indisponible ici. Déploie `sync-poro-meta-mid` / `-adc` / `-support` / `-top` / `-jungle` et réessaie.',
+        meta: { intent: 'sync_meta_error' },
+      }
+    }
+
+    /** @type {string[]} */
+    const lines = []
+    for (const rid of rolesToSync) {
+      try {
+        const result = await runtime.syncMetaRole(rid)
+        if (runtime) {
+          const fresh = await fetchPoroMetaRole(rid, true)
+          applyMetaToRuntime(runtime, rid, fresh)
+        }
+        const label = PORO_META_ROLES[rid]?.label || rid
+        lines.push(
+          `• **${label}**` +
+            (result?.patch ? ` · patch ${result.patch}` : '') +
+            (result?.championCount != null ? ` · ${result.championCount} champs` : ''),
+        )
+      } catch (err) {
+        lines.push(`• **${rid}** : échec (${err?.message || 'erreur'})`)
+      }
+    }
+    return {
+      reply:
+        `Meta synchronisée :\n${lines.join('\n')}\n\n` +
+        `Ex. : « build Orianna mid », « build Jinx adc », « build Darius top », « build Lee Sin jungle ».`,
+      meta: { intent: 'sync_meta', roles: rolesToSync },
     }
   }
 
@@ -715,15 +771,22 @@ export async function answerPoroQuery(userText, ctx = {}) {
     }
   }
 
-  // Build champion + rôle + matchup
+  // Build champion + rôle + matchup (meta mid Storage si dispo)
   if (runtime && isChampionBuildQuery(raw) && champs.length) {
     const self = pickSelfChampion(raw, champs)
     const enemy = pickEnemyChampion(raw, champs, self)
     const styleTags = detectPoroTags(raw)
-    const buildRole =
-      detectRoleInText(raw) ||
-      role
+    const buildRole = detectRoleInText(raw) || role
     try {
+      let metaEntry = null
+      let metaPatch = ''
+      const { getRuntimeMetaForRole } = await import('../../services/jeux/poroMeta.js')
+      const roleMeta = getRuntimeMetaForRole(runtime, buildRole?.id)
+      if (roleMeta?.champions) {
+        const cid = Number(self.key) || Number(self.championId)
+        metaEntry = roleMeta.champions[String(cid)] || null
+        metaPatch = roleMeta.patch || ''
+      }
       const reply = buildChampionBuildReply({
         champion: self,
         role: buildRole,
@@ -731,14 +794,17 @@ export async function answerPoroQuery(userText, ctx = {}) {
         enemyStyleTags: styleTags,
         itemsById: runtime.itemsById,
         patch: runtime.patch,
+        metaEntry,
+        metaPatch,
       })
       return {
-        reply: reply + memoryContextBlurb(memories),
+        reply: reply + memoryContextBlurb(memories, runtime?.champions),
         meta: {
           intent: 'build',
           champion: self.id,
           enemy: enemy?.id || null,
           role: buildRole.id,
+          meta: Boolean(metaEntry),
         },
       }
     } catch (err) {

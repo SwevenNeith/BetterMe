@@ -1,5 +1,5 @@
 /**
- * Suggestions de builds Poro (heuristiques Data Dragon, pas un scrape méta).
+ * Suggestions de builds Poro (meta mid Storage + heuristiques Data Dragon).
  */
 
 import { markChamp, markItem, markRole } from './poroMarkup.js'
@@ -207,6 +207,113 @@ export function planChampionBuild(opts) {
 }
 
 /**
+ * Formate une entrée meta mid (Storage).
+ * @param {object} opts
+ * @param {object} opts.metaEntry
+ * @param {{ name: string }} opts.champion
+ * @param {{ id: string, label: string }} opts.role
+ * @param {{ name: string, tags?: string[] } | null} [opts.enemy]
+ * @param {string[]} [opts.enemyStyleTags]
+ * @param {Map<number, object>} [opts.itemsById]
+ * @param {string} [opts.patch]
+ * @param {number[]} [opts.ownedItemIds]
+ * @param {boolean} [opts.compact]
+ * @param {string} [opts.metaPatch]
+ */
+function buildMetaMidReply(opts) {
+  const {
+    metaEntry,
+    champion,
+    role,
+    enemy = null,
+    itemsById = null,
+    patch = '',
+    ownedItemIds = [],
+    compact = false,
+    metaPatch = '',
+  } = opts
+  const styleTags = opts.enemyStyleTags || []
+  const owned = new Set((ownedItemIds || []).map(Number).filter((id) => id > 0))
+
+  const fmt = (ids) => {
+    const resolved = resolveExisting(ids, itemsById)
+    return resolved.map((it, i) => {
+      const had = owned.has(Number(it.id))
+      return `${i + 1}. ${markItem(it.name, it.id)}${had ? ' _(tu l’avais)_' : ''}`
+    })
+  }
+
+  // Situationnels heuristiques (compo) par-dessus le core méta
+  const situPlan = planChampionBuild({
+    champion,
+    role,
+    enemy,
+    enemyStyleTags: styleTags,
+  })
+  const used = new Set([
+    ...(metaEntry.start || []),
+    ...(metaEntry.boots || []),
+    ...(metaEntry.core || []),
+    ...(metaEntry.late || []),
+  ])
+  const situ = (situPlan.situ || []).filter((id) => !used.has(id)).slice(0, 3)
+
+  const roleLabel = role?.label || role?.id || 'poste'
+  const patchLine = metaPatch || patch
+    ? `_Meta ${roleLabel} patch **${metaPatch || patch}**` +
+      (patch && metaPatch && patch !== metaPatch ? ` · DDragon **${patch}**` : '') +
+      `_\n\n`
+    : ''
+  const vsLine = enemy
+    ? ` vs ${markChamp(enemy.name)}`
+    : styleTags.length
+      ? ` · adapté à la compo (${styleTags.join(', ')})`
+      : ''
+  const wrLine =
+    metaEntry.winRate != null && metaEntry.games
+      ? ` · WR ~**${metaEntry.winRate} %** (${metaEntry.games} games échantillon)`
+      : ''
+
+  const start = metaEntry.start || []
+  const boots = metaEntry.boots || []
+  const core = metaEntry.core || []
+  const late = metaEntry.late || []
+
+  if (compact) {
+    const fullOrder = [...start, ...boots, ...core, ...late, ...situ].filter(
+      (id, idx, arr) => arr.indexOf(id) === idx,
+    )
+    return (
+      `${patchLine}` +
+      `## Build méta · ${markChamp(champion.name)} ${markRole(role.label)}${vsLine}\n` +
+      `_Source meta ${roleLabel} (Storage)${wrLine}._\n\n` +
+      fmt(fullOrder).join('\n')
+    )
+  }
+
+  const skillLine = metaEntry.skillPriority
+    ? `\n**Skill order** : **${metaEntry.skillPriority}**` +
+      (Array.isArray(metaEntry.skillOrder) && metaEntry.skillOrder.length
+        ? ` · max ${metaEntry.skillOrder.filter((s) => s !== 'R').slice(0, 3).join(' → ')}`
+        : '')
+    : ''
+
+  return (
+    `${patchLine}` +
+    `## Build méta ${markChamp(champion.name)} ${markRole(role.label)}${vsLine}\n` +
+    `_Meta ${roleLabel} synchronisée (Storage)${wrLine} — pas un mirror U.GG live._\n` +
+    skillLine +
+    `\n\n### Ordre conseillé\n` +
+    `**1 · Départ**\n${fmt(start).join('\n') || '• —'}\n\n` +
+    `**2 · Bottes**\n${fmt(boots).join('\n') || '• —'}\n\n` +
+    `**3 · Core**\n${fmt(core).join('\n') || '• —'}\n\n` +
+    `**4 · Suite / luxe**\n${fmt(late).join('\n') || '• —'}\n` +
+    (situ.length ? `\n### Situationnel compo\n${fmt(situ).join('\n')}\n` : '') +
+    `\n_Si le champion n’est pas (encore) dans la meta sync, Poro retombe sur l’heuristique._`
+  )
+}
+
+/**
  * @param {object} opts
  * @param {{ name: string, tags?: string[], id?: string, key?: number }} opts.champion
  * @param {{ id: string, label: string }} opts.role
@@ -217,6 +324,8 @@ export function planChampionBuild(opts) {
  * @param {Map<number, object>} [opts.itemsById]
  * @param {string} [opts.patch]
  * @param {boolean} [opts.compact] une seule liste numérotée
+ * @param {object|null} [opts.metaEntry] entrée meta mid (Storage)
+ * @param {string} [opts.metaPatch]
  */
 export function buildChampionBuildReply(opts) {
   const {
@@ -227,8 +336,21 @@ export function buildChampionBuildReply(opts) {
     patch = '',
     ownedItemIds = [],
     compact = false,
+    metaEntry = null,
+    metaPatch = '',
   } = opts
   const styleTags = opts.enemyStyleTags || []
+
+  // Meta Storage : mid / adc / support / top / jungle
+  const META_ROLES = new Set(['mid', 'adc', 'support', 'top', 'jungle'])
+  if (metaEntry && META_ROLES.has(role?.id)) {
+    return buildMetaMidReply({
+      ...opts,
+      metaEntry,
+      metaPatch: metaPatch || metaEntry.patch || '',
+    })
+  }
+
   const plan = planChampionBuild(opts)
   const owned = new Set((ownedItemIds || []).map(Number).filter((id) => id > 0))
 
@@ -254,7 +376,7 @@ export function buildChampionBuildReply(opts) {
     return (
       `${patchLine}` +
       `## Build conseillé · ${markChamp(champion.name)} ${markRole(role.label)}${vsLine}\n` +
-      `_Pour **ton** champion + cette compo (heuristique Poro, pas un scrape méta)._\n\n` +
+      `_Pour **ton** champion + cette compo (heuristique Poro)._\n\n` +
       fmt(fullOrder).join('\n') +
       `\n\n_Priorise le haut de liste ; les items déjà notés « tu l’avais » étaient cohérents._`
     )
@@ -263,7 +385,11 @@ export function buildChampionBuildReply(opts) {
   return (
     `${patchLine}` +
     `## Build ${markChamp(champion.name)} ${markRole(role.label)}${vsLine}\n` +
-    `_Archétype : **${plan.archKey.replace(/_/g, ' ')}** · pistes heuristiques (pas un scrape u.gg)._\n\n` +
+    `_Archétype : **${plan.archKey.replace(/_/g, ' ')}** · heuristique` +
+    (META_ROLES.has(role?.id)
+      ? ' (meta absente pour ce champion — « actualise meta top/jungle/… »).'
+      : ' (heuristique Poro).') +
+    `_\n\n` +
     `### Ordre conseillé\n` +
     `**1 · Départ**\n${fmt(plan.start).join('\n') || '• —'}\n\n` +
     `**2 · Bottes**\n${fmt(plan.boots).join('\n') || '• —'}\n\n` +

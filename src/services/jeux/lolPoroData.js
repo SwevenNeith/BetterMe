@@ -258,6 +258,16 @@ export function inferPlayerPreferredRole(player) {
 export async function loadPoroRuntimeContext(opts = {}) {
   const catalog = await loadPoroGameCatalog()
   const player = await loadPoroPlayerStats(opts.puuid || null, catalog.championsByKey)
+
+  /** @type {Record<string, object|null>} */
+  let metaByRole = { mid: null, adc: null, support: null, top: null, jungle: null }
+  try {
+    const { fetchAllPoroMetaRoles } = await import('./poroMeta.js')
+    metaByRole = await fetchAllPoroMetaRoles()
+  } catch (err) {
+    console.warn('Poro meta load:', err)
+  }
+
   return {
     patch: catalog.version,
     champions: catalog.champions,
@@ -269,6 +279,12 @@ export async function loadPoroRuntimeContext(opts = {}) {
     summonersByKey: catalog.summonersByKey,
     player,
     preferredRole: inferPlayerPreferredRole(player),
+    metaMid: metaByRole.mid,
+    metaAdc: metaByRole.adc,
+    metaSupport: metaByRole.support,
+    metaTop: metaByRole.top,
+    metaJungle: metaByRole.jungle,
+    metaByRole,
     buildGuide: (championId) => buildDdragonChampionGuide(catalog.version, championId),
   }
 }

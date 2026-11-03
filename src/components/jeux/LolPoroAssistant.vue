@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { supabase } from '../../lib/supabase.js'
 import { loadPoroRuntimeContext } from '../../services/jeux/lolPoroData.js'
+import { invokeSyncPoroMetaRole } from '../../services/jeux/poroMeta.js'
 import { fetchMatchTimeline } from '../../services/jeux/riot.js'
 import { listPoroMemories, upsertPoroMemory } from '../../services/jeux/lolPoroMemory.js'
 import { answerPoroQuery, poroWelcomeMessage } from '../../utils/jeux/poroEngine.js'
@@ -42,17 +43,7 @@ const runtime = ref(null)
 const patchLabel = ref('')
 const listRef = ref(null)
 
-const quickPrompts = [
-  'Aide',
-  'Analyse cette partie',
-  'Je stagne mid',
-  'Matchup lane',
-  'Ma rune ?',
-  'Quels items build ?',
-  'Quel champion mid contre Yasuo Zed',
-  'Qu’est-ce que tu retiens sur moi ?',
-  'Quiz',
-]
+const quickPrompts = ['Aide', 'Que retiens-tu sur moi ?', 'Quiz']
 
 const roleHint = computed(() => {
   const role = resolvePreferredRole('', memories.value, runtime.value?.preferredRole || null)
@@ -86,6 +77,9 @@ function attachMatchToRuntime() {
       if (!matchId || !puuid) throw new Error('matchId/puuid manquant pour la timeline.')
       return fetchMatchTimeline(matchId, puuid, platform)
     },
+    syncMetaRole: async (roleId) => invokeSyncPoroMetaRole(roleId),
+    /** @deprecated */
+    syncMetaMid: async () => invokeSyncPoroMetaRole('mid'),
   }
 }
 
@@ -321,13 +315,6 @@ onMounted(() => {
             <!-- eslint-disable-next-line vue/no-v-html -->
             <div class="poro-bubble__text" v-html="renderContent(msg.content)" />
           </div>
-        </div>
-
-        <div class="poro-legend" aria-hidden="true">
-          <span class="poro-tag poro-tag-item">Item</span>
-          <span class="poro-tag poro-tag-spell">Sort</span>
-          <span class="poro-tag poro-tag-champ">Champion</span>
-          <span class="poro-tag poro-tag-role">Poste</span>
         </div>
 
         <div class="poro-quick" role="group" aria-label="Suggestions">
@@ -571,8 +558,7 @@ onMounted(() => {
   color: #b9a8c9;
 }
 
-.poro-bubble__text :deep(.poro-tag),
-.poro-legend .poro-tag {
+.poro-bubble__text :deep(.poro-tag) {
   display: inline-flex;
   align-items: center;
   gap: 0.28rem;
@@ -736,14 +722,6 @@ onMounted(() => {
   color: #9fe3b4;
   background: rgba(120, 200, 150, 0.16);
   border-color: rgba(159, 227, 180, 0.35);
-}
-
-.poro-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  padding: 0 1rem 0.25rem;
-  font-size: 0.68rem;
 }
 
 .poro-quick {
