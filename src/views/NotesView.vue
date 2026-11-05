@@ -54,6 +54,8 @@ import NotesEditorContextMenu from '../components/notes/NotesEditorContextMenu.v
 import NotesTableOfContentsTree from '../components/notes/NotesTableOfContentsTree.vue'
 import AppConfirmDialog from '../components/common/AppConfirmDialog.vue'
 import NotesExtensionsModal from '../components/notes/NotesExtensionsModal.vue'
+import NotesAuteurSettingsModal from '../components/notes/NotesAuteurSettingsModal.vue'
+import NotesAuteurWorkspace from '../components/notes/NotesAuteurWorkspace.vue'
 import NotesTemplateSettingsModal from '../components/notes/NotesTemplateSettingsModal.vue'
 import NotesGraphView from '../components/notes/NotesGraphView.vue'
 import NotesTabsBar from '../components/notes/NotesTabsBar.vue'
@@ -67,13 +69,27 @@ import { resolveTemplateContent } from '../services/notes/noteTemplateExtension.
 import {
   loadVaultExtensionPrefs,
   loadVaultTemplatePrefs,
+  loadVaultAuteurPrefs,
+  loadVaultAuteurWorld,
   loadNotesGraphFilters,
   saveNotesGraphFilters,
   saveVaultExtensionPrefs,
   saveVaultTemplatePrefs,
+  saveVaultAuteurPrefs,
+  saveVaultAuteurWorld,
   ensureVaultSettings,
   removeVaultSettings,
 } from '../services/notes/noteVaultSettings.js'
+import {
+  AUTEUR_EXTENSION_ID,
+  AUTEUR_MODULE_IDS,
+  AUTEUR_NOTE_MODULES,
+  AUTEUR_WORLD_MODULES,
+  createDefaultAuteurPrefs,
+  isNoteExcludedFromAuteurModule,
+  mergeAuteurPrefs,
+} from '../constants/notes/auteurModules.js'
+import { createDefaultAuteurWorld, mergeAuteurWorld } from '../constants/notes/auteurWorld.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import {
   createDefaultNotesGraphFilters,
@@ -238,9 +254,15 @@ const HIGHLIGHT_COLOR_PRESETS = [
 const dictionaryTooltip = ref(null)
 const extensionsOpen = ref(false)
 const templateSettingsOpen = ref(false)
+const auteurSettingsOpen = ref(false)
+const auteurWorkspaceOpen = ref(false)
+const auteurWorldViewOpen = ref(false)
 const extensionPrefs = ref(createDefaultNotesExtensionPrefs())
 const templatePrefs = ref(createDefaultNoteTemplatePrefs())
+const auteurPrefs = ref(createDefaultAuteurPrefs())
+const auteurWorld = ref(createDefaultAuteurWorld())
 const graphFilters = ref(createDefaultNotesGraphFilters())
+const editorSelectionText = ref('')
 /** @type {Map<string, string> | null} */
 let emojiShortcodeMap = null
 /** @type {import('vue').Ref<Array<{ type: 'note' | 'graph', id: string }>>} */
@@ -405,6 +427,70 @@ function isExtEnabled(extensionId) {
   return isNotesExtensionEnabled(extensionPrefs.value, extensionId)
 }
 
+const auteurEnabled = computed(() => isExtEnabled(AUTEUR_EXTENSION_ID))
+
+const auteurEnabledModules = computed(() =>
+  Object.fromEntries(
+    AUTEUR_MODULE_IDS.map((id) => [id, isExtEnabled(`auteur-${id}`)]),
+  ),
+)
+
+const auteurNoteModulesEnabled = computed(() =>
+  AUTEUR_NOTE_MODULES.some((m) => auteurEnabledModules.value[m.id]),
+)
+
+const auteurWorldModulesEnabled = computed(() =>
+  AUTEUR_WORLD_MODULES.some((m) => auteurEnabledModules.value[m.id]),
+)
+
+const auteurNoteModulesForSelected = computed(() => {
+  if (!selectedNote.value) return {}
+  return Object.fromEntries(
+    AUTEUR_NOTE_MODULES.map((m) => [
+      m.id,
+      Boolean(auteurEnabledModules.value[m.id]) &&
+        !isNoteExcludedFromAuteurModule(auteurPrefs.value, m.id, selectedNote.value),
+    ]),
+  )
+})
+
+const selectedNoteExcludedFromAuteur = computed(() => {
+  if (!selectedNote.value || !auteurNoteModulesEnabled.value) return false
+  return !Object.values(auteurNoteModulesForSelected.value).some(Boolean)
+})
+
+const showAuteurNoteButton = computed(
+  () =>
+    auteurEnabled.value &&
+    Boolean(selectedNote.value) &&
+    Object.values(auteurNoteModulesForSelected.value).some(Boolean),
+)
+
+watch(auteurEnabled, (on) => {
+  if (!on) {
+    auteurWorkspaceOpen.value = false
+    auteurSettingsOpen.value = false
+    auteurWorldViewOpen.value = false
+  }
+})
+
+async function openAuteurWorldView() {
+  if (!auteurEnabled.value || !auteurWorldModulesEnabled.value) return
+  auteurWorkspaceOpen.value = false
+  tocOpen.value = false
+  auteurWorldViewOpen.value = true
+  if (isGraphView.value) {
+    await router.push({
+      name: routeName(activeVaultId.value ? 'notes-vault' : 'notes'),
+      params: activeVaultId.value ? { vaultId: activeVaultId.value } : {},
+    })
+  }
+}
+
+function closeAuteurWorldView() {
+  auteurWorldViewOpen.value = false
+}
+
 const showNoteStatus = computed(() => isExtEnabled(NOTE_STATUS_TODOS_EXTENSION_ID))
 const noteStatusOptions = NOTE_STATUS_OPTIONS
 
@@ -430,6 +516,90 @@ function onExtensionConfigure(extensionId) {
   if (extensionId === 'templates') {
     templateSettingsOpen.value = true
   }
+  if (extensionId === AUTEUR_EXTENSION_ID) {
+    auteurSettingsOpen.value = true
+  }
+}
+
+async function onAuteurSettingsSave({ auteurPrefs: nextPrefs, extensionPrefs: nextExt }) {
+  if (!userId.value) return
+  try {
+    auteurPrefs.value = await saveVaultAuteurPrefs(
+      supabase,
+      userId.value,
+      activeVaultId.value,
+      nextPrefs,
+    )
+    await updateExtensionPrefs(nextExt)
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible d’enregistrer les paramètres Auteur.'
+  }
+}
+
+async function onAuteurWorldUpdate(nextWorld) {
+  auteurWorld.value = mergeAuteurWorld(nextWorld)
+  if (!userId.value) return
+  try {
+    auteurWorld.value = await saveVaultAuteurWorld(
+      supabase,
+      userId.value,
+      activeVaultId.value,
+      auteurWorld.value,
+    )
+  } catch (err) {
+    console.error(err)
+    errorMessage.value = err.message || 'Impossible d’enregistrer le monde Auteur.'
+  }
+}
+
+function onAuteurJumpTo({ start }) {
+  const editor = editorEl.value
+  if (!editor || start == null) return
+  viewMode.value = 'edit'
+  nextTick(() => {
+    editor.focus()
+    editor.setSelectionRange(start, start)
+    const lineHeight = 22
+    const before = editor.value.slice(0, start)
+    const line = before.split('\n').length
+    editor.scrollTop = Math.max(0, (line - 4) * lineHeight)
+  })
+}
+
+function onAuteurReplaceWord({ from, to }) {
+  const editor = editorEl.value
+  if (!editor || !from || to == null) return
+  const value = editor.value
+  const start = editor.selectionStart
+  const end = editor.selectionEnd
+  let next = value
+  if (start !== end && value.slice(start, end) === from) {
+    next = value.slice(0, start) + to + value.slice(end)
+    draftContent.value = next
+    nextTick(() => {
+      editor.setSelectionRange(start, start + to.length)
+    })
+  } else {
+    const idx = value.indexOf(from)
+    if (idx < 0) return
+    next = value.slice(0, idx) + to + value.slice(idx + from.length)
+    draftContent.value = next
+    nextTick(() => {
+      editor.setSelectionRange(idx, idx + to.length)
+    })
+  }
+  viewMode.value = 'edit'
+}
+
+function captureEditorSelection() {
+  const editor = editorEl.value
+  if (!editor) {
+    editorSelectionText.value = ''
+    return
+  }
+  const { selectionStart: a, selectionEnd: b, value } = editor
+  editorSelectionText.value = a !== b ? value.slice(a, b) : ''
 }
 
 async function onTemplateSettingsSave(nextPrefs) {
@@ -1052,19 +1222,25 @@ function expandAncestorsOfNote(noteId) {
 async function loadVaultPrefs() {
   if (!userId.value) return
   try {
-    const [extensions, templates, filters] = await Promise.all([
+    const [extensions, templates, filters, aPrefs, aWorld] = await Promise.all([
       loadVaultExtensionPrefs(supabase, userId.value, activeVaultId.value),
       loadVaultTemplatePrefs(supabase, userId.value, activeVaultId.value),
       loadNotesGraphFilters(supabase, userId.value),
+      loadVaultAuteurPrefs(supabase, userId.value, activeVaultId.value),
+      loadVaultAuteurWorld(supabase, userId.value, activeVaultId.value),
     ])
     extensionPrefs.value = extensions
     templatePrefs.value = templates
     graphFilters.value = filters
+    auteurPrefs.value = mergeAuteurPrefs(aPrefs)
+    auteurWorld.value = mergeAuteurWorld(aWorld)
   } catch (err) {
     console.error(err)
     extensionPrefs.value = createDefaultNotesExtensionPrefs()
     templatePrefs.value = createDefaultNoteTemplatePrefs()
     graphFilters.value = createDefaultNotesGraphFilters()
+    auteurPrefs.value = createDefaultAuteurPrefs()
+    auteurWorld.value = createDefaultAuteurWorld()
   }
 }
 
@@ -1343,6 +1519,7 @@ async function onDraftStatusChange() {
 
 async function selectNote(noteId, { syncRoute = true, openTab = true, newTab = false } = {}) {
   if (!noteId || !userId.value) return
+  auteurWorldViewOpen.value = false
 
   const listed = notes.value.find((note) => note.id === noteId)
   if (listed && (listed.vault_id ?? null) !== (activeVaultId.value ?? null)) {
@@ -1448,6 +1625,8 @@ function openNoteInNewTab(noteId) {
 }
 
 async function openGraphView() {
+  auteurWorldViewOpen.value = false
+  auteurWorkspaceOpen.value = false
   if (selectedNoteId.value) {
     stashCurrentNoteSession()
     if (dirty.value) await flushSave()
@@ -3005,6 +3184,7 @@ function onEditorKeyDown(event) {
 }
 
 function onEditorSelectOrKeyUp() {
+  captureEditorSelection()
   void nextTick(() => refreshWikiSuggest())
 }
 
@@ -3342,6 +3522,22 @@ watch(draftFolderId, (value) => {
               <line x1="8.5" y1="6" x2="15.5" y2="6" />
             </svg>
           </button>
+          <button
+            v-if="auteurEnabled && auteurWorldModulesEnabled"
+            type="button"
+            class="notes-page__icon-btn"
+            :class="{ 'notes-page__icon-btn--active': auteurWorldViewOpen }"
+            title="Monde Auteur (arbre, frise, intrigues, plan)"
+            aria-label="Ouvrir le monde narratif Auteur"
+            @click="openAuteurWorldView"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              <path d="M12 6v8" />
+              <path d="M9 10h6" />
+            </svg>
+          </button>
         </div>
         <input
           v-if="showTreeSearch"
@@ -3565,6 +3761,20 @@ watch(draftFolderId, (value) => {
         @update:filters="onGraphFiltersUpdate"
       />
 
+      <NotesAuteurWorkspace
+        v-else-if="auteurWorldViewOpen && auteurEnabled"
+        :open="true"
+        variant="world"
+        layout="page"
+        :auteur-prefs="auteurPrefs"
+        :auteur-world="auteurWorld"
+        :enabled-modules="auteurEnabledModules"
+        :notes="contextNotes"
+        :theme-style="activeVault ? activeVaultStyle : null"
+        @close="closeAuteurWorldView"
+        @update:world="onAuteurWorldUpdate"
+      />
+
       <template v-else-if="selectedNote">
         <header class="notes-page__editor-header">
           <input
@@ -3645,6 +3855,16 @@ watch(draftFolderId, (value) => {
                 Aperçu
               </button>
             </div>
+            <button
+              v-if="showAuteurNoteButton"
+              type="button"
+              class="notes-page__btn"
+              :class="{ 'notes-page__btn--primary': auteurWorkspaceOpen }"
+              title="Outils Auteur sur cette note"
+              @click="auteurWorkspaceOpen = !auteurWorkspaceOpen"
+            >
+              Auteur
+            </button>
             <button type="button" class="notes-page__btn" :disabled="isSaving || !dirty" @click="flushSave">
               Enregistrer
             </button>
@@ -3657,43 +3877,65 @@ watch(draftFolderId, (value) => {
           <p v-else-if="saveStatus" class="notes-page__save-msg">{{ saveStatus }}</p>
         </header>
 
-        <div
-          class="notes-page__panes"
-          :class="{
-            'notes-page__panes--edit': effectiveViewMode === 'edit',
-            'notes-page__panes--preview': effectiveViewMode === 'preview',
-          }"
-        >
-          <textarea
-            v-if="effectiveViewMode !== 'preview'"
-            ref="editorEl"
-            v-model="draftContent"
-            class="notes-page__editor"
-            lang="fr"
-            spellcheck="false"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            placeholder="Écris en Markdown… (Tab pour indenter, listes multi-niveaux)"
-            @keydown="onEditorKeyDown"
-            @input="onEditorInput"
-            @keyup="onEditorSelectOrKeyUp"
-            @click="onEditorSelectOrKeyUp"
-            @paste="onEditorPaste"
-            @dragover="onEditorDragOver"
-            @drop="onEditorDrop"
-            @blur="onEditorBlur"
-            @contextmenu="onEditorContextMenu"
-          />
+        <div class="notes-page__workbench">
           <div
-            v-if="effectiveViewMode !== 'edit'"
-            ref="previewEl"
-            class="notes-page__preview markdown-body"
-            @click="onPreviewClick"
-            @contextmenu="onPreviewContextMenu"
-            @mouseover="onPreviewMouseOver"
-            @mouseleave="hideDictionaryTooltip"
-            v-html="previewHtml"
+            class="notes-page__panes"
+            :class="{
+              'notes-page__panes--edit': effectiveViewMode === 'edit',
+              'notes-page__panes--preview': effectiveViewMode === 'preview',
+            }"
+          >
+            <textarea
+              v-if="effectiveViewMode !== 'preview'"
+              ref="editorEl"
+              v-model="draftContent"
+              class="notes-page__editor"
+              lang="fr"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              placeholder="Écris en Markdown… (Tab pour indenter, listes multi-niveaux)"
+              @keydown="onEditorKeyDown"
+              @input="onEditorInput"
+              @keyup="onEditorSelectOrKeyUp"
+              @click="onEditorSelectOrKeyUp"
+              @paste="onEditorPaste"
+              @dragover="onEditorDragOver"
+              @drop="onEditorDrop"
+              @blur="onEditorBlur"
+              @contextmenu="onEditorContextMenu"
+            />
+            <div
+              v-if="effectiveViewMode !== 'edit'"
+              ref="previewEl"
+              class="notes-page__preview markdown-body"
+              @click="onPreviewClick"
+              @contextmenu="onPreviewContextMenu"
+              @mouseover="onPreviewMouseOver"
+              @mouseleave="hideDictionaryTooltip"
+              v-html="previewHtml"
+            />
+          </div>
+          <NotesAuteurWorkspace
+            v-if="showAuteurNoteButton"
+            :open="auteurWorkspaceOpen"
+            variant="note"
+            layout="aside"
+            :note-id="selectedNoteId"
+            :note-title="draftTitle"
+            :content="draftContent"
+            :selection="editorSelectionText"
+            :note-excluded="selectedNoteExcludedFromAuteur"
+            :auteur-prefs="auteurPrefs"
+            :auteur-world="auteurWorld"
+            :enabled-modules="auteurNoteModulesForSelected"
+            :notes="contextNotes"
+            :theme-style="activeVault ? activeVaultStyle : null"
+            @close="auteurWorkspaceOpen = false"
+            @update:world="onAuteurWorldUpdate"
+            @jump-to="onAuteurJumpTo"
+            @replace-word="onAuteurReplaceWord"
           />
         </div>
       </template>
@@ -3770,6 +4012,16 @@ watch(draftFolderId, (value) => {
       :vault-id="activeVaultId"
       @close="templateSettingsOpen = false"
       @save="onTemplateSettingsSave"
+    />
+
+    <NotesAuteurSettingsModal
+      :open="auteurSettingsOpen"
+      :prefs="auteurPrefs"
+      :extension-prefs="extensionPrefs"
+      :folders="contextFolders"
+      :notes="contextNotes"
+      @close="auteurSettingsOpen = false"
+      @save="onAuteurSettingsSave"
     />
 
     <NotesVaultThemeModal
@@ -4702,6 +4954,18 @@ watch(draftFolderId, (value) => {
 
 .notes-page__save-msg--error {
   color: #a33;
+}
+
+.notes-page__workbench {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.notes-page__workbench .notes-page__panes {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .notes-page__panes {

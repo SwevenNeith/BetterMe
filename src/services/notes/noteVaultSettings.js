@@ -8,6 +8,8 @@ import {
   createDefaultNotesGraphFilters,
   mergeNotesGraphFilters,
 } from '../../constants/notes/notesGraphFilters.js'
+import { createDefaultAuteurPrefs, mergeAuteurPrefs } from '../../constants/notes/auteurModules.js'
+import { createDefaultAuteurWorld, mergeAuteurWorld } from '../../constants/notes/auteurWorld.js'
 import { mergeNotesExtensionPrefs } from './notesExtensions.js'
 import { mergeNoteTemplatePrefs } from './noteTemplateExtension.js'
 import { ensureUserSettings } from '../menstruation/menstruationNotifications.js'
@@ -30,6 +32,8 @@ function isMissingColumnError(error, column = COLUMN) {
  *   extensions: Record<string, boolean>,
  *   templatePrefs: import('../../constants/notes/noteTemplates.js').NoteTemplatePrefs,
  *   graphFilters: ReturnType<typeof createDefaultNotesGraphFilters>,
+ *   auteurPrefs: ReturnType<typeof createDefaultAuteurPrefs>,
+ *   auteurWorld: ReturnType<typeof createDefaultAuteurWorld>,
  * }}
  */
 function createDefaultVaultBundle() {
@@ -37,6 +41,8 @@ function createDefaultVaultBundle() {
     extensions: createDefaultNotesExtensionPrefs(),
     templatePrefs: createDefaultNoteTemplatePrefs(),
     graphFilters: createDefaultNotesGraphFilters(),
+    auteurPrefs: createDefaultAuteurPrefs(),
+    auteurWorld: createDefaultAuteurWorld(),
   }
 }
 
@@ -96,6 +102,8 @@ function normalizeVaultSettingsStore(raw) {
       extensions: mergeNotesExtensionPrefs(bundle.extensions),
       templatePrefs: mergeNoteTemplatePrefs(bundle.templatePrefs),
       graphFilters: mergeNotesGraphFilters(bundle.graphFilters),
+      auteurPrefs: mergeAuteurPrefs(bundle.auteurPrefs),
+      auteurWorld: mergeAuteurWorld(bundle.auteurWorld),
     }
   }
 
@@ -315,4 +323,60 @@ export async function removeVaultSettings(supabase, userId, vaultId) {
     delete store[key]
     await saveVaultSettingsStore(supabase, userId, store)
   }
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string | null | undefined} vaultId
+ */
+export async function loadVaultAuteurPrefs(supabase, userId, vaultId = null) {
+  if (!userId) return createDefaultAuteurPrefs()
+  const { store } = await loadRawVaultSettings(supabase, userId)
+  const key = vaultSettingsKey(vaultId)
+  if (!store[key]) store[key] = createDefaultVaultBundle()
+  return mergeAuteurPrefs(store[key].auteurPrefs)
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string | null | undefined} vaultId
+ * @param {ReturnType<typeof createDefaultAuteurPrefs>} prefs
+ */
+export async function saveVaultAuteurPrefs(supabase, userId, vaultId, prefs) {
+  const { store } = await loadRawVaultSettings(supabase, userId)
+  const key = vaultSettingsKey(vaultId)
+  if (!store[key]) store[key] = createDefaultVaultBundle()
+  store[key].auteurPrefs = mergeAuteurPrefs(prefs)
+  await saveVaultSettingsStore(supabase, userId, store)
+  return store[key].auteurPrefs
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string | null | undefined} vaultId
+ */
+export async function loadVaultAuteurWorld(supabase, userId, vaultId = null) {
+  if (!userId) return createDefaultAuteurWorld()
+  const { store } = await loadRawVaultSettings(supabase, userId)
+  const key = vaultSettingsKey(vaultId)
+  if (!store[key]) store[key] = createDefaultVaultBundle()
+  return mergeAuteurWorld(store[key].auteurWorld)
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string | null | undefined} vaultId
+ * @param {ReturnType<typeof createDefaultAuteurWorld>} world
+ */
+export async function saveVaultAuteurWorld(supabase, userId, vaultId, world) {
+  const { store } = await loadRawVaultSettings(supabase, userId)
+  const key = vaultSettingsKey(vaultId)
+  if (!store[key]) store[key] = createDefaultVaultBundle()
+  store[key].auteurWorld = mergeAuteurWorld(world)
+  await saveVaultSettingsStore(supabase, userId, store)
+  return store[key].auteurWorld
 }

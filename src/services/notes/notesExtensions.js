@@ -136,7 +136,8 @@ export async function saveNotesExtensionPrefs(supabase, userId, prefs) {
  * @param {string} extensionId
  */
 export function isNotesExtensionEnabled(prefs, extensionId) {
-  if (typeof prefs?.[extensionId] === 'boolean') return prefs[extensionId]
   const ext = NOTES_EXTENSIONS.find((item) => item.id === extensionId)
+  if (ext?.parentId && !isNotesExtensionEnabled(prefs, ext.parentId)) return false
+  if (typeof prefs?.[extensionId] === 'boolean') return prefs[extensionId]
   return ext?.defaultEnabled !== false
 }

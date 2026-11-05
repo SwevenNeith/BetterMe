@@ -1,3 +1,5 @@
+import { AUTEUR_EXTENSION_ID, AUTEUR_MODULES } from './auteurModules.js'
+
 /**
  * Catalogue des extensions de la page Notes (style plugins Obsidian).
  * @typedef {{
@@ -8,6 +10,7 @@
  *   defaultEnabled: boolean,
  *   hasSettings?: boolean,
  *   global?: boolean,
+ *   parentId?: string,
  * }} NotesExtension
  */
 
@@ -113,6 +116,24 @@ export const NOTES_EXTENSIONS = [
       'Clic droit dans l’éditeur → Insérer un graphique.\n\n• Types : barres, courbes, camembert\n• En aperçu : édite le titre, les catégories et les valeurs dans une grille (comme Excel)\n• En édition : bloc Markdown ```chart (JSON) — sauvegardé dans la note\n• Export PDF : le rendu suit l’aperçu Markdown (widgets inclus)',
     defaultEnabled: true,
   },
+  {
+    id: AUTEUR_EXTENSION_ID,
+    name: 'Auteur',
+    description:
+      'Suite d’écriture : répétitions, style, synonymes, personnages, frise, intrigues et plan.',
+    details:
+      'Extension parent désactivée par défaut. Active-la puis choisis les modules (⚙).\n\nSur une note : répétitions, style, synonymes.\nAu niveau du coffre (icône livre) : arbre & relations, frise, intrigues, plan.\n\nTu peux exclure dossiers/notes par module (ex. Templates hors style).',
+    defaultEnabled: false,
+    hasSettings: true,
+  },
+  ...AUTEUR_MODULES.map((mod) => ({
+    id: `auteur-${mod.id}`,
+    name: mod.name,
+    description: mod.description,
+    details: mod.details,
+    defaultEnabled: false,
+    parentId: AUTEUR_EXTENSION_ID,
+  })),
 ]
 
 export const NOTES_EXTENSION_IDS = NOTES_EXTENSIONS.map((ext) => ext.id)

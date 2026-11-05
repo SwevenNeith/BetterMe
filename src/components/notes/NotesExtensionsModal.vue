@@ -14,10 +14,14 @@ const emit = defineEmits(['close', 'update:prefs', 'configure'])
 
 const expandedIds = ref(new Set())
 
-const extensions = computed(() => NOTES_EXTENSIONS)
+const rootExtensions = computed(() => NOTES_EXTENSIONS.filter((ext) => !ext.parentId))
+
+function childrenOf(parentId) {
+  return NOTES_EXTENSIONS.filter((ext) => ext.parentId === parentId)
+}
 
 function hasSettings(id) {
-  return extensions.value.find((item) => item.id === id)?.hasSettings === true
+  return NOTES_EXTENSIONS.find((item) => item.id === id)?.hasSettings === true
 }
 
 function isExpanded(id) {
@@ -32,14 +36,21 @@ function toggleExpanded(id) {
 }
 
 function isEnabled(id) {
+  const ext = NOTES_EXTENSIONS.find((item) => item.id === id)
+  if (ext?.parentId && props.prefs?.[ext.parentId] === false) return false
   return props.prefs?.[id] !== false
 }
 
 function setEnabled(id, enabled) {
-  emit('update:prefs', {
+  const next = {
     ...props.prefs,
     [id]: Boolean(enabled),
-  })
+  }
+  // Désactiver les enfants si le parent s’éteint
+  if (!enabled) {
+    for (const child of childrenOf(id)) next[child.id] = false
+  }
+  emit('update:prefs', next)
 }
 
 function onToggle(id, event) {
@@ -92,7 +103,7 @@ onUnmounted(() => {
         </header>
 
         <ul class="notes-ext__list">
-          <li v-for="ext in extensions" :key="ext.id" class="notes-ext__item">
+          <li v-for="ext in rootExtensions" :key="ext.id" class="notes-ext__item">
             <div class="notes-ext__row">
               <div class="notes-ext__info">
                 <p class="notes-ext__name">{{ ext.name }}</p>
@@ -135,6 +146,46 @@ onUnmounted(() => {
                 {{ paragraph }}
               </p>
             </div>
+
+            <ul v-if="isEnabled(ext.id) && childrenOf(ext.id).length" class="notes-ext__children">
+              <li v-for="child in childrenOf(ext.id)" :key="child.id" class="notes-ext__child">
+                <div class="notes-ext__row">
+                  <div class="notes-ext__info">
+                    <p class="notes-ext__name">{{ child.name }}</p>
+                    <p class="notes-ext__desc">{{ child.description }}</p>
+                  </div>
+                  <div class="notes-ext__controls">
+                    <label
+                      class="notes-ext__switch"
+                      :title="isEnabled(child.id) ? 'Désactiver' : 'Activer'"
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="prefs?.[child.id] === true"
+                        @change="onToggle(child.id, $event)"
+                      />
+                      <span class="notes-ext__slider" />
+                      <span class="sr-only">{{ child.name }}</span>
+                    </label>
+                    <button
+                      type="button"
+                      class="notes-ext__chevron"
+                      :class="{ 'notes-ext__chevron--open': isExpanded(child.id) }"
+                      :aria-expanded="isExpanded(child.id)"
+                      :aria-label="`Détails de ${child.name}`"
+                      @click="toggleExpanded(child.id)"
+                    >
+                      ▸
+                    </button>
+                  </div>
+                </div>
+                <div v-if="isExpanded(child.id)" class="notes-ext__details">
+                  <p v-for="(paragraph, index) in child.details.split('\n\n')" :key="index">
+                    {{ paragraph }}
+                  </p>
+                </div>
+              </li>
+            </ul>
           </li>
         </ul>
       </div>
@@ -156,8 +207,8 @@ onUnmounted(() => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: min(520px, calc(100vw - 2rem));
-  max-height: min(80vh, 640px);
+  width: min(560px, calc(100vw - 2rem));
+  max-height: min(80vh, 720px);
   overflow: auto;
   background: #fff;
   border-radius: 14px;
@@ -199,72 +250,98 @@ onUnmounted(() => {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0.55rem;
 }
 
 .notes-ext__item {
-  border: 1px solid #e6ddf2;
-  border-radius: 10px;
-  padding: 0.7rem 0.75rem;
-  background: #faf7fd;
+  border: 1px solid #eadff2;
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
 }
 
 .notes-ext__row {
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 0.75rem;
-}
-
-.notes-ext__info {
-  flex: 1;
-  min-width: 0;
 }
 
 .notes-ext__name {
   margin: 0;
-  font-size: 0.95rem;
   font-weight: 650;
   color: #3b2a4a;
+  font-size: 0.95rem;
 }
 
 .notes-ext__desc {
-  margin: 0.25rem 0 0;
+  margin: 0.2rem 0 0;
   font-size: 0.82rem;
-  line-height: 1.4;
   color: #6d5a7e;
 }
 
 .notes-ext__controls {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.35rem;
   flex-shrink: 0;
-  padding-top: 0.1rem;
 }
 
 .notes-ext__settings {
-  width: 1.6rem;
-  height: 1.6rem;
   border: none;
-  background: rgba(213, 181, 234, 0.2);
-  color: #6d4f84;
+  background: #f4ecf8;
+  border-radius: 8px;
+  width: 2rem;
+  height: 2rem;
   cursor: pointer;
-  font-size: 0.85rem;
-  line-height: 1;
-  border-radius: 6px;
+  color: #5a3d72;
 }
 
-.notes-ext__settings:hover {
-  background: rgba(213, 181, 234, 0.35);
+.notes-ext__chevron {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #8b6fa3;
+  transition: transform 0.15s ease;
+}
+
+.notes-ext__chevron--open {
+  transform: rotate(90deg);
+}
+
+.notes-ext__details {
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid #f0e6f6;
+  font-size: 0.82rem;
+  color: #5a4a68;
+  white-space: pre-wrap;
+}
+
+.notes-ext__details p {
+  margin: 0 0 0.45rem;
+}
+
+.notes-ext__children {
+  list-style: none;
+  margin: 0.55rem 0 0;
+  padding: 0.45rem 0 0 0.65rem;
+  border-left: 2px solid #e6d8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.notes-ext__child {
+  padding: 0.35rem 0.25rem;
 }
 
 .notes-ext__switch {
   position: relative;
   display: inline-block;
-  width: 2.4rem;
-  height: 1.35rem;
-  cursor: pointer;
+  width: 40px;
+  height: 22px;
 }
 
 .notes-ext__switch input {
@@ -275,64 +352,31 @@ onUnmounted(() => {
 
 .notes-ext__slider {
   position: absolute;
+  cursor: pointer;
   inset: 0;
-  background: #d9cfe6;
+  background: #d9cce4;
   border-radius: 999px;
-  transition: background 0.15s ease;
+  transition: 0.15s;
 }
 
 .notes-ext__slider::before {
-  content: '';
   position: absolute;
-  width: 1.05rem;
-  height: 1.05rem;
-  left: 0.15rem;
-  top: 0.15rem;
-  background: #fff;
+  content: '';
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  top: 3px;
+  background: white;
   border-radius: 50%;
-  transition: transform 0.15s ease;
-  box-shadow: 0 1px 3px rgba(40, 25, 55, 0.2);
+  transition: 0.15s;
 }
 
 .notes-ext__switch input:checked + .notes-ext__slider {
-  background: var(--color-success, #95d1aa);
+  background: #7b5ea7;
 }
 
 .notes-ext__switch input:checked + .notes-ext__slider::before {
-  transform: translateX(1.05rem);
-}
-
-.notes-ext__chevron {
-  width: 1.6rem;
-  height: 1.6rem;
-  border: none;
-  background: transparent;
-  color: var(--color-tertiary, #72a098);
-  cursor: pointer;
-  font-size: 0.95rem;
-  line-height: 1;
-  border-radius: 6px;
-  transition: transform 0.12s ease;
-}
-
-.notes-ext__chevron--open {
-  transform: rotate(90deg);
-}
-
-.notes-ext__details {
-  margin-top: 0.65rem;
-  padding-top: 0.65rem;
-  border-top: 1px solid #e6ddf2;
-  display: grid;
-  gap: 0.45rem;
-}
-
-.notes-ext__details p {
-  margin: 0;
-  font-size: 0.82rem;
-  line-height: 1.5;
-  color: #5a4a68;
-  white-space: pre-line;
+  transform: translateX(18px);
 }
 
 .sr-only {
@@ -343,7 +387,6 @@ onUnmounted(() => {
   margin: -1px;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
   border: 0;
 }
 </style>
