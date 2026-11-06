@@ -1107,25 +1107,72 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
 
   const durationStamp = await resolveDurationStampForEntry(supabase, userId, existing)
 
+  // Si le parent prévu est déjà « Fait », reprendre sa liaison dans le Réel
+  let actualImpliedBy = null
+  if (existing.implied_by_entry_id) {
+    const { data: plannedParent, error: parentError } = await supabase
+      .from(ENTRIES_TABLE)
+      .select('id, completed_actual_id')
+      .eq('id', existing.implied_by_entry_id)
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (parentError) throw parentError
+    if (plannedParent?.completed_actual_id) {
+      actualImpliedBy = plannedParent.completed_actual_id
+    }
+  }
+
   // Ne pas recopier source_type/source_id : l’index unique
   // battery_day_entries_source_day_uidx n’autorise qu’une entrée par source/jour
   // (le prévu garde le lien EDT/TODO ; la durée est figée via durationStamp).
-  const { data: actual, error: insertError } = await supabase
+  const insertPayload = {
+    user_id: userId,
+    day_id: existing.day_id,
+    activity_id: existing.activity_id || null,
+    label: existing.label,
+    cost,
+    kind: BATTERY_ENTRY_KINDS.ACTUAL,
+    sort_order: (actualRows ?? []).length,
+    planned_start: existing.planned_start || null,
+    planned_end: existing.planned_end || null,
+    priority: existing.priority || null,
+    implied_by_entry_id: actualImpliedBy,
+    ...durationStamp,
+  }
+
+  let { data: actual, error: insertError } = await supabase
     .from(ENTRIES_TABLE)
-    .insert({
-      user_id: userId,
-      day_id: existing.day_id,
-      activity_id: existing.activity_id || null,
-      label: existing.label,
-      cost,
-      kind: BATTERY_ENTRY_KINDS.ACTUAL,
-      sort_order: (actualRows ?? []).length,
-      ...durationStamp,
-    })
+    .insert(insertPayload)
     .select(ENTRY_COLUMNS)
     .single()
 
-  if (insertError) throw insertError
+  if (insertError) {
+    // Colonnes absentes (migration) → insert minimal
+    if (
+      insertError.code === 'PGRST204' ||
+      String(insertError.message || '').includes('implied_by') ||
+      String(insertError.message || '').includes('planned_start') ||
+      String(insertError.message || '').includes('priority')
+    ) {
+      const {
+        planned_start,
+        planned_end,
+        priority,
+        implied_by_entry_id,
+        ...legacyInsert
+      } = insertPayload
+      const fallback = await supabase
+        .from(ENTRIES_TABLE)
+        .insert(legacyInsert)
+        .select(ENTRY_COLUMNS_LEGACY)
+        .single()
+      if (fallback.error) throw fallback.error
+      actual = withEntryDefaults(fallback.data)
+      insertError = null
+    } else {
+      throw insertError
+    }
+  }
 
   const { error: linkError } = await supabase
     .from(ENTRIES_TABLE)
@@ -1173,9 +1220,18 @@ export async function completePlannedBatteryEntry(supabase, userId, entryId, opt
       await supabase.from(ENTRIES_TABLE).delete().eq('id', actual.id).eq('user_id', userId)
       throw linkError
     }
-  } else if (actual.activity_id) {
-    await maybeLearnDefaultCost(supabase, userId, actual.activity_id, actual.cost, actual.id)
-    await maybeLearnDefaultDuration(supabase, userId, actual.activity_id, actual, actual.id)
+  } else {
+    // Enfants déjà faits → les rattacher au parent réel nouvellement créé
+    await linkCompletedChildrenActualsToParent(
+      supabase,
+      userId,
+      existing.id,
+      actual.id,
+    )
+    if (actual.activity_id) {
+      await maybeLearnDefaultCost(supabase, userId, actual.activity_id, actual.cost, actual.id)
+      await maybeLearnDefaultDuration(supabase, userId, actual.activity_id, actual, actual.id)
+    }
   }
 
   const { data: day, error: dayError } = await supabase
@@ -1285,11 +1341,14 @@ export async function copyPlannedToActual(supabase, userId, dayIso) {
   const actual = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL)
   if (!planned.length || actual.length) return { day, entries }
 
-  const rows = []
+  /** @type {Map<string, string>} plannedId → actualId */
+  const plannedToActual = new Map()
+
   for (let i = 0; i < planned.length; i += 1) {
     const e = planned[i]
     const durationStamp = await resolveDurationStampForEntry(supabase, userId, e)
-    rows.push({
+    const parentPlannedId = e.implied_by_entry_id || null
+    const insertRow = {
       user_id: userId,
       day_id: day.id,
       activity_id: e.activity_id,
@@ -1297,14 +1356,126 @@ export async function copyPlannedToActual(supabase, userId, dayIso) {
       cost: e.cost,
       kind: BATTERY_ENTRY_KINDS.ACTUAL,
       sort_order: i,
+      planned_start: e.planned_start || null,
+      planned_end: e.planned_end || null,
+      priority: e.priority || null,
+      // Parent réel si déjà créé dans cette passe ; sinon null puis 2ᵉ passe
+      implied_by_entry_id: parentPlannedId
+        ? plannedToActual.get(parentPlannedId) || null
+        : null,
       // Pas de source_* : contrainte unique source/jour (lien reste sur le prévu).
       ...durationStamp,
-    })
+    }
+
+    let { data: created, error } = await supabase
+      .from(ENTRIES_TABLE)
+      .insert(insertRow)
+      .select(ENTRY_COLUMNS)
+      .single()
+
+    if (error) {
+      if (
+        error.code === 'PGRST204' ||
+        String(error.message || '').includes('implied_by') ||
+        String(error.message || '').includes('planned_start')
+      ) {
+        const {
+          planned_start,
+          planned_end,
+          priority,
+          implied_by_entry_id,
+          ...legacy
+        } = insertRow
+        const fallback = await supabase
+          .from(ENTRIES_TABLE)
+          .insert(legacy)
+          .select(ENTRY_COLUMNS_LEGACY)
+          .single()
+        if (fallback.error) throw fallback.error
+        created = withEntryDefaults(fallback.data)
+        error = null
+      } else {
+        throw error
+      }
+    }
+
+    plannedToActual.set(e.id, created.id)
+    await supabase
+      .from(ENTRIES_TABLE)
+      .update({ completed_actual_id: created.id, skip_reason: null })
+      .eq('id', e.id)
+      .eq('user_id', userId)
   }
 
-  const { error } = await supabase.from(ENTRIES_TABLE).insert(rows)
-  if (error) throw error
+  // 2ᵉ passe : rattacher les enfants dont le parent a été créé après (ordre plat)
+  for (const e of planned) {
+    const parentPlannedId = e.implied_by_entry_id || null
+    if (!parentPlannedId) continue
+    const childActualId = plannedToActual.get(e.id)
+    const parentActualId = plannedToActual.get(parentPlannedId)
+    if (!childActualId || !parentActualId) continue
+    await supabase
+      .from(ENTRIES_TABLE)
+      .update({ implied_by_entry_id: parentActualId })
+      .eq('id', childActualId)
+      .eq('user_id', userId)
+  }
+
   return recomputeAndPersistDay(supabase, userId, day)
+}
+
+/**
+ * Rattache les réels déjà créés des enfants prévus au parent réel.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} plannedParentId
+ * @param {string} actualParentId
+ */
+async function linkCompletedChildrenActualsToParent(
+  supabase,
+  userId,
+  plannedParentId,
+  actualParentId,
+) {
+  if (!plannedParentId || !actualParentId) return
+
+  const { data: plannedChildren, error } = await supabase
+    .from(ENTRIES_TABLE)
+    .select('id, completed_actual_id')
+    .eq('user_id', userId)
+    .eq('kind', BATTERY_ENTRY_KINDS.PLANNED)
+    .eq('implied_by_entry_id', plannedParentId)
+
+  if (error) {
+    if (
+      error.code === 'PGRST204' ||
+      String(error.message || '').includes('implied_by')
+    ) {
+      return
+    }
+    throw error
+  }
+
+  const childActualIds = (plannedChildren ?? [])
+    .map((row) => row.completed_actual_id)
+    .filter(Boolean)
+
+  if (!childActualIds.length) return
+
+  const { error: updateError } = await supabase
+    .from(ENTRIES_TABLE)
+    .update({ implied_by_entry_id: actualParentId })
+    .in('id', childActualIds)
+    .eq('user_id', userId)
+    .eq('kind', BATTERY_ENTRY_KINDS.ACTUAL)
+
+  if (
+    updateError &&
+    updateError.code !== 'PGRST204' &&
+    !String(updateError.message || '').includes('implied_by')
+  ) {
+    throw updateError
+  }
 }
 
 /**
