@@ -1105,7 +1105,9 @@ onMounted(async () => {
           v-else
           class="plan-dialog__duration-block"
         >
-          <p class="plan-dialog__duration-hint">Choisis une durée (ou laisse le défaut catalogue)</p>
+          <p class="plan-dialog__duration-hint">
+            Durée Batterie seulement — sans créneau, rien n’apparaît dans l’EDT
+          </p>
           <div class="duration-chips plan-dialog__chips" role="group" aria-label="Durée">
             <button
               v-for="preset in BATTERY_DURATION_PRESETS"

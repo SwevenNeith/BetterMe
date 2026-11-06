@@ -120,17 +120,22 @@ export async function createEdtEventForBatteryPlan(
 
   const start = normalizeHhMm(input.plannedStart)
   const end = normalizeHhMm(input.plannedEnd)
-  const timeOptional = isTimeOptionalCategory(category, categories)
-  const allDay =
-    Boolean(input.allDay) || (!start && !end && timeOptional) || (!start && !end)
+  // Batterie sans horaire ne crée pas d’EDT ; un événement EDT exige un créneau
+  if (!start || !end) {
+    throw new Error('Un créneau (début et fin) est requis pour créer un événement EDT.')
+  }
+  const timeRange = formatEdtTimeRange(start, end)
+  if (!timeRange) {
+    throw new Error('Créneau horaire invalide pour l’EDT.')
+  }
 
   const payload = {
     user_id: userId,
     title,
     date_start: dayIso,
     date_end: null,
-    all_day: allDay,
-    time: allDay ? null : formatEdtTimeRange(start, end),
+    all_day: false,
+    time: timeRange,
     category: category?.id ?? null,
     detail: String(input.detail ?? '').trim(),
     reminder: false,

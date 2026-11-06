@@ -561,11 +561,13 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
     data = withEntryDefaults(data)
   }
 
+  // Sans créneau horaire → Batterie seule (pas d’événement « journée entière » dans l’EDT)
   const syncToEdt =
     kind === BATTERY_ENTRY_KINDS.PLANNED &&
     payload.sync_to_edt !== false &&
     !payload.source_type &&
-    !payload.implied_by_entry_id
+    !payload.implied_by_entry_id &&
+    Boolean(plannedStart && plannedEnd)
 
   let parentEventId = null
   if (syncToEdt) {
@@ -580,7 +582,7 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
           categoryName: category?.name || null,
           plannedStart,
           plannedEnd,
-          allDay: timeOptional && !plannedStart,
+          allDay: false,
           batteryActivityId: activity?.id || null,
           priority,
         },
