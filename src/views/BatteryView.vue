@@ -4,15 +4,20 @@ import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import {
+  BATTERY_DEFAULT_PRIORITY,
   BATTERY_DURATION_ALL_DAY_ID,
   BATTERY_DURATION_PRESETS,
   BATTERY_DURATION_RESET_ID,
   BATTERY_ENTRY_KINDS,
   BATTERY_EVENING_FEELINGS,
   BATTERY_MORNING_LABELS,
+  BATTERY_PRIORITY_IDS,
   BATTERY_SKIP_REASONS,
   BATTERY_SLEEP_QUALITIES,
   BATTERY_SOURCE_TYPES,
+  batteryPriorityMeta,
+  isBatteryTimeOptionalCategoryName,
+  normalizeBatteryPriority,
 } from '../constants/battery/battery.js'
 import { deleteTodoItem } from '../services/todo/todoItems.js'
 import {
@@ -25,9 +30,12 @@ import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
 import {
+  createBatteryActivity,
   listBatteryActivities,
   searchBatteryActivities,
+  updateBatteryActivity,
 } from '../services/battery/batteryActivities.js'
+import { ensureTimetableCategory } from '../services/timetable/timetableEvents.js'
 import {
   addBatteryEntry,
   attachEdtDurationsToEntries,
@@ -60,6 +68,15 @@ import {
   formatBatteryDuration,
   resolveBatteryDuration,
 } from '../utils/battery/batteryDuration.js'
+import {
+  buildImplicationForestRows,
+  formatPlannedSlot,
+  sumPlannedCostsWithoutDoubleCount,
+  wouldCreateImplicationCycle,
+} from '../utils/battery/batteryImplications.js'
+import { minutesBetweenHhMm, validatePlannedSlot } from '../utils/battery/batteryTime.js'
+import { isTimeOptionalCategory } from '../services/battery/batteryPlanToEdt.js'
+import { loadUserCategories } from '../services/timetable/timetableCategories.js'
 import BatteryGauge from '../components/battery/BatteryGauge.vue'
 
 defineOptions({ name: 'BatteryView' })
@@ -118,6 +135,11 @@ const entryActivityId = ref('')
 const entryKind = ref(BATTERY_ENTRY_KINDS.ACTUAL)
 const entrySearch = ref('')
 const entrySuggestions = ref([])
+const entryPriority = ref(BATTERY_DEFAULT_PRIORITY)
+const entryPlannedStart = ref('')
+const entryPlannedEnd = ref('')
+const entryCategoryName = ref('')
+const categories = ref([])
 const showEntrySuggestions = ref(false)
 let suggestionsBlurTimer = null
 
@@ -174,8 +196,164 @@ const plannedEntries = computed(() =>
   entries.value.filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED),
 )
 
-const spent = computed(() => sumEntryCosts(actualEntries.value))
-const plannedSpent = computed(() => sumEntryCosts(plannedEntries.value))
+const plannedForestRows = computed(() => buildImplicationForestRows(plannedEntries.value))
+const actualForestRows = computed(() => buildImplicationForestRows(actualEntries.value))
+
+const spent = computed(() => {
+  // Coût réel sans double-compte des implications
+  return sumPlannedCostsWithoutDoubleCount(actualEntries.value)
+})
+const plannedSpent = computed(() => sumPlannedCostsWithoutDoubleCount(plannedEntries.value))
+
+/** Mode liaison : id de l’entrée parente sélectionnée (grisée). */
+const linkSourceId = ref(null)
+const linkBusy = ref(false)
+
+function cancelLinkMode() {
+  linkSourceId.value = null
+}
+
+function isLinkSource(entryId) {
+  return linkSourceId.value === entryId
+}
+
+function isLinkTargetCandidate(entryId) {
+  if (!linkSourceId.value || linkSourceId.value === entryId) return false
+  const source = entries.value.find((e) => e.id === linkSourceId.value)
+  const target = entries.value.find((e) => e.id === entryId)
+  return Boolean(source && target && source.kind === target.kind)
+}
+
+function toggleLinkSource(entry) {
+  if (!entry?.id) return
+  if (linkSourceId.value === entry.id) {
+    linkSourceId.value = null
+    return
+  }
+  linkSourceId.value = entry.id
+  statusMessage.value = `Lien : clique une autre activité pour l’impliquer sous « ${entry.label} » (Esc pour annuler).`
+}
+
+/**
+ * @param {object} entry
+ * @param {'planned'|'actual'} kind
+ */
+async function onEntryActivateForLink(entry, kind) {
+  if (!linkSourceId.value || !entry?.id || linkBusy.value) return false
+  if (entry.id === linkSourceId.value) return false
+  if (entry.kind !== kind) return false
+
+  const pool =
+    kind === BATTERY_ENTRY_KINDS.PLANNED ? plannedEntries.value : actualEntries.value
+  const parentId = linkSourceId.value
+  const parent = pool.find((e) => e.id === parentId)
+  // Parent doit être dans la même colonne (Prévu ↔ Prévu, Réel ↔ Réel)
+  if (!parent) return false
+
+  // Déjà lié à cette source → détacher
+  if (entry.implied_by_entry_id === parentId) {
+    linkBusy.value = true
+    try {
+      const result = await updateBatteryEntry(supabase, userId.value, entry.id, {
+        implied_by_entry_id: null,
+      })
+      day.value = result.day
+      await setEntriesWithEdt(result.entries)
+      statusMessage.value = 'Liaison retirée'
+      linkSourceId.value = null
+    } catch (err) {
+      console.error(err)
+      statusMessage.value = err?.message || 'Impossible de retirer la liaison'
+    } finally {
+      linkBusy.value = false
+    }
+    return true
+  }
+
+  if (wouldCreateImplicationCycle(pool, parentId, entry.id)) {
+    statusMessage.value = 'Liaison impossible (cycle).'
+    return true
+  }
+
+  linkBusy.value = true
+  try {
+    const result = await updateBatteryEntry(supabase, userId.value, entry.id, {
+      implied_by_entry_id: parentId,
+    })
+    day.value = result.day
+    await setEntriesWithEdt(result.entries)
+    statusMessage.value = `« ${entry.label} » lié sous « ${parent.label} »`
+    linkSourceId.value = null
+  } catch (err) {
+    console.error(err)
+    statusMessage.value = err?.message || 'Impossible de lier'
+  } finally {
+    linkBusy.value = false
+  }
+  return true
+}
+
+function onLinkKeydown(event) {
+  if (event.key === 'Escape' && linkSourceId.value) {
+    cancelLinkMode()
+    statusMessage.value = ''
+  }
+}
+
+function selectedCategoryIsTimeOptional() {
+  if (isBatteryTimeOptionalCategoryName(entryCategoryName.value)) return true
+  const activity = activities.value.find((a) => a.id === entryActivityId.value)
+  if (!activity?.category_id) return false
+  const cat = categories.value.find((c) => c.id === activity.category_id)
+  return isTimeOptionalCategory(cat, categories.value)
+}
+
+/** Horaires obligatoires en Plan et en Réel, sauf Hobbies / Autre. */
+function needsEntryTimes() {
+  return !selectedCategoryIsTimeOptional()
+}
+
+const computedSlotDurationLabel = computed(() => {
+  const mins = minutesBetweenHhMm(entryPlannedStart.value, entryPlannedEnd.value)
+  if (mins == null) return ''
+  return formatBatteryDuration({ minutes: mins, allDay: false })
+})
+
+function entryAllowsDurationChips(entry) {
+  // Avec horaires → durée dérivée ; pastilles seulement sans créneau (Hobbies / Autre)
+  return !entry?.planned_start && !entry?.planned_end
+}
+
+function cycleEntryPriority() {
+  const id = normalizeBatteryPriority(entryPriority.value)
+  const idx = BATTERY_PRIORITY_IDS.indexOf(id)
+  entryPriority.value = BATTERY_PRIORITY_IDS[(idx + 1) % BATTERY_PRIORITY_IDS.length]
+}
+
+function priorityShort(id) {
+  return batteryPriorityMeta(id)?.short || 'P3'
+}
+
+function categoryNameFromId(categoryId) {
+  return categories.value.find((c) => c.id === categoryId)?.name || ''
+}
+
+async function cycleEntryListPriority(entry) {
+  if (!userId.value || !entry?.id) return
+  const id = normalizeBatteryPriority(entry.priority)
+  const idx = BATTERY_PRIORITY_IDS.indexOf(id)
+  const next = BATTERY_PRIORITY_IDS[(idx + 1) % BATTERY_PRIORITY_IDS.length]
+  try {
+    const result = await updateBatteryEntry(supabase, userId.value, entry.id, {
+      priority: next,
+    })
+    day.value = result.day
+    await setEntriesWithEdt(result.entries)
+  } catch (err) {
+    console.error(err)
+    statusMessage.value = err?.message || 'Impossible de changer la priorité'
+  }
+}
 const budget = computed(() => Number(day.value?.computed_budget) || 0)
 /** Jauge = budget − dépenses réelles (une activité à +1 coûte 1 point de batterie). */
 const remaining = computed(() => remainingEnergy(budget.value, spent.value))
@@ -227,6 +405,12 @@ function formatCost(n) {
 async function loadActivities() {
   if (!userId.value) return
   activities.value = await listBatteryActivities(supabase, userId.value)
+  try {
+    categories.value = await loadUserCategories(supabase, userId.value)
+  } catch (err) {
+    console.error(err)
+    categories.value = []
+  }
 }
 
 async function loadDay() {
@@ -338,6 +522,8 @@ function pickSuggestion(activity) {
   entrySearch.value = activity.name
   entrySuggestions.value = []
   showEntrySuggestions.value = false
+  entryPriority.value = activity.priority || BATTERY_DEFAULT_PRIORITY
+  entryCategoryName.value = categoryNameFromId(activity.category_id) || ''
   if (activity.default_all_day) {
     entryDurationChoice.value = 'all_day'
   } else if (activity.default_duration_minutes) {
@@ -374,24 +560,111 @@ function isFormDurationActive(choice) {
 
 async function submitEntry() {
   if (!userId.value || !entryLabel.value.trim()) return
+  const categoryName = entryCategoryName.value.trim()
+  if (!categoryName) {
+    statusMessage.value = 'Indique une catégorie EDT.'
+    return
+  }
+  if (needsEntryTimes()) {
+    const slotError = validatePlannedSlot(entryPlannedStart.value, entryPlannedEnd.value)
+    if (slotError) {
+      statusMessage.value = `${slotError} (obligatoire hors Hobbies / Autre).`
+      return
+    }
+  }
   isSaving.value = true
   statusMessage.value = ''
   try {
+    const { category, categories: nextCats } = await ensureTimetableCategory(
+      supabase,
+      userId.value,
+      categoryName,
+      categories.value,
+    )
+    categories.value = nextCats
+    if (!category?.id) throw new Error('Impossible de résoudre la catégorie.')
+
+    let activityId = entryActivityId.value || null
+    if (!activityId) {
+      const labelKey = entryLabel.value.trim().toLowerCase()
+      const existing = activities.value.find(
+        (a) => String(a.name || '').trim().toLowerCase() === labelKey,
+      )
+      if (existing) {
+        activityId = existing.id
+        if (
+          existing.category_id !== category.id ||
+          normalizeBatteryPriority(existing.priority) !==
+            normalizeBatteryPriority(entryPriority.value)
+        ) {
+          await updateBatteryActivity(supabase, userId.value, existing.id, {
+            category_id: category.id,
+            priority: entryPriority.value,
+          })
+        }
+      } else {
+        /** @type {Record<string, unknown>} */
+        const createPayload = {
+          name: entryLabel.value.trim(),
+          default_cost: normalizeBatteryCost(entryCost.value),
+          category_id: category.id,
+          priority: entryPriority.value,
+        }
+        if (!needsEntryTimes()) {
+          if (entryDurationChoice.value === 'all_day') {
+            createPayload.default_all_day = true
+            createPayload.default_duration_minutes = null
+          } else if (entryDurationChoice.value != null) {
+            createPayload.default_all_day = false
+            createPayload.default_duration_minutes = entryDurationChoice.value
+          }
+        } else {
+          const mins = minutesBetweenHhMm(entryPlannedStart.value, entryPlannedEnd.value)
+          if (mins != null) {
+            createPayload.default_all_day = false
+            createPayload.default_duration_minutes = mins
+          }
+        }
+        const created = await createBatteryActivity(supabase, userId.value, createPayload)
+        activityId = created.id
+      }
+    } else {
+      const selected = activities.value.find((a) => a.id === activityId)
+      if (
+        selected &&
+        (selected.category_id !== category.id ||
+          normalizeBatteryPriority(selected.priority) !==
+            normalizeBatteryPriority(entryPriority.value))
+      ) {
+        await updateBatteryActivity(supabase, userId.value, activityId, {
+          category_id: category.id,
+          priority: entryPriority.value,
+        })
+      }
+    }
+
     /** @type {Record<string, unknown>} */
     const payload = {
       label: entryLabel.value,
       cost: normalizeBatteryCost(entryCost.value),
       kind: entryKind.value,
-      activity_id: entryActivityId.value || null,
+      activity_id: activityId,
+      priority: entryPriority.value,
+      category_name: category.name,
+      category_id: category.id,
     }
-    if (entryDurationChoice.value === 'all_day') {
-      payload.has_duration_override = true
-      payload.duration_all_day = true
-      payload.duration_minutes = null
-    } else if (entryDurationChoice.value != null) {
-      payload.has_duration_override = true
-      payload.duration_all_day = false
-      payload.duration_minutes = entryDurationChoice.value
+    if (entryPlannedStart.value) payload.planned_start = entryPlannedStart.value
+    if (entryPlannedEnd.value) payload.planned_end = entryPlannedEnd.value
+    if (!needsEntryTimes()) {
+      if (entryDurationChoice.value === 'all_day') {
+        payload.has_duration_override = true
+        payload.duration_all_day = true
+        payload.duration_minutes = null
+      } else if (entryDurationChoice.value != null) {
+        payload.has_duration_override = true
+        payload.duration_all_day = false
+        payload.duration_minutes = entryDurationChoice.value
+      }
     }
     const result = await addBatteryEntry(supabase, userId.value, selectedDate.value, payload)
     day.value = result.day
@@ -401,9 +674,16 @@ async function submitEntry() {
     entryDurationChoice.value = null
     entryActivityId.value = ''
     entrySearch.value = ''
+    entryPriority.value = BATTERY_DEFAULT_PRIORITY
+    entryPlannedStart.value = ''
+    entryPlannedEnd.value = ''
+    entryCategoryName.value = ''
+    if (entryKind.value === BATTERY_ENTRY_KINDS.PLANNED) {
+      useTimetableCacheStore().$patch({ isValid: false })
+    }
     await loadActivities()
     statusMessage.value =
-      entryKind.value === BATTERY_ENTRY_KINDS.PLANNED ? 'Ajouté au plan' : 'Activité ajoutée'
+      entryKind.value === BATTERY_ENTRY_KINDS.PLANNED ? 'Ajouté au plan (+ EDT)' : 'Activité ajoutée'
   } catch (err) {
     console.error(err)
     statusMessage.value = err?.message || 'Erreur'
@@ -413,6 +693,7 @@ async function submitEntry() {
 }
 
 function toggleDurationPicker(entry) {
+  if (!entryAllowsDurationChips(entry)) return
   durationEntryId.value = durationEntryId.value === entry.id ? null : entry.id
 }
 
@@ -492,18 +773,52 @@ async function onEntryDrop(kind, targetId, event) {
   const planned = entries.value.filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED)
   const actual = entries.value.filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL)
   const list = kind === BATTERY_ENTRY_KINDS.PLANNED ? planned : actual
-  if (!list.some((e) => e.id === sourceId) || !list.some((e) => e.id === targetId)) return
+  const source = list.find((e) => e.id === sourceId)
+  const target = list.find((e) => e.id === targetId)
+  if (!source || !target) return
 
-  const reordered = [...list]
-  if (!reorderById(reordered, sourceId, targetId)) return
+  // Réordonner uniquement entre frères (même parent d’implication)
+  const sourceParent = source.implied_by_entry_id || null
+  const targetParent = target.implied_by_entry_id || null
+  if (sourceParent !== targetParent) {
+    statusMessage.value = 'Réordonne les activités liées entre elles sous le même parent.'
+    return
+  }
+
+  const siblings = list.filter((e) => (e.implied_by_entry_id || null) === sourceParent)
+  const reorderedSiblings = [...siblings]
+  if (!reorderById(reorderedSiblings, sourceId, targetId)) return
+
+  // Conserve les sort_order existants des frères, dans le nouvel ordre relatif
+  const keptOrders = siblings
+    .map((e) => Number(e.sort_order) || 0)
+    .sort((a, b) => a - b)
+  reorderedSiblings.forEach((entry, index) => {
+    entry.sort_order = keptOrders[index] ?? index
+  })
+
+  // Recompose la liste complète en remplaçant le bloc des frères
+  const siblingIds = new Set(siblings.map((e) => e.id))
+  const nextList = []
+  let siblingsInserted = false
+  for (const entry of list) {
+    if (!siblingIds.has(entry.id)) {
+      nextList.push(entry)
+      continue
+    }
+    if (!siblingsInserted) {
+      nextList.push(...reorderedSiblings)
+      siblingsInserted = true
+    }
+  }
 
   entries.value =
     kind === BATTERY_ENTRY_KINDS.PLANNED
-      ? [...reordered, ...actual]
-      : [...planned, ...reordered]
+      ? [...nextList, ...actual]
+      : [...planned, ...nextList]
 
   try {
-    await persistBatteryEntryOrders(supabase, userId.value, reordered)
+    await persistBatteryEntryOrders(supabase, userId.value, reorderedSiblings)
   } catch (err) {
     console.error(err)
     statusMessage.value = err?.message || 'Impossible de réordonner'
@@ -701,11 +1016,13 @@ onMounted(async () => {
   const user = await resolveSessionUser()
   if (!user) return
   userId.value = user.id
+  window.addEventListener('keydown', onLinkKeydown)
   await loadActivities()
   await loadDay()
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onLinkKeydown)
   if (suggestionsBlurTimer != null) {
     clearTimeout(suggestionsBlurTimer)
     suggestionsBlurTimer = null
@@ -955,7 +1272,64 @@ onUnmounted(() => {
               {{ entryKind === BATTERY_ENTRY_KINDS.PLANNED ? 'Planifier' : 'Ajouter' }}
             </button>
           </div>
-          <div class="duration-chips" role="group" aria-label="Durée (optionnelle)">
+          <div class="entry-plan-meta">
+            <label class="entry-meta-field entry-meta-field--grow">
+              <span class="entry-meta-field__label">Catégorie</span>
+              <input
+                v-model="entryCategoryName"
+                type="text"
+                list="battery-category-suggestions"
+                placeholder="Catégorie"
+                required
+                aria-label="Catégorie EDT"
+              />
+              <datalist id="battery-category-suggestions">
+                <option v-for="cat in categories" :key="cat.id" :value="cat.name" />
+              </datalist>
+            </label>
+            <div class="entry-meta-field">
+              <span class="entry-meta-field__label">Priorité</span>
+              <button
+                type="button"
+                class="priority-pill priority-pill--btn"
+                :class="`priority-pill--${entryPriority}`"
+                :title="`${batteryPriorityMeta(entryPriority)?.label} — cliquer pour changer`"
+                @click="cycleEntryPriority"
+              >
+                {{ priorityShort(entryPriority) }}
+              </button>
+            </div>
+            <label class="entry-meta-field">
+              <span class="entry-meta-field__label">
+                Début{{ needsEntryTimes() ? ' *' : '' }}
+              </span>
+              <input v-model="entryPlannedStart" type="time" />
+            </label>
+            <label class="entry-meta-field">
+              <span class="entry-meta-field__label">
+                Fin{{ needsEntryTimes() ? ' *' : '' }}
+              </span>
+              <input v-model="entryPlannedEnd" type="time" />
+            </label>
+            <p class="entry-plan-hint">
+              <template v-if="needsEntryTimes()">
+                Horaires obligatoires (sauf Hobbies / Autre)
+                {{ entryKind === BATTERY_ENTRY_KINDS.PLANNED ? ' — sync EDT' : '' }}.
+                <span v-if="computedSlotDurationLabel">
+                  Durée : {{ computedSlotDurationLabel }}.
+                </span>
+              </template>
+              <template v-else>
+                Hobbies / Autre : horaires optionnels — choisis une durée ci-dessous.
+              </template>
+            </p>
+          </div>
+          <div
+            v-if="!needsEntryTimes()"
+            class="duration-chips"
+            role="group"
+            aria-label="Durée (Hobbies / Autre)"
+          >
             <button
               v-for="preset in BATTERY_DURATION_PRESETS"
               :key="preset.id"
@@ -984,93 +1358,150 @@ onUnmounted(() => {
               Défaut
             </button>
           </div>
+          <p v-else-if="computedSlotDurationLabel" class="entry-slot-duration">
+            Durée calculée : <strong>{{ computedSlotDurationLabel }}</strong>
+          </p>
         </form>
 
-        <div class="lists-grid">
+        <div class="lists-grid" :class="{ 'lists-grid--linking': linkSourceId }">
           <div class="list-col list-col--plan">
             <h3 class="list-col__title">Prévu</h3>
+            <p v-if="linkSourceId && plannedEntries.some((e) => e.id === linkSourceId)" class="link-mode-hint">
+              Mode lien — clique une activité pour l’impliquer (Esc pour annuler).
+            </p>
             <ul class="entry-list">
               <li
-                v-for="entry in plannedEntries"
-                :key="entry.id"
+                v-for="row in plannedForestRows"
+                :key="row.entry.id"
                 class="entry-row entry-row--plan"
                 :class="[
-                  `entry-row--${costStyleClass(entry.cost)}`,
+                  `entry-row--${costStyleClass(row.displayCost)}`,
                   {
-                    'entry-row--done': isPlannedEntryDone(entry),
-                    'entry-row--dragging': draggingEntryId === entry.id,
+                    'entry-row--done': isPlannedEntryDone(row.entry),
+                    'entry-row--dragging': draggingEntryId === row.entry.id,
+                    'entry-row--link-source': isLinkSource(row.entry.id),
+                    'entry-row--link-target': isLinkTargetCandidate(row.entry.id),
+                    'entry-row--nested': row.depth > 0,
                   },
                 ]"
+                :style="{ '--nest-depth': row.depth }"
                 draggable="true"
-                @dragstart="onEntryDragStart(BATTERY_ENTRY_KINDS.PLANNED, entry.id, $event)"
-                @dragover="onEntryDragOver(entry.id, $event)"
-                @drop="onEntryDrop(BATTERY_ENTRY_KINDS.PLANNED, entry.id, $event)"
+                @dragstart="onEntryDragStart(BATTERY_ENTRY_KINDS.PLANNED, row.entry.id, $event)"
+                @dragover="onEntryDragOver(row.entry.id, $event)"
+                @drop="onEntryDrop(BATTERY_ENTRY_KINDS.PLANNED, row.entry.id, $event)"
                 @dragend="onEntryDragEnd"
+                @click="onEntryActivateForLink(row.entry, BATTERY_ENTRY_KINDS.PLANNED)"
               >
                 <div class="entry-row__main">
-                  <span class="entry-label" title="Glisser pour réordonner">
-                    <span class="entry-label__text">{{ entry.label }}</span>
-                    <span v-if="isPlannedEntryDone(entry)" class="entry-done-pill">fait</span>
+                  <span class="entry-label" title="Glisser pour réordonner les frères">
                     <span
-                      v-else-if="entry.skip_reason"
-                      class="entry-skip-pill"
-                      :title="skipReasonLabel(entry.skip_reason)"
+                      v-if="formatPlannedSlot(row.entry.planned_start, row.entry.planned_end)"
+                      class="entry-slot"
                     >
-                      {{ skipReasonLabel(entry.skip_reason) }}
+                      {{ formatPlannedSlot(row.entry.planned_start, row.entry.planned_end) }}
+                    </span>
+                    <span class="entry-label__text">{{ row.entry.label }}</span>
+                    <span v-if="isPlannedEntryDone(row.entry)" class="entry-done-pill">fait</span>
+                    <span
+                      v-else-if="row.entry.skip_reason"
+                      class="entry-skip-pill"
+                      :title="skipReasonLabel(row.entry.skip_reason)"
+                    >
+                      {{ skipReasonLabel(row.entry.skip_reason) }}
                     </span>
                   </span>
                   <button
                     type="button"
-                    class="duration-tag"
-                    :class="{
-                      'is-active': durationEntryId === entry.id,
-                      'is-overridden': entryResolvedDuration(entry).overriddenFromEdt,
-                    }"
-                    :title="
-                      entryResolvedDuration(entry).overriddenFromEdt
-                        ? 'Durée modifiée par rapport à l’EDT'
-                        : 'Modifier la durée'
-                    "
-                    @click="toggleDurationPicker(entry)"
+                    class="priority-pill priority-pill--sm priority-pill--btn"
+                    :class="`priority-pill--${row.entry.priority || 'p3'}`"
+                    :title="`${batteryPriorityMeta(row.entry.priority)?.label} — cliquer pour changer`"
+                    @click.stop="cycleEntryListPriority(row.entry)"
                   >
-                    {{ entryDurationLabel(entry) || 'Durée' }}
-                    <span
-                      v-if="entryResolvedDuration(entry).overriddenFromEdt"
-                      class="duration-tag__dot"
-                      aria-hidden="true"
-                    />
+                    {{ priorityShort(row.entry.priority) }}
                   </button>
-                  <span class="cost-tag" :class="`cost-tag--${costStyleClass(entry.cost)}`">
-                    {{ formatCost(entry.cost) }}
+                  <button
+                    v-if="entryAllowsDurationChips(row.entry)"
+                    type="button"
+                    class="duration-tag"
+                    :class="{ 'is-active': durationEntryId === row.entry.id }"
+                    title="Modifier la durée"
+                    @click.stop="toggleDurationPicker(row.entry)"
+                  >
+                    {{ entryDurationLabel(row.entry) || 'Durée' }}
+                  </button>
+                  <span
+                    v-else-if="entryDurationLabel(row.entry)"
+                    class="duration-tag duration-tag--readonly"
+                    title="Durée calculée depuis les horaires"
+                  >
+                    {{ entryDurationLabel(row.entry) }}
+                  </span>
+                  <span
+                    class="cost-tag"
+                    :class="`cost-tag--${costStyleClass(row.displayCost)}`"
+                    :title="
+                      row.childCount
+                        ? `Coût agrégé (propre + ${row.childCount} liée(s))`
+                        : ''
+                    "
+                  >
+                    {{ formatCost(row.displayCost) }}
                   </span>
                   <button
-                    v-if="!isPlannedEntryDone(entry)"
+                    type="button"
+                    class="link-btn-icon"
+                    :class="{ 'is-active': isLinkSource(row.entry.id) }"
+                    :title="
+                      isLinkSource(row.entry.id)
+                        ? 'Annuler le mode lien'
+                        : 'Lier des activités (implications)'
+                    "
+                    :aria-label="`Lier « ${row.entry.label} »`"
+                    @click.stop="toggleLinkSource(row.entry)"
+                  >
+                    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                      <path
+                        fill="currentColor"
+                        d="M17 7h-4v2h4a3 3 0 1 1 0 6h-4v2h4a5 5 0 1 0 0-10zm-6 8H7a3 3 0 1 1 0-6h4V7H7a5 5 0 1 0 0 10h4v-2zm-1-4h4v2h-4v-2z"
+                      />
+                    </svg>
+                    <span v-if="row.childCount" class="link-btn-icon__count">{{ row.childCount }}</span>
+                  </button>
+                  <button
+                    v-if="!isPlannedEntryDone(row.entry)"
                     type="button"
                     class="fait-btn"
-                    :disabled="completingPlannedId === entry.id"
-                    :aria-label="`Marquer « ${entry.label} » comme fait`"
-                    @click="markPlannedDone(entry)"
+                    :disabled="completingPlannedId === row.entry.id"
+                    :aria-label="`Marquer « ${row.entry.label} » comme fait`"
+                    @click.stop="markPlannedDone(row.entry)"
                   >
-                    {{ completingPlannedId === entry.id ? '…' : 'Fait' }}
+                    {{ completingPlannedId === row.entry.id ? '…' : 'Fait' }}
                   </button>
-                  <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    aria-label="Supprimer"
+                    @click.stop="removeEntry(row.entry)"
+                  >
+                    ×
+                  </button>
                 </div>
                 <div
-                  v-if="durationEntryId === entry.id"
+                  v-if="durationEntryId === row.entry.id && entryAllowsDurationChips(row.entry)"
                   class="duration-chips"
                   role="group"
-                  :aria-label="`Durée pour ${entry.label}`"
+                  :aria-label="`Durée pour ${row.entry.label}`"
                 >
                   <button
                     v-for="preset in BATTERY_DURATION_PRESETS"
                     :key="preset.id"
                     type="button"
                     class="duration-chip"
-                    :class="{ 'is-active': entryDurationPresetActive(entry) === preset.id }"
-                    :disabled="durationBusyId === entry.id"
-                    @click="
+                    :class="{ 'is-active': entryDurationPresetActive(row.entry) === preset.id }"
+                    :disabled="durationBusyId === row.entry.id"
+                    @click.stop="
                       applyEntryDuration(
-                        entry,
+                        row.entry,
                         preset.id === 'over_2h' ? 'over_2h' : preset.minutes,
                       )
                     "
@@ -1078,128 +1509,162 @@ onUnmounted(() => {
                     {{ preset.label }}
                   </button>
                   <button
-                    v-if="
-                      entryDurationPresetActive(entry) &&
-                      String(entryDurationPresetActive(entry)).startsWith('custom:')
-                    "
-                    type="button"
-                    class="duration-chip is-active"
-                    disabled
-                  >
-                    {{ entryDurationLabel(entry) }}
-                  </button>
-                  <button
                     type="button"
                     class="duration-chip"
                     :class="{
-                      'is-active': entryDurationPresetActive(entry) === BATTERY_DURATION_ALL_DAY_ID,
+                      'is-active':
+                        entryDurationPresetActive(row.entry) === BATTERY_DURATION_ALL_DAY_ID,
                     }"
-                    :disabled="durationBusyId === entry.id"
-                    @click="applyEntryDuration(entry, 'all_day')"
+                    :disabled="durationBusyId === row.entry.id"
+                    @click.stop="applyEntryDuration(row.entry, 'all_day')"
                   >
                     Journée entière
                   </button>
                   <button
                     type="button"
                     class="duration-chip duration-chip--reset"
-                    :disabled="durationBusyId === entry.id"
-                    :title="
-                      entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE
-                        ? 'Revenir à la durée de l’EDT'
-                        : 'Effacer la durée'
-                    "
-                    @click="applyEntryDuration(entry, 'reset')"
+                    :disabled="durationBusyId === row.entry.id"
+                    @click.stop="applyEntryDuration(row.entry, 'reset')"
                   >
                     Défaut
                   </button>
                 </div>
               </li>
-              <li v-if="!plannedEntries.length" class="empty-line">Rien de planifié</li>
+              <li v-if="!plannedForestRows.length" class="empty-line">Rien de planifié</li>
             </ul>
           </div>
           <div class="list-col list-col--actual">
             <h3 class="list-col__title">Réel</h3>
+            <p v-if="linkSourceId && actualEntries.some((e) => e.id === linkSourceId)" class="link-mode-hint">
+              Mode lien — clique une activité pour l’impliquer (Esc pour annuler).
+            </p>
             <ul class="entry-list">
               <li
-                v-for="entry in actualEntries"
-                :key="entry.id"
+                v-for="row in actualForestRows"
+                :key="row.entry.id"
                 class="entry-row entry-row--actual"
                 :class="[
-                  `entry-row--${costStyleClass(entry.cost)}`,
-                  { 'entry-row--dragging': draggingEntryId === entry.id },
+                  `entry-row--${costStyleClass(row.displayCost)}`,
+                  {
+                    'entry-row--dragging': draggingEntryId === row.entry.id,
+                    'entry-row--link-source': isLinkSource(row.entry.id),
+                    'entry-row--link-target': isLinkTargetCandidate(row.entry.id),
+                    'entry-row--nested': row.depth > 0,
+                  },
                 ]"
+                :style="{ '--nest-depth': row.depth }"
                 draggable="true"
-                @dragstart="onEntryDragStart(BATTERY_ENTRY_KINDS.ACTUAL, entry.id, $event)"
-                @dragover="onEntryDragOver(entry.id, $event)"
-                @drop="onEntryDrop(BATTERY_ENTRY_KINDS.ACTUAL, entry.id, $event)"
+                @dragstart="onEntryDragStart(BATTERY_ENTRY_KINDS.ACTUAL, row.entry.id, $event)"
+                @dragover="onEntryDragOver(row.entry.id, $event)"
+                @drop="onEntryDrop(BATTERY_ENTRY_KINDS.ACTUAL, row.entry.id, $event)"
                 @dragend="onEntryDragEnd"
+                @click="onEntryActivateForLink(row.entry, BATTERY_ENTRY_KINDS.ACTUAL)"
               >
                 <div class="entry-row__main">
-                  <span class="entry-label" title="Glisser pour réordonner chronologiquement">
-                    <span class="entry-label__text">{{ entry.label }}</span>
+                  <span class="entry-label" title="Glisser pour réordonner les frères">
+                    <span
+                      v-if="formatPlannedSlot(row.entry.planned_start, row.entry.planned_end)"
+                      class="entry-slot"
+                    >
+                      {{ formatPlannedSlot(row.entry.planned_start, row.entry.planned_end) }}
+                    </span>
+                    <span class="entry-label__text">{{ row.entry.label }}</span>
                   </span>
                   <button
                     type="button"
-                    class="duration-tag"
-                    :class="{
-                      'is-active': durationEntryId === entry.id,
-                      'is-overridden': entryResolvedDuration(entry).overriddenFromEdt,
-                    }"
-                    :title="
-                      entryResolvedDuration(entry).overriddenFromEdt
-                        ? 'Durée modifiée par rapport à l’EDT'
-                        : 'Modifier la durée'
-                    "
-                    @click="toggleDurationPicker(entry)"
+                    class="priority-pill priority-pill--sm priority-pill--btn"
+                    :class="`priority-pill--${row.entry.priority || 'p3'}`"
+                    :title="`${batteryPriorityMeta(row.entry.priority)?.label} — cliquer pour changer`"
+                    @click.stop="cycleEntryListPriority(row.entry)"
                   >
-                    {{ entryDurationLabel(entry) || 'Durée' }}
-                    <span
-                      v-if="entryResolvedDuration(entry).overriddenFromEdt"
-                      class="duration-tag__dot"
-                      aria-hidden="true"
-                    />
+                    {{ priorityShort(row.entry.priority) }}
                   </button>
+                  <button
+                    v-if="entryAllowsDurationChips(row.entry)"
+                    type="button"
+                    class="duration-tag"
+                    :class="{ 'is-active': durationEntryId === row.entry.id }"
+                    title="Modifier la durée"
+                    @click.stop="toggleDurationPicker(row.entry)"
+                  >
+                    {{ entryDurationLabel(row.entry) || 'Durée' }}
+                  </button>
+                  <span
+                    v-else-if="entryDurationLabel(row.entry)"
+                    class="duration-tag duration-tag--readonly"
+                    title="Durée calculée depuis les horaires"
+                  >
+                    {{ entryDurationLabel(row.entry) }}
+                  </span>
                   <input
-                    v-if="editingCostEntryId === entry.id"
-                    :data-cost-edit="entry.id"
+                    v-if="editingCostEntryId === row.entry.id"
+                    :data-cost-edit="row.entry.id"
                     v-model.number="editingCostValue"
                     class="cost-tag cost-tag--edit"
                     :class="`cost-tag--${costStyleClass(editingCostValue)}`"
                     type="number"
                     step="0.5"
                     aria-label="Modifier le coût"
-                    @keydown.enter.prevent="commitEditActualCost(entry)"
+                    @keydown.enter.prevent="commitEditActualCost(row.entry)"
                     @keydown.escape.prevent="cancelEditActualCost"
-                    @blur="commitEditActualCost(entry)"
+                    @blur="commitEditActualCost(row.entry)"
+                    @click.stop
                   />
                   <button
                     v-else
                     type="button"
                     class="cost-tag cost-tag--btn"
-                    :class="`cost-tag--${costStyleClass(entry.cost)}`"
+                    :class="`cost-tag--${costStyleClass(row.displayCost)}`"
                     title="Modifier le coût"
-                    @click="startEditActualCost(entry)"
+                    @click.stop="startEditActualCost(row.entry)"
                   >
-                    {{ formatCost(entry.cost) }}
+                    {{ formatCost(row.displayCost) }}
                   </button>
-                  <button type="button" class="icon-btn" aria-label="Supprimer" @click="removeEntry(entry)">×</button>
+                  <button
+                    type="button"
+                    class="link-btn-icon"
+                    :class="{ 'is-active': isLinkSource(row.entry.id) }"
+                    :title="
+                      isLinkSource(row.entry.id)
+                        ? 'Annuler le mode lien'
+                        : 'Lier des activités (implications)'
+                    "
+                    :aria-label="`Lier « ${row.entry.label} »`"
+                    @click.stop="toggleLinkSource(row.entry)"
+                  >
+                    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                      <path
+                        fill="currentColor"
+                        d="M17 7h-4v2h4a3 3 0 1 1 0 6h-4v2h4a5 5 0 1 0 0-10zm-6 8H7a3 3 0 1 1 0-6h4V7H7a5 5 0 1 0 0 10h4v-2zm-1-4h4v2h-4v-2z"
+                      />
+                    </svg>
+                    <span v-if="row.childCount" class="link-btn-icon__count">{{ row.childCount }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    aria-label="Supprimer"
+                    @click.stop="removeEntry(row.entry)"
+                  >
+                    ×
+                  </button>
                 </div>
                 <div
-                  v-if="durationEntryId === entry.id"
+                  v-if="durationEntryId === row.entry.id && entryAllowsDurationChips(row.entry)"
                   class="duration-chips"
                   role="group"
-                  :aria-label="`Durée pour ${entry.label}`"
+                  :aria-label="`Durée pour ${row.entry.label}`"
                 >
                   <button
                     v-for="preset in BATTERY_DURATION_PRESETS"
                     :key="preset.id"
                     type="button"
                     class="duration-chip"
-                    :class="{ 'is-active': entryDurationPresetActive(entry) === preset.id }"
-                    :disabled="durationBusyId === entry.id"
-                    @click="
+                    :class="{ 'is-active': entryDurationPresetActive(row.entry) === preset.id }"
+                    :disabled="durationBusyId === row.entry.id"
+                    @click.stop="
                       applyEntryDuration(
-                        entry,
+                        row.entry,
                         preset.id === 'over_2h' ? 'over_2h' : preset.minutes,
                       )
                     "
@@ -1207,46 +1672,31 @@ onUnmounted(() => {
                     {{ preset.label }}
                   </button>
                   <button
-                    v-if="
-                      entryDurationPresetActive(entry) &&
-                      String(entryDurationPresetActive(entry)).startsWith('custom:')
-                    "
-                    type="button"
-                    class="duration-chip is-active"
-                    disabled
-                  >
-                    {{ entryDurationLabel(entry) }}
-                  </button>
-                  <button
                     type="button"
                     class="duration-chip"
                     :class="{
-                      'is-active': entryDurationPresetActive(entry) === BATTERY_DURATION_ALL_DAY_ID,
+                      'is-active': entryDurationPresetActive(row.entry) === BATTERY_DURATION_ALL_DAY_ID,
                     }"
-                    :disabled="durationBusyId === entry.id"
-                    @click="applyEntryDuration(entry, 'all_day')"
+                    :disabled="durationBusyId === row.entry.id"
+                    @click.stop="applyEntryDuration(row.entry, 'all_day')"
                   >
                     Journée entière
                   </button>
                   <button
                     type="button"
                     class="duration-chip duration-chip--reset"
-                    :disabled="durationBusyId === entry.id"
-                    :title="
-                      entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE
-                        ? 'Revenir à la durée de l’EDT'
-                        : 'Effacer la durée'
-                    "
-                    @click="applyEntryDuration(entry, 'reset')"
+                    :disabled="durationBusyId === row.entry.id"
+                    @click.stop="applyEntryDuration(row.entry, 'reset')"
                   >
                     Défaut
                   </button>
                 </div>
               </li>
-              <li v-if="!actualEntries.length" class="empty-line">Aucune activité réelle</li>
+              <li v-if="!actualForestRows.length" class="empty-line">Aucune activité réelle</li>
             </ul>
           </div>
         </div>
+
       </section>
 
       <!-- Ressenti du soir : disponible pour tous les jours -->
@@ -2049,7 +2499,9 @@ onUnmounted(() => {
 .entry-row__main > .duration-tag,
 .entry-row__main > .cost-tag,
 .entry-row__main > .fait-btn,
-.entry-row__main > .icon-btn {
+.entry-row__main > .icon-btn,
+.entry-row__main > .link-btn-icon,
+.entry-row__main > .priority-pill {
   flex: 0 0 auto;
 }
 
@@ -2619,6 +3071,258 @@ onUnmounted(() => {
     padding: 0.14rem 0.4rem;
     font-size: 0.68rem;
   }
+}
+
+.entry-plan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 0.85rem;
+  align-items: flex-end;
+  margin: 0.55rem 0 0.25rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 14px;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.78), rgba(236, 230, 245, 0.5));
+  border: 1px solid rgba(173, 129, 190, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.entry-meta-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.entry-meta-field__label {
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #5c5368;
+}
+
+.entry-meta-field--grow {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+}
+
+.entry-meta-field select,
+.entry-meta-field input {
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #2f2938;
+  border-radius: 12px;
+  border: 1.5px solid rgba(140, 118, 168, 0.35);
+  background: #fff;
+  padding: 0.5rem 0.7rem;
+  box-shadow: 0 1px 2px rgba(60, 40, 80, 0.04);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.entry-meta-field select:focus,
+.entry-meta-field input:focus {
+  outline: none;
+  border-color: rgba(150, 110, 190, 0.65);
+  box-shadow: 0 0 0 3px rgba(173, 129, 190, 0.22);
+}
+
+.entry-meta-field input::placeholder {
+  color: #7a7388;
+  font-weight: 500;
+  opacity: 1;
+}
+
+.entry-plan-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 550;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #5f566c;
+}
+
+.entry-slot-duration {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #4a5f8f;
+}
+
+.duration-tag--readonly {
+  cursor: default;
+  opacity: 0.92;
+}
+
+.entry-slot {
+  display: inline-block;
+  margin-right: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #6a7a9a;
+  font-variant-numeric: tabular-nums;
+}
+
+.priority-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.6rem;
+  min-height: 2rem;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border: 1.5px solid transparent;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.priority-pill--btn {
+  cursor: pointer;
+  font: inherit;
+  font-size: inherit;
+  font-weight: 800;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.priority-pill--btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(60, 40, 80, 0.1);
+}
+
+.priority-pill--sm {
+  min-width: 1.55rem;
+  min-height: 1.25rem;
+  padding: 0.05rem 0.28rem;
+  font-size: 0.58rem;
+  line-height: 1.1;
+  border-width: 1px;
+}
+
+.priority-pill--obligatoire {
+  background: rgba(196, 92, 92, 0.22);
+  border-color: rgba(196, 92, 92, 0.45);
+  color: #8a3030;
+}
+
+.priority-pill--p1 {
+  background: rgba(212, 160, 23, 0.26);
+  border-color: rgba(212, 160, 23, 0.5);
+  color: #7a5a08;
+}
+
+.priority-pill--p2 {
+  background: rgba(143, 162, 212, 0.28);
+  border-color: rgba(143, 162, 212, 0.5);
+  color: #3a5080;
+}
+
+.priority-pill--p3 {
+  background: rgba(110, 120, 145, 0.2);
+  border-color: rgba(110, 120, 145, 0.4);
+  color: #3f4658;
+}
+
+.priority-pill--p4 {
+  background: rgba(110, 120, 145, 0.12);
+  border-color: rgba(110, 120, 145, 0.28);
+  color: #5a6270;
+}
+
+.link-mode-hint {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #5a6b8a;
+}
+
+.link-btn-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 8px;
+  border: 1px solid rgba(143, 162, 212, 0.4);
+  background: rgba(143, 162, 212, 0.12);
+  color: #4a5f8f;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.link-btn-icon:hover,
+.link-btn-icon.is-active {
+  background: rgba(143, 162, 212, 0.28);
+  border-color: rgba(100, 120, 180, 0.55);
+}
+
+.link-btn-icon__count {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  min-width: 0.95rem;
+  height: 0.95rem;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  background: rgba(173, 129, 190, 0.9);
+  color: #fff;
+  font-size: 0.58rem;
+  font-weight: 800;
+  line-height: 0.95rem;
+  text-align: center;
+}
+
+.entry-row--nested {
+  margin-left: calc(var(--nest-depth, 1) * 0.85rem);
+  border-left: 2px solid rgba(143, 162, 212, 0.4);
+  border-radius: 0 12px 12px 0;
+  background: rgba(143, 162, 212, 0.05);
+}
+
+.entry-row--link-source {
+  opacity: 0.55;
+  outline: 2px dashed rgba(120, 100, 160, 0.55);
+  outline-offset: 1px;
+  filter: grayscale(0.35);
+}
+
+.entry-row--link-target {
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1.5px rgba(90, 140, 200, 0.45);
+}
+
+.lists-grid--linking .entry-row:not(.entry-row--link-source):not(.entry-row--link-target) {
+  opacity: 0.72;
+}
+
+.entry-row__main {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.entry-row__main > .entry-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.entry-label__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 @media (prefers-color-scheme: dark) {

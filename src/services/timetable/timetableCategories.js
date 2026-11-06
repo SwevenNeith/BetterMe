@@ -1,6 +1,7 @@
 const DEFAULT_CATEGORIES = [
   { name: 'Travail', color: 'hsl(280, 65%, 72%)', icon: '💼' },
   { name: 'Hobbies', color: 'hsl(25, 75%, 72%)', icon: '🎨' },
+  { name: 'Autre', color: 'hsl(200, 35%, 72%)', icon: '📌' },
 ]
 
 /** Normalise une ligne timetable_categories */

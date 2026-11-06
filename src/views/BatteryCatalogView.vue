@@ -1,12 +1,17 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import {
+  BATTERY_DEFAULT_PRIORITY,
   BATTERY_DURATION_ALL_DAY_ID,
   BATTERY_DURATION_PRESETS,
   BATTERY_DURATION_RESET_ID,
   BATTERY_ENTRY_KINDS,
+  BATTERY_PRIORITY_IDS,
+  batteryPriorityMeta,
+  isBatteryTimeOptionalCategoryName,
+  normalizeBatteryPriority,
 } from '../constants/battery/battery.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
@@ -16,13 +21,18 @@ import {
   listBatteryActivities,
   updateBatteryActivity,
 } from '../services/battery/batteryActivities.js'
+import { isTimeOptionalCategory } from '../services/battery/batteryPlanToEdt.js'
 import { addBatteryEntry } from '../services/battery/batteryDays.js'
+import { ensureTimetableCategory } from '../services/timetable/timetableEvents.js'
+import { loadUserCategories } from '../services/timetable/timetableCategories.js'
 import { costStyleClass, normalizeBatteryCost } from '../utils/battery/batteryMath.js'
 import {
   activeDurationPresetId,
   formatBatteryDuration,
 } from '../utils/battery/batteryDuration.js'
 import { addDaysISO } from '../utils/habit/habitCalendar.js'
+import { validatePlannedSlot } from '../utils/battery/batteryTime.js'
+import { useTimetableCacheStore } from '../stores/timetableCache.js'
 import EmojiPickerField from '../components/common/EmojiPickerField.vue'
 
 defineOptions({ name: 'BatteryCatalogView' })
@@ -56,6 +66,21 @@ const editingCostValue = ref(0)
 const newDurationChoice = ref(null)
 const durationEditActivityId = ref(null)
 const durationBusyId = ref(null)
+
+const categories = ref([])
+const newCategoryText = ref('')
+const newPriority = ref(BATTERY_DEFAULT_PRIORITY)
+const catalogPage = ref(1)
+const PAGE_SIZE = 10
+
+/** Dialogue horaires (plan ou réel) */
+const planActivity = ref(null)
+/** @type {import('vue').Ref<'planned'|'actual'|null>} */
+const planKind = ref(null)
+const planStart = ref('09:00')
+const planEnd = ref('10:00')
+const planError = ref('')
+const planBusy = ref(false)
 
 const SORT_OPTIONS = [
   { id: 'alpha', label: 'A → Z' },
@@ -91,7 +116,6 @@ const filtered = computed(() => {
     String(a.name || '').localeCompare(String(b.name || ''), 'fr', { sensitivity: 'base' })
 
   if (sortMode.value === 'cost-desc') {
-    // Coût signé : +2 (dépense) > −2 (regain) → plus « cher » en premier.
     return list.sort((a, b) => {
       const diff = (Number(b.default_cost) || 0) - (Number(a.default_cost) || 0)
       return diff !== 0 ? diff : byName(a, b)
@@ -104,6 +128,24 @@ const filtered = computed(() => {
     })
   }
   return list.sort(byName)
+})
+
+const totalCatalogPages = computed(() =>
+  Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)),
+)
+
+const pagedActivities = computed(() => {
+  const page = Math.min(catalogPage.value, totalCatalogPages.value)
+  const start = (page - 1) * PAGE_SIZE
+  return filtered.value.slice(start, start + PAGE_SIZE)
+})
+
+watch([query, sortMode], () => {
+  catalogPage.value = 1
+})
+
+watch(totalCatalogPages, (pages) => {
+  if (catalogPage.value > pages) catalogPage.value = pages
 })
 
 /**
@@ -128,21 +170,83 @@ function effectOf(cost) {
   return Number(cost) < 0 ? 'restore' : 'drain'
 }
 
+async function loadCategories() {
+  if (!userId.value) return
+  categories.value = await loadUserCategories(supabase, userId.value)
+}
+
+/**
+ * @param {string} name
+ * @returns {Promise<string>} category id
+ */
+async function resolveCategoryByName(name) {
+  const trimmed = String(name ?? '').trim()
+  if (!trimmed) throw new Error('Indique une catégorie.')
+  const { category, categories: next } = await ensureTimetableCategory(
+    supabase,
+    userId.value,
+    trimmed,
+    categories.value,
+  )
+  categories.value = next
+  useTimetableCacheStore().$patch({ isValid: false })
+  if (!category?.id) throw new Error('Impossible de créer la catégorie.')
+  return category.id
+}
+
+function categoryNameOf(activity) {
+  const cat = categories.value.find((c) => c.id === activity?.category_id)
+  return cat?.name || ''
+}
+
+function cyclePriority(current) {
+  const id = normalizeBatteryPriority(current)
+  const idx = BATTERY_PRIORITY_IDS.indexOf(id)
+  const next = BATTERY_PRIORITY_IDS[(idx + 1) % BATTERY_PRIORITY_IDS.length]
+  return next
+}
+
+function cycleNewPriority() {
+  newPriority.value = cyclePriority(newPriority.value)
+}
+
+
 async function loadActivities() {
   if (!userId.value) return
   isLoading.value = true
   loadError.value = ''
   try {
+    await loadCategories()
     activities.value = await listBatteryActivities(supabase, userId.value)
   } catch (err) {
     console.error(err)
     loadError.value =
       err?.message?.includes('battery_') || err?.code === '42P01'
         ? 'Tables Batterie introuvables. Exécute scripts/create-battery.sql dans Supabase.'
-        : 'Impossible de charger le catalogue.'
+        : err?.message?.includes('category_id') || err?.message?.includes('priority')
+          ? 'Migration Batterie↔EDT manquante. Exécute scripts/migrate-battery-edt-link.sql.'
+          : 'Impossible de charger le catalogue.'
   } finally {
     isLoading.value = false
   }
+}
+
+function activityIsTimeOptional(activity) {
+  const cat = categories.value.find((c) => c.id === activity?.category_id)
+  return isTimeOptionalCategory(cat, categories.value)
+}
+
+const newCategoryIsTimeOptional = computed(() =>
+  isBatteryTimeOptionalCategoryName(newCategoryText.value),
+)
+
+watch(newCategoryIsTimeOptional, (optional) => {
+  if (!optional) newDurationChoice.value = null
+})
+
+
+function priorityLabel(id) {
+  return batteryPriorityMeta(id)?.short || 'P3'
 }
 
 /**
@@ -288,21 +392,27 @@ async function createItem() {
     return
   }
   try {
+    const categoryId = await resolveCategoryByName(newCategoryText.value)
     /** @type {Record<string, unknown>} */
     const payload = {
       name: newName.value,
       default_cost: toSignedCost(newEffect.value, newAmount.value),
+      category_id: categoryId,
+      priority: newPriority.value,
     }
-    if (newDurationChoice.value === 'all_day') {
-      payload.default_all_day = true
-      payload.default_duration_minutes = null
-    } else if (newDurationChoice.value != null) {
-      payload.default_all_day = false
-      payload.default_duration_minutes = newDurationChoice.value
+    if (isBatteryTimeOptionalCategoryName(newCategoryText.value)) {
+      if (newDurationChoice.value === 'all_day') {
+        payload.default_all_day = true
+        payload.default_duration_minutes = null
+      } else if (newDurationChoice.value != null) {
+        payload.default_all_day = false
+        payload.default_duration_minutes = newDurationChoice.value
+      }
     }
     await createBatteryActivity(supabase, userId.value, payload)
     newName.value = ''
-    // Conserve effet + points + durée pour enchaîner plusieurs créations similaires.
+    newCategoryText.value = ''
+    newDurationChoice.value = null
     await loadActivities()
     await nextTick()
     newNameInputRef.value?.focus()
@@ -310,6 +420,46 @@ async function createItem() {
     formError.value = err?.message || 'Erreur.'
   }
 }
+
+async function patchActivityCategoryName(activity, event) {
+  if (!userId.value || !activity?.id) return
+  const input = event?.target
+  const name = String(input?.value || '').trim()
+  const previous = categoryNameOf(activity)
+  if (!name) {
+    if (input) input.value = previous
+    formError.value = 'Indique une catégorie.'
+    return
+  }
+  if (name.toLowerCase() === previous.toLowerCase()) {
+    if (input) input.value = previous
+    return
+  }
+  try {
+    const categoryId = await resolveCategoryByName(name)
+    await updateBatteryActivity(supabase, userId.value, activity.id, {
+      category_id: categoryId,
+    })
+    await loadActivities()
+  } catch (err) {
+    console.error(err)
+    if (input) input.value = previous
+    formError.value = err?.message || 'Impossible de changer la catégorie.'
+  }
+}
+
+async function cycleActivityPriority(activity) {
+  if (!userId.value || !activity?.id) return
+  const next = cyclePriority(activity.priority)
+  try {
+    await updateBatteryActivity(supabase, userId.value, activity.id, { priority: next })
+    await loadActivities()
+  } catch (err) {
+    console.error(err)
+    formError.value = err?.message || 'Impossible de changer la priorité.'
+  }
+}
+
 
 function startEditCost(activity) {
   editingCostActivityId.value = activity.id
@@ -366,8 +516,51 @@ async function removeItem(activity) {
   }
 }
 
+/**
+ * @param {object} activity
+ * @param {'planned'|'actual'} kind
+ */
+function openPlanDialog(activity, kind) {
+  planActivity.value = activity
+  planKind.value = kind
+  planError.value = ''
+  const mins = Number(activity.default_duration_minutes) || 60
+  planStart.value = '09:00'
+  const endH = Math.floor((9 * 60 + mins) / 60)
+  const endM = (9 * 60 + mins) % 60
+  planEnd.value = `${String(Math.min(23, endH)).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
+}
+
+function closePlanDialog() {
+  if (planBusy.value) return
+  planActivity.value = null
+  planKind.value = null
+  planError.value = ''
+}
+
+const planDialogTitle = computed(() => {
+  const name = planActivity.value?.name || ''
+  return planKind.value === BATTERY_ENTRY_KINDS.ACTUAL
+    ? `Réel « ${name} »`
+    : `Planifier « ${name} »`
+})
+
+const planDialogDateLabel = computed(() =>
+  planKind.value === BATTERY_ENTRY_KINDS.ACTUAL ? 'aujourd’hui' : planningDateLabel.value,
+)
+
 async function addToDay(activity, kind) {
   if (!userId.value || busyId.value) return
+
+  if (!activity.category_id) {
+    statusMessage.value = 'Attribue d’abord une catégorie EDT à cette activité.'
+    return
+  }
+  if (!activityIsTimeOptional(activity)) {
+    openPlanDialog(activity, kind)
+    return
+  }
+
   busyId.value = activity.id
   statusMessage.value = ''
   const dayIso =
@@ -378,7 +571,11 @@ async function addToDay(activity, kind) {
       cost: activity.default_cost,
       kind,
       activity_id: activity.id,
+      priority: activity.priority,
     })
+    if (kind === BATTERY_ENTRY_KINDS.PLANNED) {
+      useTimetableCacheStore().$patch({ isValid: false })
+    }
     statusMessage.value =
       kind === BATTERY_ENTRY_KINDS.PLANNED
         ? `« ${activity.name} » planifié pour ${planningDateLabel.value}`
@@ -388,6 +585,46 @@ async function addToDay(activity, kind) {
     statusMessage.value = err?.message || 'Erreur'
   } finally {
     busyId.value = null
+  }
+}
+
+async function confirmPlanWithTimes() {
+  const activity = planActivity.value
+  const kind = planKind.value
+  if (!userId.value || !activity || !kind || planBusy.value) return
+  planError.value = ''
+  const slotError = validatePlannedSlot(planStart.value, planEnd.value)
+  if (slotError) {
+    planError.value = slotError
+    return
+  }
+  planBusy.value = true
+  const dayIso =
+    kind === BATTERY_ENTRY_KINDS.PLANNED ? planningDate.value : actualDate.value
+  try {
+    await addBatteryEntry(supabase, userId.value, dayIso, {
+      label: activity.name,
+      cost: activity.default_cost,
+      kind,
+      activity_id: activity.id,
+      priority: activity.priority,
+      planned_start: planStart.value,
+      planned_end: planEnd.value,
+    })
+    if (kind === BATTERY_ENTRY_KINDS.PLANNED) {
+      useTimetableCacheStore().$patch({ isValid: false })
+    }
+    statusMessage.value =
+      kind === BATTERY_ENTRY_KINDS.PLANNED
+        ? `« ${activity.name} » planifié (${planStart.value} – ${planEnd.value}) pour ${planningDateLabel.value}`
+        : `« ${activity.name} » ajouté au réel (${planStart.value} – ${planEnd.value})`
+    planActivity.value = null
+    planKind.value = null
+  } catch (err) {
+    console.error(err)
+    planError.value = err?.message || 'Erreur'
+  } finally {
+    planBusy.value = false
   }
 }
 
@@ -473,7 +710,41 @@ onMounted(async () => {
           />
           <button type="submit" class="primary-btn">Ajouter</button>
         </form>
-        <div class="duration-chips" role="group" aria-label="Durée par défaut (optionnelle)">
+        <div class="meta-card">
+          <label class="meta-field meta-field--cat">
+            <span class="meta-field__label">Catégorie EDT</span>
+            <input
+              v-model="newCategoryText"
+              type="text"
+              class="meta-input"
+              list="catalog-category-suggestions"
+              placeholder="Catégorie"
+              required
+              aria-label="Catégorie (créée si nouvelle)"
+            />
+            <datalist id="catalog-category-suggestions">
+              <option v-for="cat in categories" :key="cat.id" :value="cat.name" />
+            </datalist>
+          </label>
+          <div class="meta-field meta-field--priority">
+            <span class="meta-field__label">Priorité</span>
+            <button
+              type="button"
+              class="priority-pill priority-pill--btn"
+              :class="`priority-pill--${newPriority}`"
+              :title="`${batteryPriorityMeta(newPriority)?.label} — cliquer pour changer`"
+              @click="cycleNewPriority"
+            >
+              {{ priorityLabel(newPriority) }}
+            </button>
+          </div>
+        </div>
+        <div
+          v-if="newCategoryIsTimeOptional"
+          class="duration-chips"
+          role="group"
+          aria-label="Durée par défaut (Hobbies / Autre)"
+        >
           <button
             v-for="preset in BATTERY_DURATION_PRESETS"
             :key="preset.id"
@@ -503,9 +774,8 @@ onMounted(async () => {
         </div>
         <p v-if="formError" class="flash flash--error">{{ formError }}</p>
         <p class="hint">
-          Choisis Dépense ou Regain, puis les points (entiers ou 0.5). La durée est optionnelle.
-          « Planifier » ajoute à demain ; « Réel » à aujourd’hui. Le coût / la durée par défaut
-          évoluent via les activités réelles (même valeur pendant 2 semaines d’affilée).
+          Tape une catégorie (créée si nouvelle). Pastilles de durée : Hobbies / Autre uniquement.
+          Les autres catégories calculent la durée depuis les horaires à la planification.
         </p>
       </section>
 
@@ -527,7 +797,7 @@ onMounted(async () => {
 
         <ul class="list">
           <li
-            v-for="activity in filtered"
+            v-for="activity in pagedActivities"
             :key="activity.id"
             class="item"
             :class="`item--${costStyleClass(activity.default_cost)}`"
@@ -582,6 +852,7 @@ onMounted(async () => {
                 {{ formatCost(activity.default_cost) }}
               </button>
               <button
+                v-if="activityIsTimeOptional(activity)"
                 type="button"
                 class="duration-tag"
                 :class="{ 'is-active': durationEditActivityId === activity.id }"
@@ -590,10 +861,41 @@ onMounted(async () => {
               >
                 {{ catalogDurationLabel(activity) || 'Durée' }}
               </button>
+              <span
+                v-else-if="catalogDurationLabel(activity)"
+                class="duration-tag duration-tag--readonly"
+                title="Durée typique (calculée via horaires à la planification)"
+              >
+                {{ catalogDurationLabel(activity) }}
+              </span>
+              <button
+                type="button"
+                class="priority-pill priority-pill--btn"
+                :class="`priority-pill--${activity.priority || 'p3'}`"
+                :title="`${batteryPriorityMeta(activity.priority)?.label} — cliquer pour changer`"
+                @click="cycleActivityPriority(activity)"
+              >
+                {{ priorityLabel(activity.priority) }}
+              </button>
+            </div>
+
+            <div class="item__meta">
+              <label class="meta-field meta-field--compact">
+                <span class="meta-field__label">Catégorie</span>
+                <input
+                  type="text"
+                  class="meta-input"
+                  list="catalog-category-suggestions"
+                  :value="categoryNameOf(activity)"
+                  placeholder="Catégorie…"
+                  aria-label="Catégorie"
+                  @change="patchActivityCategoryName(activity, $event)"
+                />
+              </label>
             </div>
 
             <div
-              v-if="durationEditActivityId === activity.id"
+              v-if="durationEditActivityId === activity.id && activityIsTimeOptional(activity)"
               class="duration-chips"
               role="group"
               :aria-label="`Durée par défaut pour ${activity.name}`"
@@ -675,8 +977,82 @@ onMounted(async () => {
           </li>
           <li v-if="!filtered.length" class="empty">Aucune activité</li>
         </ul>
+
+        <nav
+          v-if="filtered.length > PAGE_SIZE"
+          class="catalog-pager"
+          aria-label="Pagination du catalogue"
+        >
+          <button
+            type="button"
+            class="ghost-btn"
+            :disabled="catalogPage <= 1"
+            @click="catalogPage = Math.max(1, catalogPage - 1)"
+          >
+            ← Préc.
+          </button>
+          <span class="catalog-pager__status">
+            Page {{ Math.min(catalogPage, totalCatalogPages) }} / {{ totalCatalogPages }}
+            <em>({{ filtered.length }} activité{{ filtered.length > 1 ? 's' : '' }})</em>
+          </span>
+          <button
+            type="button"
+            class="ghost-btn"
+            :disabled="catalogPage >= totalCatalogPages"
+            @click="catalogPage = Math.min(totalCatalogPages, catalogPage + 1)"
+          >
+            Suiv. →
+          </button>
+        </nav>
       </section>
     </template>
+
+    <div
+      v-if="planActivity"
+      class="plan-overlay"
+      @click.self="closePlanDialog"
+      @keydown.escape="closePlanDialog"
+    >
+      <div class="plan-dialog" role="dialog" aria-modal="true" aria-labelledby="plan-dialog-title">
+        <h2 id="plan-dialog-title" class="plan-dialog__title">
+          {{ planDialogTitle }}
+        </h2>
+        <p class="plan-dialog__sub">
+          Horaires pour {{ planDialogDateLabel }} · priorité
+          {{ priorityLabel(planActivity.priority) }}
+        </p>
+        <div class="plan-dialog__times">
+          <label class="meta-field">
+            <span class="meta-field__label">Début</span>
+            <input v-model="planStart" type="time" class="meta-input" required />
+          </label>
+          <label class="meta-field">
+            <span class="meta-field__label">Fin</span>
+            <input v-model="planEnd" type="time" class="meta-input" required />
+          </label>
+        </div>
+        <p v-if="planError" class="flash flash--error">{{ planError }}</p>
+        <div class="plan-dialog__actions">
+          <button type="button" class="ghost-btn" :disabled="planBusy" @click="closePlanDialog">
+            Annuler
+          </button>
+          <button
+            type="button"
+            class="primary-btn"
+            :disabled="planBusy"
+            @click="confirmPlanWithTimes"
+          >
+            {{
+              planBusy
+                ? '…'
+                : planKind === BATTERY_ENTRY_KINDS.ACTUAL
+                  ? 'Ajouter au réel'
+                  : 'Planifier + EDT'
+            }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1007,7 +1383,7 @@ onMounted(async () => {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
@@ -1125,6 +1501,11 @@ onMounted(async () => {
   font-size: 0.72rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+.duration-tag--readonly {
+  cursor: default;
+  opacity: 0.9;
 }
 
 .duration-tag.is-active,
@@ -1302,6 +1683,256 @@ onMounted(async () => {
   .list {
     grid-template-columns: 1fr;
   }
+}
+
+.meta-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 14px;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.72), rgba(236, 230, 245, 0.55));
+  border: 1px solid rgba(173, 129, 190, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.meta-row,
+.item__meta,
+.new-cat-row,
+.plan-dialog__times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: flex-end;
+  margin-top: 0.65rem;
+}
+
+.meta-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 8rem;
+  flex: 1;
+}
+
+.meta-field--cat {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+}
+
+.meta-field--compact {
+  min-width: 7rem;
+}
+
+.meta-field__label {
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #5c5368;
+}
+
+.meta-select,
+.meta-input {
+  border-radius: 12px;
+  border: 1.5px solid rgba(140, 118, 168, 0.35);
+  background: #fff;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #2f2938;
+  box-shadow: 0 1px 2px rgba(60, 40, 80, 0.04);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.meta-select:focus,
+.meta-input:focus {
+  outline: none;
+  border-color: rgba(150, 110, 190, 0.65);
+  box-shadow: 0 0 0 3px rgba(173, 129, 190, 0.22);
+}
+
+.meta-input::placeholder {
+  color: #7a7388;
+  font-weight: 500;
+  opacity: 1;
+}
+
+.meta-input--icon {
+  width: 3.2rem;
+  text-align: center;
+}
+
+.meta-input--offset {
+  width: 5.5rem;
+}
+
+.meta-color {
+  width: 2.4rem;
+  height: 2.2rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ghost-btn {
+  border-radius: 999px;
+  border: 1px solid rgba(173, 129, 190, 0.35);
+  background: transparent;
+  color: #6d5f7a;
+  padding: 0.4rem 0.85rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.ghost-btn--sm {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+}
+
+.ghost-btn.is-active {
+  background: rgba(173, 129, 190, 0.18);
+  border-color: rgba(173, 129, 190, 0.5);
+}
+
+.primary-btn--sm {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.priority-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.85rem;
+  min-height: 2.15rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border: 1.5px solid transparent;
+}
+
+.priority-pill--btn {
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.priority-pill--btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(60, 40, 80, 0.12);
+}
+
+.meta-field--priority {
+  flex: 0 0 auto;
+  align-items: flex-start;
+}
+
+.catalog-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.catalog-pager__status {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #6d6478;
+}
+
+.catalog-pager__status em {
+  font-style: normal;
+  font-weight: 500;
+  color: #8a8494;
+  margin-left: 0.25rem;
+}
+
+.catalog-pager .ghost-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.priority-pill--obligatoire {
+  background: rgba(196, 92, 92, 0.22);
+  border-color: rgba(196, 92, 92, 0.45);
+  color: #8a3030;
+}
+
+.priority-pill--p1 {
+  background: rgba(212, 160, 23, 0.26);
+  border-color: rgba(212, 160, 23, 0.5);
+  color: #7a5a08;
+}
+
+.priority-pill--p2 {
+  background: rgba(143, 162, 212, 0.28);
+  border-color: rgba(143, 162, 212, 0.5);
+  color: #3a5080;
+}
+
+.priority-pill--p3 {
+  background: rgba(110, 120, 145, 0.2);
+  border-color: rgba(110, 120, 145, 0.4);
+  color: #3f4658;
+}
+
+.priority-pill--p4 {
+  background: rgba(110, 120, 145, 0.12);
+  border-color: rgba(110, 120, 145, 0.28);
+  color: #5a6270;
+}
+
+
+
+.plan-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(28, 24, 36, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.plan-dialog {
+  width: min(420px, 100%);
+  border-radius: 18px;
+  padding: 1.25rem 1.35rem 1.1rem;
+  background: linear-gradient(165deg, #fffafc 0%, #f3eef8 100%);
+  border: 1px solid rgba(173, 129, 190, 0.3);
+  box-shadow: 0 18px 40px rgba(60, 40, 80, 0.22);
+}
+
+.plan-dialog__title {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #4a3d58;
+}
+
+.plan-dialog__sub {
+  margin: 0.35rem 0 0.85rem;
+  font-size: 0.88rem;
+  color: #7a7488;
+}
+
+.plan-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 1rem;
 }
 
 @media (prefers-color-scheme: dark) {

@@ -289,6 +289,16 @@ export async function createTimetableEvent(supabase, userId, input, userCategori
     todo_item_id: input.todoItemId || null,
   }
 
+  if (input.batteryActivityId) {
+    eventPayload.battery_activity_id = input.batteryActivityId
+  }
+  if (input.impliedByEventId) {
+    eventPayload.implied_by_event_id = input.impliedByEventId
+  }
+  if (input.priority) {
+    eventPayload.priority = input.priority
+  }
+
   const { data, error } = await supabase
     .from('timetable_events')
     .insert({ user_id: userId, ...eventPayload })

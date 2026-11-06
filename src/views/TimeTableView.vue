@@ -40,7 +40,17 @@ import {
   listTimetableEventsForTodo,
 } from '../services/todo/todoTimetableLink.js'
 import { isRecurringTodoFrequency } from '../utils/todo/todoPlanningDates.js'
-import { BATTERY_SOURCE_TYPES } from '../constants/battery/battery.js'
+import {
+  BATTERY_DEFAULT_PRIORITY,
+  BATTERY_PRIORITIES,
+  BATTERY_SOURCE_TYPES,
+  batteryPriorityMeta,
+  normalizeBatteryPriority,
+} from '../constants/battery/battery.js'
+
+function eventPriorityShort(id) {
+  return batteryPriorityMeta(id)?.short || ''
+}
 import {
   clearTodoBatteryWhenTimetableLinked,
   countBatteryEntriesForSources,
@@ -82,6 +92,7 @@ const newEventDetail = ref('')
 const newEventStartTime = ref('10:00')
 const newEventEndTime = ref('11:30')
 const newEventCategory = ref('Travail')
+const newEventPriority = ref(BATTERY_DEFAULT_PRIORITY)
 const newEventDay = ref(new Date().toISOString().split('T')[0])
 const newEventDateEnd = ref('')
 const newEventAllDay = ref(false)
@@ -119,6 +130,7 @@ const { clearDraft: clearEventDraft, restoreDraft: restoreEventDraft } = useForm
     startTime: newEventStartTime.value,
     endTime: newEventEndTime.value,
     category: newEventCategory.value,
+    priority: newEventPriority.value,
     day: newEventDay.value,
     dateEnd: newEventDateEnd.value,
     allDay: newEventAllDay.value,
@@ -141,6 +153,7 @@ const { clearDraft: clearEventDraft, restoreDraft: restoreEventDraft } = useForm
     newEventStartTime.value = state.startTime ?? '10:00'
     newEventEndTime.value = state.endTime ?? '11:30'
     newEventCategory.value = state.category ?? 'Travail'
+    newEventPriority.value = normalizeBatteryPriority(state.priority)
     newEventDay.value = state.day ?? newEventDay.value
     newEventDateEnd.value = state.dateEnd ?? ''
     newEventAllDay.value = Boolean(state.allDay)
@@ -273,6 +286,7 @@ function resetEventForm() {
   newEventStartTime.value = '10:00'
   newEventEndTime.value = '11:30'
   newEventCategory.value = 'Travail'
+  newEventPriority.value = BATTERY_DEFAULT_PRIORITY
   newEventDateEnd.value = ''
   newEventAllDay.value = false
   newEventIsBirthday.value = false
@@ -320,6 +334,7 @@ async function openEventForEdit(event) {
 
   const cat = userCategories.value.find((c) => c.id === original.category)
   newEventCategory.value = cat?.name || 'Travail'
+  newEventPriority.value = normalizeBatteryPriority(original.priority)
 
   resetReminderFields()
   resetTimerFields()
@@ -1217,6 +1232,9 @@ const handleAddEvent = async () => {
       timer_duration: timerActive ? timerMinutes : null,
       event_kind: isBirthday ? TIMETABLE_EVENT_KIND.BIRTHDAY : null,
       origin_date: isBirthday ? originDate : null,
+      priority: isBirthday
+        ? null
+        : normalizeBatteryPriority(newEventPriority.value),
     }
 
     let savedEvent
@@ -2040,11 +2058,25 @@ const getPositionedEventsForDay = (dayIdx) => {
                       <div v-if="event.isShort" class="event-main-line">
                         <span class="event-time">{{ event.timeStartLabel }}</span>
                         <h4 class="event-title">{{ event.title }}</h4>
+                        <span
+                          v-if="event.priority"
+                          class="event-priority-pill event-priority-pill--inline"
+                          :class="`event-priority-pill--${event.priority}`"
+                        >
+                          {{ eventPriorityShort(event.priority) }}
+                        </span>
                       </div>
                       <!-- Sinon : horaire, titre, catégorie empilés -->
                       <template v-else>
                         <div class="event-meta-row">
                           <span class="event-time">{{ event.timeRangeLabel }}</span>
+                          <span
+                            v-if="event.priority"
+                            class="event-priority-pill"
+                            :class="`event-priority-pill--${event.priority}`"
+                          >
+                            {{ eventPriorityShort(event.priority) }}
+                          </span>
                         </div>
                         <h4 class="event-title">{{ event.title }}</h4>
                         <span class="event-category-tag" v-if="event.category">
@@ -2173,10 +2205,24 @@ const getPositionedEventsForDay = (dayIdx) => {
                       <div v-if="event.isShort" class="event-main-line">
                         <span class="event-time">{{ event.timeStartLabel }}</span>
                         <h4 class="event-title">{{ event.title }}</h4>
+                        <span
+                          v-if="event.priority"
+                          class="event-priority-pill event-priority-pill--inline"
+                          :class="`event-priority-pill--${event.priority}`"
+                        >
+                          {{ eventPriorityShort(event.priority) }}
+                        </span>
                       </div>
                       <template v-else>
                         <div class="event-meta-row">
                           <span class="event-time">{{ event.timeRangeLabel }}</span>
+                          <span
+                            v-if="event.priority"
+                            class="event-priority-pill"
+                            :class="`event-priority-pill--${event.priority}`"
+                          >
+                            {{ eventPriorityShort(event.priority) }}
+                          </span>
                         </div>
                         <h4 class="event-title">{{ event.title }}</h4>
                         <span class="event-category-tag" v-if="event.category">
@@ -2479,6 +2525,15 @@ const getPositionedEventsForDay = (dayIdx) => {
           />
 
           <label v-if="!newEventIsBirthday" class="modal-battery-cost">
+            <span>Priorité</span>
+            <select v-model="newEventPriority" aria-label="Priorité">
+              <option v-for="p in BATTERY_PRIORITIES" :key="p.id" :value="p.id">
+                {{ p.label }}
+              </option>
+            </select>
+          </label>
+
+          <label v-if="!newEventIsBirthday" class="modal-battery-cost">
             <span>Coût Batterie (prévu)</span>
             <input
               v-model.number="newEventBatteryCost"
@@ -2489,7 +2544,7 @@ const getPositionedEventsForDay = (dayIdx) => {
           </label>
           <p v-if="!newEventIsBirthday" class="category-tip">
             Ajouté au prévu Batterie pour chaque jour de l’événement (multi-jours inclus). Hors
-            anniversaires.
+            anniversaires. Les implications catalogue se gèrent depuis Batterie → Catalogue.
           </p>
 
           <p v-if="eventFormError" class="event-form-error" role="alert">{{ eventFormError }}</p>
@@ -3694,6 +3749,54 @@ const getPositionedEventsForDay = (dayIdx) => {
   white-space: nowrap;
 }
 
+.event-priority-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.35rem;
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+}
+
+.event-priority-pill--inline {
+  margin-left: 0.25rem;
+}
+
+.event-priority-pill--obligatoire {
+  background: rgba(196, 92, 92, 0.22);
+  border-color: rgba(196, 92, 92, 0.4);
+  color: #7a2e2e;
+}
+
+.event-priority-pill--p1 {
+  background: rgba(212, 160, 23, 0.22);
+  border-color: rgba(212, 160, 23, 0.4);
+  color: #7a5c0c;
+}
+
+.event-priority-pill--p2 {
+  background: rgba(90, 120, 180, 0.2);
+  border-color: rgba(90, 120, 180, 0.35);
+  color: #3a4f7a;
+}
+
+.event-priority-pill--p3 {
+  background: rgba(80, 90, 110, 0.12);
+  border-color: rgba(80, 90, 110, 0.25);
+  color: #4a5260;
+}
+
+.event-priority-pill--p4 {
+  background: rgba(80, 90, 110, 0.08);
+  border-color: rgba(80, 90, 110, 0.18);
+  color: #6a7280;
+}
+
 .event-block:hover .event-category-tag {
   max-width: none;
   flex: 1 1 100%;
@@ -4594,7 +4697,8 @@ const getPositionedEventsForDay = (dayIdx) => {
   color: #95a5a6;
 }
 
-.modal-battery-cost input {
+.modal-battery-cost input,
+.modal-battery-cost select {
   border: 1px solid rgba(213, 181, 234, 0.45);
   border-radius: 10px;
   padding: 0.55rem 0.7rem;
@@ -4605,7 +4709,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   color: #2c3e50;
   text-transform: none;
   letter-spacing: normal;
-  max-width: 8rem;
+  max-width: 12rem;
 }
 
 .category-tip {

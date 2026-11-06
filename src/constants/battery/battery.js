@@ -83,6 +83,60 @@ export const BATTERY_SOURCE_TYPES = {
   TIMETABLE: 'timetable',
 }
 
+/**
+ * Priorités activités (Batterie + EDT).
+ * obligatoire = plus haute ; p4 = plus basse.
+ */
+export const BATTERY_PRIORITIES = [
+  { id: 'obligatoire', label: 'Obligatoire', short: 'Oblig.', rank: 0 },
+  { id: 'p1', label: 'P1', short: 'P1', rank: 1 },
+  { id: 'p2', label: 'P2', short: 'P2', rank: 2 },
+  { id: 'p3', label: 'P3', short: 'P3', rank: 3 },
+  { id: 'p4', label: 'P4', short: 'P4', rank: 4 },
+]
+
+export const BATTERY_PRIORITY_IDS = BATTERY_PRIORITIES.map((p) => p.id)
+
+export const BATTERY_DEFAULT_PRIORITY = 'p3'
+
+export const BATTERY_HOBBIES_CATEGORY_NAME = 'Hobbies'
+export const BATTERY_OTHER_CATEGORY_NAME = 'Autre'
+
+/** Catégories sans horaires obligatoires (durée via pastilles). */
+export const BATTERY_TIME_OPTIONAL_CATEGORY_NAMES = [
+  BATTERY_HOBBIES_CATEGORY_NAME,
+  BATTERY_OTHER_CATEGORY_NAME,
+]
+
+/**
+ * @param {string | null | undefined} name
+ */
+export function isBatteryTimeOptionalCategoryName(name) {
+  const key = String(name ?? '')
+    .trim()
+    .toLowerCase()
+  if (!key) return false
+  return BATTERY_TIME_OPTIONAL_CATEGORY_NAMES.some((n) => n.toLowerCase() === key)
+}
+
+/**
+ * @param {string | null | undefined} id
+ */
+export function batteryPriorityMeta(id) {
+  return (
+    BATTERY_PRIORITIES.find((p) => p.id === id) ||
+    BATTERY_PRIORITIES.find((p) => p.id === BATTERY_DEFAULT_PRIORITY)
+  )
+}
+
+/**
+ * @param {string | null | undefined} id
+ */
+export function normalizeBatteryPriority(id) {
+  const raw = String(id ?? '').trim().toLowerCase()
+  return BATTERY_PRIORITY_IDS.includes(raw) ? raw : BATTERY_DEFAULT_PRIORITY
+}
+
 export const BATTERY_GAUGE_COLORS = {
   green: '#5a9e78',
   orange: '#d4a017',

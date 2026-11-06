@@ -1,10 +1,26 @@
 const TABLE = 'battery_activities'
 
+import {
+  BATTERY_DEFAULT_PRIORITY,
+  normalizeBatteryPriority,
+} from '../../constants/battery/battery.js'
 import { normalizeBatteryCost } from '../../utils/battery/batteryMath.js'
 import { normalizeDurationMinutes } from '../../utils/battery/batteryDuration.js'
 
 const COLUMNS =
+  'id, user_id, name, default_cost, default_duration_minutes, default_all_day, category_id, priority, created_at, updated_at'
+
+const LEGACY_COLUMNS =
   'id, user_id, name, default_cost, default_duration_minutes, default_all_day, created_at, updated_at'
+
+function withActivityDefaults(row) {
+  if (!row) return row
+  return {
+    ...row,
+    category_id: row.category_id ?? null,
+    priority: normalizeBatteryPriority(row.priority || BATTERY_DEFAULT_PRIORITY),
+  }
+}
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
@@ -17,8 +33,23 @@ export async function listBatteryActivities(supabase, userId) {
     .eq('user_id', userId)
     .order('name', { ascending: true })
 
-  if (error) throw error
-  return data ?? []
+  if (error) {
+    if (
+      error.code === 'PGRST204' ||
+      String(error.message || '').includes('category_id') ||
+      String(error.message || '').includes('priority')
+    ) {
+      const legacy = await supabase
+        .from(TABLE)
+        .select(LEGACY_COLUMNS)
+        .eq('user_id', userId)
+        .order('name', { ascending: true })
+      if (legacy.error) throw legacy.error
+      return (legacy.data ?? []).map(withActivityDefaults)
+    }
+    throw error
+  }
+  return (data ?? []).map(withActivityDefaults)
 }
 
 /**
@@ -38,8 +69,59 @@ export async function searchBatteryActivities(supabase, userId, query) {
     .order('name', { ascending: true })
     .limit(40)
 
-  if (error) throw error
-  return data ?? []
+  if (error) {
+    if (
+      error.code === 'PGRST204' ||
+      String(error.message || '').includes('category_id') ||
+      String(error.message || '').includes('priority')
+    ) {
+      const legacy = await supabase
+        .from(TABLE)
+        .select(LEGACY_COLUMNS)
+        .eq('user_id', userId)
+        .ilike('name', `%${q}%`)
+        .order('name', { ascending: true })
+        .limit(40)
+      if (legacy.error) throw legacy.error
+      return (legacy.data ?? []).map(withActivityDefaults)
+    }
+    throw error
+  }
+  return (data ?? []).map(withActivityDefaults)
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string} activityId
+ */
+export async function getBatteryActivity(supabase, userId, activityId) {
+  if (!activityId) return null
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select(COLUMNS)
+    .eq('id', activityId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) {
+    if (
+      error.code === 'PGRST204' ||
+      String(error.message || '').includes('category_id') ||
+      String(error.message || '').includes('priority')
+    ) {
+      const legacy = await supabase
+        .from(TABLE)
+        .select(LEGACY_COLUMNS)
+        .eq('id', activityId)
+        .eq('user_id', userId)
+        .maybeSingle()
+      if (legacy.error) throw legacy.error
+      return withActivityDefaults(legacy.data)
+    }
+    throw error
+  }
+  return withActivityDefaults(data)
 }
 
 /**
@@ -50,6 +132,8 @@ export async function searchBatteryActivities(supabase, userId, query) {
  *   default_cost?: number,
  *   default_duration_minutes?: number | null,
  *   default_all_day?: boolean,
+ *   category_id?: string | null,
+ *   priority?: string,
  * }} payload
  */
 export async function createBatteryActivity(supabase, userId, payload) {
@@ -65,6 +149,13 @@ export async function createBatteryActivity(supabase, userId, payload) {
     ? null
     : normalizeDurationMinutes(payload.default_duration_minutes)
 
+  const category_id = payload.category_id || null
+  if (!category_id) {
+    throw new Error('Choisis une catégorie EDT pour cette activité.')
+  }
+
+  const priority = normalizeBatteryPriority(payload.priority)
+
   const { data, error } = await supabase
     .from(TABLE)
     .insert({
@@ -73,6 +164,8 @@ export async function createBatteryActivity(supabase, userId, payload) {
       default_cost,
       default_duration_minutes,
       default_all_day,
+      category_id,
+      priority,
     })
     .select(COLUMNS)
     .single()
@@ -83,12 +176,14 @@ export async function createBatteryActivity(supabase, userId, payload) {
     }
     if (
       error.code === 'PGRST204' ||
-      String(error.message || '').includes('default_duration')
+      String(error.message || '').includes('default_duration') ||
+      String(error.message || '').includes('category_id') ||
+      String(error.message || '').includes('priority')
     ) {
-      // Migration non appliquée : crée sans durée
+      const fallbackPayload = { user_id: userId, name, default_cost }
       const fallback = await supabase
         .from(TABLE)
-        .insert({ user_id: userId, name, default_cost })
+        .insert(fallbackPayload)
         .select('id, user_id, name, default_cost, created_at, updated_at')
         .single()
       if (fallback.error) {
@@ -97,15 +192,17 @@ export async function createBatteryActivity(supabase, userId, payload) {
         }
         throw fallback.error
       }
-      return {
+      return withActivityDefaults({
         ...fallback.data,
         default_duration_minutes: null,
         default_all_day: false,
-      }
+        category_id,
+        priority,
+      })
     }
     throw error
   }
-  return data
+  return withActivityDefaults(data)
 }
 
 /**
@@ -117,6 +214,8 @@ export async function createBatteryActivity(supabase, userId, payload) {
  *   default_cost?: number,
  *   default_duration_minutes?: number | null,
  *   default_all_day?: boolean,
+ *   category_id?: string | null,
+ *   priority?: string,
  * }} patch
  */
 export async function updateBatteryActivity(supabase, userId, activityId, patch) {
@@ -139,6 +238,14 @@ export async function updateBatteryActivity(supabase, userId, activityId, patch)
       payload.default_duration_minutes = normalizeDurationMinutes(patch.default_duration_minutes)
     }
   }
+  if ('category_id' in patch) {
+    const category_id = patch.category_id || null
+    if (!category_id) throw new Error('Choisis une catégorie EDT pour cette activité.')
+    payload.category_id = category_id
+  }
+  if ('priority' in patch) {
+    payload.priority = normalizeBatteryPriority(patch.priority)
+  }
 
   const { data, error } = await supabase
     .from(TABLE)
@@ -154,7 +261,7 @@ export async function updateBatteryActivity(supabase, userId, activityId, patch)
     }
     throw error
   }
-  return data
+  return withActivityDefaults(data)
 }
 
 /**
@@ -201,7 +308,6 @@ export async function listRecentActivityUsages(supabase, userId, activityId, opt
     .limit(limit + 4)
 
   if (error) {
-    // Colonnes durée absentes → fallback coût seul
     if (
       error.code === 'PGRST204' ||
       String(error.message || '').includes('duration_')

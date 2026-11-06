@@ -1,7 +1,9 @@
 import {
+  BATTERY_DEFAULT_PRIORITY,
   BATTERY_ENTRY_KINDS,
   BATTERY_SKIP_REASON_IDS,
   BATTERY_SOURCE_TYPES,
+  normalizeBatteryPriority,
 } from '../../constants/battery/battery.js'
 import {
   BATTERY_BASE_DEFAULT,
@@ -26,11 +28,25 @@ import {
   resolveBatteryDuration,
   stampDurationFromResolved,
 } from '../../utils/battery/batteryDuration.js'
+import { sumPlannedCostsWithoutDoubleCount } from '../../utils/battery/batteryImplications.js'
 import {
+  minutesBetweenHhMm,
+  normalizeHhMm,
+  validatePlannedSlot,
+} from '../../utils/battery/batteryTime.js'
+import {
+  getBatteryActivity,
   listRecentActivityUsages,
   updateBatteryActivity,
 } from './batteryActivities.js'
+import {
+  createEdtEventForBatteryPlan,
+  isTimeOptionalCategory,
+  resolveActivityCategory,
+} from './batteryPlanToEdt.js'
 import { getBatterySettings, updateBatterySettings } from './batterySettings.js'
+import { loadUserCategories } from '../timetable/timetableCategories.js'
+import { ensureTimetableCategory } from '../timetable/timetableEvents.js'
 
 async function refreshBatteryPlanningReminder(userId) {
   if (!userId) return
@@ -60,7 +76,21 @@ function normalizeTimeValue(value) {
 }
 
 const ENTRY_COLUMNS =
+  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, duration_minutes, duration_all_day, has_duration_override, planned_start, planned_end, priority, implied_by_entry_id, created_at'
+
+const ENTRY_COLUMNS_LEGACY =
   'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, duration_minutes, duration_all_day, has_duration_override, created_at'
+
+function withEntryDefaults(row) {
+  if (!row) return row
+  return {
+    ...row,
+    planned_start: row.planned_start != null ? String(row.planned_start).slice(0, 5) : null,
+    planned_end: row.planned_end != null ? String(row.planned_end).slice(0, 5) : null,
+    priority: row.priority ? normalizeBatteryPriority(row.priority) : null,
+    implied_by_entry_id: row.implied_by_entry_id ?? null,
+  }
+}
 
 /**
  * @param {unknown} value
@@ -101,8 +131,25 @@ export async function listDayEntries(supabase, dayId) {
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true })
 
-  if (error) throw error
-  return data ?? []
+  if (error) {
+    if (
+      error.code === 'PGRST204' ||
+      String(error.message || '').includes('planned_start') ||
+      String(error.message || '').includes('implied_by') ||
+      String(error.message || '').includes('priority')
+    ) {
+      const legacy = await supabase
+        .from(ENTRIES_TABLE)
+        .select(ENTRY_COLUMNS_LEGACY)
+        .eq('day_id', dayId)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true })
+      if (legacy.error) throw legacy.error
+      return (legacy.data ?? []).map(withEntryDefaults)
+    }
+    throw error
+  }
+  return (data ?? []).map(withEntryDefaults)
 }
 
 /**
@@ -348,6 +395,14 @@ async function maybeApplyWeeklyBaseAdjustment(supabase, userId, dayIso) {
  *   duration_minutes?: number | null,
  *   duration_all_day?: boolean,
  *   has_duration_override?: boolean,
+ *   planned_start?: string | null,
+ *   planned_end?: string | null,
+ *   priority?: string | null,
+ *   category_id?: string | null,
+ *   category_name?: string | null,
+ *   sync_to_edt?: boolean,
+ *   skip_implications?: boolean,
+ *   implied_by_entry_id?: string | null,
  * }} payload
  */
 export async function addBatteryEntry(supabase, userId, dayIso, payload) {
@@ -360,42 +415,198 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
       ? BATTERY_ENTRY_KINDS.PLANNED
       : BATTERY_ENTRY_KINDS.ACTUAL
   const cost = normalizeBatteryCost(payload.cost)
-  const sort_order = entries.filter((e) => e.kind === kind).length
+  let sort_order = entries.filter((e) => e.kind === kind).length
+
+  const activity = payload.activity_id
+    ? await getBatteryActivity(supabase, userId, payload.activity_id)
+    : null
 
   let durationFields = durationFieldsFromSource(payload)
-  // Si pas de surcharge explicite mais activité catalogue avec défaut durée → copie
-  if (!durationFields.has_duration_override && payload.activity_id) {
-    const { data: activity } = await supabase
-      .from('battery_activities')
-      .select('default_duration_minutes, default_all_day')
-      .eq('id', payload.activity_id)
-      .eq('user_id', userId)
-      .maybeSingle()
-    if (activity?.default_all_day) {
+  if (!durationFields.has_duration_override && activity) {
+    if (activity.default_all_day) {
       durationFields = durationOverridePayload('all_day')
-    } else if (normalizeDurationMinutes(activity?.default_duration_minutes) != null) {
+    } else if (normalizeDurationMinutes(activity.default_duration_minutes) != null) {
       durationFields = durationOverridePayload(activity.default_duration_minutes)
     }
   }
 
-  const { data, error } = await supabase
+  const priority = normalizeBatteryPriority(
+    payload.priority || activity?.priority || BATTERY_DEFAULT_PRIORITY,
+  )
+
+  let plannedStart = normalizeHhMm(payload.planned_start) || null
+  let plannedEnd = normalizeHhMm(payload.planned_end) || null
+  let categories = []
+  let category = null
+  let timeOptional = false
+
+  const needsCategoryAndSlot =
+    !payload.implied_by_entry_id &&
+    (kind === BATTERY_ENTRY_KINDS.PLANNED || kind === BATTERY_ENTRY_KINDS.ACTUAL) &&
+    !payload.source_type
+
+  if (
+    (kind === BATTERY_ENTRY_KINDS.PLANNED || kind === BATTERY_ENTRY_KINDS.ACTUAL) &&
+    !payload.implied_by_entry_id
+  ) {
+    categories = await loadUserCategories(supabase, userId)
+    if (activity?.category_id) {
+      const resolved = await resolveActivityCategory(
+        supabase,
+        userId,
+        activity.category_id,
+        categories,
+      )
+      category = resolved.category
+      categories = resolved.categories
+    } else if (payload.category_id) {
+      const resolved = await resolveActivityCategory(
+        supabase,
+        userId,
+        payload.category_id,
+        categories,
+      )
+      category = resolved.category
+      categories = resolved.categories
+    } else if (payload.category_name) {
+      const ensured = await ensureTimetableCategory(
+        supabase,
+        userId,
+        payload.category_name,
+        categories,
+      )
+      category = ensured.category
+      categories = ensured.categories
+    }
+
+    if (needsCategoryAndSlot && !category) {
+      throw new Error('Indique une catégorie EDT.')
+    }
+
+    timeOptional = isTimeOptionalCategory(category, categories)
+
+    if (needsCategoryAndSlot && !timeOptional) {
+      const slotError = validatePlannedSlot(plannedStart, plannedEnd)
+      if (slotError) {
+        throw new Error(`${slotError} (obligatoire hors Hobbies / Autre).`)
+      }
+    }
+    if (timeOptional && !plannedStart && !plannedEnd) {
+      plannedStart = null
+      plannedEnd = null
+    }
+  }
+
+  // Durée dérivée des horaires (hors Hobbies / Autre, ou si un créneau est fourni)
+  if (plannedStart && plannedEnd) {
+    const fromSlot = minutesBetweenHhMm(plannedStart, plannedEnd)
+    if (fromSlot != null) {
+      durationFields = {
+        has_duration_override: true,
+        duration_minutes: fromSlot,
+        duration_all_day: false,
+      }
+    }
+  }
+
+  const insertRow = {
+    user_id: userId,
+    day_id: day.id,
+    activity_id: payload.activity_id || null,
+    label,
+    cost,
+    kind,
+    sort_order,
+    source_type: payload.source_type || null,
+    source_id: payload.source_id || null,
+    planned_start: plannedStart ? `${plannedStart}:00` : null,
+    planned_end: plannedEnd ? `${plannedEnd}:00` : null,
+    priority,
+    implied_by_entry_id: payload.implied_by_entry_id || null,
+    ...durationFields,
+  }
+
+  let { data, error } = await supabase
     .from(ENTRIES_TABLE)
-    .insert({
-      user_id: userId,
-      day_id: day.id,
-      activity_id: payload.activity_id || null,
-      label,
-      cost,
-      kind,
-      sort_order,
-      source_type: payload.source_type || null,
-      source_id: payload.source_id || null,
-      ...durationFields,
-    })
+    .insert(insertRow)
     .select(ENTRY_COLUMNS)
     .single()
 
-  if (error) throw error
+  if (error) {
+    if (
+      error.code === 'PGRST204' ||
+      String(error.message || '').includes('planned_start') ||
+      String(error.message || '').includes('priority') ||
+      String(error.message || '').includes('implied_by')
+    ) {
+      const {
+        planned_start,
+        planned_end,
+        priority: _p,
+        implied_by_entry_id,
+        ...legacyRow
+      } = insertRow
+      const fallback = await supabase
+        .from(ENTRIES_TABLE)
+        .insert(legacyRow)
+        .select(ENTRY_COLUMNS_LEGACY)
+        .single()
+      if (fallback.error) throw fallback.error
+      data = withEntryDefaults(fallback.data)
+      error = null
+    } else {
+      throw error
+    }
+  } else {
+    data = withEntryDefaults(data)
+  }
+
+  const syncToEdt =
+    kind === BATTERY_ENTRY_KINDS.PLANNED &&
+    payload.sync_to_edt !== false &&
+    !payload.source_type &&
+    !payload.implied_by_entry_id
+
+  let parentEventId = null
+  if (syncToEdt) {
+    try {
+      const { event, categories: nextCats } = await createEdtEventForBatteryPlan(
+        supabase,
+        userId,
+        {
+          title: label,
+          dayIso,
+          categoryId: activity?.category_id || category?.id || null,
+          categoryName: category?.name || null,
+          plannedStart,
+          plannedEnd,
+          allDay: timeOptional && !plannedStart,
+          batteryActivityId: activity?.id || null,
+          priority,
+        },
+        categories,
+      )
+      categories = nextCats
+      parentEventId = event?.id || null
+      if (parentEventId) {
+        const { data: linked, error: linkError } = await supabase
+          .from(ENTRIES_TABLE)
+          .update({
+            source_type: BATTERY_SOURCE_TYPES.TIMETABLE,
+            source_id: parentEventId,
+          })
+          .eq('id', data.id)
+          .eq('user_id', userId)
+          .select(ENTRY_COLUMNS)
+          .single()
+        if (!linkError && linked) data = withEntryDefaults(linked)
+      }
+    } catch (edtErr) {
+      console.error('createEdtEventForBatteryPlan:', edtErr)
+    }
+  }
+
+  // Les liaisons se font sur Prévu/Réel (icône lien), plus via le catalogue.
 
   if (kind === BATTERY_ENTRY_KINDS.ACTUAL && data.activity_id) {
     await maybeLearnDefaultCost(supabase, userId, data.activity_id, cost, data.id)
@@ -420,6 +631,9 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
  *   duration_all_day?: boolean,
  *   has_duration_override?: boolean,
  *   durationChoice?: 'reset' | 'all_day' | number,
+ *   planned_start?: string | null,
+ *   planned_end?: string | null,
+ *   priority?: string | null,
  * }} patch
  */
 export async function updateBatteryEntry(supabase, userId, entryId, patch) {
@@ -450,6 +664,50 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
   ) {
     Object.assign(payload, durationFieldsFromSource(patch))
   }
+  if ('planned_start' in patch) {
+    const start = normalizeHhMm(patch.planned_start)
+    payload.planned_start = start ? `${start}:00` : null
+  }
+  if ('planned_end' in patch) {
+    const end = normalizeHhMm(patch.planned_end)
+    payload.planned_end = end ? `${end}:00` : null
+  }
+  if ('priority' in patch) {
+    payload.priority = patch.priority
+      ? normalizeBatteryPriority(patch.priority)
+      : null
+  }
+  if ('implied_by_entry_id' in patch) {
+    payload.implied_by_entry_id = patch.implied_by_entry_id || null
+  }
+
+  // Si les deux bornes horaires sont connues après patch → durée dérivée
+  const nextStart =
+    'planned_start' in patch
+      ? normalizeHhMm(patch.planned_start)
+      : existing.planned_start
+        ? String(existing.planned_start).slice(0, 5)
+        : null
+  const nextEnd =
+    'planned_end' in patch
+      ? normalizeHhMm(patch.planned_end)
+      : existing.planned_end
+        ? String(existing.planned_end).slice(0, 5)
+        : null
+  if (
+    ('planned_start' in patch || 'planned_end' in patch) &&
+    nextStart &&
+    nextEnd &&
+    !('durationChoice' in patch) &&
+    !('duration_minutes' in patch)
+  ) {
+    const fromSlot = minutesBetweenHhMm(nextStart, nextEnd)
+    if (fromSlot != null) {
+      payload.has_duration_override = true
+      payload.duration_minutes = fromSlot
+      payload.duration_all_day = false
+    }
+  }
 
   const { data, error } = await supabase
     .from(ENTRIES_TABLE)
@@ -460,26 +718,44 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
     .single()
 
   if (error) throw error
+  const normalized = withEntryDefaults(data)
 
   const durationPatched =
     patch.durationChoice != null ||
     'has_duration_override' in patch ||
     'duration_minutes' in patch ||
-    'duration_all_day' in patch
+    'duration_all_day' in patch ||
+    Boolean(payload.duration_minutes != null && ('planned_start' in patch || 'planned_end' in patch))
 
   if (durationPatched) {
-    await syncLinkedEntryDuration(supabase, userId, data)
+    await syncLinkedEntryDuration(supabase, userId, normalized)
   }
 
   if (
-    data.kind === BATTERY_ENTRY_KINDS.ACTUAL &&
-    data.activity_id &&
+    normalized.kind === BATTERY_ENTRY_KINDS.ACTUAL &&
+    normalized.activity_id &&
     patch.cost != null
   ) {
-    await maybeLearnDefaultCost(supabase, userId, data.activity_id, data.cost, data.id)
+    await maybeLearnDefaultCost(
+      supabase,
+      userId,
+      normalized.activity_id,
+      normalized.cost,
+      normalized.id,
+    )
   }
-  if (data.kind === BATTERY_ENTRY_KINDS.ACTUAL && data.activity_id && durationPatched) {
-    await maybeLearnDefaultDuration(supabase, userId, data.activity_id, data, data.id)
+  if (
+    normalized.kind === BATTERY_ENTRY_KINDS.ACTUAL &&
+    normalized.activity_id &&
+    durationPatched
+  ) {
+    await maybeLearnDefaultDuration(
+      supabase,
+      userId,
+      normalized.activity_id,
+      normalized,
+      normalized.id,
+    )
   }
 
   const day = await supabase
@@ -611,7 +887,12 @@ export async function persistBatteryEntryOrders(supabase, userId, orderedEntries
     orderedEntries.map((entry, index) =>
       supabase
         .from(ENTRIES_TABLE)
-        .update({ sort_order: index })
+        .update({
+          sort_order:
+            entry.sort_order != null && Number.isFinite(Number(entry.sort_order))
+              ? Number(entry.sort_order)
+              : index,
+        })
         .eq('id', entry.id)
         .eq('user_id', userId),
     ),
@@ -1189,7 +1470,7 @@ export async function listBatteryHistory(supabase, userId, opts = {}) {
       const actual = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL)
       const planned = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED)
       const spent = sumEntryCosts(actual)
-      const plannedSpent = sumEntryCosts(planned)
+      const plannedSpent = sumPlannedCostsWithoutDoubleCount(planned)
       return {
         ...day,
         entries,
@@ -1254,7 +1535,7 @@ export async function getBatteryDashboardSnapshot(supabase, userId, date = new D
   const actual = (entries ?? []).filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL)
   const planned = (entries ?? []).filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED)
   const spent = sumEntryCosts(actual)
-  const plannedSpent = sumEntryCosts(planned)
+  const plannedSpent = sumPlannedCostsWithoutDoubleCount(planned)
   const budget = Number(day.computed_budget) || 0
   return {
     day,

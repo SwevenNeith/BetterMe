@@ -4,8 +4,10 @@
  */
 
 import {
+  BATTERY_DEFAULT_PRIORITY,
   BATTERY_ENTRY_KINDS,
   BATTERY_SOURCE_TYPES,
+  normalizeBatteryPriority,
 } from '../../constants/battery/battery.js'
 import { TODO_FREQUENCY } from '../../constants/todo/todoOptions.js'
 import { TIMETABLE_EVENT_KIND } from '../../utils/timetable/anniversaryMath.js'
@@ -14,11 +16,12 @@ import {
   normalizeDateISO,
 } from '../../utils/habit/habitCalendar.js'
 import { normalizeBatteryCost } from '../../utils/battery/batteryMath.js'
+import { minutesBetweenHhMm, parseEdtTimeRange } from '../../utils/battery/batteryTime.js'
 import { ensureBatteryDay } from './batteryDays.js'
 
 const ENTRIES_TABLE = 'battery_day_entries'
 const ENTRY_COLUMNS =
-  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, duration_minutes, duration_all_day, has_duration_override, created_at'
+  'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, duration_minutes, duration_all_day, has_duration_override, planned_start, planned_end, priority, implied_by_entry_id, created_at'
 
 /**
  * TODO synchronisable : ponctuel uniquement (hors « Cette semaine »).
@@ -174,6 +177,10 @@ export async function deleteBatteryEntriesForSources(supabase, userId, sources) 
  *   cost?: number,
  *   dayIsos: string[],
  *   preserveExistingCost?: boolean,
+ *   activityId?: string | null,
+ *   plannedStart?: string | null,
+ *   plannedEnd?: string | null,
+ *   priority?: string | null,
  * }} input
  */
 export async function syncPlannedEntriesForSource(supabase, userId, input) {
@@ -185,6 +192,10 @@ export async function syncPlannedEntriesForSource(supabase, userId, input) {
   const dayIsos = [...new Set((input.dayIsos ?? []).map(normalizeDateISO).filter(Boolean))].sort()
   const cost = normalizeBatteryCost(input.cost)
   const preserveCost = input.preserveExistingCost !== false
+  const activityId = input.activityId || null
+  const plannedStart = input.plannedStart || null
+  const plannedEnd = input.plannedEnd || null
+  const priority = normalizeBatteryPriority(input.priority || BATTERY_DEFAULT_PRIORITY)
 
   const existing = await listBatteryEntriesForSource(supabase, userId, sourceType, sourceId)
   const existingByDayId = new Map(existing.map((row) => [row.day_id, row]))
@@ -212,6 +223,20 @@ export async function syncPlannedEntriesForSource(supabase, userId, input) {
   for (const dayIso of dayIsos) {
     const dayId = dayIdByIso.get(dayIso)
     const prev = existing.find((row) => row.day_id === dayId)
+    const schedulePatch = {
+      planned_start: plannedStart ? `${plannedStart}:00` : null,
+      planned_end: plannedEnd ? `${plannedEnd}:00` : null,
+      priority,
+      activity_id: activityId,
+    }
+    if (plannedStart && plannedEnd) {
+      const mins = minutesBetweenHhMm(plannedStart, plannedEnd)
+      if (mins != null) {
+        schedulePatch.has_duration_override = true
+        schedulePatch.duration_minutes = mins
+        schedulePatch.duration_all_day = false
+      }
+    }
     if (prev) {
       const nextCost = preserveCost ? prev.cost : cost
       const { data, error } = await supabase
@@ -220,12 +245,35 @@ export async function syncPlannedEntriesForSource(supabase, userId, input) {
           label,
           cost: nextCost,
           kind: BATTERY_ENTRY_KINDS.PLANNED,
+          ...schedulePatch,
         })
         .eq('id', prev.id)
         .eq('user_id', userId)
         .select(ENTRY_COLUMNS)
         .single()
-      if (error) throw error
+      if (error) {
+        // Migration non appliquée : update sans nouveaux champs
+        if (error.code === 'PGRST204') {
+          const legacy = await supabase
+            .from(ENTRIES_TABLE)
+            .update({
+              label,
+              cost: nextCost,
+              kind: BATTERY_ENTRY_KINDS.PLANNED,
+            })
+            .eq('id', prev.id)
+            .eq('user_id', userId)
+            .select(
+              'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, duration_minutes, duration_all_day, has_duration_override, created_at',
+            )
+            .single()
+          if (legacy.error) throw legacy.error
+          results.push(legacy.data)
+          existingByDayId.delete(dayId)
+          continue
+        }
+        throw error
+      }
       results.push(data)
       existingByDayId.delete(dayId)
       continue
@@ -244,18 +292,43 @@ export async function syncPlannedEntriesForSource(supabase, userId, input) {
       .insert({
         user_id: userId,
         day_id: dayId,
-        activity_id: null,
+        activity_id: activityId,
         label,
         cost,
         kind: BATTERY_ENTRY_KINDS.PLANNED,
         sort_order: siblings?.length ?? 0,
         source_type: sourceType,
         source_id: sourceId,
+        ...schedulePatch,
       })
       .select(ENTRY_COLUMNS)
       .single()
 
-    if (error) throw error
+    if (error) {
+      if (error.code === 'PGRST204') {
+        const legacy = await supabase
+          .from(ENTRIES_TABLE)
+          .insert({
+            user_id: userId,
+            day_id: dayId,
+            activity_id: activityId,
+            label,
+            cost,
+            kind: BATTERY_ENTRY_KINDS.PLANNED,
+            sort_order: siblings?.length ?? 0,
+            source_type: sourceType,
+            source_id: sourceId,
+          })
+          .select(
+            'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, duration_minutes, duration_all_day, has_duration_override, created_at',
+          )
+          .single()
+        if (legacy.error) throw legacy.error
+        results.push(legacy.data)
+        continue
+      }
+      throw error
+    }
     results.push(data)
   }
 
@@ -331,6 +404,10 @@ export async function syncBatteryFromTimetableEvent(supabase, userId, event, opt
     return []
   }
 
+  const { start, end } = event.all_day
+    ? { start: '', end: '' }
+    : parseEdtTimeRange(event.time)
+
   return syncPlannedEntriesForSource(supabase, userId, {
     sourceType: BATTERY_SOURCE_TYPES.TIMETABLE,
     sourceId: event.id,
@@ -338,6 +415,10 @@ export async function syncBatteryFromTimetableEvent(supabase, userId, event, opt
     cost: options.cost,
     dayIsos,
     preserveExistingCost: options.preserveExistingCost,
+    activityId: event.battery_activity_id || options.activityId || null,
+    plannedStart: start || null,
+    plannedEnd: end || null,
+    priority: event.priority || options.priority || BATTERY_DEFAULT_PRIORITY,
   })
 }
 
