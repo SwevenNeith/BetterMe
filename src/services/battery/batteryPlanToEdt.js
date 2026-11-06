@@ -120,12 +120,14 @@ export async function createEdtEventForBatteryPlan(
 
   const start = normalizeHhMm(input.plannedStart)
   const end = normalizeHhMm(input.plannedEnd)
-  // Batterie sans horaire ne crée pas d’EDT ; un événement EDT exige un créneau
-  if (!start || !end) {
+  // Hobbies sans créneau → événement « à placer » (all_day, rubrique Hobbies).
+  // Autres catégories : créneau obligatoire.
+  const asHobbyPool = Boolean(input.allDay) && isHobbiesCategory(category, categories)
+  if (!asHobbyPool && (!start || !end)) {
     throw new Error('Un créneau (début et fin) est requis pour créer un événement EDT.')
   }
-  const timeRange = formatEdtTimeRange(start, end)
-  if (!timeRange) {
+  const timeRange = asHobbyPool ? null : formatEdtTimeRange(start, end)
+  if (!asHobbyPool && !timeRange) {
     throw new Error('Créneau horaire invalide pour l’EDT.')
   }
 
@@ -134,7 +136,7 @@ export async function createEdtEventForBatteryPlan(
     title,
     date_start: dayIso,
     date_end: null,
-    all_day: false,
+    all_day: asHobbyPool,
     time: timeRange,
     category: category?.id ?? null,
     detail: String(input.detail ?? '').trim(),

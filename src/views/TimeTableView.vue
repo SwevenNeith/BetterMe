@@ -20,7 +20,10 @@ import {
   normalizeCategory,
   deleteTimetableCategory,
   saveTimetableCategory,
+  findHobbiesCategory,
+  isUnscheduledHobbyEvent,
 } from '../services/timetable/timetableCategories.js'
+import { listBatteryActivities } from '../services/battery/batteryActivities.js'
 import { createTodoItem, listTodoItems, deleteTodoItem } from '../services/todo/todoItems.js'
 import { loadTodoPromesseLimits } from '../services/todo/todoPromesseSettings.js'
 import { TODO_FREQUENCY } from '../constants/todo/todoOptions.js'
@@ -49,7 +52,11 @@ import {
 } from '../constants/battery/battery.js'
 
 function eventPriorityShort(id) {
-  return batteryPriorityMeta(id)?.short || ''
+  const meta = batteryPriorityMeta(id)
+  if (!meta) return ''
+  // Label court pour tenir dans les cartes EDT étroites
+  if (meta.id === 'obligatoire') return 'Obl'
+  return meta.short
 }
 import {
   clearTodoBatteryWhenTimetableLinked,
@@ -412,8 +419,73 @@ const categoriesForPills = computed(() =>
   userCategories.value.filter((c) => c?.name),
 )
 
-const openModalWithHobby = async (hobbyTitle) => {
+/** Hobbies planifiés sans créneau (semaine visible) — à glisser dans l’EDT. */
+const hobbiesToPlace = computed(() => {
+  if (!weekDays.value?.length) return []
+  const monday = formatDateToLocalISO(weekDays.value[0].date)
+  const sunday = formatDateToLocalISO(weekDays.value[6].date)
+  return userEvents.value
+    .filter((e) => isUnscheduledHobbyEvent(e, userCategories.value))
+    .filter((e) => {
+      const start = String(e.date_start || '').slice(0, 10)
+      const end = String(e.date_end || e.date_start || '').slice(0, 10)
+      if (!start) return false
+      return start <= sunday && end >= monday
+    })
+    .map((e) => ({
+      id: e.id,
+      eventId: e.id,
+      title: e.title,
+      date: String(e.date_start || '').slice(0, 10),
+      event: e,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title, 'fr'))
+})
+
+/** Une seule rubrique : hobbies à placer (semaine) + favoris, sans doublon de titre. */
+const mesHobbiesPills = computed(() => {
+  const seen = new Set()
+  const pills = []
+  for (const hobby of hobbiesToPlace.value) {
+    const key = String(hobby.title || '').trim().toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    pills.push({
+      id: `place-${hobby.id}`,
+      title: hobby.title,
+      eventId: hobby.eventId,
+      event: hobby.event,
+      toPlace: true,
+    })
+  }
+  for (const hobby of hobbyQuickPicks.value) {
+    const key = String(hobby.title || '').trim().toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    pills.push({
+      id: hobby.id,
+      title: hobby.title,
+      eventId: null,
+      event: null,
+      toPlace: false,
+      batteryActivityId: hobby.batteryActivityId || null,
+      defaultCost: hobby.defaultCost,
+    })
+  }
+  return pills
+})
+
+const showHobbiesRail = computed(() => mesHobbiesPills.value.length > 0)
+
+const openModalWithHobby = async (hobbyTitle, existingEvent = null, extras = null) => {
   resetEventForm()
+  if (existingEvent?.id) {
+    await openEventForEdit(existingEvent)
+    newEventAllDay.value = false
+    if (!newEventStartTime.value) newEventStartTime.value = '10:00'
+    if (!newEventEndTime.value) newEventEndTime.value = '11:30'
+    return
+  }
   newEventTitle.value = hobbyTitle
   newEventCategory.value = 'Hobbies'
   newEventStartTime.value = '10:00'
@@ -424,19 +496,83 @@ const openModalWithHobby = async (hobbyTitle) => {
   newEventDateEnd.value = ''
   newEventAllDay.value = false
   newEventDetail.value = ''
+  if (extras?.defaultCost != null) {
+    newEventBatteryCost.value = Number(extras.defaultCost) || 0
+  }
   resetReminderFields()
   resetTimerFields()
   isModalOpen.value = true
   await restoreEventFormDraft()
 }
 
-const handleDragStart = (event, hobbyTitle) => {
-  event.dataTransfer.setData('text/plain', hobbyTitle)
-  event.dataTransfer.effectAllowed = 'copy'
+const handleDragStart = (event, hobby) => {
+  const title = typeof hobby === 'string' ? hobby : hobby?.title
+  const eventId =
+    typeof hobby === 'object' && hobby?.toPlace && hobby?.eventId ? hobby.eventId : null
+  if (title) event.dataTransfer.setData('text/plain', title)
+  if (eventId) event.dataTransfer.setData('application/x-hobby-event-id', String(eventId))
+  event.dataTransfer.effectAllowed = eventId ? 'move' : 'copy'
+}
+
+async function scheduleHobbyEventIntoSlot(eventId, dayIdx, startHour) {
+  const existing = userEvents.value.find((e) => e.id === eventId)
+  if (!existing) return false
+
+  const day =
+    weekDays.value && weekDays.value[dayIdx]
+      ? formatDateToLocalISO(weekDays.value[dayIdx].date)
+      : existing.date_start
+  const startStr = `${String(startHour).padStart(2, '0')}:00`
+  const endHour = Math.min(startHour + 1, 23)
+  const endStr = `${String(endHour).padStart(2, '0')}:00`
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const patch = {
+    date_start: day,
+    date_end: null,
+    all_day: false,
+    time: `${startStr} - ${endStr}`,
+  }
+  const { data, error } = await supabase
+    .from('timetable_events')
+    .update(patch)
+    .eq('id', eventId)
+    .eq('user_id', user.id)
+    .select()
+    .single()
+  if (error) throw error
+
+  const idx = userEvents.value.findIndex((e) => e.id === eventId)
+  if (idx >= 0) userEvents.value[idx] = data
+  else userEvents.value.push(data)
+
+  await syncBatteryFromTimetableEvent(supabase, user.id, data, {
+    preserveExistingCost: true,
+  })
+  timetableCache.publish({
+    userEvents: userEvents.value,
+    userCategories: userCategories.value,
+    hobbyQuickPicks: hobbyQuickPicks.value,
+  })
+  return true
 }
 
 const handleDrop = async (event, dayIdx, startHour) => {
   event.preventDefault()
+  const existingId = event.dataTransfer.getData('application/x-hobby-event-id')
+  if (existingId) {
+    try {
+      await scheduleHobbyEventIntoSlot(existingId, dayIdx, startHour)
+    } catch (err) {
+      console.error(err)
+    }
+    return
+  }
+
   const hobbyTitle = event.dataTransfer.getData('text/plain')
   if (!hobbyTitle) return
 
@@ -624,7 +760,7 @@ const getPillStyle = (cat) => {
   }
 }
 
-/** Catégories (timetable_categories) + titres hobbies (timetable_events) */
+/** Catégories EDT + hobbies catalogue Batterie + titres déjà utilisés */
 const fetchTimetableMeta = async (gen) => {
   try {
     isMetaLoading.value = true
@@ -640,7 +776,40 @@ const fetchTimetableMeta = async (gen) => {
     const { categories, hobbyPicks } = await loadTimetableMeta(supabase, user.id)
     if (gen !== timetableLoadGen) return
     userCategories.value = categories
-    hobbyQuickPicks.value = hobbyPicks
+
+    /** @type {{ id: string, title: string, batteryActivityId?: string, defaultCost?: number }[]} */
+    let catalogHobbyPicks = []
+    try {
+      const activities = await listBatteryActivities(supabase, user.id)
+      const hobbyCat = findHobbiesCategory(categories)
+      const hobbyCatId = hobbyCat?.id
+      if (hobbyCatId && !String(hobbyCatId).startsWith('temp-')) {
+        catalogHobbyPicks = activities
+          .filter((a) => a.category_id === hobbyCatId)
+          .map((a) => ({
+            id: `battery-${a.id}`,
+            title: a.name,
+            batteryActivityId: a.id,
+            defaultCost: Number(a.default_cost) || 0,
+          }))
+      }
+    } catch (catalogErr) {
+      console.warn('Hobbies catalogue Batterie:', catalogErr)
+    }
+
+    const seen = new Set()
+    const merged = []
+    for (const hobby of [...catalogHobbyPicks, ...(hobbyPicks || [])]) {
+      const key = String(hobby.title || '')
+        .trim()
+        .toLowerCase()
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      merged.push(hobby)
+    }
+    merged.sort((a, b) => a.title.localeCompare(b.title, 'fr'))
+    if (gen !== timetableLoadGen) return
+    hobbyQuickPicks.value = merged
   } catch (err) {
     console.error('Erreur chargement catégories / hobbies:', err)
     try {
@@ -932,6 +1101,8 @@ const getAllDayEventsForDay = (dayIdx) => {
   const regular = userEvents.value.filter((e) => {
     if (!e.all_day) return false
     if (e.event_kind === TIMETABLE_EVENT_KIND.BIRTHDAY) return false
+    // Hobbies sans créneau → rubrique Hobbies, pas la bande « journée entière »
+    if (isUnscheduledHobbyEvent(e, userCategories.value)) return false
 
     const startStr = e.date_start
     if (!startStr) return false
@@ -1891,18 +2062,27 @@ const getPositionedEventsForDay = (dayIdx) => {
       </div>
     </div>
 
-    <!-- Hobbies quick reference pills (au-dessus de l'EDT) -->
-    <div class="hobbies-quick-reference" v-if="hobbyQuickPicks.length > 0">
+    <!-- Rubrique Mes Hobbies (favoris + à placer sans créneau) -->
+    <div class="hobbies-quick-reference" v-if="showHobbiesRail">
       <span class="hobbies-ref-label">Mes Hobbies :</span>
       <div class="hobbies-ref-pills">
         <button
-          v-for="hobby in hobbyQuickPicks"
+          v-for="hobby in mesHobbiesPills"
           :key="hobby.id"
           class="hobby-ref-pill"
           draggable="true"
-          @dragstart="handleDragStart($event, hobby.title)"
-          @click="openModalWithHobby(hobby.title)"
-          title="Planifier cette activité à nouveau (Glisse-dépose dans l'edt !)"
+          @dragstart="handleDragStart($event, hobby)"
+          @click="
+            openModalWithHobby(hobby.title, hobby.event, {
+              defaultCost: hobby.defaultCost,
+              batteryActivityId: hobby.batteryActivityId,
+            })
+          "
+          :title="
+            hobby.toPlace
+              ? 'Glisse dans un créneau libre'
+              : 'Planifier cette activité (glisse-dépose dans l’EDT)'
+          "
         >
           <span class="hobby-pill-icon">🎨</span>
           <span class="hobby-pill-title">{{ hobby.title }}</span>
@@ -2062,6 +2242,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                           v-if="event.priority"
                           class="event-priority-pill event-priority-pill--inline"
                           :class="`event-priority-pill--${event.priority}`"
+                          :title="batteryPriorityMeta(event.priority)?.label"
                         >
                           {{ eventPriorityShort(event.priority) }}
                         </span>
@@ -2074,6 +2255,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                             v-if="event.priority"
                             class="event-priority-pill"
                             :class="`event-priority-pill--${event.priority}`"
+                            :title="batteryPriorityMeta(event.priority)?.label"
                           >
                             {{ eventPriorityShort(event.priority) }}
                           </span>
@@ -2209,6 +2391,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                           v-if="event.priority"
                           class="event-priority-pill event-priority-pill--inline"
                           :class="`event-priority-pill--${event.priority}`"
+                          :title="batteryPriorityMeta(event.priority)?.label"
                         >
                           {{ eventPriorityShort(event.priority) }}
                         </span>
@@ -2220,6 +2403,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                             v-if="event.priority"
                             class="event-priority-pill"
                             :class="`event-priority-pill--${event.priority}`"
+                            :title="batteryPriorityMeta(event.priority)?.label"
                           >
                             {{ eventPriorityShort(event.priority) }}
                           </span>
@@ -2847,7 +3031,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   }
 }
 
-/* ─── Hobbies Quick Reference ─── */
+/* ─── Rubrique Mes Hobbies ─── */
 .hobbies-quick-reference {
   position: relative;
   z-index: 1;
@@ -2878,12 +3062,14 @@ const getPositionedEventsForDay = (dayIdx) => {
   color: #72a098;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  flex-shrink: 0;
 }
 
 .hobbies-ref-pills {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 .hobby-ref-pill {
@@ -2893,11 +3079,11 @@ const getPositionedEventsForDay = (dayIdx) => {
   padding: 0.4rem 0.85rem;
   border-radius: 12px;
   border: 2px solid transparent;
-  background: rgba(255, 140, 0, 0.1); /* Soft HSL peach tint */
-  color: hsl(25, 75%, 62%); /* Premium salmon peach text */
+  background: rgba(255, 140, 0, 0.1);
+  color: hsl(25, 75%, 62%);
   font-weight: 700;
   font-size: 0.82rem;
-  cursor: pointer;
+  cursor: grab;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 2px 6px rgba(255, 140, 0, 0.03);
 }
@@ -3464,7 +3650,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   position: absolute;
   box-sizing: border-box;
   border-radius: 10px;
-  padding: 0.2rem 0.35rem;
+  padding: 0.28rem 0.4rem 0.26rem 0.42rem;
   transition:
     transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
     box-shadow 0.25s ease,
@@ -3597,7 +3783,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .event-block--short {
-  padding: 0.12rem 0.3rem 0.12rem 0.35rem;
+  padding: 0.22rem 0.38rem 0.2rem 0.4rem;
   overflow: hidden;
 }
 
@@ -3623,16 +3809,18 @@ const getPositionedEventsForDay = (dayIdx) => {
 .event-meta-row {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  justify-content: space-between;
+  gap: 0.3rem;
   min-width: 0;
   width: 100%;
   flex-shrink: 0;
   font-size: 0.68rem;
   line-height: 1.2;
+  box-sizing: border-box;
 }
 
 .event-block--tall {
-  padding: 0.22rem 0.35rem 0.25rem 0.4rem;
+  padding: 0.3rem 0.4rem 0.28rem 0.42rem;
   overflow: hidden;
 }
 
@@ -3698,12 +3886,19 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .event-time {
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 0.95em;
   font-weight: 700;
   letter-spacing: -0.15px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
+}
+
+.event-meta-row .event-time {
+  flex: 1 1 auto;
 }
 
 .event-title {
@@ -3753,18 +3948,28 @@ const getPositionedEventsForDay = (dayIdx) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-left: 0.35rem;
-  padding: 0.08rem 0.35rem;
+  margin-left: auto;
+  padding: 0.12rem 0.34rem;
   border-radius: 999px;
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: 800;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
+  line-height: 1;
   border: 1px solid transparent;
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .event-priority-pill--inline {
-  margin-left: 0.25rem;
+  margin-left: 0.2rem;
+}
+
+.event-main-line .event-priority-pill,
+.event-meta-row .event-priority-pill {
+  position: relative;
+  z-index: 2;
 }
 
 .event-priority-pill--obligatoire {

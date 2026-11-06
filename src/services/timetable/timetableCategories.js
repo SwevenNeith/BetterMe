@@ -41,7 +41,7 @@ export function findHobbiesCategory(categories) {
   return (categories ?? []).find((c) => c.name?.toLowerCase() === 'hobbies') ?? null
 }
 
-function eventMatchesHobbiesCategory(event, categories) {
+export function eventMatchesHobbiesCategory(event, categories) {
   if (!event?.category) return false
   const catRef = event.category
   const hobbyCat = findHobbiesCategory(categories)
@@ -50,6 +50,11 @@ function eventMatchesHobbiesCategory(event, categories) {
   if (hobbyCat.id && catRef === hobbyCat.id) return true
   if (catRef === hobbyCat.name) return true
   return String(catRef).toLowerCase() === 'hobbies'
+}
+
+/** Hobby « à placer » : all_day dans la catégorie Hobbies (pas encore de créneau). */
+export function isUnscheduledHobbyEvent(event, categories) {
+  return Boolean(event?.all_day) && eventMatchesHobbiesCategory(event, categories)
 }
 
 function dedupeHobbyTitles(events) {

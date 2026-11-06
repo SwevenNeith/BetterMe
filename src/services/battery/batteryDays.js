@@ -41,6 +41,7 @@ import {
 } from './batteryActivities.js'
 import {
   createEdtEventForBatteryPlan,
+  isHobbiesCategory,
   isTimeOptionalCategory,
   resolveActivityCategory,
 } from './batteryPlanToEdt.js'
@@ -561,13 +562,17 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
     data = withEntryDefaults(data)
   }
 
-  // Sans créneau horaire → Batterie seule (pas d’événement « journée entière » dans l’EDT)
+  // Avec créneau → EDT daté. Hobbies sans créneau → rubrique Hobbies (à placer).
+  // Autre sans créneau → Batterie seule.
+  const hasTimedSlot = Boolean(plannedStart && plannedEnd)
+  const hobbyPool =
+    !hasTimedSlot && isHobbiesCategory(category, categories)
   const syncToEdt =
     kind === BATTERY_ENTRY_KINDS.PLANNED &&
     payload.sync_to_edt !== false &&
     !payload.source_type &&
     !payload.implied_by_entry_id &&
-    Boolean(plannedStart && plannedEnd)
+    (hasTimedSlot || hobbyPool)
 
   let parentEventId = null
   if (syncToEdt) {
@@ -582,7 +587,7 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
           categoryName: category?.name || null,
           plannedStart,
           plannedEnd,
-          allDay: false,
+          allDay: hobbyPool,
           batteryActivityId: activity?.id || null,
           priority,
         },

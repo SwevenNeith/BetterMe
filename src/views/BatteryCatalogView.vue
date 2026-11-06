@@ -1106,7 +1106,7 @@ onMounted(async () => {
           class="plan-dialog__duration-block"
         >
           <p class="plan-dialog__duration-hint">
-            Durée Batterie seulement — sans créneau, rien n’apparaît dans l’EDT
+            Sans créneau : Hobbies → Mes Hobbies sur l’EDT ; Autre → Batterie seule
           </p>
           <div class="duration-chips plan-dialog__chips" role="group" aria-label="Durée">
             <button

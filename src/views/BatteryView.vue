@@ -1320,7 +1320,7 @@ onUnmounted(() => {
                 </span>
               </template>
               <template v-else>
-                Hobbies / Autre : horaires optionnels. Sans créneau → Batterie seule (pas d’EDT).
+                Hobbies / Autre : horaires optionnels. Hobbies sans créneau → Mes Hobbies sur l’EDT.
               </template>
             </p>
           </div>
