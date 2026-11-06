@@ -94,6 +94,10 @@ const selectedDayIndex = ref(new Date().getDay() === 0 ? 6 : new Date().getDay()
 // Modal quick add / edit state
 const isModalOpen = ref(false)
 const editingEventId = ref(null)
+
+// Read-only view state
+const isReadModalOpen = ref(false)
+const viewingEvent = ref(null)
 const newEventTitle = ref('')
 const newEventDetail = ref('')
 const newEventStartTime = ref('10:00')
@@ -311,7 +315,25 @@ function closeEventModal() {
   resetEventForm()
 }
 
-async function openEventForEdit(event) {
+function openEventReadView(event) {
+  const original = userEvents.value.find((e) => e.id === event.id) ?? event
+  viewingEvent.value = original
+  isReadModalOpen.value = true
+}
+
+function closeReadModal() {
+  isReadModalOpen.value = false
+  viewingEvent.value = null
+}
+
+function switchToEditMode() {
+  if (!viewingEvent.value) return
+  const event = viewingEvent.value
+  closeReadModal()
+  openEventForEditDirect(event)
+}
+
+async function openEventForEditDirect(event) {
   const original = userEvents.value.find((e) => e.id === event.id) ?? event
 
   resetTodoLinkedForm()
@@ -356,6 +378,10 @@ async function openEventForEdit(event) {
   isModalOpen.value = true
   await restoreEventFormDraft()
   void loadEventBatteryCost(original)
+}
+
+async function openEventForEdit(event) {
+  openEventReadView(event)
 }
 
 async function loadEventBatteryCost(event) {
@@ -480,7 +506,7 @@ const showHobbiesRail = computed(() => mesHobbiesPills.value.length > 0)
 const openModalWithHobby = async (hobbyTitle, existingEvent = null, extras = null) => {
   resetEventForm()
   if (existingEvent?.id) {
-    await openEventForEdit(existingEvent)
+    await openEventForEditDirect(existingEvent)
     newEventAllDay.value = false
     if (!newEventStartTime.value) newEventStartTime.value = '10:00'
     if (!newEventEndTime.value) newEventEndTime.value = '11:30'
@@ -1002,6 +1028,8 @@ const getEventsForDay = (dayIdx) => {
   for (const event of userEvents.value) {
     if (event.all_day) continue // All day events are handled separately
     if (event.event_kind === TIMETABLE_EVENT_KIND.BIRTHDAY) continue
+    // Hobbies sans créneau → rubrique Hobbies, pas la grille horaire
+    if (isUnscheduledHobbyEvent(event, userCategories.value)) continue
 
     const startStr = event.date_start
     if (!startStr) continue
@@ -1838,7 +1866,7 @@ async function confirmCategoryDelete() {
 const gridViewport = ref(null)
 const mobileGridViewport = ref(null)
 /** Hauteur d’1 heure en px — 30 min ≈ 70 px pour horaire + titre + catégorie sans coupe. */
-const HOUR_HEIGHT_PX = 140
+const HOUR_HEIGHT_PX = 60
 const hourHeight = HOUR_HEIGHT_PX
 const dayGridStyle = {
   '--hour-height': `${HOUR_HEIGHT_PX}px`,
@@ -1851,13 +1879,13 @@ const formatHour = (hour) => {
   return `${String(hour).padStart(2, '0')}:00`
 }
 
-// Scrolls viewport to Daytime hours by default
+// Scrolls viewport to Daytime hours by default (starts at 8h30 to show 9h-17h)
 const scrollToStartingHour = () => {
   if (gridViewport.value) {
-    gridViewport.value.scrollTop = 7.5 * hourHeight
+    gridViewport.value.scrollTop = 8.5 * hourHeight
   }
   if (mobileGridViewport.value) {
-    mobileGridViewport.value.scrollTop = 7.5 * hourHeight
+    mobileGridViewport.value.scrollTop = 8.5 * hourHeight
   }
 }
 
@@ -1939,8 +1967,10 @@ const getPositionedEventsForDay = (dayIdx) => {
       start,
       end,
       duration,
-      // < 30 min : une ligne ; sinon empilé (horaire / titre / catégorie)
-      isShort: duration < 0.5,
+      // < 1h : une ligne compacte ; sinon empilé (horaire / titre / catégorie)
+      isShort: duration < 1,
+      // < 30min : très compact (titre + priorité uniquement, pas d'heure)
+      isVeryShort: duration < 0.5,
       timeStartLabel: formatEventStartLabel(ev.time),
       timeRangeLabel: formatEventRangeLabel(ev.time),
     }
@@ -2234,8 +2264,20 @@ const getPositionedEventsForDay = (dayIdx) => {
                       ✕
                     </button>
                     <div class="event-content">
-                      <!-- Très court (<30 min) : une ligne -->
-                      <div v-if="event.isShort" class="event-main-line">
+                      <!-- Très court (<30 min) : titre + priorité seulement -->
+                      <div v-if="event.isVeryShort" class="event-main-line event-main-line--very-short">
+                        <h4 class="event-title">{{ event.title }}</h4>
+                        <span
+                          v-if="event.priority"
+                          class="event-priority-pill event-priority-pill--inline"
+                          :class="`event-priority-pill--${event.priority}`"
+                          :title="batteryPriorityMeta(event.priority)?.label"
+                        >
+                          {{ eventPriorityShort(event.priority) }}
+                        </span>
+                      </div>
+                      <!-- Court (<1h) : une ligne avec heure -->
+                      <div v-else-if="event.isShort" class="event-main-line">
                         <span class="event-time">{{ event.timeStartLabel }}</span>
                         <h4 class="event-title">{{ event.title }}</h4>
                         <span
@@ -2384,7 +2426,20 @@ const getPositionedEventsForDay = (dayIdx) => {
                       ✕
                     </button>
                     <div class="event-content">
-                      <div v-if="event.isShort" class="event-main-line">
+                      <!-- Très court (<30 min) : titre + priorité seulement -->
+                      <div v-if="event.isVeryShort" class="event-main-line event-main-line--very-short">
+                        <h4 class="event-title">{{ event.title }}</h4>
+                        <span
+                          v-if="event.priority"
+                          class="event-priority-pill event-priority-pill--inline"
+                          :class="`event-priority-pill--${event.priority}`"
+                          :title="batteryPriorityMeta(event.priority)?.label"
+                        >
+                          {{ eventPriorityShort(event.priority) }}
+                        </span>
+                      </div>
+                      <!-- Court (<1h) : une ligne avec heure -->
+                      <div v-else-if="event.isShort" class="event-main-line">
                         <span class="event-time">{{ event.timeStartLabel }}</span>
                         <h4 class="event-title">{{ event.title }}</h4>
                         <span
@@ -2396,6 +2451,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                           {{ eventPriorityShort(event.priority) }}
                         </span>
                       </div>
+                      <!-- Sinon : horaire, titre, catégorie empilés -->
                       <template v-else>
                         <div class="event-meta-row">
                           <span class="event-time">{{ event.timeRangeLabel }}</span>
@@ -2421,6 +2477,118 @@ const getPositionedEventsForDay = (dayIdx) => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Read-Only Event View Modal -->
+    <div class="modal-overlay" v-if="isReadModalOpen" @click.self="closeReadModal">
+      <div class="modal-card modal-card--read">
+        <div class="modal-header modal-header--read">
+          <h3>{{ viewingEvent?.title || 'Détails de l\'activité' }}</h3>
+          <div class="modal-header-actions">
+            <button
+              class="modal-edit-btn"
+              type="button"
+              @click="switchToEditMode"
+              title="Modifier l'activité"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+            </button>
+            <button class="modal-close" type="button" @click="closeReadModal">✕</button>
+          </div>
+        </div>
+
+        <div class="read-modal-content" v-if="viewingEvent">
+          <div class="read-field" v-if="viewingEvent.detail">
+            <span class="read-label">Description</span>
+            <p class="read-value read-value--description">{{ viewingEvent.detail }}</p>
+          </div>
+
+          <div class="read-field-row">
+            <div class="read-field" v-if="viewingEvent.date_start">
+              <span class="read-label">Date</span>
+              <span class="read-value">
+                {{ new Date(viewingEvent.date_start).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) }}
+                <template v-if="viewingEvent.date_end && viewingEvent.date_end !== viewingEvent.date_start">
+                  → {{ new Date(viewingEvent.date_end).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) }}
+                </template>
+              </span>
+            </div>
+          </div>
+
+          <div class="read-field-row" v-if="!viewingEvent.all_day && viewingEvent.time">
+            <div class="read-field">
+              <span class="read-label">Horaire</span>
+              <span class="read-value">{{ viewingEvent.time }}</span>
+            </div>
+          </div>
+
+          <div class="read-field" v-if="viewingEvent.all_day">
+            <span class="read-label">Type</span>
+            <span class="read-value read-value--tag">Toute la journée 🕒</span>
+          </div>
+
+          <div class="read-field-row">
+            <div class="read-field" v-if="viewingEvent.category">
+              <span class="read-label">Catégorie</span>
+              <span class="read-value read-value--category" :style="getCategoryStyle(viewingEvent.category)">
+                {{ getCategoryIcon(viewingEvent.category) }} {{ getCategoryName(viewingEvent.category) }}
+              </span>
+            </div>
+            <div class="read-field" v-if="viewingEvent.priority">
+              <span class="read-label">Priorité</span>
+              <span
+                class="read-value read-value--priority"
+                :class="`event-priority-pill--${viewingEvent.priority}`"
+              >
+                {{ batteryPriorityMeta(viewingEvent.priority)?.label || viewingEvent.priority }}
+              </span>
+            </div>
+          </div>
+
+          <div class="read-field" v-if="viewingEvent.reminder">
+            <span class="read-label">Rappel</span>
+            <span class="read-value">🔔 {{ formatDelaiAvantEvenement(viewingEvent.reminder_time) }} avant</span>
+          </div>
+
+          <div class="read-field" v-if="viewingEvent.timer">
+            <span class="read-label">Timer</span>
+            <span class="read-value">⏱️ {{ viewingEvent.timer_duration }} min</span>
+          </div>
+
+          <div class="read-field" v-if="viewingEvent.event_kind === 'birthday' && viewingEvent.origin_date">
+            <span class="read-label">Date de naissance</span>
+            <span class="read-value">🎂 {{ new Date(viewingEvent.origin_date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) }}</span>
+          </div>
+
+          <div class="read-modal-actions">
+            <button
+              class="read-action-btn read-action-btn--edit"
+              type="button"
+              @click="switchToEditMode"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+              Modifier
+            </button>
+            <button
+              class="read-action-btn read-action-btn--delete"
+              type="button"
+              @click="closeReadModal(); requestDeleteEvent(viewingEvent.id)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              Supprimer
+            </button>
           </div>
         </div>
       </div>
@@ -3545,7 +3713,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 
 /* Scrollable Viewport */
 .grid-scroll-viewport {
-  max-height: 520px;
+  max-height: 540px;
   overflow-y: auto;
   position: relative;
   scroll-behavior: smooth;
@@ -3793,7 +3961,20 @@ const getPositionedEventsForDay = (dayIdx) => {
 }
 
 .event-block--short .event-main-line {
-  font-size: clamp(0.55rem, 1.15vw, 0.68rem);
+  font-size: clamp(0.52rem, 1.1vw, 0.64rem);
+}
+
+.event-main-line--very-short {
+  font-size: clamp(0.5rem, 1vw, 0.6rem);
+}
+
+.event-main-line--very-short .event-title {
+  font-weight: 700;
+}
+
+.event-block--short .event-priority-pill--inline {
+  font-size: 0.48rem;
+  padding: 0.12rem 0.28rem;
 }
 
 .event-block--short .event-title {
@@ -4283,6 +4464,216 @@ const getPositionedEventsForDay = (dayIdx) => {
 
 .modal-close:hover {
   color: #ad81be;
+}
+
+/* ─── Read-Only Modal Styles ─── */
+.modal-card--read {
+  max-width: 380px;
+}
+
+.modal-header--read {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.modal-header--read h3 {
+  flex: 1;
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #2c3e50;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+@media (prefers-color-scheme: dark) {
+  .modal-header--read h3 {
+    color: #f0e8f8;
+  }
+}
+
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.modal-edit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(173, 129, 190, 0.15);
+  color: #ad81be;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modal-edit-btn:hover {
+  background: #ad81be;
+  color: white;
+}
+
+.read-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.read-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.read-field-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.read-field-row .read-field {
+  flex: 1;
+  min-width: 120px;
+}
+
+.read-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #9b59b6;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+@media (prefers-color-scheme: dark) {
+  .read-label {
+    color: #d5b5ea;
+  }
+}
+
+.read-value {
+  font-size: 0.92rem;
+  color: #2c3e50;
+  line-height: 1.4;
+}
+
+@media (prefers-color-scheme: dark) {
+  .read-value {
+    color: #f0e8f8;
+  }
+}
+
+.read-value--description {
+  font-size: 0.88rem;
+  color: #5d6d7e;
+  line-height: 1.45;
+  padding: 0.5rem 0.65rem;
+  background: rgba(213, 181, 234, 0.08);
+  border-radius: 8px;
+  margin: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .read-value--description {
+    color: #aeb6bf;
+    background: rgba(173, 129, 190, 0.1);
+  }
+}
+
+.read-value--tag {
+  display: inline-block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  background: rgba(173, 129, 190, 0.15);
+  border-radius: 6px;
+  color: #9b59b6;
+}
+
+@media (prefers-color-scheme: dark) {
+  .read-value--tag {
+    background: rgba(173, 129, 190, 0.2);
+    color: #d5b5ea;
+  }
+}
+
+.read-value--category {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.3rem 0.65rem;
+  border-radius: 8px;
+}
+
+.read-value--priority {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.25rem 0.55rem;
+  border-radius: 5px;
+}
+
+.read-modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.2);
+}
+
+.read-action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.65rem 1rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.read-action-btn--edit {
+  background: linear-gradient(145deg, #ad81be, #9b59b6);
+  color: white;
+}
+
+.read-action-btn--edit:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.read-action-btn--delete {
+  background: rgba(192, 57, 43, 0.1);
+  color: #c0392b;
+}
+
+.read-action-btn--delete:hover {
+  background: #c0392b;
+  color: white;
+}
+
+@media (prefers-color-scheme: dark) {
+  .read-action-btn--delete {
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+  }
+  .read-action-btn--delete:hover {
+    background: #e74c3c;
+    color: white;
+  }
 }
 
 .modal-form {

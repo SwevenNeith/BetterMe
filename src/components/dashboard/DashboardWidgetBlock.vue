@@ -1,5 +1,5 @@
 <script setup>
-import { defineAsyncComponent } from 'vue'
+import { defineAsyncComponent, computed } from 'vue'
 import { DASHBOARD_WIDGET_IDS } from '../../constants/dashboard/dashboardWidgets.js'
 import { isPinnedNoteWidgetId } from '../../constants/dashboard/dashboardPinnedNotes.js'
 
@@ -34,7 +34,7 @@ const DashboardBatteryPlanned = defineAsyncComponent(
   () => import('./DashboardBatteryPlanned.vue'),
 )
 
-defineProps({
+const props = defineProps({
   widgetId: {
     type: String,
     required: true,
@@ -150,6 +150,40 @@ function rootClass(widgetId, asColumn) {
   }
   return ['dashboard-column', COLUMN_CLASS_BY_ID[widgetId] || `${widgetId}-column`]
 }
+
+const timedEvents = computed(() =>
+  props.userEvents.filter((ev) => ev.startDecimal >= 0 && ev.endDecimal >= 0)
+)
+
+const allDayEvents = computed(() =>
+  props.userEvents.filter((ev) => ev.startDecimal < 0)
+)
+
+const timelineStart = computed(() => {
+  if (timedEvents.value.length === 0) return 8
+  const minStart = Math.min(...timedEvents.value.map((ev) => ev.startDecimal))
+  return Math.max(0, Math.floor(minStart) - 1)
+})
+
+const timelineEnd = computed(() => {
+  if (timedEvents.value.length === 0) return 18
+  const maxEnd = Math.max(...timedEvents.value.map((ev) => ev.endDecimal))
+  return Math.min(24, Math.ceil(maxEnd) + 1)
+})
+
+const timelineHours = computed(() => {
+  const hours = []
+  for (let h = timelineStart.value; h <= timelineEnd.value; h++) {
+    hours.push(h)
+  }
+  return hours
+})
+
+function formatTimeShort(decimal) {
+  const h = Math.floor(decimal)
+  const m = Math.round((decimal - h) * 60)
+  return `${h}h${m > 0 ? String(m).padStart(2, '0') : ''}`
+}
 </script>
 
 <template>
@@ -193,27 +227,43 @@ function rootClass(widgetId, asColumn) {
           <span class="empty-icon">☕</span>
           <p>Aucun événement prévu aujourd'hui. Profite de ton temps libre !</p>
         </div>
-        <div v-else class="today-events-list">
-          <div
-            v-for="event in userEvents"
-            :key="event.id"
-            class="dashboard-event-card"
-            :style="getCategoryStyle(event.category)"
-          >
-            <div class="event-time">
-              <span v-if="event.all_day" class="time-badge">Toute la journée</span>
-              <span v-else class="time-badge">{{ event.time }}</span>
+        <div v-else class="today-timeline">
+          <div v-if="allDayEvents.length > 0" class="all-day-section all-day-section--top">
+            <div
+              v-for="event in allDayEvents"
+              :key="event.id"
+              class="all-day-event-pill"
+              :style="getCategoryStyle(event.category)"
+            >
+              <span class="all-day-icon">{{ getCategoryIcon(event.category) }}</span>
+              <span class="all-day-title">{{ event.title }}</span>
             </div>
-            <div class="event-details">
-              <div class="event-title-row">
-                <span class="event-icon">{{ getCategoryIcon(event.category) }}</span>
-                <h4 class="event-title">{{ event.title }}</h4>
+          </div>
+          <div class="timeline-wrapper">
+            <div class="timeline-axis">
+              <div
+                v-for="hour in timelineHours"
+                :key="hour"
+                class="timeline-hour-mark"
+                :style="{ top: `${((hour - timelineStart) / (timelineEnd - timelineStart)) * 100}%` }"
+              >
+                <span class="timeline-hour-label">{{ hour }}h</span>
               </div>
-              <p v-if="event.detail" class="event-description">{{ event.detail }}</p>
-              <div v-if="event.category" class="event-tags">
-                <span class="event-category-tag">
-                  {{ getCategoryName(event.category) }}
-                </span>
+            </div>
+            <div class="timeline-events">
+              <div
+                v-for="event in timedEvents"
+                :key="event.id"
+                class="timeline-event-block"
+                :style="{
+                  ...getCategoryStyle(event.category),
+                  top: `${((event.startDecimal - timelineStart) / (timelineEnd - timelineStart)) * 100}%`,
+                  height: `${Math.max(((event.endDecimal - event.startDecimal) / (timelineEnd - timelineStart)) * 100, 8)}%`,
+                }"
+                :title="`${event.time} — ${event.title}`"
+              >
+                <span class="timeline-event-time">{{ formatTimeShort(event.startDecimal) }}</span>
+                <span class="timeline-event-title">{{ event.title }}</span>
               </div>
             </div>
           </div>
@@ -410,6 +460,142 @@ function rootClass(widgetId, asColumn) {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+/* Timeline View */
+.today-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.timeline-wrapper {
+  position: relative;
+  height: 280px;
+  margin-left: 2.5rem;
+}
+
+.timeline-axis {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  border-left: 2px solid rgba(213, 181, 234, 0.3);
+}
+
+.timeline-hour-mark {
+  position: absolute;
+  left: -2.5rem;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: calc(100% + 2.5rem);
+}
+
+.timeline-hour-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #9b59b6;
+  width: 2rem;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .timeline-hour-label {
+    color: #d5b5ea;
+  }
+  .timeline-axis {
+    border-left-color: rgba(213, 181, 234, 0.2);
+  }
+}
+
+.timeline-hour-mark::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(213, 181, 234, 0.2);
+}
+
+.timeline-events {
+  position: absolute;
+  top: 0;
+  left: 0.5rem;
+  right: 0;
+  bottom: 0;
+}
+
+.timeline-event-block {
+  position: absolute;
+  left: 0;
+  right: 0.5rem;
+  min-height: 22px;
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  cursor: default;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.timeline-event-block:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 10;
+}
+
+.timeline-event-time {
+  font-size: 0.62rem;
+  font-weight: 800;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.timeline-event-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.all-day-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.all-day-section--top {
+  padding-bottom: 0.65rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px dashed rgba(213, 181, 234, 0.25);
+}
+
+.all-day-event-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.all-day-icon {
+  font-size: 0.85rem;
+}
+
+.all-day-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
 }
 
 .dashboard-event-card {
