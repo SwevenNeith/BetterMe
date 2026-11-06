@@ -38,12 +38,13 @@ export function groupEntriesByImplication(entries) {
     childrenByParent.get(parentId).push(entry)
   }
 
-  // Enfants : ordre manuel (DnD / sort_order), pas chrono — pour réordonner sous le parent
+  // Ordre manuel (DnD / sort_order) partout — y compris avec horaires (Prévu & Réel)
+  const bySortOrder = (a, b) => (Number(a?.sort_order) || 0) - (Number(b?.sort_order) || 0)
   for (const kids of childrenByParent.values()) {
-    kids.sort((a, b) => (Number(a?.sort_order) || 0) - (Number(b?.sort_order) || 0))
+    kids.sort(bySortOrder)
   }
-  roots.sort(compareEntriesChrono)
-  orphanImplied.sort(compareEntriesChrono)
+  roots.sort(bySortOrder)
+  orphanImplied.sort(bySortOrder)
 
   return { roots, childrenByParent, orphanImplied }
 }

@@ -82,4 +82,16 @@ describe('batteryImplications', () => {
       ['a', 'b', 'c'],
     )
   })
+
+  it('ordonne les racines par sort_order même avec horaires (DnD Réel)', () => {
+    const entries = [
+      { id: 'late', cost: 1, sort_order: 0, planned_start: '18:00' },
+      { id: 'early', cost: 1, sort_order: 1, planned_start: '09:00' },
+    ]
+    const rows = buildImplicationForestRows(entries)
+    assert.deepEqual(
+      rows.map((r) => r.entry.id),
+      ['late', 'early'],
+    )
+  })
 })

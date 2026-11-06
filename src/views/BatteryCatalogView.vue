@@ -31,7 +31,7 @@ import {
   formatBatteryDuration,
 } from '../utils/battery/batteryDuration.js'
 import { addDaysISO } from '../utils/habit/habitCalendar.js'
-import { validatePlannedSlot } from '../utils/battery/batteryTime.js'
+import { minutesBetweenHhMm, validatePlannedSlot } from '../utils/battery/batteryTime.js'
 import { useTimetableCacheStore } from '../stores/timetableCache.js'
 import EmojiPickerField from '../components/common/EmojiPickerField.vue'
 
@@ -79,6 +79,10 @@ const planActivity = ref(null)
 const planKind = ref(null)
 const planStart = ref('09:00')
 const planEnd = ref('10:00')
+/** Hobbies / Autre : créneau facultatif (false = durée seule). */
+const planUseTimes = ref(true)
+/** @type {import('vue').Ref<'all_day' | number | null>} */
+const planDurationChoice = ref(null)
 const planError = ref('')
 const planBusy = ref(false)
 
@@ -524,6 +528,15 @@ function openPlanDialog(activity, kind) {
   planActivity.value = activity
   planKind.value = kind
   planError.value = ''
+  const optional = activityIsTimeOptional(activity)
+  planUseTimes.value = !optional
+  if (activity.default_all_day) {
+    planDurationChoice.value = 'all_day'
+  } else if (activity.default_duration_minutes != null) {
+    planDurationChoice.value = Number(activity.default_duration_minutes)
+  } else {
+    planDurationChoice.value = null
+  }
   const mins = Number(activity.default_duration_minutes) || 60
   planStart.value = '09:00'
   const endH = Math.floor((9 * 60 + mins) / 60)
@@ -536,6 +549,8 @@ function closePlanDialog() {
   planActivity.value = null
   planKind.value = null
   planError.value = ''
+  planUseTimes.value = true
+  planDurationChoice.value = null
 }
 
 const planDialogTitle = computed(() => {
@@ -549,6 +564,40 @@ const planDialogDateLabel = computed(() =>
   planKind.value === BATTERY_ENTRY_KINDS.ACTUAL ? 'aujourd’hui' : planningDateLabel.value,
 )
 
+const planTimesOptional = computed(() =>
+  planActivity.value ? activityIsTimeOptional(planActivity.value) : false,
+)
+
+const planSlotDurationLabel = computed(() => {
+  if (!planUseTimes.value) return ''
+  const mins = minutesBetweenHhMm(planStart.value, planEnd.value)
+  if (mins == null) return ''
+  return formatBatteryDuration({ minutes: mins, allDay: false })
+})
+
+function setPlanDurationChoice(choice) {
+  if (choice === BATTERY_DURATION_RESET_ID || choice == null) {
+    planDurationChoice.value = null
+    return
+  }
+  if (choice === BATTERY_DURATION_ALL_DAY_ID) {
+    planDurationChoice.value = 'all_day'
+    return
+  }
+  if (choice === 'over_2h') {
+    planDurationChoice.value = 150
+    return
+  }
+  planDurationChoice.value = Number(choice)
+}
+
+function isPlanDurationActive(choice) {
+  if (choice === BATTERY_DURATION_RESET_ID) return planDurationChoice.value == null
+  if (choice === BATTERY_DURATION_ALL_DAY_ID) return planDurationChoice.value === 'all_day'
+  if (choice === 'over_2h') return Number(planDurationChoice.value) > 120
+  return planDurationChoice.value === Number(choice)
+}
+
 async function addToDay(activity, kind) {
   if (!userId.value || busyId.value) return
 
@@ -556,36 +605,7 @@ async function addToDay(activity, kind) {
     statusMessage.value = 'Attribue d’abord une catégorie EDT à cette activité.'
     return
   }
-  if (!activityIsTimeOptional(activity)) {
-    openPlanDialog(activity, kind)
-    return
-  }
-
-  busyId.value = activity.id
-  statusMessage.value = ''
-  const dayIso =
-    kind === BATTERY_ENTRY_KINDS.PLANNED ? planningDate.value : actualDate.value
-  try {
-    await addBatteryEntry(supabase, userId.value, dayIso, {
-      label: activity.name,
-      cost: activity.default_cost,
-      kind,
-      activity_id: activity.id,
-      priority: activity.priority,
-    })
-    if (kind === BATTERY_ENTRY_KINDS.PLANNED) {
-      useTimetableCacheStore().$patch({ isValid: false })
-    }
-    statusMessage.value =
-      kind === BATTERY_ENTRY_KINDS.PLANNED
-        ? `« ${activity.name} » planifié pour ${planningDateLabel.value}`
-        : `« ${activity.name} » ajouté au réel d’aujourd’hui`
-  } catch (err) {
-    console.error(err)
-    statusMessage.value = err?.message || 'Erreur'
-  } finally {
-    busyId.value = null
-  }
+  openPlanDialog(activity, kind)
 }
 
 async function confirmPlanWithTimes() {
@@ -593,33 +613,53 @@ async function confirmPlanWithTimes() {
   const kind = planKind.value
   if (!userId.value || !activity || !kind || planBusy.value) return
   planError.value = ''
-  const slotError = validatePlannedSlot(planStart.value, planEnd.value)
-  if (slotError) {
-    planError.value = slotError
-    return
+
+  const useTimes = planUseTimes.value || !planTimesOptional.value
+  if (useTimes) {
+    const slotError = validatePlannedSlot(planStart.value, planEnd.value)
+    if (slotError) {
+      planError.value = slotError
+      return
+    }
   }
+
   planBusy.value = true
   const dayIso =
     kind === BATTERY_ENTRY_KINDS.PLANNED ? planningDate.value : actualDate.value
   try {
-    await addBatteryEntry(supabase, userId.value, dayIso, {
+    /** @type {Record<string, unknown>} */
+    const payload = {
       label: activity.name,
       cost: activity.default_cost,
       kind,
       activity_id: activity.id,
       priority: activity.priority,
-      planned_start: planStart.value,
-      planned_end: planEnd.value,
-    })
+    }
+    if (useTimes) {
+      payload.planned_start = planStart.value
+      payload.planned_end = planEnd.value
+    } else if (planDurationChoice.value === 'all_day') {
+      payload.has_duration_override = true
+      payload.duration_all_day = true
+      payload.duration_minutes = null
+    } else if (planDurationChoice.value != null) {
+      payload.has_duration_override = true
+      payload.duration_all_day = false
+      payload.duration_minutes = planDurationChoice.value
+    }
+
+    await addBatteryEntry(supabase, userId.value, dayIso, payload)
     if (kind === BATTERY_ENTRY_KINDS.PLANNED) {
       useTimetableCacheStore().$patch({ isValid: false })
     }
+    const slotLabel = useTimes ? ` (${planStart.value} – ${planEnd.value})` : ''
     statusMessage.value =
       kind === BATTERY_ENTRY_KINDS.PLANNED
-        ? `« ${activity.name} » planifié (${planStart.value} – ${planEnd.value}) pour ${planningDateLabel.value}`
-        : `« ${activity.name} » ajouté au réel (${planStart.value} – ${planEnd.value})`
+        ? `« ${activity.name} » planifié${slotLabel} pour ${planningDateLabel.value}`
+        : `« ${activity.name} » ajouté au réel${slotLabel}`
     planActivity.value = null
     planKind.value = null
+    planDurationChoice.value = null
   } catch (err) {
     console.error(err)
     planError.value = err?.message || 'Erreur'
@@ -774,7 +814,7 @@ onMounted(async () => {
         </div>
         <p v-if="formError" class="flash flash--error">{{ formError }}</p>
         <p class="hint">
-          Tape une catégorie (créée si nouvelle). Pastilles de durée : Hobbies / Autre uniquement.
+          Tape une catégorie (créée si nouvelle). Hobbies / Autre : horaires optionnels à la planification.
           Les autres catégories calculent la durée depuis les horaires à la planification.
         </p>
       </section>
@@ -1018,19 +1058,84 @@ onMounted(async () => {
           {{ planDialogTitle }}
         </h2>
         <p class="plan-dialog__sub">
-          Horaires pour {{ planDialogDateLabel }} · priorité
+          {{ planDialogDateLabel }} · priorité
           {{ priorityLabel(planActivity.priority) }}
         </p>
-        <div class="plan-dialog__times">
-          <label class="meta-field">
-            <span class="meta-field__label">Début</span>
-            <input v-model="planStart" type="time" class="meta-input" required />
-          </label>
-          <label class="meta-field">
-            <span class="meta-field__label">Fin</span>
-            <input v-model="planEnd" type="time" class="meta-input" required />
-          </label>
+
+        <div v-if="planTimesOptional" class="plan-schedule-toggle" role="group" aria-label="Mode horaire">
+          <button
+            type="button"
+            class="plan-schedule-toggle__btn"
+            :class="{ 'is-active': !planUseTimes }"
+            @click="planUseTimes = false"
+          >
+            Sans créneau
+          </button>
+          <button
+            type="button"
+            class="plan-schedule-toggle__btn"
+            :class="{ 'is-active': planUseTimes }"
+            @click="planUseTimes = true"
+          >
+            Avec horaire
+          </button>
         </div>
+
+        <div v-if="planUseTimes || !planTimesOptional" class="plan-dialog__slot">
+          <div class="plan-dialog__times">
+            <label class="meta-field">
+              <span class="meta-field__label">
+                Début{{ planTimesOptional ? '' : ' *' }}
+              </span>
+              <input v-model="planStart" type="time" class="meta-input" />
+            </label>
+            <label class="meta-field">
+              <span class="meta-field__label">
+                Fin{{ planTimesOptional ? '' : ' *' }}
+              </span>
+              <input v-model="planEnd" type="time" class="meta-input" />
+            </label>
+          </div>
+          <p v-if="planSlotDurationLabel" class="plan-dialog__duration">
+            Durée calculée · <strong>{{ planSlotDurationLabel }}</strong>
+          </p>
+        </div>
+
+        <div
+          v-else
+          class="plan-dialog__duration-block"
+        >
+          <p class="plan-dialog__duration-hint">Choisis une durée (ou laisse le défaut catalogue)</p>
+          <div class="duration-chips plan-dialog__chips" role="group" aria-label="Durée">
+            <button
+              v-for="preset in BATTERY_DURATION_PRESETS"
+              :key="preset.id"
+              type="button"
+              class="duration-chip"
+              :class="{ 'is-active': isPlanDurationActive(preset.id) }"
+              @click="setPlanDurationChoice(preset.id === 'over_2h' ? 'over_2h' : preset.minutes)"
+            >
+              {{ preset.label }}
+            </button>
+            <button
+              type="button"
+              class="duration-chip"
+              :class="{ 'is-active': isPlanDurationActive(BATTERY_DURATION_ALL_DAY_ID) }"
+              @click="setPlanDurationChoice(BATTERY_DURATION_ALL_DAY_ID)"
+            >
+              Journée entière
+            </button>
+            <button
+              type="button"
+              class="duration-chip duration-chip--reset"
+              :class="{ 'is-active': isPlanDurationActive(BATTERY_DURATION_RESET_ID) }"
+              @click="setPlanDurationChoice(BATTERY_DURATION_RESET_ID)"
+            >
+              Défaut
+            </button>
+          </div>
+        </div>
+
         <p v-if="planError" class="flash flash--error">{{ planError }}</p>
         <div class="plan-dialog__actions">
           <button type="button" class="ghost-btn" :disabled="planBusy" @click="closePlanDialog">
@@ -1047,7 +1152,9 @@ onMounted(async () => {
                 ? '…'
                 : planKind === BATTERY_ENTRY_KINDS.ACTUAL
                   ? 'Ajouter au réel'
-                  : 'Planifier + EDT'
+                  : planUseTimes || !planTimesOptional
+                    ? 'Planifier + EDT'
+                    : 'Planifier'
             }}
           </button>
         </div>
@@ -1908,7 +2015,7 @@ onMounted(async () => {
 }
 
 .plan-dialog {
-  width: min(420px, 100%);
+  width: min(440px, 100%);
   border-radius: 18px;
   padding: 1.25rem 1.35rem 1.1rem;
   background: linear-gradient(165deg, #fffafc 0%, #f3eef8 100%);
@@ -1928,6 +2035,84 @@ onMounted(async () => {
   color: #7a7488;
 }
 
+.plan-schedule-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3rem;
+  padding: 0.28rem;
+  margin-bottom: 0.85rem;
+  border-radius: 12px;
+  background: rgba(143, 162, 212, 0.14);
+  border: 1px solid rgba(143, 162, 212, 0.22);
+}
+
+.plan-schedule-toggle__btn {
+  border: none;
+  border-radius: 9px;
+  padding: 0.48rem 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #5a6278;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.plan-schedule-toggle__btn:hover {
+  color: #3a4460;
+}
+
+.plan-schedule-toggle__btn.is-active {
+  background: #fff;
+  color: #3d4a68;
+  box-shadow: 0 2px 8px rgba(60, 50, 90, 0.1);
+}
+
+.plan-dialog__slot {
+  animation: plan-slot-in 0.18s ease;
+}
+
+@keyframes plan-slot-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.plan-dialog__times {
+  margin-top: 0;
+}
+
+.plan-dialog__duration {
+  margin: 0.55rem 0 0;
+  font-size: 0.82rem;
+  color: #5a6278;
+}
+
+.plan-dialog__duration strong {
+  color: #3d4a68;
+  font-weight: 750;
+}
+
+.plan-dialog__duration-block {
+  animation: plan-slot-in 0.18s ease;
+}
+
+.plan-dialog__duration-hint {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #6a7084;
+}
+
+.plan-dialog__chips {
+  margin-top: 0;
+}
+
 .plan-dialog__actions {
   display: flex;
   justify-content: flex-end;
@@ -1936,6 +2121,39 @@ onMounted(async () => {
 }
 
 @media (prefers-color-scheme: dark) {
+  .plan-dialog {
+    background: linear-gradient(165deg, #2a2436 0%, #221c2e 100%);
+    border-color: rgba(213, 181, 234, 0.28);
+  }
+
+  .plan-dialog__title {
+    color: #f0e8f8;
+  }
+
+  .plan-dialog__sub,
+  .plan-dialog__duration,
+  .plan-dialog__duration-hint {
+    color: #b8b0c4;
+  }
+
+  .plan-dialog__duration strong {
+    color: #f0e8f8;
+  }
+
+  .plan-schedule-toggle {
+    background: rgba(143, 162, 212, 0.12);
+    border-color: rgba(143, 162, 212, 0.22);
+  }
+
+  .plan-schedule-toggle__btn {
+    color: #b8b0c4;
+  }
+
+  .plan-schedule-toggle__btn.is-active {
+    background: rgba(55, 48, 72, 0.95);
+    color: #f0e8f8;
+  }
+
   .page-title,
   .panel__title {
     color: #f0e8f8;
