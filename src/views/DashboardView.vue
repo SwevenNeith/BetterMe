@@ -19,6 +19,7 @@ import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { useDashboardVisibility } from '../composables/useDashboardVisibility.js'
 import { buildMobileCarouselSlides } from '../services/dashboard/dashboardVisibility.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
+import { isUnscheduledHobbyEvent, normalizeCategory } from '../services/timetable/timetableCategories.js'
 
 usePageDisplayLabel(APP_PAGE_IDS.DASHBOARD, undefined, { setDocumentTitle: true })
 
@@ -288,17 +289,29 @@ const fetchTodayEvents = async (userId, gen) => {
       }
     }
 
-    const parsedEvents = (evResult.data || []).map((ev) => {
-      let startDecimal = 0
-      if (!ev.all_day && ev.time) {
-        const startStr = ev.time.split('-')[0].trim().replace('h', ':')
-        const parts = startStr.split(':')
-        startDecimal = parseInt(parts[0], 10) + parseInt(parts[1] || 0, 10) / 60
-      } else {
-        startDecimal = -1 // all day first
-      }
-      return { ...ev, startDecimal }
-    })
+    const normalizedCategories = userCategories.value.map(normalizeCategory).filter(Boolean)
+
+    const parsedEvents = (evResult.data || [])
+      .filter((ev) => !isUnscheduledHobbyEvent(ev, normalizedCategories))
+      .map((ev) => {
+        let startDecimal = 0
+        let endDecimal = 24
+        if (!ev.all_day && ev.time) {
+          const timeParts = ev.time.split('-')
+          const startStr = timeParts[0].trim().replace('h', ':')
+          const endStr = (timeParts[1] || '').trim().replace('h', ':')
+          const startParts = startStr.split(':')
+          const endParts = endStr.split(':')
+          startDecimal = parseInt(startParts[0], 10) + parseInt(startParts[1] || 0, 10) / 60
+          endDecimal = endParts.length >= 1 && endParts[0]
+            ? parseInt(endParts[0], 10) + parseInt(endParts[1] || 0, 10) / 60
+            : startDecimal + 1
+        } else {
+          startDecimal = -1 // all day first
+          endDecimal = -1
+        }
+        return { ...ev, startDecimal, endDecimal }
+      })
 
     parsedEvents.sort((a, b) => a.startDecimal - b.startDecimal)
     userEvents.value = parsedEvents
