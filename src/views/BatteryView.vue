@@ -30,7 +30,6 @@ import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
 import {
-  createBatteryActivity,
   listBatteryActivities,
   searchBatteryActivities,
   updateBatteryActivity,
@@ -234,6 +233,190 @@ function toggleLinkSource(entry) {
   statusMessage.value = `Lien : clique une autre activité pour l’impliquer sous « ${entry.label} » (Esc pour annuler).`
 }
 
+/** Modal édition entrée Prévu / Réel */
+const editEntry = ref(null)
+const editLabel = ref('')
+const editCost = ref(0)
+const editPriority = ref(BATTERY_DEFAULT_PRIORITY)
+const editCategoryName = ref('')
+const editStart = ref('')
+const editEnd = ref('')
+const editUseTimes = ref(true)
+/** @type {import('vue').Ref<'all_day' | number | null>} */
+const editDurationChoice = ref(null)
+const editBusy = ref(false)
+const editError = ref('')
+
+const editTimesOptional = computed(() => {
+  if (isBatteryTimeOptionalCategoryName(editCategoryName.value)) return true
+  const entry = editEntry.value
+  if (!entry?.activity_id) return false
+  const activity = activities.value.find((a) => a.id === entry.activity_id)
+  if (!activity?.category_id) return false
+  const cat = categories.value.find((c) => c.id === activity.category_id)
+  return isTimeOptionalCategory(cat, categories.value)
+})
+
+const editSlotDurationLabel = computed(() => {
+  if (!editUseTimes.value) return ''
+  const mins = minutesBetweenHhMm(editStart.value, editEnd.value)
+  if (mins == null) return ''
+  return formatBatteryDuration({ minutes: mins, allDay: false })
+})
+
+function openEntryEdit(entry) {
+  if (!entry?.id) return
+  editEntry.value = entry
+  editLabel.value = entry.label || ''
+  editCost.value = Number(entry.cost) || 0
+  editPriority.value = normalizeBatteryPriority(entry.priority || BATTERY_DEFAULT_PRIORITY)
+  const activity = entry.activity_id
+    ? activities.value.find((a) => a.id === entry.activity_id)
+    : null
+  editCategoryName.value =
+    categoryNameFromId(activity?.category_id) ||
+    categoryNameFromId(entry.category_id) ||
+    ''
+  const start = entry.planned_start ? String(entry.planned_start).slice(0, 5) : ''
+  const end = entry.planned_end ? String(entry.planned_end).slice(0, 5) : ''
+  editStart.value = start
+  editEnd.value = end
+  editUseTimes.value = Boolean(start || end) || !isBatteryTimeOptionalCategoryName(editCategoryName.value)
+  if (entry.duration_all_day) {
+    editDurationChoice.value = 'all_day'
+  } else if (entry.duration_minutes != null) {
+    editDurationChoice.value = Number(entry.duration_minutes)
+  } else {
+    editDurationChoice.value = null
+  }
+  editError.value = ''
+}
+
+function closeEntryEdit() {
+  if (editBusy.value) return
+  editEntry.value = null
+  editError.value = ''
+}
+
+function cycleEditPriority() {
+  const id = normalizeBatteryPriority(editPriority.value)
+  const idx = BATTERY_PRIORITY_IDS.indexOf(id)
+  editPriority.value = BATTERY_PRIORITY_IDS[(idx + 1) % BATTERY_PRIORITY_IDS.length]
+}
+
+function setEditDurationChoice(choice) {
+  if (choice === BATTERY_DURATION_RESET_ID || choice == null) {
+    editDurationChoice.value = null
+    return
+  }
+  if (choice === BATTERY_DURATION_ALL_DAY_ID) {
+    editDurationChoice.value = 'all_day'
+    return
+  }
+  if (choice === 'over_2h') {
+    editDurationChoice.value = 150
+    return
+  }
+  editDurationChoice.value = Number(choice)
+}
+
+function isEditDurationActive(choice) {
+  if (choice === BATTERY_DURATION_RESET_ID) return editDurationChoice.value == null
+  if (choice === BATTERY_DURATION_ALL_DAY_ID) return editDurationChoice.value === 'all_day'
+  if (choice === 'over_2h') return Number(editDurationChoice.value) > 120
+  return editDurationChoice.value === Number(choice)
+}
+
+/**
+ * @param {object} entry
+ * @param {'planned'|'actual'} kind
+ */
+function onEntryRowClick(entry, kind) {
+  if (linkSourceId.value) {
+    void onEntryActivateForLink(entry, kind)
+    return
+  }
+  openEntryEdit(entry)
+}
+
+async function saveEntryEdit() {
+  const entry = editEntry.value
+  if (!userId.value || !entry?.id || editBusy.value) return
+  editError.value = ''
+  const label = String(editLabel.value || '').trim()
+  if (!label) {
+    editError.value = 'Indique un libellé.'
+    return
+  }
+  const categoryName = String(editCategoryName.value || '').trim()
+  if (!categoryName) {
+    editError.value = 'Indique une catégorie.'
+    return
+  }
+
+  const useTimes = editUseTimes.value || !editTimesOptional.value
+  if (useTimes) {
+    const slotError = validatePlannedSlot(editStart.value, editEnd.value)
+    if (slotError) {
+      editError.value = slotError
+      return
+    }
+  }
+
+  editBusy.value = true
+  try {
+    const { category, categories: nextCats } = await ensureTimetableCategory(
+      supabase,
+      userId.value,
+      categoryName,
+      categories.value,
+    )
+    categories.value = nextCats
+
+    if (entry.activity_id) {
+      await updateBatteryActivity(supabase, userId.value, entry.activity_id, {
+        category_id: category.id,
+      })
+    }
+
+    /** @type {Record<string, unknown>} */
+    const patch = {
+      label,
+      cost: normalizeBatteryCost(editCost.value),
+      priority: editPriority.value,
+    }
+    if (useTimes) {
+      patch.planned_start = editStart.value
+      patch.planned_end = editEnd.value
+    } else {
+      patch.planned_start = null
+      patch.planned_end = null
+      if (editDurationChoice.value === 'all_day') {
+        patch.durationChoice = 'all_day'
+      } else if (editDurationChoice.value != null) {
+        patch.durationChoice = editDurationChoice.value
+      } else {
+        patch.durationChoice = 'reset'
+      }
+    }
+
+    const result = await updateBatteryEntry(supabase, userId.value, entry.id, patch)
+    day.value = result.day
+    await setEntriesWithEdt(result.entries)
+    await loadActivities()
+    if (entry.kind === BATTERY_ENTRY_KINDS.PLANNED) {
+      useTimetableCacheStore().$patch({ isValid: false })
+    }
+    statusMessage.value = 'Activité mise à jour'
+    editEntry.value = null
+  } catch (err) {
+    console.error(err)
+    editError.value = err?.message || 'Impossible d’enregistrer'
+  } finally {
+    editBusy.value = false
+  }
+}
+
 /**
  * @param {object} entry
  * @param {'planned'|'actual'} kind
@@ -294,7 +477,12 @@ async function onEntryActivateForLink(entry, kind) {
 }
 
 function onLinkKeydown(event) {
-  if (event.key === 'Escape' && linkSourceId.value) {
+  if (event.key !== 'Escape') return
+  if (editEntry.value) {
+    closeEntryEdit()
+    return
+  }
+  if (linkSourceId.value) {
     cancelLinkMode()
     statusMessage.value = ''
   }
@@ -396,7 +584,7 @@ const periodLabel = computed(() => {
 function formatCost(n) {
   const v = Number(n) || 0
   const abs = Math.abs(v)
-  const label = Number.isInteger(abs) ? String(abs) : abs.toFixed(1)
+  const label = Number.isInteger(abs) ? String(abs) : String(parseFloat(abs.toFixed(2)))
   if (v > 0) return `−${label}`
   if (v < 0) return `+${label}`
   return '0'
@@ -584,63 +772,14 @@ async function submitEntry() {
     categories.value = nextCats
     if (!category?.id) throw new Error('Impossible de résoudre la catégorie.')
 
+    // Ne crée plus d’activité catalogue à la volée : lien seulement si déjà choisie / existante
     let activityId = entryActivityId.value || null
     if (!activityId) {
       const labelKey = entryLabel.value.trim().toLowerCase()
       const existing = activities.value.find(
         (a) => String(a.name || '').trim().toLowerCase() === labelKey,
       )
-      if (existing) {
-        activityId = existing.id
-        if (
-          existing.category_id !== category.id ||
-          normalizeBatteryPriority(existing.priority) !==
-            normalizeBatteryPriority(entryPriority.value)
-        ) {
-          await updateBatteryActivity(supabase, userId.value, existing.id, {
-            category_id: category.id,
-            priority: entryPriority.value,
-          })
-        }
-      } else {
-        /** @type {Record<string, unknown>} */
-        const createPayload = {
-          name: entryLabel.value.trim(),
-          default_cost: normalizeBatteryCost(entryCost.value),
-          category_id: category.id,
-          priority: entryPriority.value,
-        }
-        if (!needsEntryTimes()) {
-          if (entryDurationChoice.value === 'all_day') {
-            createPayload.default_all_day = true
-            createPayload.default_duration_minutes = null
-          } else if (entryDurationChoice.value != null) {
-            createPayload.default_all_day = false
-            createPayload.default_duration_minutes = entryDurationChoice.value
-          }
-        } else {
-          const mins = minutesBetweenHhMm(entryPlannedStart.value, entryPlannedEnd.value)
-          if (mins != null) {
-            createPayload.default_all_day = false
-            createPayload.default_duration_minutes = mins
-          }
-        }
-        const created = await createBatteryActivity(supabase, userId.value, createPayload)
-        activityId = created.id
-      }
-    } else {
-      const selected = activities.value.find((a) => a.id === activityId)
-      if (
-        selected &&
-        (selected.category_id !== category.id ||
-          normalizeBatteryPriority(selected.priority) !==
-            normalizeBatteryPriority(entryPriority.value))
-      ) {
-        await updateBatteryActivity(supabase, userId.value, activityId, {
-          category_id: category.id,
-          priority: entryPriority.value,
-        })
-      }
+      if (existing) activityId = existing.id
     }
 
     /** @type {Record<string, unknown>} */
@@ -1258,15 +1397,15 @@ onUnmounted(() => {
               v-model="entryLabel"
               class="entry-form__label"
               type="text"
-              placeholder="Libellé (hors catalogue OK)"
+              placeholder="Libellé (hors catalogue = prévu/EDT seul)"
               required
             />
             <input
               v-model.number="entryCost"
               class="entry-form__cost"
               type="number"
-              step="0.5"
-              title="Positif = dépense, négatif = regain (ex. 0.5)"
+              step="0.25"
+              title="Positif = dépense, négatif = regain (ex. 0.5 ou 0.25)"
             />
             <button type="submit" class="primary-btn entry-form__submit" :disabled="isSaving">
               {{ entryKind === BATTERY_ENTRY_KINDS.PLANNED ? 'Planifier' : 'Ajouter' }}
@@ -1390,10 +1529,10 @@ onUnmounted(() => {
                 @dragover="onEntryDragOver(row.entry.id, $event)"
                 @drop="onEntryDrop(BATTERY_ENTRY_KINDS.PLANNED, row.entry.id, $event)"
                 @dragend="onEntryDragEnd"
-                @click="onEntryActivateForLink(row.entry, BATTERY_ENTRY_KINDS.PLANNED)"
+                @click="onEntryRowClick(row.entry, BATTERY_ENTRY_KINDS.PLANNED)"
               >
                 <div class="entry-row__main">
-                  <span class="entry-label" title="Glisser pour réordonner les frères">
+                  <span class="entry-label" title="Cliquer pour modifier · glisser pour réordonner">
                     <span
                       v-if="formatPlannedSlot(row.entry.planned_start, row.entry.planned_end)"
                       class="entry-slot"
@@ -1558,10 +1697,10 @@ onUnmounted(() => {
                 @dragover="onEntryDragOver(row.entry.id, $event)"
                 @drop="onEntryDrop(BATTERY_ENTRY_KINDS.ACTUAL, row.entry.id, $event)"
                 @dragend="onEntryDragEnd"
-                @click="onEntryActivateForLink(row.entry, BATTERY_ENTRY_KINDS.ACTUAL)"
+                @click="onEntryRowClick(row.entry, BATTERY_ENTRY_KINDS.ACTUAL)"
               >
                 <div class="entry-row__main">
-                  <span class="entry-label" title="Glisser pour réordonner les frères">
+                  <span class="entry-label" title="Cliquer pour modifier · glisser pour réordonner">
                     <span
                       v-if="formatPlannedSlot(row.entry.planned_start, row.entry.planned_end)"
                       class="entry-slot"
@@ -1603,7 +1742,7 @@ onUnmounted(() => {
                     class="cost-tag cost-tag--edit"
                     :class="`cost-tag--${costStyleClass(editingCostValue)}`"
                     type="number"
-                    step="0.5"
+                    step="0.25"
                     aria-label="Modifier le coût"
                     @keydown.enter.prevent="commitEditActualCost(row.entry)"
                     @keydown.escape.prevent="cancelEditActualCost"
@@ -1719,6 +1858,159 @@ onUnmounted(() => {
         </div>
       </section>
     </template>
+
+    <div
+      v-if="editEntry"
+      class="battery-edit-overlay"
+      @click.self="closeEntryEdit"
+      @keydown.escape="closeEntryEdit"
+    >
+      <div
+        class="battery-edit-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="battery-edit-title"
+      >
+        <h2 id="battery-edit-title" class="battery-edit-dialog__title">
+          Modifier « {{ editEntry.label }} »
+        </h2>
+        <p class="battery-edit-dialog__sub">
+          {{
+            editEntry.kind === BATTERY_ENTRY_KINDS.PLANNED ? 'Prévu' : 'Réel'
+          }}
+          · {{ periodLabel }}
+        </p>
+
+        <label class="battery-edit-field">
+          <span class="battery-edit-field__label">Nom</span>
+          <input v-model="editLabel" type="text" class="battery-edit-input" required />
+        </label>
+
+        <div class="battery-edit-row">
+          <label class="battery-edit-field battery-edit-field--grow">
+            <span class="battery-edit-field__label">Catégorie</span>
+            <input
+              v-model="editCategoryName"
+              type="text"
+              list="battery-edit-category-suggestions"
+              class="battery-edit-input"
+              required
+            />
+            <datalist id="battery-edit-category-suggestions">
+              <option v-for="cat in categories" :key="cat.id" :value="cat.name" />
+            </datalist>
+          </label>
+          <div class="battery-edit-field">
+            <span class="battery-edit-field__label">Priorité</span>
+            <button
+              type="button"
+              class="priority-pill priority-pill--btn"
+              :class="`priority-pill--${editPriority}`"
+              :title="`${batteryPriorityMeta(editPriority)?.label} — cliquer pour changer`"
+              @click="cycleEditPriority"
+            >
+              {{ priorityShort(editPriority) }}
+            </button>
+          </div>
+          <label class="battery-edit-field">
+            <span class="battery-edit-field__label">Coût</span>
+            <input
+              v-model.number="editCost"
+              type="number"
+              step="0.25"
+              class="battery-edit-input battery-edit-input--cost"
+              title="Positif = dépense, négatif = regain (ex. 0.5 ou 0.25)"
+            />
+          </label>
+        </div>
+
+        <div
+          v-if="editTimesOptional"
+          class="battery-edit-schedule-toggle"
+          role="group"
+          aria-label="Mode horaire"
+        >
+          <button
+            type="button"
+            class="battery-edit-schedule-toggle__btn"
+            :class="{ 'is-active': !editUseTimes }"
+            @click="editUseTimes = false"
+          >
+            Sans créneau
+          </button>
+          <button
+            type="button"
+            class="battery-edit-schedule-toggle__btn"
+            :class="{ 'is-active': editUseTimes }"
+            @click="editUseTimes = true"
+          >
+            Avec horaire
+          </button>
+        </div>
+
+        <div v-if="editUseTimes || !editTimesOptional" class="battery-edit-row">
+          <label class="battery-edit-field">
+            <span class="battery-edit-field__label">
+              Début{{ editTimesOptional ? '' : ' *' }}
+            </span>
+            <input v-model="editStart" type="time" class="battery-edit-input" />
+          </label>
+          <label class="battery-edit-field">
+            <span class="battery-edit-field__label">
+              Fin{{ editTimesOptional ? '' : ' *' }}
+            </span>
+            <input v-model="editEnd" type="time" class="battery-edit-input" />
+          </label>
+        </div>
+        <p v-if="(editUseTimes || !editTimesOptional) && editSlotDurationLabel" class="battery-edit-hint">
+          Durée calculée · <strong>{{ editSlotDurationLabel }}</strong>
+        </p>
+
+        <div v-else-if="editTimesOptional" class="duration-chips" role="group" aria-label="Durée">
+          <button
+            v-for="preset in BATTERY_DURATION_PRESETS"
+            :key="preset.id"
+            type="button"
+            class="duration-chip"
+            :class="{ 'is-active': isEditDurationActive(preset.id) }"
+            @click="setEditDurationChoice(preset.id === 'over_2h' ? 'over_2h' : preset.minutes)"
+          >
+            {{ preset.label }}
+          </button>
+          <button
+            type="button"
+            class="duration-chip"
+            :class="{ 'is-active': isEditDurationActive(BATTERY_DURATION_ALL_DAY_ID) }"
+            @click="setEditDurationChoice(BATTERY_DURATION_ALL_DAY_ID)"
+          >
+            Journée entière
+          </button>
+          <button
+            type="button"
+            class="duration-chip duration-chip--reset"
+            :class="{ 'is-active': isEditDurationActive(BATTERY_DURATION_RESET_ID) }"
+            @click="setEditDurationChoice(BATTERY_DURATION_RESET_ID)"
+          >
+            Défaut
+          </button>
+        </div>
+
+        <p v-if="editError" class="flash flash--error">{{ editError }}</p>
+        <div class="battery-edit-actions">
+          <button
+            type="button"
+            class="battery-confirm-cancel"
+            :disabled="editBusy"
+            @click="closeEntryEdit"
+          >
+            Annuler
+          </button>
+          <button type="button" class="primary-btn" :disabled="editBusy" @click="saveEntryEdit">
+            {{ editBusy ? '…' : 'Enregistrer' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <div
       v-if="pendingDeleteEntry"
@@ -2790,6 +3082,124 @@ onUnmounted(() => {
   color: #3a4a66;
 }
 
+.battery-edit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(28, 24, 36, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.battery-edit-dialog {
+  width: min(440px, 100%);
+  max-height: min(90vh, 720px);
+  overflow: auto;
+  padding: 1.25rem 1.35rem 1.1rem;
+  border-radius: 18px;
+  background: linear-gradient(165deg, #fffafc 0%, #f3eef8 100%);
+  border: 1px solid rgba(173, 129, 190, 0.3);
+  box-shadow: 0 18px 40px rgba(60, 40, 80, 0.22);
+}
+
+.battery-edit-dialog__title {
+  margin: 0;
+  font-size: 1.12rem;
+  color: #4a3d58;
+}
+
+.battery-edit-dialog__sub {
+  margin: 0.3rem 0 0.85rem;
+  font-size: 0.86rem;
+  color: #7a7488;
+}
+
+.battery-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.battery-edit-field--grow {
+  flex: 1 1 10rem;
+}
+
+.battery-edit-field__label {
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #5c5368;
+}
+
+.battery-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid rgba(143, 162, 212, 0.35);
+  background: rgba(255, 255, 255, 0.9);
+  color: #2c3e50;
+  font-size: 0.92rem;
+}
+
+.battery-edit-input--cost {
+  width: 5.5rem;
+}
+
+.battery-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.battery-edit-schedule-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3rem;
+  padding: 0.28rem;
+  margin-bottom: 0.75rem;
+  border-radius: 12px;
+  background: rgba(143, 162, 212, 0.14);
+  border: 1px solid rgba(143, 162, 212, 0.22);
+}
+
+.battery-edit-schedule-toggle__btn {
+  border: none;
+  border-radius: 9px;
+  padding: 0.48rem 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #5a6278;
+  background: transparent;
+  cursor: pointer;
+}
+
+.battery-edit-schedule-toggle__btn.is-active {
+  background: #fff;
+  color: #3d4a68;
+  box-shadow: 0 2px 8px rgba(60, 50, 90, 0.1);
+}
+
+.battery-edit-hint {
+  margin: -0.35rem 0 0.75rem;
+  font-size: 0.8rem;
+  color: #5a6278;
+}
+
+.battery-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 1rem;
+}
+
 .battery-confirm-overlay {
   position: fixed;
   inset: 0;
@@ -3159,10 +3569,14 @@ onUnmounted(() => {
 .entry-slot {
   display: inline-block;
   margin-right: 0.35rem;
+  padding: 0.08rem 0.32rem;
+  border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 700;
-  color: #6a7a9a;
+  color: #5a6b8a;
   font-variant-numeric: tabular-nums;
+  background: rgba(143, 162, 212, 0.14);
+  border: 1px solid rgba(143, 162, 212, 0.28);
 }
 
 .priority-pill {
@@ -3509,6 +3923,117 @@ onUnmounted(() => {
   .entry-row--restore-3 { background: rgba(143, 162, 212, 0.34); }
   .entry-row--restore-4 { background: rgba(143, 162, 212, 0.42); }
   .entry-row--restore-5 { background: rgba(143, 162, 212, 0.5); }
+
+  .priority-pill--obligatoire {
+    background: rgba(220, 110, 110, 0.45);
+    border-color: rgba(255, 170, 170, 0.65);
+    color: #ffe8e8;
+  }
+
+  .priority-pill--p1 {
+    background: rgba(230, 180, 60, 0.42);
+    border-color: rgba(255, 220, 140, 0.65);
+    color: #fff4d6;
+  }
+
+  .priority-pill--p2 {
+    background: rgba(143, 162, 212, 0.48);
+    border-color: rgba(190, 210, 250, 0.65);
+    color: #eef3ff;
+  }
+
+  .priority-pill--p3 {
+    background: rgba(140, 150, 175, 0.42);
+    border-color: rgba(190, 200, 220, 0.55);
+    color: #eef1f8;
+  }
+
+  .priority-pill--p4 {
+    background: rgba(120, 128, 148, 0.35);
+    border-color: rgba(170, 178, 198, 0.45);
+    color: #dce1ec;
+  }
+
+  .duration-tag,
+  .duration-tag--readonly {
+    background: rgba(143, 162, 212, 0.32);
+    border: 1px solid rgba(180, 200, 235, 0.55);
+    color: #e8eeff;
+  }
+
+  .duration-tag.is-active,
+  .duration-tag:hover {
+    background: rgba(143, 162, 212, 0.5);
+    border-color: rgba(200, 220, 250, 0.7);
+    color: #fff;
+  }
+
+  .entry-slot {
+    color: #c5d2f0;
+    background: rgba(143, 162, 212, 0.22);
+    border: 1px solid rgba(160, 180, 220, 0.4);
+  }
+
+  .entry-slot-duration {
+    color: #c5c0cb;
+  }
+
+  .entry-done-pill {
+    background: rgba(143, 162, 212, 0.4);
+    color: #e8eeff;
+  }
+
+  .entry-skip-pill {
+    background: rgba(173, 129, 190, 0.35);
+    color: #f0e4f8;
+  }
+
+  .link-btn-icon {
+    background: rgba(143, 162, 212, 0.28);
+    border-color: rgba(180, 200, 235, 0.5);
+    color: #dce6ff;
+  }
+
+  .fait-btn {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(200, 210, 235, 0.45);
+    color: #e8eeff;
+  }
+
+  .battery-edit-dialog {
+    background: linear-gradient(165deg, #2a2436 0%, #221c2e 100%);
+    border-color: rgba(213, 181, 234, 0.28);
+  }
+
+  .battery-edit-dialog__title {
+    color: #f0e8f8;
+  }
+
+  .battery-edit-dialog__sub,
+  .battery-edit-hint,
+  .battery-edit-field__label {
+    color: #b8b0c4;
+  }
+
+  .battery-edit-input {
+    background: rgba(40, 34, 55, 0.95);
+    border-color: rgba(213, 181, 234, 0.28);
+    color: #f0e8f8;
+  }
+
+  .battery-edit-schedule-toggle {
+    background: rgba(143, 162, 212, 0.12);
+    border-color: rgba(143, 162, 212, 0.22);
+  }
+
+  .battery-edit-schedule-toggle__btn {
+    color: #b8b0c4;
+  }
+
+  .battery-edit-schedule-toggle__btn.is-active {
+    background: rgba(55, 48, 72, 0.95);
+    color: #f0e8f8;
+  }
 
   .cost-tag,
   .cost-tag--btn,

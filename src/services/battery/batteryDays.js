@@ -738,6 +738,43 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
     await syncLinkedEntryDuration(supabase, userId, normalized)
   }
 
+  // Aligner l’événement EDT lié (horaires / titre / priorité)
+  if (
+    normalized.kind === BATTERY_ENTRY_KINDS.PLANNED &&
+    normalized.source_type === BATTERY_SOURCE_TYPES.TIMETABLE &&
+    normalized.source_id &&
+    ('planned_start' in patch ||
+      'planned_end' in patch ||
+      'label' in patch ||
+      'priority' in patch)
+  ) {
+    try {
+      const edtPatch = {}
+      if ('label' in patch) edtPatch.title = normalized.label
+      if ('priority' in patch) edtPatch.priority = normalized.priority
+      if ('planned_start' in patch || 'planned_end' in patch) {
+        const s = normalizeHhMm(normalized.planned_start)
+        const e = normalizeHhMm(normalized.planned_end)
+        if (s && e) {
+          edtPatch.all_day = false
+          edtPatch.time = `${s} - ${e}`
+        } else if (!s && !e) {
+          edtPatch.all_day = true
+          edtPatch.time = null
+        }
+      }
+      if (Object.keys(edtPatch).length) {
+        await supabase
+          .from('timetable_events')
+          .update(edtPatch)
+          .eq('id', normalized.source_id)
+          .eq('user_id', userId)
+      }
+    } catch (edtErr) {
+      console.error('sync EDT depuis updateBatteryEntry:', edtErr)
+    }
+  }
+
   if (
     normalized.kind === BATTERY_ENTRY_KINDS.ACTUAL &&
     normalized.activity_id &&

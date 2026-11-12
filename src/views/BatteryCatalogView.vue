@@ -164,7 +164,7 @@ function toSignedCost(effect, amount) {
 function formatCost(n) {
   const v = Number(n) || 0
   const abs = Math.abs(v)
-  const label = Number.isInteger(abs) ? String(abs) : abs.toFixed(1)
+  const label = Number.isInteger(abs) ? String(abs) : String(parseFloat(abs.toFixed(2)))
   if (v > 0) return `−${label}`
   if (v < 0) return `+${label}`
   return '0'
@@ -744,8 +744,8 @@ onMounted(async () => {
             v-model.number="newAmount"
             type="number"
             min="0"
-            step="0.5"
-            title="Points d’énergie (ex. 0.5)"
+            step="0.25"
+            title="Points d’énergie (ex. 0.5 ou 0.25)"
             aria-label="Points d’énergie"
           />
           <button type="submit" class="primary-btn">Ajouter</button>
@@ -870,9 +870,9 @@ onMounted(async () => {
                 class="item__badge item__badge--edit"
                 :class="`item__badge--${costStyleClass(editingCostValue)}`"
                 type="number"
-                step="0.5"
+                step="0.25"
                 aria-label="Modifier le coût par défaut"
-                title="Positif = dépense, négatif = regain (ex. 0.5 ou −1)"
+                title="Positif = dépense, négatif = regain (ex. 0.5, 0.25 ou −1)"
                 @keydown.enter.prevent="commitEditCost(activity)"
                 @keydown.escape.prevent="cancelEditCost"
                 @blur="commitEditCost(activity)"

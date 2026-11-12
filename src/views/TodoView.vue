@@ -89,6 +89,7 @@ import {
   listTimetableEventsForTodo,
 } from '../services/todo/todoTimetableLink.js'
 import { BATTERY_SOURCE_TYPES } from '../constants/battery/battery.js'
+import { normalizeBatteryCost } from '../utils/battery/batteryMath.js'
 import {
   clearTodoBatteryWhenTimetableLinked,
   countBatteryEntriesForSources,
@@ -1038,7 +1039,7 @@ async function submitForm() {
 async function syncBatteryAfterTodoSave(savedTodo, { events = [], cost = 0, linkedTodoFrequence } = {}) {
   if (!userId.value || !savedTodo?.id) return
 
-  const batteryCost = Math.round(Number(cost) || 0)
+  const batteryCost = normalizeBatteryCost(cost)
   const linkedEvents = (events ?? []).filter(Boolean)
 
   if (linkedEvents.length) {
@@ -1712,8 +1713,8 @@ watch(userId, (id) => {
         <input
           v-model.number="todoForm.batteryCost"
           type="number"
-          step="1"
-          title="Positif = dépense, négatif = regain (0 autorisé)"
+          step="0.25"
+          title="Positif = dépense, négatif = regain (ex. 0.5 ou 0.25)"
         />
       </label>
       <p v-if="showBatteryCostField" class="todo-form-hint">

@@ -37,7 +37,6 @@ import {
   formatEuro,
   monthlyBalanceSeries,
   monthlyRecap,
-  occurredOnForMonth,
   periodAggregates,
   planFixedExpenseRolloversThrough,
   savingsAccountsOverview,
@@ -388,9 +387,7 @@ const confirmTitle = computed(() => {
       : 'Supprimer ce montant ?'
   }
   if (confirmDialog.value?.kind === 'save-edit') {
-    return confirmDialog.value?.seriesCount > 1
-      ? 'Modifier cette dépense fixe ?'
-      : 'Enregistrer les modifications ?'
+    return 'Enregistrer les modifications ?'
   }
   if (confirmDialog.value?.kind === 'delete-livret') return 'Supprimer ce compte ?'
   return ''
@@ -407,8 +404,9 @@ const confirmMessage = computed(() => {
     return `« ${tx.category} » (${formatEuro(tx.amount)}) sera définitivement supprimé.`
   }
   if (confirmDialog.value?.kind === 'save-edit') {
-    if (seriesCount > 1) {
-      return `Les changements (montant, catégorie, détail, jour) seront appliqués aux ${seriesCount} occurrences de cette dépense fixe. Le statut « Réalisé » de chaque mois reste indépendant.`
+    const existing = transactions.value.find((t) => t.id === editingId.value)
+    if (existing?.tx_type === TX_TYPES.FIXED) {
+      return 'Les changements (montant, catégorie, détail, jour) s’appliquent uniquement à ce mois. Les mois précédents et suivants restent inchangés.'
     }
     return 'Les changements seront appliqués à ce montant.'
   }
@@ -650,38 +648,16 @@ async function persistAmount(amount) {
     const accountId = selectedAccountId.value
     if (editingId.value) {
       const existing = transactions.value.find((t) => t.id === editingId.value)
-      const series =
-        existing?.tx_type === TX_TYPES.FIXED ? seriesForFixedTx(existing) : existing ? [existing] : []
-
-      if (existing?.tx_type === TX_TYPES.FIXED && series.length > 1) {
-        for (const sibling of series) {
-          const y = Number(String(sibling.occurred_on || '').slice(0, 4))
-          const m = Number(String(sibling.occurred_on || '').slice(5, 7))
-          const occurredOn =
-            y && m
-              ? occurredOnForMonth(amountForm.occurredOn, y, m)
-              : amountForm.occurredOn
-          await updateFinanceTransaction(supabase, userId.value, sibling.id, {
-            occurredOn,
-            txType: amountForm.txType,
-            category,
-            detail: amountForm.detail,
-            amount,
-            // Conservé par mois : on ne touche pas à applied
-            accountId: existing.account_id ?? accountId,
-          })
-        }
-      } else {
-        await updateFinanceTransaction(supabase, userId.value, editingId.value, {
-          occurredOn: amountForm.occurredOn,
-          txType: amountForm.txType,
-          category,
-          detail: amountForm.detail,
-          amount,
-          applied: existing?.applied ?? false,
-          accountId: existing?.account_id ?? accountId,
-        })
-      }
+      // Dépense fixe : modification limitée au mois / occurrence éditée uniquement
+      await updateFinanceTransaction(supabase, userId.value, editingId.value, {
+        occurredOn: amountForm.occurredOn,
+        txType: amountForm.txType,
+        category,
+        detail: amountForm.detail,
+        amount,
+        applied: existing?.applied ?? false,
+        accountId: existing?.account_id ?? accountId,
+      })
     } else {
       await createFinanceTransaction(supabase, userId.value, {
         occurredOn: amountForm.occurredOn,

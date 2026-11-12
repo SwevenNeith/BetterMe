@@ -2722,8 +2722,8 @@ const getPositionedEventsForDay = (dayIdx) => {
             <input
               v-model.number="newEventBatteryCost"
               type="number"
-              step="1"
-              title="Positif = dépense, négatif = regain (0 autorisé)"
+              step="0.25"
+              title="Positif = dépense, négatif = regain (ex. 0.5 ou 0.25)"
             />
           </label>
           <p v-if="!newEventIsBirthday" class="category-tip">

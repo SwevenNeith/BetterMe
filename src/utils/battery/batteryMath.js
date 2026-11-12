@@ -70,13 +70,13 @@ export function computeDayBudget(input = {}) {
 }
 
 /**
- * Normalise un coût Batterie à 1 décimale (ex. 0.5).
+ * Normalise un coût Batterie à 2 décimales (ex. 0.5, 0.25).
  * @param {unknown} value
  */
 export function normalizeBatteryCost(value) {
   const n = Number(value)
   if (!Number.isFinite(n)) return 0
-  return Math.round(n * 10) / 10
+  return Math.round(n * 100) / 100
 }
 
 /**
