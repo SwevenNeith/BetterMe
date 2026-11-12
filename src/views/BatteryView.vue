@@ -16,7 +16,6 @@ import {
   BATTERY_SLEEP_QUALITIES,
   BATTERY_SOURCE_TYPES,
   batteryPriorityMeta,
-  isBatteryTimeOptionalCategoryName,
   normalizeBatteryPriority,
 } from '../constants/battery/battery.js'
 import { deleteTodoItem } from '../services/todo/todoItems.js'
@@ -74,7 +73,6 @@ import {
   wouldCreateImplicationCycle,
 } from '../utils/battery/batteryImplications.js'
 import { minutesBetweenHhMm, validatePlannedSlot } from '../utils/battery/batteryTime.js'
-import { isTimeOptionalCategory } from '../services/battery/batteryPlanToEdt.js'
 import { loadUserCategories } from '../services/timetable/timetableCategories.js'
 import BatteryGauge from '../components/battery/BatteryGauge.vue'
 
@@ -247,16 +245,6 @@ const editDurationChoice = ref(null)
 const editBusy = ref(false)
 const editError = ref('')
 
-const editTimesOptional = computed(() => {
-  if (isBatteryTimeOptionalCategoryName(editCategoryName.value)) return true
-  const entry = editEntry.value
-  if (!entry?.activity_id) return false
-  const activity = activities.value.find((a) => a.id === entry.activity_id)
-  if (!activity?.category_id) return false
-  const cat = categories.value.find((c) => c.id === activity.category_id)
-  return isTimeOptionalCategory(cat, categories.value)
-})
-
 const editSlotDurationLabel = computed(() => {
   if (!editUseTimes.value) return ''
   const mins = minutesBetweenHhMm(editStart.value, editEnd.value)
@@ -281,7 +269,7 @@ function openEntryEdit(entry) {
   const end = entry.planned_end ? String(entry.planned_end).slice(0, 5) : ''
   editStart.value = start
   editEnd.value = end
-  editUseTimes.value = Boolean(start || end) || !isBatteryTimeOptionalCategoryName(editCategoryName.value)
+  editUseTimes.value = Boolean(start && end)
   if (entry.duration_all_day) {
     editDurationChoice.value = 'all_day'
   } else if (entry.duration_minutes != null) {
@@ -354,7 +342,7 @@ async function saveEntryEdit() {
     return
   }
 
-  const useTimes = editUseTimes.value || !editTimesOptional.value
+  const useTimes = editUseTimes.value
   if (useTimes) {
     const slotError = validatePlannedSlot(editStart.value, editEnd.value)
     if (slotError) {
@@ -488,19 +476,6 @@ function onLinkKeydown(event) {
   }
 }
 
-function selectedCategoryIsTimeOptional() {
-  if (isBatteryTimeOptionalCategoryName(entryCategoryName.value)) return true
-  const activity = activities.value.find((a) => a.id === entryActivityId.value)
-  if (!activity?.category_id) return false
-  const cat = categories.value.find((c) => c.id === activity.category_id)
-  return isTimeOptionalCategory(cat, categories.value)
-}
-
-/** Horaires obligatoires en Plan et en Réel, sauf Hobbies / Autre. */
-function needsEntryTimes() {
-  return !selectedCategoryIsTimeOptional()
-}
-
 const computedSlotDurationLabel = computed(() => {
   const mins = minutesBetweenHhMm(entryPlannedStart.value, entryPlannedEnd.value)
   if (mins == null) return ''
@@ -508,7 +483,7 @@ const computedSlotDurationLabel = computed(() => {
 })
 
 function entryAllowsDurationChips(entry) {
-  // Avec horaires → durée dérivée ; pastilles seulement sans créneau (Hobbies / Autre)
+  // Avec horaires → durée dérivée ; pastilles seulement sans créneau
   return !entry?.planned_start && !entry?.planned_end
 }
 
@@ -753,10 +728,10 @@ async function submitEntry() {
     statusMessage.value = 'Indique une catégorie EDT.'
     return
   }
-  if (needsEntryTimes()) {
+  if (entryPlannedStart.value || entryPlannedEnd.value) {
     const slotError = validatePlannedSlot(entryPlannedStart.value, entryPlannedEnd.value)
     if (slotError) {
-      statusMessage.value = `${slotError} (obligatoire hors Hobbies / Autre).`
+      statusMessage.value = slotError
       return
     }
   }
@@ -794,7 +769,7 @@ async function submitEntry() {
     }
     if (entryPlannedStart.value) payload.planned_start = entryPlannedStart.value
     if (entryPlannedEnd.value) payload.planned_end = entryPlannedEnd.value
-    if (!needsEntryTimes()) {
+    if (!entryPlannedStart.value || !entryPlannedEnd.value) {
       if (entryDurationChoice.value === 'all_day') {
         payload.has_duration_override = true
         payload.duration_all_day = true
@@ -1439,35 +1414,27 @@ onUnmounted(() => {
               </button>
             </div>
             <label class="entry-meta-field">
-              <span class="entry-meta-field__label">
-                Début{{ needsEntryTimes() ? ' *' : '' }}
-              </span>
+              <span class="entry-meta-field__label">Début</span>
               <input v-model="entryPlannedStart" type="time" />
             </label>
             <label class="entry-meta-field">
-              <span class="entry-meta-field__label">
-                Fin{{ needsEntryTimes() ? ' *' : '' }}
-              </span>
+              <span class="entry-meta-field__label">Fin</span>
               <input v-model="entryPlannedEnd" type="time" />
             </label>
             <p class="entry-plan-hint">
-              <template v-if="needsEntryTimes()">
-                Horaires obligatoires (sauf Hobbies / Autre)
-                {{ entryKind === BATTERY_ENTRY_KINDS.PLANNED ? ' — sync EDT' : '' }}.
-                <span v-if="computedSlotDurationLabel">
-                  Durée : {{ computedSlotDurationLabel }}.
-                </span>
-              </template>
-              <template v-else>
-                Hobbies / Autre : horaires optionnels. Hobbies sans créneau → Mes Hobbies sur l’EDT.
-              </template>
+              Horaires facultatifs
+              {{ entryKind === BATTERY_ENTRY_KINDS.PLANNED ? ' — avec créneau → EDT' : '' }}.
+              Sans créneau : Hobbies → Mes Hobbies ; sinon Batterie seule.
+              <span v-if="computedSlotDurationLabel">
+                Durée : {{ computedSlotDurationLabel }}.
+              </span>
             </p>
           </div>
           <div
-            v-if="!needsEntryTimes()"
+            v-if="!entryPlannedStart || !entryPlannedEnd"
             class="duration-chips"
             role="group"
-            aria-label="Durée (Hobbies / Autre)"
+            aria-label="Durée"
           >
             <button
               v-for="preset in BATTERY_DURATION_PRESETS"
@@ -1497,7 +1464,10 @@ onUnmounted(() => {
               Défaut
             </button>
           </div>
-          <p v-else-if="computedSlotDurationLabel" class="entry-slot-duration">
+          <p
+            v-else-if="entryPlannedStart && entryPlannedEnd && computedSlotDurationLabel"
+            class="entry-slot-duration"
+          >
             Durée calculée : <strong>{{ computedSlotDurationLabel }}</strong>
           </p>
         </form>
@@ -1924,12 +1894,7 @@ onUnmounted(() => {
           </label>
         </div>
 
-        <div
-          v-if="editTimesOptional"
-          class="battery-edit-schedule-toggle"
-          role="group"
-          aria-label="Mode horaire"
-        >
+        <div class="battery-edit-schedule-toggle" role="group" aria-label="Mode horaire">
           <button
             type="button"
             class="battery-edit-schedule-toggle__btn"
@@ -1948,25 +1913,21 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div v-if="editUseTimes || !editTimesOptional" class="battery-edit-row">
+        <div v-if="editUseTimes" class="battery-edit-row">
           <label class="battery-edit-field">
-            <span class="battery-edit-field__label">
-              Début{{ editTimesOptional ? '' : ' *' }}
-            </span>
+            <span class="battery-edit-field__label">Début</span>
             <input v-model="editStart" type="time" class="battery-edit-input" />
           </label>
           <label class="battery-edit-field">
-            <span class="battery-edit-field__label">
-              Fin{{ editTimesOptional ? '' : ' *' }}
-            </span>
+            <span class="battery-edit-field__label">Fin</span>
             <input v-model="editEnd" type="time" class="battery-edit-input" />
           </label>
         </div>
-        <p v-if="(editUseTimes || !editTimesOptional) && editSlotDurationLabel" class="battery-edit-hint">
+        <p v-if="editUseTimes && editSlotDurationLabel" class="battery-edit-hint">
           Durée calculée · <strong>{{ editSlotDurationLabel }}</strong>
         </p>
 
-        <div v-else-if="editTimesOptional" class="duration-chips" role="group" aria-label="Durée">
+        <div v-else class="duration-chips" role="group" aria-label="Durée">
           <button
             v-for="preset in BATTERY_DURATION_PRESETS"
             :key="preset.id"

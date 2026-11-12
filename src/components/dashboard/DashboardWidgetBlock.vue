@@ -152,12 +152,10 @@ function rootClass(widgetId, asColumn) {
 }
 
 const timedEvents = computed(() =>
-  props.userEvents.filter((ev) => ev.startDecimal >= 0 && ev.endDecimal >= 0)
+  props.userEvents.filter((ev) => ev.startDecimal >= 0 && ev.endDecimal >= 0),
 )
 
-const allDayEvents = computed(() =>
-  props.userEvents.filter((ev) => ev.startDecimal < 0)
-)
+const allDayEvents = computed(() => props.userEvents.filter((ev) => ev.startDecimal < 0))
 
 const timelineStart = computed(() => {
   if (timedEvents.value.length === 0) return 8
@@ -177,6 +175,104 @@ const timelineHours = computed(() => {
     hours.push(h)
   }
   return hours
+})
+
+/**
+ * Place les créneaux qui se chevauchent côte à côte (colonnes), comme l’EDT.
+ * Hauteur visuelle bornée pour ne pas empiéter sur le créneau suivant (ex. 11h30 → 12h).
+ * @returns {Array<object & { colIndex: number, colCount: number, leftPct: number, widthPct: number }>}
+ */
+const positionedTimedEvents = computed(() => {
+  const span = Math.max(timelineEnd.value - timelineStart.value, 1)
+  /** Marge verticale (~4 min) entre blocs quasi-adjacents. */
+  const VISUAL_GAP_H = 0.07
+  const mapped = timedEvents.value.map((ev) => ({
+    ...ev,
+    start: Number(ev.startDecimal),
+    end: Math.max(Number(ev.endDecimal), Number(ev.startDecimal) + 0.15),
+    duration: Math.max(Number(ev.endDecimal) - Number(ev.startDecimal), 0.15),
+  }))
+  mapped.sort((a, b) => a.start - b.start || b.duration - a.duration)
+
+  /** @type {typeof mapped[]} */
+  const clusters = []
+  let cluster = []
+  let clusterEnd = -1
+  for (const ev of mapped) {
+    if (cluster.length && ev.start < clusterEnd) {
+      cluster.push(ev)
+      clusterEnd = Math.max(clusterEnd, ev.end)
+    } else {
+      if (cluster.length) clusters.push(cluster)
+      cluster = [ev]
+      clusterEnd = ev.end
+    }
+  }
+  if (cluster.length) clusters.push(cluster)
+
+  /** @type {Array<object>} */
+  const result = []
+  for (const group of clusters) {
+    /** @type {typeof mapped[]} */
+    const columns = []
+    for (const ev of group) {
+      let placed = false
+      for (let i = 0; i < columns.length; i++) {
+        const overlaps = columns[i].some((m) => ev.start < m.end && ev.end > m.start)
+        if (!overlaps) {
+          columns[i].push(ev)
+          ev.colIndex = i
+          placed = true
+          break
+        }
+      }
+      if (!placed) {
+        columns.push([ev])
+        ev.colIndex = columns.length - 1
+      }
+    }
+
+    for (const col of columns) {
+      const sorted = [...col].sort((a, b) => a.start - b.start)
+      for (let i = 0; i < sorted.length; i++) {
+        const ev = sorted[i]
+        const next = sorted[i + 1]
+        let visualEnd = ev.end
+        if (next) {
+          visualEnd = Math.min(visualEnd, Math.max(ev.start + 0.12, next.start - VISUAL_GAP_H))
+        }
+        ev.visualDuration = Math.max(visualEnd - ev.start, 0.12)
+      }
+    }
+
+    const colCount = columns.length
+    const gapPct = colCount > 1 ? 1.2 : 0
+    const widthPct = (100 - gapPct * (colCount - 1)) / colCount
+    for (const ev of group) {
+      const leftPct = ev.colIndex * (widthPct + gapPct)
+      result.push({
+        ...ev,
+        colCount,
+        leftPct,
+        widthPct,
+        visualDuration: ev.visualDuration ?? ev.duration,
+      })
+    }
+  }
+
+  // Passe globale : un bloc qui finit à 11h30 ne doit pas déborder sur celui de 12h
+  // (min-height / timeline compacte).
+  const ordered = [...result].sort((a, b) => a.start - b.start || a.end - b.end)
+  for (const ev of ordered) {
+    const nextBelow = ordered.find((o) => o.id !== ev.id && o.start >= ev.end - 0.001)
+    if (nextBelow) {
+      const maxDur = Math.max(0.12, nextBelow.start - VISUAL_GAP_H - ev.start)
+      ev.visualDuration = Math.min(ev.visualDuration, maxDur)
+    }
+    ev.topPct = ((ev.start - timelineStart.value) / span) * 100
+    ev.heightPct = Math.max((ev.visualDuration / span) * 100, 2.4)
+  }
+  return result
 })
 
 function formatTimeShort(decimal) {
@@ -252,13 +348,17 @@ function formatTimeShort(decimal) {
             </div>
             <div class="timeline-events">
               <div
-                v-for="event in timedEvents"
+                v-for="event in positionedTimedEvents"
                 :key="event.id"
                 class="timeline-event-block"
+                :class="{ 'timeline-event-block--split': event.colCount > 1 }"
                 :style="{
                   ...getCategoryStyle(event.category),
-                  top: `${((event.startDecimal - timelineStart) / (timelineEnd - timelineStart)) * 100}%`,
-                  height: `${Math.max(((event.endDecimal - event.startDecimal) / (timelineEnd - timelineStart)) * 100, 8)}%`,
+                  top: `${event.topPct}%`,
+                  height: `${event.heightPct}%`,
+                  left: `${event.leftPct}%`,
+                  width: `${event.widthPct}%`,
+                  zIndex: 1 + (event.colIndex || 0),
                 }"
                 :title="`${event.time} — ${event.title}`"
               >
@@ -530,24 +630,26 @@ function formatTimeShort(decimal) {
 
 .timeline-event-block {
   position: absolute;
-  left: 0;
-  right: 0.5rem;
-  min-height: 22px;
+  box-sizing: border-box;
+  min-height: 0;
   border-radius: 6px;
-  padding: 0.25rem 0.5rem;
+  padding: 0.18rem 0.4rem;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.3rem;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   cursor: default;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: box-shadow 0.15s ease;
+}
+
+.timeline-event-block--split {
+  padding: 0.2rem 0.32rem;
 }
 
 .timeline-event-block:hover {
-  transform: scale(1.02);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-  z-index: 10;
+  z-index: 20 !important;
 }
 
 .timeline-event-time {
@@ -557,12 +659,21 @@ function formatTimeShort(decimal) {
   flex-shrink: 0;
 }
 
+.timeline-event-block--split .timeline-event-time {
+  font-size: 0.56rem;
+}
+
 .timeline-event-title {
   font-size: 0.72rem;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.timeline-event-block--split .timeline-event-title {
+  font-size: 0.64rem;
 }
 
 .all-day-section {

@@ -10,7 +10,6 @@ import {
   BATTERY_ENTRY_KINDS,
   BATTERY_PRIORITY_IDS,
   batteryPriorityMeta,
-  isBatteryTimeOptionalCategoryName,
   normalizeBatteryPriority,
 } from '../constants/battery/battery.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
@@ -21,7 +20,6 @@ import {
   listBatteryActivities,
   updateBatteryActivity,
 } from '../services/battery/batteryActivities.js'
-import { isTimeOptionalCategory } from '../services/battery/batteryPlanToEdt.js'
 import { addBatteryEntry } from '../services/battery/batteryDays.js'
 import { ensureTimetableCategory } from '../services/timetable/timetableEvents.js'
 import { loadUserCategories } from '../services/timetable/timetableCategories.js'
@@ -235,18 +233,12 @@ async function loadActivities() {
   }
 }
 
-function activityIsTimeOptional(activity) {
-  const cat = categories.value.find((c) => c.id === activity?.category_id)
-  return isTimeOptionalCategory(cat, categories.value)
+/** Horaires / durée par défaut : facultatifs pour toutes les catégories. */
+function activityIsTimeOptional(_activity) {
+  return true
 }
 
-const newCategoryIsTimeOptional = computed(() =>
-  isBatteryTimeOptionalCategoryName(newCategoryText.value),
-)
-
-watch(newCategoryIsTimeOptional, (optional) => {
-  if (!optional) newDurationChoice.value = null
-})
+const newCategoryIsTimeOptional = computed(() => true)
 
 
 function priorityLabel(id) {
@@ -404,14 +396,12 @@ async function createItem() {
       category_id: categoryId,
       priority: newPriority.value,
     }
-    if (isBatteryTimeOptionalCategoryName(newCategoryText.value)) {
-      if (newDurationChoice.value === 'all_day') {
-        payload.default_all_day = true
-        payload.default_duration_minutes = null
-      } else if (newDurationChoice.value != null) {
-        payload.default_all_day = false
-        payload.default_duration_minutes = newDurationChoice.value
-      }
+    if (newDurationChoice.value === 'all_day') {
+      payload.default_all_day = true
+      payload.default_duration_minutes = null
+    } else if (newDurationChoice.value != null) {
+      payload.default_all_day = false
+      payload.default_duration_minutes = newDurationChoice.value
     }
     await createBatteryActivity(supabase, userId.value, payload)
     newName.value = ''
@@ -528,8 +518,7 @@ function openPlanDialog(activity, kind) {
   planActivity.value = activity
   planKind.value = kind
   planError.value = ''
-  const optional = activityIsTimeOptional(activity)
-  planUseTimes.value = !optional
+  planUseTimes.value = true
   if (activity.default_all_day) {
     planDurationChoice.value = 'all_day'
   } else if (activity.default_duration_minutes != null) {
@@ -562,10 +551,6 @@ const planDialogTitle = computed(() => {
 
 const planDialogDateLabel = computed(() =>
   planKind.value === BATTERY_ENTRY_KINDS.ACTUAL ? 'aujourd’hui' : planningDateLabel.value,
-)
-
-const planTimesOptional = computed(() =>
-  planActivity.value ? activityIsTimeOptional(planActivity.value) : false,
 )
 
 const planSlotDurationLabel = computed(() => {
@@ -614,7 +599,7 @@ async function confirmPlanWithTimes() {
   if (!userId.value || !activity || !kind || planBusy.value) return
   planError.value = ''
 
-  const useTimes = planUseTimes.value || !planTimesOptional.value
+  const useTimes = planUseTimes.value
   if (useTimes) {
     const slotError = validatePlannedSlot(planStart.value, planEnd.value)
     if (slotError) {
@@ -783,7 +768,7 @@ onMounted(async () => {
           v-if="newCategoryIsTimeOptional"
           class="duration-chips"
           role="group"
-          aria-label="Durée par défaut (Hobbies / Autre)"
+          aria-label="Durée par défaut"
         >
           <button
             v-for="preset in BATTERY_DURATION_PRESETS"
@@ -814,8 +799,8 @@ onMounted(async () => {
         </div>
         <p v-if="formError" class="flash flash--error">{{ formError }}</p>
         <p class="hint">
-          Tape une catégorie (créée si nouvelle). Hobbies / Autre : horaires optionnels à la planification.
-          Les autres catégories calculent la durée depuis les horaires à la planification.
+          Tape une catégorie (créée si nouvelle). Horaires facultatifs à la planification :
+          avec créneau → EDT ; Hobbies sans créneau → Mes Hobbies ; sinon Batterie seule.
         </p>
       </section>
 
@@ -1062,7 +1047,7 @@ onMounted(async () => {
           {{ priorityLabel(planActivity.priority) }}
         </p>
 
-        <div v-if="planTimesOptional" class="plan-schedule-toggle" role="group" aria-label="Mode horaire">
+        <div class="plan-schedule-toggle" role="group" aria-label="Mode horaire">
           <button
             type="button"
             class="plan-schedule-toggle__btn"
@@ -1081,18 +1066,14 @@ onMounted(async () => {
           </button>
         </div>
 
-        <div v-if="planUseTimes || !planTimesOptional" class="plan-dialog__slot">
+        <div v-if="planUseTimes" class="plan-dialog__slot">
           <div class="plan-dialog__times">
             <label class="meta-field">
-              <span class="meta-field__label">
-                Début{{ planTimesOptional ? '' : ' *' }}
-              </span>
+              <span class="meta-field__label">Début</span>
               <input v-model="planStart" type="time" class="meta-input" />
             </label>
             <label class="meta-field">
-              <span class="meta-field__label">
-                Fin{{ planTimesOptional ? '' : ' *' }}
-              </span>
+              <span class="meta-field__label">Fin</span>
               <input v-model="planEnd" type="time" class="meta-input" />
             </label>
           </div>
@@ -1106,7 +1087,7 @@ onMounted(async () => {
           class="plan-dialog__duration-block"
         >
           <p class="plan-dialog__duration-hint">
-            Sans créneau : Hobbies → Mes Hobbies sur l’EDT ; Autre → Batterie seule
+            Sans créneau : Hobbies → Mes Hobbies sur l’EDT ; sinon Batterie seule
           </p>
           <div class="duration-chips plan-dialog__chips" role="group" aria-label="Durée">
             <button
@@ -1154,7 +1135,7 @@ onMounted(async () => {
                 ? '…'
                 : planKind === BATTERY_ENTRY_KINDS.ACTUAL
                   ? 'Ajouter au réel'
-                  : planUseTimes || !planTimesOptional
+                  : planUseTimes
                     ? 'Planifier + EDT'
                     : 'Planifier'
             }}

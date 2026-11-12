@@ -486,11 +486,11 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
 
     timeOptional = isTimeOptionalCategory(category, categories)
 
-    if (needsCategoryAndSlot && !timeOptional) {
+    // Horaires facultatifs : si les deux bornes manquent → pas de créneau.
+    // Si une seule est renseignée → validation (début + fin cohérents).
+    if (needsCategoryAndSlot && (plannedStart || plannedEnd)) {
       const slotError = validatePlannedSlot(plannedStart, plannedEnd)
-      if (slotError) {
-        throw new Error(`${slotError} (obligatoire hors Hobbies / Autre).`)
-      }
+      if (slotError) throw new Error(slotError)
     }
     if (timeOptional && !plannedStart && !plannedEnd) {
       plannedStart = null
@@ -498,7 +498,7 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
     }
   }
 
-  // Durée dérivée des horaires (hors Hobbies / Autre, ou si un créneau est fourni)
+  // Durée dérivée des horaires quand un créneau complet est fourni
   if (plannedStart && plannedEnd) {
     const fromSlot = minutesBetweenHhMm(plannedStart, plannedEnd)
     if (fromSlot != null) {
@@ -563,7 +563,7 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
   }
 
   // Avec créneau → EDT daté. Hobbies sans créneau → rubrique Hobbies (à placer).
-  // Autre sans créneau → Batterie seule.
+  // Autres catégories sans créneau → Batterie seule.
   const hasTimedSlot = Boolean(plannedStart && plannedEnd)
   const hobbyPool =
     !hasTimedSlot && isHobbiesCategory(category, categories)
@@ -759,8 +759,42 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
           edtPatch.all_day = false
           edtPatch.time = `${s} - ${e}`
         } else if (!s && !e) {
-          edtPatch.all_day = true
-          edtPatch.time = null
+          // Sans créneau : Hobbies → pool « à placer » ; sinon retirer l’EDT.
+          let categories = await loadUserCategories(supabase, userId)
+          let category = null
+          if (normalized.activity_id) {
+            const activity = await getBatteryActivity(supabase, userId, normalized.activity_id)
+            if (activity?.category_id) {
+              const resolved = await resolveActivityCategory(
+                supabase,
+                userId,
+                activity.category_id,
+                categories,
+              )
+              category = resolved.category
+              categories = resolved.categories
+            }
+          }
+          if (isHobbiesCategory(category, categories)) {
+            edtPatch.all_day = true
+            edtPatch.time = null
+          } else {
+            await supabase
+              .from('timetable_events')
+              .delete()
+              .eq('id', normalized.source_id)
+              .eq('user_id', userId)
+            const { data: unlinked } = await supabase
+              .from(ENTRIES_TABLE)
+              .update({ source_type: null, source_id: null })
+              .eq('id', normalized.id)
+              .eq('user_id', userId)
+              .select(ENTRY_COLUMNS)
+              .single()
+            if (unlinked) {
+              Object.assign(normalized, withEntryDefaults(unlinked))
+            }
+          }
         }
       }
       if (Object.keys(edtPatch).length) {

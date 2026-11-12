@@ -1998,6 +1998,7 @@ const getPositionedEventsForDay = (dayIdx) => {
 
   // 4. For each group, calculate left position and width to sit perfectly side-by-side
   const result = []
+  const GAP_PX = 3
   for (const group of groups) {
     const columns = []
 
@@ -2020,12 +2021,25 @@ const getPositionedEventsForDay = (dayIdx) => {
     }
 
     const totalCols = columns.length
+    for (const col of columns) {
+      const sorted = [...col].sort((a, b) => a.start - b.start)
+      for (let i = 0; i < sorted.length; i++) {
+        const ev = sorted[i]
+        const next = sorted[i + 1]
+        let height = Math.max(ev.duration * hourHeight - GAP_PX, 22)
+        if (next) {
+          const maxH = Math.max(18, next.start * hourHeight - GAP_PX - ev.start * hourHeight)
+          height = Math.min(height, maxH)
+        }
+        ev._layoutHeight = height
+      }
+    }
     for (const ev of group) {
       const widthPercent = 96 / totalCols
       const leftPercent = ev.colIndex * (100 / totalCols)
 
       const top = ev.start * hourHeight
-      const height = Math.max(ev.duration * hourHeight, 26)
+      const height = ev._layoutHeight ?? Math.max(ev.duration * hourHeight - GAP_PX, 22)
 
       ev.positionStyle = {
         position: 'absolute',
@@ -2036,6 +2050,21 @@ const getPositionedEventsForDay = (dayIdx) => {
         width: `${widthPercent}%`,
       }
       result.push(ev)
+    }
+  }
+
+  // Évite le débordement visuel entre créneaux quasi-adjacents (ex. 11h30 → 12h)
+  const ordered = [...result].sort((a, b) => a.start - b.start || a.end - b.end)
+  for (const ev of ordered) {
+    const nextBelow = ordered.find((o) => o.id !== ev.id && o.start >= ev.end - 0.001)
+    if (!nextBelow) continue
+    const maxH = Math.max(18, nextBelow.start * hourHeight - GAP_PX - ev.start * hourHeight)
+    const height = Math.min(ev._layoutHeight ?? maxH, maxH)
+    ev._layoutHeight = height
+    ev.positionStyle = {
+      ...ev.positionStyle,
+      height: `${height}px`,
+      '--event-block-height': `${height}px`,
     }
   }
 

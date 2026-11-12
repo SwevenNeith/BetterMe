@@ -6,7 +6,6 @@
 import {
   BATTERY_DEFAULT_PRIORITY,
   BATTERY_HOBBIES_CATEGORY_NAME,
-  isBatteryTimeOptionalCategoryName,
   normalizeBatteryPriority,
 } from '../../constants/battery/battery.js'
 import { findHobbiesCategory } from '../timetable/timetableCategories.js'
@@ -33,17 +32,12 @@ export function isHobbiesCategory(category, categories = []) {
 }
 
 /**
- * Hobbies + Autre : pas d’horaires obligatoires, durée via pastilles.
- * @param {object | string | null | undefined} category
- * @param {object[]} [categories]
+ * Horaires facultatifs pour toutes les catégories (durée via pastilles si pas de créneau).
+ * @param {object | string | null | undefined} [_category]
+ * @param {object[]} [_categories]
  */
-export function isTimeOptionalCategory(category, categories = []) {
-  if (!category) return false
-  if (typeof category === 'string') {
-    return isBatteryTimeOptionalCategoryName(category)
-  }
-  if (isHobbiesCategory(category, categories)) return true
-  return isBatteryTimeOptionalCategoryName(category.name)
+export function isTimeOptionalCategory(_category, _categories = []) {
+  return true
 }
 
 /**
@@ -121,10 +115,10 @@ export async function createEdtEventForBatteryPlan(
   const start = normalizeHhMm(input.plannedStart)
   const end = normalizeHhMm(input.plannedEnd)
   // Hobbies sans créneau → événement « à placer » (all_day, rubrique Hobbies).
-  // Autres catégories : créneau obligatoire.
+  // Autres catégories sans créneau : pas d’EDT (géré en amont).
   const asHobbyPool = Boolean(input.allDay) && isHobbiesCategory(category, categories)
   if (!asHobbyPool && (!start || !end)) {
-    throw new Error('Un créneau (début et fin) est requis pour créer un événement EDT.')
+    throw new Error('Un créneau (début et fin) est requis pour créer un événement EDT daté.')
   }
   const timeRange = asHobbyPool ? null : formatEdtTimeRange(start, end)
   if (!asHobbyPool && !timeRange) {

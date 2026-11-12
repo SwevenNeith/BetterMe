@@ -102,21 +102,21 @@ export const BATTERY_DEFAULT_PRIORITY = 'p3'
 export const BATTERY_HOBBIES_CATEGORY_NAME = 'Hobbies'
 export const BATTERY_OTHER_CATEGORY_NAME = 'Autre'
 
-/** Catégories sans horaires obligatoires (durée via pastilles). */
+/**
+ * Ancien périmètre Hobbies / Autre (historique).
+ * Les horaires sont désormais facultatifs pour toutes les catégories.
+ */
 export const BATTERY_TIME_OPTIONAL_CATEGORY_NAMES = [
   BATTERY_HOBBIES_CATEGORY_NAME,
   BATTERY_OTHER_CATEGORY_NAME,
 ]
 
 /**
- * @param {string | null | undefined} name
+ * @param {string | null | undefined} _name
+ * @deprecated Préférer isTimeOptionalCategory — toujours true.
  */
-export function isBatteryTimeOptionalCategoryName(name) {
-  const key = String(name ?? '')
-    .trim()
-    .toLowerCase()
-  if (!key) return false
-  return BATTERY_TIME_OPTIONAL_CATEGORY_NAMES.some((n) => n.toLowerCase() === key)
+export function isBatteryTimeOptionalCategoryName(_name) {
+  return true
 }
 
 /**
