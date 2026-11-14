@@ -49,6 +49,7 @@ describe('batteryEntryToWeekEvent', () => {
     assert.equal(event.all_day, false)
     assert.equal(event.time, '18:00 - 19:00')
     assert.equal(event.title, 'Sport')
+    assert.equal(event.cost, 2)
   })
 
   it('ignore les activités sans horaire', () => {

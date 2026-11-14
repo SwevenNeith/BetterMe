@@ -123,6 +123,7 @@ export function batteryEntryToWeekEvent(entry, dayIso, activityById = new Map())
   // Pas d’horaires → pas sur l’EDT réel (même si durée / journée entière)
   if (!start || !end) return null
 
+  const cost = Number(entry?.cost)
   return {
     id: `actual-${entry.id}`,
     title,
@@ -131,22 +132,13 @@ export function batteryEntryToWeekEvent(entry, dayIso, activityById = new Map())
     all_day: false,
     time: formatEdtTimeRange(start, end),
     category,
-    detail: formatCostDetail(entry?.cost),
+    detail: '',
     priority: entry?.priority || null,
+    cost: Number.isFinite(cost) ? cost : null,
     _source: 'actual',
     _batteryDay: dayIso,
     _entryId: entry.id,
   }
-}
-
-/**
- * @param {unknown} cost
- */
-function formatCostDetail(cost) {
-  const n = Number(cost)
-  if (!Number.isFinite(n) || n === 0) return ''
-  const sign = n > 0 ? '+' : ''
-  return `${sign}${n} pts énergie`
 }
 
 /**

@@ -3,12 +3,16 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../../lib/supabase.js'
 import { resolveSessionUser } from '../../utils/auth/sessionUser.js'
-import { batteryPriorityMeta } from '../../constants/battery/battery.js'
+import {
+  BATTERY_SOURCE_TYPES,
+  batteryPriorityMeta,
+} from '../../constants/battery/battery.js'
 import {
   allDayEventsForDay,
   loadHistoryEdtWeekContext,
   timedEventsForDay,
 } from '../../services/battery/batteryHistoryEdt.js'
+import { getLinkedBatteryCost } from '../../services/battery/batterySourceSync.js'
 import {
   WEEK_GRID_HOUR_HEIGHT_PX,
   buildWeekDays,
@@ -40,6 +44,11 @@ const plannedEvents = ref([])
 const actualEvents = ref([])
 const gridViewport = ref(null)
 const mobileGridViewport = ref(null)
+const isReadModalOpen = ref(false)
+const viewingEvent = ref(null)
+const viewingCost = ref(null)
+const viewingCostLoading = ref(false)
+const userId = ref(null)
 
 const hourHeight = WEEK_GRID_HOUR_HEIGHT_PX
 const dayGridStyle = {
@@ -159,11 +168,66 @@ function setMode(mode) {
   edtMode.value = mode
 }
 
-function openEvent(event) {
+function formatDayLong(iso) {
+  const raw = String(iso || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return iso || ''
+  const [y, m, d] = raw.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
+function formatCostLabel(cost) {
+  if (cost == null || !Number.isFinite(Number(cost))) return null
+  const n = Number(cost)
+  if (n === 0) return '0 pt'
+  const abs = Math.abs(n)
+  const unit = abs === 1 ? 'pt' : 'pts'
+  return n > 0 ? `${n} ${unit}` : `${n} ${unit} (regain)`
+}
+
+async function openEvent(event) {
+  if (!event) return
+  viewingEvent.value = event
+  viewingCost.value = event.cost != null ? Number(event.cost) : null
+  viewingCostLoading.value = false
+  isReadModalOpen.value = true
+
+  // Prévu (événement EDT) : charger le coût Batterie lié si besoin
+  if (event._source !== 'actual' && event.id && userId.value) {
+    viewingCostLoading.value = true
+    try {
+      const cost = await getLinkedBatteryCost(supabase, userId.value, [
+        { sourceType: BATTERY_SOURCE_TYPES.TIMETABLE, sourceId: event.id },
+      ])
+      if (viewingEvent.value?.id === event.id) {
+        viewingCost.value = cost
+      }
+    } catch (err) {
+      console.warn('Coût Batterie lié:', err)
+    } finally {
+      if (viewingEvent.value?.id === event.id) viewingCostLoading.value = false
+    }
+  }
+}
+
+function closeReadModal() {
+  isReadModalOpen.value = false
+  viewingEvent.value = null
+  viewingCost.value = null
+  viewingCostLoading.value = false
+}
+
+function openEventOnBatteryDay() {
+  const event = viewingEvent.value
   const dayIso =
     event?._batteryDay ||
     String(event?.date_start || '').slice(0, 10) ||
     dayIsoAt(selectedDayIndex.value)
+  closeReadModal()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dayIso)) return
   router.push({ name: 'battery', query: { date: dayIso } })
 }
@@ -174,10 +238,12 @@ async function loadWeek() {
   try {
     const user = await resolveSessionUser()
     if (!user) {
+      userId.value = null
       plannedEvents.value = []
       actualEvents.value = []
       return
     }
+    userId.value = user.id
     const ctx = await loadHistoryEdtWeekContext(supabase, user.id, currentDate.value)
     categories.value = ctx.categories
     plannedEvents.value = ctx.plannedEvents
@@ -487,6 +553,128 @@ onMounted(() => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Popup détail (même logique que la page EDT) -->
+    <div
+      v-if="isReadModalOpen"
+      class="modal-overlay"
+      @click.self="closeReadModal"
+    >
+      <div class="modal-card modal-card--read" role="dialog" aria-modal="true">
+        <div class="modal-header modal-header--read">
+          <h3>{{ viewingEvent?.title || "Détails de l'activité" }}</h3>
+          <div class="modal-header-actions">
+            <button
+              type="button"
+              class="modal-edit-btn"
+              title="Ouvrir le jour Batterie"
+              @click="openEventOnBatteryDay"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                width="18"
+                height="18"
+              >
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+            </button>
+            <button type="button" class="modal-close" @click="closeReadModal">✕</button>
+          </div>
+        </div>
+
+        <div v-if="viewingEvent" class="read-modal-content">
+          <div v-if="viewingEvent.detail" class="read-field">
+            <span class="read-label">Description</span>
+            <p class="read-value read-value--description">{{ viewingEvent.detail }}</p>
+          </div>
+
+          <div class="read-field-row">
+            <div v-if="viewingEvent.date_start" class="read-field">
+              <span class="read-label">Date</span>
+              <span class="read-value">
+                {{ formatDayLong(viewingEvent.date_start) }}
+                <template
+                  v-if="
+                    viewingEvent.date_end &&
+                    viewingEvent.date_end !== viewingEvent.date_start
+                  "
+                >
+                  → {{ formatDayLong(viewingEvent.date_end) }}
+                </template>
+              </span>
+            </div>
+          </div>
+
+          <div
+            v-if="!viewingEvent.all_day && viewingEvent.time"
+            class="read-field-row"
+          >
+            <div class="read-field">
+              <span class="read-label">Horaire</span>
+              <span class="read-value">{{ viewingEvent.time }}</span>
+            </div>
+          </div>
+
+          <div v-if="viewingEvent.all_day" class="read-field">
+            <span class="read-label">Type</span>
+            <span class="read-value read-value--tag">Toute la journée 🕒</span>
+          </div>
+
+          <div class="read-field-row">
+            <div v-if="viewingEvent.category" class="read-field">
+              <span class="read-label">Catégorie</span>
+              <span
+                class="read-value read-value--category"
+                :style="getCategoryStyle(viewingEvent.category)"
+              >
+                {{ getCategoryIcon(viewingEvent.category) }}
+                {{ getCategoryName(viewingEvent.category) }}
+              </span>
+            </div>
+            <div v-if="viewingEvent.priority" class="read-field">
+              <span class="read-label">Priorité</span>
+              <span
+                class="read-value read-value--priority"
+                :class="`event-priority-pill--${viewingEvent.priority}`"
+              >
+                {{
+                  batteryPriorityMeta(viewingEvent.priority)?.label ||
+                  viewingEvent.priority
+                }}
+              </span>
+            </div>
+          </div>
+
+          <div class="read-field">
+            <span class="read-label">Coût énergie</span>
+            <span v-if="viewingCostLoading" class="read-value read-value--muted">
+              Chargement…
+            </span>
+            <span v-else-if="formatCostLabel(viewingCost)" class="read-value">
+              {{ formatCostLabel(viewingCost) }}
+            </span>
+            <span v-else class="read-value read-value--muted">Non renseigné</span>
+          </div>
+
+          <div class="read-modal-actions">
+            <button
+              type="button"
+              class="read-action-btn read-action-btn--edit"
+              @click="openEventOnBatteryDay"
+            >
+              Ouvrir le jour Batterie
+            </button>
           </div>
         </div>
       </div>
@@ -1278,6 +1466,237 @@ onMounted(() => {
   .event-priority-pill--p3,
   .event-priority-pill--p4 {
     color: #c5cad3;
+  }
+}
+
+/* ─── Popup détail (aligné page EDT) ─── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 430px;
+  max-height: calc(100vh - 3rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(16px);
+  border-radius: 24px;
+  border: 1px solid rgba(213, 181, 234, 0.4);
+  box-shadow: 0 20px 50px rgba(173, 129, 190, 0.25);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.modal-card--read {
+  max-width: 380px;
+}
+
+.modal-header--read {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.modal-header--read h3 {
+  flex: 1;
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #2c3e50;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.modal-edit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(173, 129, 190, 0.15);
+  color: #ad81be;
+  cursor: pointer;
+}
+
+.modal-edit-btn:hover {
+  background: #ad81be;
+  color: white;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  color: #6c757d;
+}
+
+.modal-close:hover {
+  color: #ad81be;
+}
+
+.read-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.read-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.read-field-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.read-field-row .read-field {
+  flex: 1;
+  min-width: 120px;
+}
+
+.read-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #9b59b6;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.read-value {
+  font-size: 0.92rem;
+  color: #2c3e50;
+  line-height: 1.4;
+}
+
+.read-value--muted {
+  color: #8a9098;
+  font-style: italic;
+}
+
+.read-value--description {
+  font-size: 0.88rem;
+  color: #5d6d7e;
+  line-height: 1.45;
+  padding: 0.5rem 0.65rem;
+  background: rgba(213, 181, 234, 0.08);
+  border-radius: 8px;
+  margin: 0;
+}
+
+.read-value--tag {
+  display: inline-block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  background: rgba(173, 129, 190, 0.15);
+  border-radius: 6px;
+  color: #9b59b6;
+}
+
+.read-value--category {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.3rem 0.65rem;
+  border-radius: 8px;
+}
+
+.read-value--priority {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.25rem 0.55rem;
+  border-radius: 5px;
+}
+
+.read-modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(213, 181, 234, 0.2);
+}
+
+.read-action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.65rem 1rem;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.read-action-btn--edit {
+  background: linear-gradient(145deg, #ad81be, #9b59b6);
+  color: white;
+}
+
+.read-action-btn--edit:hover {
+  filter: brightness(1.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  .modal-card {
+    background: rgba(25, 20, 35, 0.95);
+    border-color: rgba(213, 181, 234, 0.2);
+  }
+
+  .modal-header--read h3,
+  .read-value {
+    color: #f0e8f8;
+  }
+
+  .read-label {
+    color: #d5b5ea;
+  }
+
+  .read-value--muted {
+    color: #adb5bd;
+  }
+
+  .read-value--description {
+    color: #aeb6bf;
+    background: rgba(173, 129, 190, 0.1);
+  }
+
+  .read-value--tag {
+    background: rgba(173, 129, 190, 0.2);
+    color: #d5b5ea;
   }
 }
 </style>
