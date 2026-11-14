@@ -80,7 +80,7 @@ const hasAllDayEvents = computed(() => {
 const modeHint = computed(() =>
   edtMode.value === 'planned'
     ? 'Emploi du temps prévu (comme sur la page EDT).'
-    : 'Activités réellement faites avec un créneau horaire (sans horaire → non affichées).',
+    : 'Horaires réellement faits (indépendants du prévu — sans créneau → non affichés).',
 )
 
 function formatHour(hour) {
@@ -333,35 +333,61 @@ onMounted(() => {
                     class="event-block"
                     :class="event.isShort ? 'event-block--short' : 'event-block--tall'"
                     :style="[getCategoryStyle(event.category), event.positionStyle]"
-                    :title="[event.timeRangeLabel, event.title, getCategoryName(event.category)]
+                    :title="[
+                      event.timeRangeLabel || event.time,
+                      event.title,
+                      getCategoryName(event.category),
+                      event.detail || '',
+                    ]
                       .filter(Boolean)
                       .join(' — ')"
                     @click="openEvent(event)"
                   >
                     <div class="event-content">
-                      <div v-if="event.isVeryShort" class="event-main-line event-main-line--very-short">
+                      <div
+                        v-if="event.isVeryShort"
+                        class="event-main-line event-main-line--very-short"
+                      >
                         <h4 class="event-title">{{ event.title }}</h4>
-                      </div>
-                      <template v-else-if="event.isShort">
-                        <div class="event-main-line">
-                          <span class="event-time">{{ event.timeStartLabel }}</span>
-                          <h4 class="event-title">{{ event.title }}</h4>
-                        </div>
-                      </template>
-                      <template v-else>
-                        <span class="event-time">{{ event.timeRangeLabel }}</span>
-                        <h4 class="event-title">{{ event.title }}</h4>
-                        <span v-if="getCategoryName(event.category)" class="event-category">
-                          {{ getCategoryName(event.category) }}
-                        </span>
                         <span
                           v-if="event.priority"
-                          class="event-priority"
+                          class="event-priority-pill event-priority-pill--inline"
+                          :class="`event-priority-pill--${event.priority}`"
                           :title="batteryPriorityMeta(event.priority)?.label"
                         >
                           {{ eventPriorityShort(event.priority) }}
                         </span>
+                      </div>
+                      <div v-else-if="event.isShort" class="event-main-line">
+                        <span class="event-time">{{ event.timeStartLabel }}</span>
+                        <h4 class="event-title">{{ event.title }}</h4>
+                        <span
+                          v-if="event.priority"
+                          class="event-priority-pill event-priority-pill--inline"
+                          :class="`event-priority-pill--${event.priority}`"
+                          :title="batteryPriorityMeta(event.priority)?.label"
+                        >
+                          {{ eventPriorityShort(event.priority) }}
+                        </span>
+                      </div>
+                      <template v-else>
+                        <div class="event-meta-row">
+                          <span class="event-time">{{ event.timeRangeLabel }}</span>
+                          <span
+                            v-if="event.priority"
+                            class="event-priority-pill"
+                            :class="`event-priority-pill--${event.priority}`"
+                            :title="batteryPriorityMeta(event.priority)?.label"
+                          >
+                            {{ eventPriorityShort(event.priority) }}
+                          </span>
+                        </div>
+                        <h4 class="event-title">{{ event.title }}</h4>
+                        <span v-if="event.category" class="event-category-tag">
+                          {{ getCategoryName(event.category) }}
+                        </span>
                       </template>
+                      <p v-if="event.detail" class="event-description">{{ event.detail }}</p>
                     </div>
                   </button>
                 </div>
@@ -409,20 +435,53 @@ onMounted(() => {
                     v-for="event in getPositionedForDay(selectedDayIndex)"
                     :key="event.id"
                     type="button"
-                    class="event-block"
+                    class="event-block event-block--mobile"
                     :class="event.isShort ? 'event-block--short' : 'event-block--tall'"
                     :style="[getCategoryStyle(event.category), event.positionStyle]"
                     @click="openEvent(event)"
                   >
                     <div class="event-content">
-                      <div v-if="event.isShort" class="event-main-line">
+                      <div
+                        v-if="event.isVeryShort"
+                        class="event-main-line event-main-line--very-short"
+                      >
+                        <h4 class="event-title">{{ event.title }}</h4>
+                        <span
+                          v-if="event.priority"
+                          class="event-priority-pill event-priority-pill--inline"
+                          :class="`event-priority-pill--${event.priority}`"
+                        >
+                          {{ eventPriorityShort(event.priority) }}
+                        </span>
+                      </div>
+                      <div v-else-if="event.isShort" class="event-main-line">
                         <span class="event-time">{{ event.timeStartLabel }}</span>
                         <h4 class="event-title">{{ event.title }}</h4>
+                        <span
+                          v-if="event.priority"
+                          class="event-priority-pill event-priority-pill--inline"
+                          :class="`event-priority-pill--${event.priority}`"
+                        >
+                          {{ eventPriorityShort(event.priority) }}
+                        </span>
                       </div>
                       <template v-else>
-                        <span class="event-time">{{ event.timeRangeLabel }}</span>
+                        <div class="event-meta-row">
+                          <span class="event-time">{{ event.timeRangeLabel }}</span>
+                          <span
+                            v-if="event.priority"
+                            class="event-priority-pill"
+                            :class="`event-priority-pill--${event.priority}`"
+                          >
+                            {{ eventPriorityShort(event.priority) }}
+                          </span>
+                        </div>
                         <h4 class="event-title">{{ event.title }}</h4>
+                        <span v-if="event.category" class="event-category-tag">
+                          {{ getCategoryName(event.category) }}
+                        </span>
                       </template>
+                      <p v-if="event.detail" class="event-description">{{ event.detail }}</p>
                     </div>
                   </button>
                 </div>
@@ -705,9 +764,18 @@ onMounted(() => {
 }
 
 .grid-scroll-viewport {
-  height: min(62vh, 640px);
+  height: min(70vh, 720px);
   overflow: auto;
   padding: 0 0.5rem 0.5rem;
+}
+
+.grid-scroll-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+
+.grid-scroll-viewport::-webkit-scrollbar-thumb {
+  background: rgba(213, 181, 234, 0.3);
+  border-radius: 4px;
 }
 
 .weekly-timetable-grid {
@@ -783,23 +851,59 @@ onMounted(() => {
 .grid-events-layer {
   position: absolute;
   inset: 0;
+  height: 100%;
   pointer-events: none;
 }
 
 .event-block {
+  position: absolute;
   box-sizing: border-box;
   border-radius: 10px;
   padding: 0.28rem 0.4rem 0.26rem 0.42rem;
+  transition:
+    transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.25s ease,
+    z-index 0.1s ease;
   cursor: pointer;
   z-index: 1;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  justify-content: flex-start;
   pointer-events: auto;
   min-width: 0;
   border: none;
   font: inherit;
   text-align: left;
+}
+
+.event-block:hover {
+  width: max(100%, max-content) !important;
+  min-width: 100% !important;
+  max-width: 280px;
+  height: auto !important;
+  min-height: var(--event-block-height, 0px) !important;
+  padding: 0.45rem 0.55rem 0.45rem 0.55rem !important;
+  z-index: 50;
+  overflow: hidden;
+  transform: translateY(-2px) scale(1.05);
+  transform-origin: left top;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+  background: #ffffff !important;
+  border: 1px solid var(--event-color-solid) !important;
+  border-left: 4px solid var(--event-color-solid) !important;
+}
+
+.grid-day-column:first-child .event-block:hover {
+  left: 0 !important;
+  right: auto !important;
+  transform-origin: left top;
+}
+
+.grid-day-column:last-child .event-block:hover {
+  left: auto !important;
+  right: 0 !important;
+  transform-origin: right top;
 }
 
 .event-content {
@@ -808,6 +912,7 @@ onMounted(() => {
   min-height: 0;
   min-width: 0;
   height: 100%;
+  position: relative;
   gap: 0.1rem;
   overflow: hidden;
 }
@@ -816,44 +921,263 @@ onMounted(() => {
   justify-content: center;
 }
 
+.event-block--tall .event-content {
+  justify-content: flex-start;
+  padding-top: 0.05rem;
+  gap: 0.08rem;
+}
+
+.event-block:hover .event-content {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  justify-content: flex-start;
+  overflow: visible;
+}
+
 .event-main-line {
   display: flex;
   align-items: center;
   gap: 0.3rem;
   min-width: 0;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  font-size: 0.62rem;
+  line-height: 1.15;
 }
 
-.event-time {
-  font-size: 0.68rem;
+.event-block--short {
+  padding: 0.22rem 0.38rem 0.2rem 0.4rem;
+  overflow: hidden;
+}
+
+.event-block--short .event-main-line {
+  font-size: clamp(0.52rem, 1.1vw, 0.64rem);
+}
+
+.event-main-line--very-short {
+  font-size: clamp(0.5rem, 1vw, 0.6rem);
+}
+
+.event-main-line--very-short .event-title {
   font-weight: 700;
-  opacity: 0.85;
+}
+
+.event-block--short .event-priority-pill--inline {
+  font-size: 0.48rem;
+  padding: 0.12rem 0.28rem;
+}
+
+.event-block--short .event-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.event-block--short:not(:hover) .event-description {
+  display: none;
+}
+
+.event-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+  min-width: 0;
+  width: 100%;
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  box-sizing: border-box;
+}
+
+.event-block--tall {
+  padding: 0.3rem 0.4rem 0.28rem 0.42rem;
+  overflow: hidden;
+}
+
+.event-block--tall .event-meta-row {
+  font-size: 0.64rem;
+  line-height: 1.15;
+}
+
+.event-block--tall .event-title {
+  flex: 0 1 auto;
+  width: 100%;
+  font-size: 0.74rem;
+  line-height: 1.2;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+}
+
+.event-block--tall .event-category-tag {
+  flex: 0 0 auto;
+  max-width: 100%;
+  width: fit-content;
+  font-size: 0.58rem;
+  line-height: 1.15;
+}
+
+.event-block--tall:not(:hover) .event-description {
+  display: none;
+}
+
+.event-block:hover .event-main-line {
+  white-space: normal;
+  flex-wrap: wrap;
+  overflow: visible;
+  font-size: 0.72rem;
+  row-gap: 0.2rem;
+}
+
+.event-block--short:hover .event-main-line {
+  flex-wrap: nowrap;
   white-space: nowrap;
 }
 
+.event-block:hover .event-meta-row {
+  font-size: 0.75rem;
+}
+
+.event-time {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.95em;
+  font-weight: 700;
+  letter-spacing: -0.15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.event-meta-row .event-time {
+  flex: 1 1 auto;
+}
+
 .event-title {
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
-  font-size: 0.78rem;
-  font-weight: 800;
+  font-size: 1em;
+  font-weight: 700;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
+  color: inherit;
 }
 
-.event-category {
-  font-size: 0.68rem;
-  font-weight: 600;
-  opacity: 0.8;
+.event-block:hover .event-title {
+  flex: 1 1 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  display: block;
+  -webkit-line-clamp: unset;
+  word-break: break-word;
+}
+
+.event-block--short:hover .event-title {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.event-category-tag {
+  flex: 0 1 auto;
+  max-width: 32%;
+  margin: 0;
+  font-size: 0.82em;
+  font-weight: 700;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.15px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.event-priority {
-  font-size: 0.65rem;
+.event-block:hover .event-category-tag {
+  max-width: none;
+  flex: 1 1 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+
+.event-priority-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 0.12rem 0.34rem;
+  border-radius: 999px;
+  font-size: 0.58rem;
   font-weight: 800;
-  opacity: 0.75;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  border: 1px solid transparent;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.event-priority-pill--inline {
+  margin-left: 0.2rem;
+}
+
+.event-priority-pill--p1 {
+  background: rgba(212, 160, 23, 0.22);
+  border-color: rgba(212, 160, 23, 0.4);
+  color: #7a5c0c;
+}
+
+.event-priority-pill--p2 {
+  background: rgba(90, 120, 180, 0.2);
+  border-color: rgba(90, 120, 180, 0.35);
+  color: #3a4f7a;
+}
+
+.event-priority-pill--p3 {
+  background: rgba(80, 90, 110, 0.12);
+  border-color: rgba(80, 90, 110, 0.25);
+  color: #4a5260;
+}
+
+.event-priority-pill--p4 {
+  background: rgba(80, 90, 110, 0.08);
+  border-color: rgba(80, 90, 110, 0.18);
+  color: #6a7280;
+}
+
+.event-description {
+  display: block;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #4f5f6f;
+  margin-top: 0;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.event-block:hover .event-description {
+  max-height: 8rem;
+  opacity: 1;
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .weekly-grid-mobile {
@@ -900,8 +1224,7 @@ onMounted(() => {
 
   .week-badge-title,
   .desktop-day-number,
-  .mobile-day-heading,
-  .event-title {
+  .mobile-day-heading {
     color: #f0e8f8;
   }
 
@@ -930,6 +1253,31 @@ onMounted(() => {
   .day-tab--active {
     background: rgba(173, 129, 190, 0.22);
     color: #e8d4f0;
+  }
+
+  .event-block:hover {
+    background: #1c1825 !important;
+  }
+
+  .event-description {
+    color: #c5b8d4;
+  }
+
+  .event-block:hover .event-description {
+    border-top-color: rgba(213, 181, 234, 0.2);
+  }
+
+  .event-priority-pill--p1 {
+    color: #f0d78a;
+  }
+
+  .event-priority-pill--p2 {
+    color: #a8bce8;
+  }
+
+  .event-priority-pill--p3,
+  .event-priority-pill--p4 {
+    color: #c5cad3;
   }
 }
 </style>
