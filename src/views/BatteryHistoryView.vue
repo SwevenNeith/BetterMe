@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { BATTERY_HISTORY_PRESETS } from '../constants/battery/battery.js'
@@ -7,6 +7,7 @@ import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import { getLocalTodayISO } from '../services/common/scheduledReminders.js'
 import { listBatteryHistory } from '../services/battery/batteryDays.js'
 import { listEmotionLogs } from '../services/mood/emotionLogs.js'
+import BatteryHistoryEdtWeek from '../components/battery/BatteryHistoryEdtWeek.vue'
 import {
   activityDurationStats,
   avgSpentByActivityDuration,
@@ -37,6 +38,8 @@ const route = useRoute()
 const router = useRouter()
 
 const userId = ref(null)
+/** @type {import('vue').Ref<'stats'|'edt'>} */
+const viewMode = ref(route.query.view === 'edt' ? 'edt' : 'stats')
 const periodPreset = ref('30d')
 const customFrom = ref('')
 const customTo = ref('')
@@ -47,6 +50,25 @@ const loadError = ref('')
 const rangeError = ref('')
 
 const todayIso = computed(() => getLocalTodayISO())
+const edtAnchorDate = computed(() => {
+  const date = String(route.query.date || '')
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todayIso.value
+})
+
+function setViewMode(mode) {
+  viewMode.value = mode
+  const query = { ...route.query }
+  if (mode === 'edt') query.view = 'edt'
+  else delete query.view
+  router.replace({ name: 'battery-historique', query })
+}
+
+watch(
+  () => route.query.view,
+  (view) => {
+    viewMode.value = view === 'edt' ? 'edt' : 'stats'
+  },
+)
 
 function monthRange(anchor = new Date()) {
   const y = anchor.getFullYear()
@@ -342,9 +364,37 @@ onMounted(async () => {
     <header class="page-header">
       <button type="button" class="page-back" @click="goBack">← Batterie</button>
       <h1 class="page-title">{{ pageTitle }}</h1>
-      <p class="page-subtitle">Courbes, jours coûteux, activités gourmandes et corrélations.</p>
+      <p class="page-subtitle">
+        {{
+          viewMode === 'edt'
+            ? 'Compare l’EDT prévu et ce que tu as réellement fait, semaine par semaine.'
+            : 'Courbes, jours coûteux, activités gourmandes et corrélations.'
+        }}
+      </p>
     </header>
 
+    <div class="view-switch" role="group" aria-label="Mode d’affichage">
+      <button
+        type="button"
+        class="chip"
+        :class="{ 'is-active': viewMode === 'stats' }"
+        @click="setViewMode('stats')"
+      >
+        Stats
+      </button>
+      <button
+        type="button"
+        class="chip"
+        :class="{ 'is-active': viewMode === 'edt' }"
+        @click="setViewMode('edt')"
+      >
+        Vue EDT
+      </button>
+    </div>
+
+    <BatteryHistoryEdtWeek v-if="viewMode === 'edt'" :anchor-date="edtAnchorDate" />
+
+    <template v-else>
     <div class="toolbar">
       <div class="window-chips" role="group" aria-label="Période">
         <button
@@ -623,6 +673,7 @@ onMounted(async () => {
         </section>
       </div>
     </template>
+    </template>
   </div>
 </template>
 
@@ -635,7 +686,7 @@ onMounted(async () => {
   margin: 0;
   padding: 1.5rem 1.25rem 3rem;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 .bg-blob {
@@ -662,12 +713,29 @@ onMounted(async () => {
 }
 
 .page-header,
+.view-switch,
 .toolbar,
 .panel,
 .flash,
 .insights-grid {
   position: relative;
   z-index: 1;
+}
+
+.view-switch {
+  display: flex;
+  gap: 0.4rem;
+  width: 100%;
+  margin-bottom: 1rem;
+  padding: 0.28rem;
+  border-radius: 12px;
+  background: rgba(213, 181, 234, 0.14);
+  border: 1px solid rgba(213, 181, 234, 0.28);
+  box-sizing: border-box;
+}
+
+.view-switch .chip {
+  flex: 1 1 0;
 }
 
 .page-header {
