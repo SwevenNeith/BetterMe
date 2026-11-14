@@ -80,7 +80,7 @@ const hasAllDayEvents = computed(() => {
 const modeHint = computed(() =>
   edtMode.value === 'planned'
     ? 'Emploi du temps prévu (comme sur la page EDT).'
-    : 'Ce que tu as réellement fait (activités Batterie marquées comme faites).',
+    : 'Activités réellement faites avec un créneau horaire (sans horaire → non affichées).',
 )
 
 function formatHour(hour) {

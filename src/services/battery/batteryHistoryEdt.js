@@ -101,6 +101,8 @@ export function buildActualWeekEvents(history, activityById = new Map()) {
 }
 
 /**
+ * EDT réel : uniquement les activités avec un vrai créneau horaire.
+ * Sans début/fin → null (pas affiché tant qu’il n’y a pas d’horaires).
  * @param {object} entry
  * @param {string} dayIso
  * @param {Map<string, object>} activityById
@@ -113,49 +115,13 @@ export function batteryEntryToWeekEvent(entry, dayIso, activityById = new Map())
   let start = normalizeHhMm(entry?.planned_start)
   let end = normalizeHhMm(entry?.planned_end)
   const duration = normalizeDurationMinutes(entry?.duration_minutes)
-  const allDayFlag = Boolean(entry?.duration_all_day)
 
   if (start && !end && duration != null) {
     end = shiftHhMm(start, duration) || ''
   }
 
-  if (allDayFlag || (!start && !end)) {
-    return {
-      id: `actual-${entry.id}`,
-      title,
-      date_start: dayIso,
-      date_end: dayIso,
-      all_day: true,
-      time: null,
-      category,
-      detail: formatCostDetail(entry?.cost),
-      priority: entry?.priority || null,
-      _source: 'actual',
-      _batteryDay: dayIso,
-      _entryId: entry.id,
-    }
-  }
-
-  if (!start) {
-    return {
-      id: `actual-${entry.id}`,
-      title,
-      date_start: dayIso,
-      date_end: dayIso,
-      all_day: true,
-      time: null,
-      category,
-      detail: formatCostDetail(entry?.cost),
-      priority: entry?.priority || null,
-      _source: 'actual',
-      _batteryDay: dayIso,
-      _entryId: entry.id,
-    }
-  }
-
-  if (!end) {
-    end = shiftHhMm(start, duration ?? 60) || shiftHhMm(start, 60)
-  }
+  // Pas d’horaires → pas sur l’EDT réel (même si durée / journée entière)
+  if (!start || !end) return null
 
   return {
     id: `actual-${entry.id}`,

@@ -392,9 +392,8 @@ async function saveEntryEdit() {
     day.value = result.day
     await setEntriesWithEdt(result.entries)
     await loadActivities()
-    if (entry.kind === BATTERY_ENTRY_KINDS.PLANNED) {
-      useTimetableCacheStore().$patch({ isValid: false })
-    }
+    // Horaires / catégorie peuvent créer ou mettre à jour l’EDT de base (prévu ou réel)
+    useTimetableCacheStore().$patch({ isValid: false })
     statusMessage.value = 'Activité mise à jour'
     editEntry.value = null
   } catch (err) {

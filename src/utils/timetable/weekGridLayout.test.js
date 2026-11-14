@@ -51,7 +51,7 @@ describe('batteryEntryToWeekEvent', () => {
     assert.equal(event.title, 'Sport')
   })
 
-  it('passe en journée entière sans horaire', () => {
+  it('ignore les activités sans horaire', () => {
     const event = batteryEntryToWeekEvent(
       {
         id: 'a2',
@@ -63,8 +63,7 @@ describe('batteryEntryToWeekEvent', () => {
       },
       '2026-03-10',
     )
-    assert.equal(event.all_day, true)
-    assert.equal(event.time, null)
+    assert.equal(event, null)
   })
 
   it('dérive la fin depuis la durée', () => {
