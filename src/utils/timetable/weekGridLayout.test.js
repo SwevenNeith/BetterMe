@@ -99,4 +99,22 @@ describe('batteryEntryToWeekEvent', () => {
     )
     assert.equal(event.time, '09:00 - 10:30')
   })
+
+  it('reprend la catégorie EDT liée pour le réel', () => {
+    const categoryByActualId = new Map([['a4', 'cat-travail']])
+    const event = batteryEntryToWeekEvent(
+      {
+        id: 'a4',
+        label: 'Léon',
+        duration_all_day: true,
+        cost: 1,
+        activity_id: null,
+      },
+      '2026-11-13',
+      new Map(),
+      categoryByActualId,
+    )
+    assert.equal(event.category, 'cat-travail')
+    assert.equal(event.all_day, true)
+  })
 })

@@ -2,7 +2,7 @@
  * Données pour la vue EDT de l’historique Batterie (prévu vs réel).
  */
 
-import { BATTERY_ENTRY_KINDS } from '../../constants/battery/battery.js'
+import { BATTERY_ENTRY_KINDS, BATTERY_SOURCE_TYPES } from '../../constants/battery/battery.js'
 import { normalizeHhMm, shiftHhMm, formatEdtTimeRange } from '../../utils/battery/batteryTime.js'
 import { normalizeDurationMinutes } from '../../utils/battery/batteryDuration.js'
 import { formatDateToLocalISO } from '../../utils/timetable/weekGridLayout.js'
@@ -32,7 +32,13 @@ export async function loadHistoryEdtWeekContext(supabase, userId, weekAnchor) {
   ])
 
   const activityById = new Map((activities ?? []).map((a) => [a.id, a]))
-  const actualEvents = buildActualWeekEvents(history, activityById)
+  const categoryByActualId = await resolveActualCategoryMap(
+    supabase,
+    userId,
+    history,
+    activityById,
+  )
+  const actualEvents = buildActualWeekEvents(history, activityById, categoryByActualId)
 
   return {
     from,
@@ -78,11 +84,79 @@ async function fetchPlannedTimetableEvents(supabase, userId, mondayStr, sundaySt
 }
 
 /**
+ * Catégorie pour chaque entrée réelle : priorité à la catégorie EDT du prévu lié,
+ * sinon activité catalogue (réel puis prévu).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {object[]} history
+ * @param {Map<string, object>} activityById
+ * @returns {Promise<Map<string, string>>}
+ */
+export async function resolveActualCategoryMap(
+  supabase,
+  userId,
+  history,
+  activityById = new Map(),
+) {
+  /** @type {Map<string, string>} actualId → category id/name */
+  const map = new Map()
+  /** @type {Map<string, string>} actualId → timetable event id */
+  const actualToEventId = new Map()
+
+  for (const day of history ?? []) {
+    for (const entry of day.entries ?? []) {
+      if (entry?.kind !== BATTERY_ENTRY_KINDS.PLANNED || !entry.completed_actual_id) continue
+      const actualId = String(entry.completed_actual_id)
+
+      const plannedActivity = entry.activity_id ? activityById.get(entry.activity_id) : null
+      if (plannedActivity?.category_id) {
+        map.set(actualId, plannedActivity.category_id)
+      }
+
+      if (
+        entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE &&
+        entry.source_id
+      ) {
+        actualToEventId.set(actualId, String(entry.source_id))
+      }
+    }
+  }
+
+  const eventIds = [...new Set(actualToEventId.values())]
+  if (eventIds.length) {
+    const { data, error } = await supabase
+      .from('timetable_events')
+      .select('id, category')
+      .eq('user_id', userId)
+      .in('id', eventIds)
+
+    if (error) {
+      console.warn('resolveActualCategoryMap:', error)
+    } else {
+      const eventCategory = new Map(
+        (data ?? []).map((row) => [String(row.id), row.category || null]),
+      )
+      for (const [actualId, eventId] of actualToEventId) {
+        const category = eventCategory.get(eventId)
+        if (category) map.set(actualId, category)
+      }
+    }
+  }
+
+  return map
+}
+
+/**
  * Transforme les entrées Batterie « actual » en événements grille.
  * @param {object[]} history
  * @param {Map<string, object>} activityById
+ * @param {Map<string, string>} [categoryByActualId]
  */
-export function buildActualWeekEvents(history, activityById = new Map()) {
+export function buildActualWeekEvents(
+  history,
+  activityById = new Map(),
+  categoryByActualId = new Map(),
+) {
   /** @type {object[]} */
   const events = []
 
@@ -92,7 +166,7 @@ export function buildActualWeekEvents(history, activityById = new Map()) {
 
     for (const entry of day.entries ?? []) {
       if (entry?.kind !== BATTERY_ENTRY_KINDS.ACTUAL) continue
-      const event = batteryEntryToWeekEvent(entry, dayIso, activityById)
+      const event = batteryEntryToWeekEvent(entry, dayIso, activityById, categoryByActualId)
       if (event) events.push(event)
     }
   }
@@ -108,11 +182,20 @@ export function buildActualWeekEvents(history, activityById = new Map()) {
  * @param {object} entry
  * @param {string} dayIso
  * @param {Map<string, object>} activityById
+ * @param {Map<string, string>} [categoryByActualId]
  */
-export function batteryEntryToWeekEvent(entry, dayIso, activityById = new Map()) {
+export function batteryEntryToWeekEvent(
+  entry,
+  dayIso,
+  activityById = new Map(),
+  categoryByActualId = new Map(),
+) {
   const title = String(entry?.label || '').trim() || 'Activité'
   const activity = entry?.activity_id ? activityById.get(entry.activity_id) : null
-  const category = activity?.category_id || null
+  const category =
+    (entry?.id && categoryByActualId.get(String(entry.id))) ||
+    activity?.category_id ||
+    null
   const cost = Number(entry?.cost)
   const costValue = Number.isFinite(cost) ? cost : null
 
