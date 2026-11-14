@@ -6,7 +6,10 @@ import {
   parseEventHours,
   positionEventsForDay,
 } from './weekGridLayout.js'
-import { batteryEntryToWeekEvent } from '../../services/battery/batteryHistoryEdt.js'
+import {
+  batteryEntryToWeekEvent,
+  batteryEntryToWeekEvents,
+} from '../../services/battery/batteryHistoryEdt.js'
 
 describe('parseEventHours', () => {
   it('parse une plage HH:MM', () => {
@@ -116,5 +119,31 @@ describe('batteryEntryToWeekEvent', () => {
     )
     assert.equal(event.category, 'cat-travail')
     assert.equal(event.all_day, true)
+  })
+
+  it('garde la bande journée entière avec catégorie même si horaires réels', () => {
+    const meta = new Map([
+      ['a5', { category: 'cat-social', allDay: true }],
+    ])
+    const events = batteryEntryToWeekEvents(
+      {
+        id: 'a5',
+        label: 'Léon',
+        planned_start: '10:30',
+        planned_end: '11:30',
+        duration_all_day: false,
+        cost: 1,
+        priority: 'p1',
+      },
+      '2026-11-13',
+      new Map(),
+      meta,
+    )
+    assert.equal(events.length, 2)
+    assert.equal(events[0].all_day, false)
+    assert.equal(events[0].category, 'cat-social')
+    assert.equal(events[1].all_day, true)
+    assert.equal(events[1].category, 'cat-social')
+    assert.equal(events[1].priority, 'p1')
   })
 })

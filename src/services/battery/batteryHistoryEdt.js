@@ -32,21 +32,23 @@ export async function loadHistoryEdtWeekContext(supabase, userId, weekAnchor) {
   ])
 
   const activityById = new Map((activities ?? []).map((a) => [a.id, a]))
-  const categoryByActualId = await resolveActualCategoryMap(
+  const filteredPlanned = (plannedEvents ?? []).filter(
+    (e) => !isUnscheduledHobbyEvent(e, categories),
+  )
+  const actualMetaById = await resolveActualMetaMap(
     supabase,
     userId,
     history,
     activityById,
+    filteredPlanned,
   )
-  const actualEvents = buildActualWeekEvents(history, activityById, categoryByActualId)
+  const actualEvents = buildActualWeekEvents(history, activityById, actualMetaById)
 
   return {
     from,
     to,
     categories,
-    plannedEvents: plannedEvents.filter(
-      (e) => !isUnscheduledHobbyEvent(e, categories),
-    ),
+    plannedEvents: filteredPlanned,
     actualEvents,
   }
 }
@@ -84,40 +86,60 @@ async function fetchPlannedTimetableEvents(supabase, userId, mondayStr, sundaySt
 }
 
 /**
- * Catégorie pour chaque entrée réelle : priorité à la catégorie EDT du prévu lié,
- * sinon activité catalogue (réel puis prévu).
+ * @typedef {{ category: string | null, allDay: boolean }} ActualEdtMeta
+ */
+
+/**
+ * Métadonnées EDT pour chaque entrée réelle : catégorie + journée entière du prévu lié.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {object[]} history
  * @param {Map<string, object>} activityById
- * @returns {Promise<Map<string, string>>}
+ * @param {object[]} [plannedEvents]
+ * @returns {Promise<Map<string, ActualEdtMeta>>}
  */
-export async function resolveActualCategoryMap(
+export async function resolveActualMetaMap(
   supabase,
   userId,
   history,
   activityById = new Map(),
+  plannedEvents = [],
 ) {
-  /** @type {Map<string, string>} actualId → category id/name */
+  /** @type {Map<string, ActualEdtMeta>} */
   const map = new Map()
   /** @type {Map<string, string>} actualId → timetable event id */
   const actualToEventId = new Map()
+  const plannedByEventId = new Map(
+    (plannedEvents ?? []).map((e) => [String(e.id), e]),
+  )
+
+  function ensureMeta(actualId) {
+    if (!map.has(actualId)) map.set(actualId, { category: null, allDay: false })
+    return map.get(actualId)
+  }
 
   for (const day of history ?? []) {
     for (const entry of day.entries ?? []) {
       if (entry?.kind !== BATTERY_ENTRY_KINDS.PLANNED || !entry.completed_actual_id) continue
       const actualId = String(entry.completed_actual_id)
+      const meta = ensureMeta(actualId)
+
+      if (entry.duration_all_day) meta.allDay = true
 
       const plannedActivity = entry.activity_id ? activityById.get(entry.activity_id) : null
-      if (plannedActivity?.category_id) {
-        map.set(actualId, plannedActivity.category_id)
+      if (plannedActivity?.category_id && !meta.category) {
+        meta.category = plannedActivity.category_id
       }
 
       if (
         entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE &&
         entry.source_id
       ) {
-        actualToEventId.set(actualId, String(entry.source_id))
+        const eventId = String(entry.source_id)
+        actualToEventId.set(actualId, eventId)
+        const plannedEvt = plannedByEventId.get(eventId)
+        if (plannedEvt?.all_day) meta.allDay = true
+        if (plannedEvt?.category) meta.category = plannedEvt.category
       }
     }
   }
@@ -126,36 +148,94 @@ export async function resolveActualCategoryMap(
   if (eventIds.length) {
     const { data, error } = await supabase
       .from('timetable_events')
-      .select('id, category')
+      .select('id, category, all_day')
       .eq('user_id', userId)
       .in('id', eventIds)
 
     if (error) {
-      console.warn('resolveActualCategoryMap:', error)
+      console.warn('resolveActualMetaMap:', error)
     } else {
-      const eventCategory = new Map(
-        (data ?? []).map((row) => [String(row.id), row.category || null]),
-      )
-      for (const [actualId, eventId] of actualToEventId) {
-        const category = eventCategory.get(eventId)
-        if (category) map.set(actualId, category)
+      for (const row of data ?? []) {
+        for (const [actualId, eventId] of actualToEventId) {
+          if (eventId !== String(row.id)) continue
+          const meta = ensureMeta(actualId)
+          if (row.category) meta.category = row.category
+          if (row.all_day) meta.allDay = true
+        }
       }
+    }
+  }
+
+  // Repli : activité réelle sans lien → catégorie catalogue
+  for (const day of history ?? []) {
+    const dayIso = String(day.day_date || '').slice(0, 10)
+    for (const entry of day.entries ?? []) {
+      if (entry?.kind !== BATTERY_ENTRY_KINDS.ACTUAL || !entry.id) continue
+      const actualId = String(entry.id)
+      const meta = ensureMeta(actualId)
+      if (!meta.category) {
+        const activity = entry.activity_id ? activityById.get(entry.activity_id) : null
+        if (activity?.category_id) meta.category = activity.category_id
+      }
+      if (!meta.category || !meta.allDay) {
+        const title = String(entry.label || '').trim().toLowerCase()
+        if (!title || !dayIso) continue
+        for (const evt of plannedEvents ?? []) {
+          if (!evt?.all_day) continue
+          if (String(evt.title || '').trim().toLowerCase() !== title) continue
+          if (!eventCoversDay(evt, dayIso)) continue
+          if (!meta.category && evt.category) meta.category = evt.category
+          meta.allDay = true
+          break
+        }
+      }
+      if (entry.duration_all_day) meta.allDay = true
     }
   }
 
   return map
 }
 
+/** @deprecated Utiliser resolveActualMetaMap */
+export async function resolveActualCategoryMap(
+  supabase,
+  userId,
+  history,
+  activityById = new Map(),
+) {
+  const meta = await resolveActualMetaMap(supabase, userId, history, activityById, [])
+  /** @type {Map<string, string>} */
+  const map = new Map()
+  for (const [id, value] of meta) {
+    if (value?.category) map.set(id, value.category)
+  }
+  return map
+}
+
+/**
+ * @param {object} event
+ * @param {string} dayIso
+ */
+function eventCoversDay(event, dayIso) {
+  const targetTime = new Date(`${dayIso}T00:00:00`).getTime()
+  const startStr = event?.date_start
+  if (!startStr) return false
+  const startTime = new Date(`${startStr}T00:00:00`).getTime()
+  const endStr = event.date_end || event.date_start
+  const endTime = new Date(`${endStr}T23:59:59`).getTime()
+  return targetTime >= startTime && targetTime <= endTime
+}
+
 /**
  * Transforme les entrées Batterie « actual » en événements grille.
  * @param {object[]} history
  * @param {Map<string, object>} activityById
- * @param {Map<string, string>} [categoryByActualId]
+ * @param {Map<string, ActualEdtMeta|string>} [actualMetaById]
  */
 export function buildActualWeekEvents(
   history,
   activityById = new Map(),
-  categoryByActualId = new Map(),
+  actualMetaById = new Map(),
 ) {
   /** @type {object[]} */
   const events = []
@@ -166,8 +246,8 @@ export function buildActualWeekEvents(
 
     for (const entry of day.entries ?? []) {
       if (entry?.kind !== BATTERY_ENTRY_KINDS.ACTUAL) continue
-      const event = batteryEntryToWeekEvent(entry, dayIso, activityById, categoryByActualId)
-      if (event) events.push(event)
+      const built = batteryEntryToWeekEvents(entry, dayIso, activityById, actualMetaById)
+      events.push(...built)
     }
   }
 
@@ -175,42 +255,60 @@ export function buildActualWeekEvents(
 }
 
 /**
+ * @param {Map<string, ActualEdtMeta|string>} actualMetaById
+ * @param {string | null | undefined} entryId
+ * @returns {ActualEdtMeta}
+ */
+function metaForActual(actualMetaById, entryId) {
+  if (!entryId) return { category: null, allDay: false }
+  const raw = actualMetaById.get(String(entryId))
+  if (!raw) return { category: null, allDay: false }
+  if (typeof raw === 'string') return { category: raw, allDay: false }
+  return {
+    category: raw.category || null,
+    allDay: Boolean(raw.allDay),
+  }
+}
+
+/**
  * EDT réel :
  * - créneau horaire → bloc daté (horaires réellement faits)
- * - journée entière sans horaire → bande « Journée » (catégorie / priorité conservées)
- * - sans horaire et sans journée entière → null
+ * - journée entière (prévu / EDT / flag) → bande « Journée » avec catégorie
+ * - les deux peuvent coexister (horaires réels + journée entière prévue)
  * @param {object} entry
  * @param {string} dayIso
  * @param {Map<string, object>} activityById
- * @param {Map<string, string>} [categoryByActualId]
+ * @param {Map<string, ActualEdtMeta|string>} [actualMetaById]
+ * @returns {object[]}
  */
-export function batteryEntryToWeekEvent(
+export function batteryEntryToWeekEvents(
   entry,
   dayIso,
   activityById = new Map(),
-  categoryByActualId = new Map(),
+  actualMetaById = new Map(),
 ) {
   const title = String(entry?.label || '').trim() || 'Activité'
   const activity = entry?.activity_id ? activityById.get(entry.activity_id) : null
-  const category =
-    (entry?.id && categoryByActualId.get(String(entry.id))) ||
-    activity?.category_id ||
-    null
+  const linked = metaForActual(actualMetaById, entry?.id)
+  const category = linked.category || activity?.category_id || null
   const cost = Number(entry?.cost)
   const costValue = Number.isFinite(cost) ? cost : null
 
   let start = normalizeHhMm(entry?.planned_start)
   let end = normalizeHhMm(entry?.planned_end)
   const duration = normalizeDurationMinutes(entry?.duration_minutes)
-  const isAllDay = Boolean(entry?.duration_all_day)
+  const isAllDay = Boolean(entry?.duration_all_day) || linked.allDay
 
   if (start && !end && duration != null) {
     end = shiftHhMm(start, duration) || ''
   }
 
-  // Horaires réels renseignés → créneau (même si le prévu est journée entière)
+  /** @type {object[]} */
+  const events = []
+
+  // Horaires réels renseignés → créneau (indépendant de la bande journée)
   if (start && end) {
-    return {
+    events.push({
       id: `actual-${entry.id}`,
       title,
       date_start: dayIso,
@@ -224,13 +322,13 @@ export function batteryEntryToWeekEvent(
       _source: 'actual',
       _batteryDay: dayIso,
       _entryId: entry.id,
-    }
+    })
   }
 
-  // Journée entière sans horaire précis → visible en bande journée
+  // Journée entière (prévue / EDT) → bande journée, même si des horaires réels existent
   if (isAllDay) {
-    return {
-      id: `actual-${entry.id}`,
+    events.push({
+      id: start && end ? `actual-${entry.id}-allday` : `actual-${entry.id}`,
       title,
       date_start: dayIso,
       date_end: dayIso,
@@ -243,10 +341,27 @@ export function batteryEntryToWeekEvent(
       _source: 'actual',
       _batteryDay: dayIso,
       _entryId: entry.id,
-    }
+    })
   }
 
-  return null
+  return events
+}
+
+/**
+ * Compat : premier événement (créneau prioritaire, sinon journée entière).
+ * @param {object} entry
+ * @param {string} dayIso
+ * @param {Map<string, object>} activityById
+ * @param {Map<string, ActualEdtMeta|string>} [actualMetaById]
+ */
+export function batteryEntryToWeekEvent(
+  entry,
+  dayIso,
+  activityById = new Map(),
+  actualMetaById = new Map(),
+) {
+  const events = batteryEntryToWeekEvents(entry, dayIso, activityById, actualMetaById)
+  return events[0] || null
 }
 
 /**
