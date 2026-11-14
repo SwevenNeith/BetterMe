@@ -181,6 +181,7 @@ export async function deleteBatteryEntriesForSources(supabase, userId, sources) 
  *   plannedStart?: string | null,
  *   plannedEnd?: string | null,
  *   priority?: string | null,
+ *   allDay?: boolean,
  * }} input
  */
 export async function syncPlannedEntriesForSource(supabase, userId, input) {
@@ -196,6 +197,7 @@ export async function syncPlannedEntriesForSource(supabase, userId, input) {
   const plannedStart = input.plannedStart || null
   const plannedEnd = input.plannedEnd || null
   const priority = normalizeBatteryPriority(input.priority || BATTERY_DEFAULT_PRIORITY)
+  const allDay = Boolean(input.allDay)
 
   const existing = await listBatteryEntriesForSource(supabase, userId, sourceType, sourceId)
   const existingByDayId = new Map(existing.map((row) => [row.day_id, row]))
@@ -236,6 +238,10 @@ export async function syncPlannedEntriesForSource(supabase, userId, input) {
         schedulePatch.duration_minutes = mins
         schedulePatch.duration_all_day = false
       }
+    } else if (allDay) {
+      schedulePatch.has_duration_override = true
+      schedulePatch.duration_minutes = null
+      schedulePatch.duration_all_day = true
     }
     if (prev) {
       const nextCost = preserveCost ? prev.cost : cost
@@ -408,6 +414,20 @@ export async function syncBatteryFromTimetableEvent(supabase, userId, event, opt
     ? { start: '', end: '' }
     : parseEdtTimeRange(event.time)
 
+  const activityId = event.battery_activity_id || options.activityId || null
+
+  // Aligner la catégorie catalogue Batterie sur celle de l’EDT
+  if (activityId && event.category) {
+    try {
+      const { updateBatteryActivity } = await import('./batteryActivities.js')
+      await updateBatteryActivity(supabase, userId, activityId, {
+        category_id: event.category,
+      })
+    } catch (err) {
+      console.warn('sync catégorie activité depuis EDT:', err)
+    }
+  }
+
   return syncPlannedEntriesForSource(supabase, userId, {
     sourceType: BATTERY_SOURCE_TYPES.TIMETABLE,
     sourceId: event.id,
@@ -415,10 +435,11 @@ export async function syncBatteryFromTimetableEvent(supabase, userId, event, opt
     cost: options.cost,
     dayIsos,
     preserveExistingCost: options.preserveExistingCost,
-    activityId: event.battery_activity_id || options.activityId || null,
+    activityId,
     plannedStart: start || null,
     plannedEnd: end || null,
     priority: event.priority || options.priority || BATTERY_DEFAULT_PRIORITY,
+    allDay: Boolean(event.all_day),
   })
 }
 

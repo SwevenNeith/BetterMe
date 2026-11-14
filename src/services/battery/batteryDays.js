@@ -562,52 +562,34 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
     data = withEntryDefaults(data)
   }
 
-  // Avec créneau → EDT daté. Hobbies sans créneau → rubrique Hobbies (à placer).
-  // Autres catégories sans créneau → Batterie seule.
+  // Avec créneau → EDT daté. Journée entière / Hobbies sans créneau → all_day.
+  // Autres catégories sans créneau ni journée entière → Batterie seule.
+  // Seul le prévu synchronise l’EDT de base (le réel ne doit pas fausser le prévu).
   const hasTimedSlot = Boolean(plannedStart && plannedEnd)
+  const isAllDayDuration = Boolean(durationFields?.duration_all_day)
   const hobbyPool =
-    !hasTimedSlot && isHobbiesCategory(category, categories)
+    !hasTimedSlot &&
+    kind === BATTERY_ENTRY_KINDS.PLANNED &&
+    isHobbiesCategory(category, categories)
   const syncToEdt =
     kind === BATTERY_ENTRY_KINDS.PLANNED &&
     payload.sync_to_edt !== false &&
     !payload.source_type &&
     !payload.implied_by_entry_id &&
-    (hasTimedSlot || hobbyPool)
+    (hasTimedSlot || hobbyPool || isAllDayDuration)
 
-  let parentEventId = null
   if (syncToEdt) {
     try {
-      const { event, categories: nextCats } = await createEdtEventForBatteryPlan(
-        supabase,
-        userId,
-        {
-          title: label,
-          dayIso,
-          categoryId: activity?.category_id || category?.id || null,
-          categoryName: category?.name || null,
-          plannedStart,
-          plannedEnd,
-          allDay: hobbyPool,
-          batteryActivityId: activity?.id || null,
-          priority,
-        },
+      data = await linkBatteryEntryToNewEdtEvent(supabase, userId, data, {
+        dayIso,
+        plannedStart,
+        plannedEnd,
+        allDay: !hasTimedSlot && (hobbyPool || isAllDayDuration),
+        categoryId: activity?.category_id || category?.id || null,
+        categoryName: category?.name || null,
+        batteryActivityId: activity?.id || null,
         categories,
-      )
-      categories = nextCats
-      parentEventId = event?.id || null
-      if (parentEventId) {
-        const { data: linked, error: linkError } = await supabase
-          .from(ENTRIES_TABLE)
-          .update({
-            source_type: BATTERY_SOURCE_TYPES.TIMETABLE,
-            source_id: parentEventId,
-          })
-          .eq('id', data.id)
-          .eq('user_id', userId)
-          .select(ENTRY_COLUMNS)
-          .single()
-        if (!linkError && linked) data = withEntryDefaults(linked)
-      }
+      })
     } catch (edtErr) {
       console.error('createEdtEventForBatteryPlan:', edtErr)
     }
@@ -625,6 +607,173 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
     await refreshBatteryPlanningReminder(userId)
   }
   return result
+}
+
+/**
+ * Crée un événement EDT et le lie à l’entrée Batterie.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {object} entry
+ * @param {{
+ *   dayIso: string,
+ *   plannedStart?: string | null,
+ *   plannedEnd?: string | null,
+ *   allDay?: boolean,
+ *   categoryId?: string | null,
+ *   categoryName?: string | null,
+ *   batteryActivityId?: string | null,
+ *   categories?: object[],
+ * }} opts
+ */
+async function linkBatteryEntryToNewEdtEvent(supabase, userId, entry, opts) {
+  const { event, categories: nextCats } = await createEdtEventForBatteryPlan(
+    supabase,
+    userId,
+    {
+      title: entry.label,
+      dayIso: opts.dayIso,
+      categoryId: opts.categoryId || null,
+      categoryName: opts.categoryName || null,
+      plannedStart: opts.plannedStart || null,
+      plannedEnd: opts.plannedEnd || null,
+      allDay: Boolean(opts.allDay),
+      batteryActivityId: opts.batteryActivityId || entry.activity_id || null,
+      priority: entry.priority || null,
+    },
+    opts.categories || [],
+  )
+  void nextCats
+  const eventId = event?.id || null
+  if (!eventId) return withEntryDefaults(entry)
+
+  const { data: linked, error: linkError } = await supabase
+    .from(ENTRIES_TABLE)
+    .update({
+      source_type: BATTERY_SOURCE_TYPES.TIMETABLE,
+      source_id: eventId,
+    })
+    .eq('id', entry.id)
+    .eq('user_id', userId)
+    .select(ENTRY_COLUMNS)
+    .single()
+
+  if (linkError) throw linkError
+  return withEntryDefaults(linked)
+}
+
+/**
+ * Après update d’une entrée prévue : crée ou met à jour l’EDT de base.
+ * Le réel n’est jamais synchronisé ici (évite de fausser le prévu).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {object} entry
+ * @param {object} patch
+ */
+async function syncBatteryEntryEdtOnUpdate(supabase, userId, entry, patch) {
+  if (entry.kind !== BATTERY_ENTRY_KINDS.PLANNED) return entry
+
+  const timesTouched = 'planned_start' in patch || 'planned_end' in patch
+  const durationTouched =
+    patch.durationChoice != null ||
+    'duration_all_day' in patch ||
+    'duration_minutes' in patch ||
+    'has_duration_override' in patch
+  const s = normalizeHhMm(entry.planned_start)
+  const e = normalizeHhMm(entry.planned_end)
+  const hasTimedSlot = Boolean(s && e)
+  const isAllDayDuration = Boolean(entry.duration_all_day)
+
+  const dayRow = await supabase
+    .from(DAYS_TABLE)
+    .select('day_date')
+    .eq('id', entry.day_id)
+    .maybeSingle()
+  if (dayRow.error) throw dayRow.error
+  const dayIso = String(dayRow.data?.day_date || '').slice(0, 10)
+  if (!dayIso) return entry
+
+  let categories = await loadUserCategories(supabase, userId)
+  let category = null
+  let activity = null
+  if (entry.activity_id) {
+    activity = await getBatteryActivity(supabase, userId, entry.activity_id)
+    if (activity?.category_id) {
+      const resolved = await resolveActivityCategory(
+        supabase,
+        userId,
+        activity.category_id,
+        categories,
+      )
+      category = resolved.category
+      categories = resolved.categories
+    }
+  }
+
+  const eventId =
+    entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && entry.source_id
+      ? entry.source_id
+      : null
+
+  const linkOpts = {
+    dayIso,
+    plannedStart: s,
+    plannedEnd: e,
+    categoryId: activity?.category_id || category?.id || null,
+    categoryName: category?.name || null,
+    batteryActivityId: activity?.id || null,
+    categories,
+  }
+
+  // Créneau complet sans événement EDT → créer un EDT daté
+  if (timesTouched && hasTimedSlot && !eventId) {
+    return linkBatteryEntryToNewEdtEvent(supabase, userId, entry, {
+      ...linkOpts,
+      allDay: false,
+    })
+  }
+
+  // Journée entière (ou Hobbies à placer) sans EDT → créer un all_day
+  if (
+    !eventId &&
+    !hasTimedSlot &&
+    (isAllDayDuration || isHobbiesCategory(category, categories)) &&
+    (timesTouched || durationTouched || 'label' in patch || 'priority' in patch)
+  ) {
+    return linkBatteryEntryToNewEdtEvent(supabase, userId, entry, {
+      ...linkOpts,
+      allDay: true,
+    })
+  }
+
+  if (!eventId) return entry
+
+  const edtPatch = {}
+  if ('label' in patch) edtPatch.title = entry.label
+  if ('priority' in patch) edtPatch.priority = entry.priority
+
+  if (timesTouched || durationTouched) {
+    if (hasTimedSlot) {
+      // Horaires explicites sur le prévu → créneau daté (pas journée entière)
+      edtPatch.all_day = false
+      edtPatch.time = `${s} - ${e}`
+      edtPatch.date_start = dayIso
+    } else if (!s && !e) {
+      // Sans créneau : conserver / forcer journée entière (ne jamais supprimer l’EDT)
+      edtPatch.all_day = true
+      edtPatch.time = null
+      edtPatch.date_start = dayIso
+    }
+  }
+
+  if (Object.keys(edtPatch).length) {
+    await supabase
+      .from('timetable_events')
+      .update(edtPatch)
+      .eq('id', eventId)
+      .eq('user_id', userId)
+  }
+
+  return entry
 }
 
 /**
@@ -734,76 +883,36 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
     'duration_all_day' in patch ||
     Boolean(payload.duration_minutes != null && ('planned_start' in patch || 'planned_end' in patch))
 
-  if (durationPatched) {
+  // Ne pas répercuter sur le prévu une durée dérivée des horaires du réel
+  // (sinon modifier le réel fausse le prévu).
+  const skipLinkedDurationFromActualTimes =
+    normalized.kind === BATTERY_ENTRY_KINDS.ACTUAL &&
+    ('planned_start' in patch || 'planned_end' in patch) &&
+    patch.durationChoice == null &&
+    !('duration_minutes' in patch) &&
+    !('duration_all_day' in patch) &&
+    !('has_duration_override' in patch)
+
+  if (durationPatched && !skipLinkedDurationFromActualTimes) {
     await syncLinkedEntryDuration(supabase, userId, normalized)
   }
 
-  // Aligner l’événement EDT lié (horaires / titre / priorité)
+  // Aligner / créer l’événement EDT de base — prévu uniquement (le réel reste indépendant)
   if (
     normalized.kind === BATTERY_ENTRY_KINDS.PLANNED &&
-    normalized.source_type === BATTERY_SOURCE_TYPES.TIMETABLE &&
-    normalized.source_id &&
+    !normalized.implied_by_entry_id &&
     ('planned_start' in patch ||
       'planned_end' in patch ||
       'label' in patch ||
-      'priority' in patch)
+      'priority' in patch ||
+      patch.durationChoice != null ||
+      'duration_all_day' in patch ||
+      'duration_minutes' in patch ||
+      'has_duration_override' in patch)
   ) {
     try {
-      const edtPatch = {}
-      if ('label' in patch) edtPatch.title = normalized.label
-      if ('priority' in patch) edtPatch.priority = normalized.priority
-      if ('planned_start' in patch || 'planned_end' in patch) {
-        const s = normalizeHhMm(normalized.planned_start)
-        const e = normalizeHhMm(normalized.planned_end)
-        if (s && e) {
-          edtPatch.all_day = false
-          edtPatch.time = `${s} - ${e}`
-        } else if (!s && !e) {
-          // Sans créneau : Hobbies → pool « à placer » ; sinon retirer l’EDT.
-          let categories = await loadUserCategories(supabase, userId)
-          let category = null
-          if (normalized.activity_id) {
-            const activity = await getBatteryActivity(supabase, userId, normalized.activity_id)
-            if (activity?.category_id) {
-              const resolved = await resolveActivityCategory(
-                supabase,
-                userId,
-                activity.category_id,
-                categories,
-              )
-              category = resolved.category
-              categories = resolved.categories
-            }
-          }
-          if (isHobbiesCategory(category, categories)) {
-            edtPatch.all_day = true
-            edtPatch.time = null
-          } else {
-            await supabase
-              .from('timetable_events')
-              .delete()
-              .eq('id', normalized.source_id)
-              .eq('user_id', userId)
-            const { data: unlinked } = await supabase
-              .from(ENTRIES_TABLE)
-              .update({ source_type: null, source_id: null })
-              .eq('id', normalized.id)
-              .eq('user_id', userId)
-              .select(ENTRY_COLUMNS)
-              .single()
-            if (unlinked) {
-              Object.assign(normalized, withEntryDefaults(unlinked))
-            }
-          }
-        }
-      }
-      if (Object.keys(edtPatch).length) {
-        await supabase
-          .from('timetable_events')
-          .update(edtPatch)
-          .eq('id', normalized.source_id)
-          .eq('user_id', userId)
-      }
+      const synced = await syncBatteryEntryEdtOnUpdate(supabase, userId, normalized, patch)
+      if (synced) Object.assign(normalized, synced)
     } catch (edtErr) {
       console.error('sync EDT depuis updateBatteryEntry:', edtErr)
     }
@@ -1336,8 +1445,8 @@ async function resolveDurationStampForEntry(supabase, userId, entry) {
 
   let edtDuration = null
   if (entry?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && entry?.source_id) {
-    const map = await fetchTimetableDurationMap(supabase, userId, [entry.source_id])
-    edtDuration = map.get(String(entry.source_id)) || null
+    const map = await fetchTimetableMetaMap(supabase, userId, [entry.source_id])
+    edtDuration = map.get(String(entry.source_id))?.duration || null
   }
 
   let catalog = null
@@ -1355,54 +1464,100 @@ async function resolveDurationStampForEntry(supabase, userId, entry) {
 }
 
 /**
+ * Métadonnées EDT liées (durée + catégorie) pour des événements.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {string[]} eventIds
- * @returns {Promise<Map<string, { minutes: number | null, allDay: boolean }>>}
+ * @returns {Promise<Map<string, { duration: { minutes: number | null, allDay: boolean } | null, categoryId: string | null }>>}
  */
-export async function fetchTimetableDurationMap(supabase, userId, eventIds) {
-  /** @type {Map<string, { minutes: number | null, allDay: boolean }>} */
+export async function fetchTimetableMetaMap(supabase, userId, eventIds) {
+  /** @type {Map<string, { duration: { minutes: number | null, allDay: boolean } | null, categoryId: string | null }>} */
   const map = new Map()
   const ids = [...new Set((eventIds ?? []).map(String).filter(Boolean))]
   if (!ids.length) return map
 
   const { data, error } = await supabase
     .from('timetable_events')
-    .select('id, all_day, time')
+    .select('id, all_day, time, category')
     .eq('user_id', userId)
     .in('id', ids)
 
   if (error) {
-    console.warn('fetchTimetableDurationMap:', error)
+    console.warn('fetchTimetableMetaMap:', error)
     return map
   }
 
   for (const event of data ?? []) {
-    const resolved = durationFromTimetableEvent(event)
-    if (resolved) map.set(String(event.id), resolved)
+    map.set(String(event.id), {
+      duration: durationFromTimetableEvent(event),
+      categoryId: event.category || null,
+    })
   }
   return map
 }
 
 /**
- * Enrichit les entrées avec la durée EDT (lecture seule) pour l’affichage.
+ * @deprecated Préférer fetchTimetableMetaMap
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string[]} eventIds
+ * @returns {Promise<Map<string, { minutes: number | null, allDay: boolean }>>}
+ */
+export async function fetchTimetableDurationMap(supabase, userId, eventIds) {
+  const meta = await fetchTimetableMetaMap(supabase, userId, eventIds)
+  /** @type {Map<string, { minutes: number | null, allDay: boolean }>} */
+  const map = new Map()
+  for (const [id, value] of meta) {
+    if (value?.duration) map.set(id, value.duration)
+  }
+  return map
+}
+
+/**
+ * Enrichit les entrées avec durée + catégorie EDT (lecture seule) pour l’affichage.
+ * Le réel lié à un prévu EDT récupère aussi la catégorie via le prévu.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {object[]} entries
  */
 export async function attachEdtDurationsToEntries(supabase, userId, entries) {
   const list = Array.isArray(entries) ? entries : []
-  const timetableIds = list
-    .filter((e) => e?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && e?.source_id)
-    .map((e) => String(e.source_id))
-  const edtMap = await fetchTimetableDurationMap(supabase, userId, timetableIds)
-  return list.map((entry) => ({
-    ...entry,
-    edt_duration:
-      entry?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && entry?.source_id
-        ? edtMap.get(String(entry.source_id)) || null
-        : null,
-  }))
+
+  /** @type {Map<string, string>} actualId → timetable event id */
+  const actualToEventId = new Map()
+  for (const entry of list) {
+    if (
+      entry?.kind === BATTERY_ENTRY_KINDS.PLANNED &&
+      entry.completed_actual_id &&
+      entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE &&
+      entry.source_id
+    ) {
+      actualToEventId.set(String(entry.completed_actual_id), String(entry.source_id))
+    }
+  }
+
+  const timetableIds = [
+    ...list
+      .filter((e) => e?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && e?.source_id)
+      .map((e) => String(e.source_id)),
+    ...actualToEventId.values(),
+  ]
+  const edtMap = await fetchTimetableMetaMap(supabase, userId, timetableIds)
+
+  return list.map((entry) => {
+    let eventId = null
+    if (entry?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && entry?.source_id) {
+      eventId = String(entry.source_id)
+    } else if (entry?.kind === BATTERY_ENTRY_KINDS.ACTUAL && entry?.id) {
+      eventId = actualToEventId.get(String(entry.id)) || null
+    }
+    const meta = eventId ? edtMap.get(eventId) || null : null
+    return {
+      ...entry,
+      edt_duration: meta?.duration || null,
+      edt_category_id: meta?.categoryId || null,
+    }
+  })
 }
 
 /**
