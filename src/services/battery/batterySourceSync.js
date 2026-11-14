@@ -414,6 +414,20 @@ export async function syncBatteryFromTimetableEvent(supabase, userId, event, opt
     ? { start: '', end: '' }
     : parseEdtTimeRange(event.time)
 
+  const activityId = event.battery_activity_id || options.activityId || null
+
+  // Aligner la catégorie catalogue Batterie sur celle de l’EDT
+  if (activityId && event.category) {
+    try {
+      const { updateBatteryActivity } = await import('./batteryActivities.js')
+      await updateBatteryActivity(supabase, userId, activityId, {
+        category_id: event.category,
+      })
+    } catch (err) {
+      console.warn('sync catégorie activité depuis EDT:', err)
+    }
+  }
+
   return syncPlannedEntriesForSource(supabase, userId, {
     sourceType: BATTERY_SOURCE_TYPES.TIMETABLE,
     sourceId: event.id,
@@ -421,7 +435,7 @@ export async function syncBatteryFromTimetableEvent(supabase, userId, event, opt
     cost: options.cost,
     dayIsos,
     preserveExistingCost: options.preserveExistingCost,
-    activityId: event.battery_activity_id || options.activityId || null,
+    activityId,
     plannedStart: start || null,
     plannedEnd: end || null,
     priority: event.priority || options.priority || BATTERY_DEFAULT_PRIORITY,

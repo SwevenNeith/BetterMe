@@ -263,6 +263,7 @@ function openEntryEdit(entry) {
     : null
   editCategoryName.value =
     categoryNameFromId(activity?.category_id) ||
+    categoryNameFromId(entry.edt_category_id) ||
     categoryNameFromId(entry.category_id) ||
     ''
   const start = entry.planned_start ? String(entry.planned_start).slice(0, 5) : ''
@@ -367,6 +368,19 @@ async function saveEntryEdit() {
       })
     }
 
+    // Entrée issue de l’EDT : aligner aussi la catégorie de l’événement
+    if (
+      entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE &&
+      entry.source_id &&
+      category?.id
+    ) {
+      await supabase
+        .from('timetable_events')
+        .update({ category: category.id })
+        .eq('id', entry.source_id)
+        .eq('user_id', userId.value)
+    }
+
     /** @type {Record<string, unknown>} */
     const patch = {
       label,
@@ -392,8 +406,11 @@ async function saveEntryEdit() {
     day.value = result.day
     await setEntriesWithEdt(result.entries)
     await loadActivities()
-    // Seul le prévu synchronise l’EDT de base
-    if (entry.kind === BATTERY_ENTRY_KINDS.PLANNED) {
+    // Prévu ou entrée liée EDT : invalider le cache emploi du temps
+    if (
+      entry.kind === BATTERY_ENTRY_KINDS.PLANNED ||
+      entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE
+    ) {
       useTimetableCacheStore().$patch({ isValid: false })
     }
     statusMessage.value = 'Activité mise à jour'

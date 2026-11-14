@@ -1445,8 +1445,8 @@ async function resolveDurationStampForEntry(supabase, userId, entry) {
 
   let edtDuration = null
   if (entry?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && entry?.source_id) {
-    const map = await fetchTimetableDurationMap(supabase, userId, [entry.source_id])
-    edtDuration = map.get(String(entry.source_id)) || null
+    const map = await fetchTimetableMetaMap(supabase, userId, [entry.source_id])
+    edtDuration = map.get(String(entry.source_id))?.duration || null
   }
 
   let catalog = null
@@ -1464,54 +1464,100 @@ async function resolveDurationStampForEntry(supabase, userId, entry) {
 }
 
 /**
+ * Métadonnées EDT liées (durée + catégorie) pour des événements.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {string[]} eventIds
- * @returns {Promise<Map<string, { minutes: number | null, allDay: boolean }>>}
+ * @returns {Promise<Map<string, { duration: { minutes: number | null, allDay: boolean } | null, categoryId: string | null }>>}
  */
-export async function fetchTimetableDurationMap(supabase, userId, eventIds) {
-  /** @type {Map<string, { minutes: number | null, allDay: boolean }>} */
+export async function fetchTimetableMetaMap(supabase, userId, eventIds) {
+  /** @type {Map<string, { duration: { minutes: number | null, allDay: boolean } | null, categoryId: string | null }>} */
   const map = new Map()
   const ids = [...new Set((eventIds ?? []).map(String).filter(Boolean))]
   if (!ids.length) return map
 
   const { data, error } = await supabase
     .from('timetable_events')
-    .select('id, all_day, time')
+    .select('id, all_day, time, category')
     .eq('user_id', userId)
     .in('id', ids)
 
   if (error) {
-    console.warn('fetchTimetableDurationMap:', error)
+    console.warn('fetchTimetableMetaMap:', error)
     return map
   }
 
   for (const event of data ?? []) {
-    const resolved = durationFromTimetableEvent(event)
-    if (resolved) map.set(String(event.id), resolved)
+    map.set(String(event.id), {
+      duration: durationFromTimetableEvent(event),
+      categoryId: event.category || null,
+    })
   }
   return map
 }
 
 /**
- * Enrichit les entrées avec la durée EDT (lecture seule) pour l’affichage.
+ * @deprecated Préférer fetchTimetableMetaMap
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {string[]} eventIds
+ * @returns {Promise<Map<string, { minutes: number | null, allDay: boolean }>>}
+ */
+export async function fetchTimetableDurationMap(supabase, userId, eventIds) {
+  const meta = await fetchTimetableMetaMap(supabase, userId, eventIds)
+  /** @type {Map<string, { minutes: number | null, allDay: boolean }>} */
+  const map = new Map()
+  for (const [id, value] of meta) {
+    if (value?.duration) map.set(id, value.duration)
+  }
+  return map
+}
+
+/**
+ * Enrichit les entrées avec durée + catégorie EDT (lecture seule) pour l’affichage.
+ * Le réel lié à un prévu EDT récupère aussi la catégorie via le prévu.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {object[]} entries
  */
 export async function attachEdtDurationsToEntries(supabase, userId, entries) {
   const list = Array.isArray(entries) ? entries : []
-  const timetableIds = list
-    .filter((e) => e?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && e?.source_id)
-    .map((e) => String(e.source_id))
-  const edtMap = await fetchTimetableDurationMap(supabase, userId, timetableIds)
-  return list.map((entry) => ({
-    ...entry,
-    edt_duration:
-      entry?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && entry?.source_id
-        ? edtMap.get(String(entry.source_id)) || null
-        : null,
-  }))
+
+  /** @type {Map<string, string>} actualId → timetable event id */
+  const actualToEventId = new Map()
+  for (const entry of list) {
+    if (
+      entry?.kind === BATTERY_ENTRY_KINDS.PLANNED &&
+      entry.completed_actual_id &&
+      entry.source_type === BATTERY_SOURCE_TYPES.TIMETABLE &&
+      entry.source_id
+    ) {
+      actualToEventId.set(String(entry.completed_actual_id), String(entry.source_id))
+    }
+  }
+
+  const timetableIds = [
+    ...list
+      .filter((e) => e?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && e?.source_id)
+      .map((e) => String(e.source_id)),
+    ...actualToEventId.values(),
+  ]
+  const edtMap = await fetchTimetableMetaMap(supabase, userId, timetableIds)
+
+  return list.map((entry) => {
+    let eventId = null
+    if (entry?.source_type === BATTERY_SOURCE_TYPES.TIMETABLE && entry?.source_id) {
+      eventId = String(entry.source_id)
+    } else if (entry?.kind === BATTERY_ENTRY_KINDS.ACTUAL && entry?.id) {
+      eventId = actualToEventId.get(String(entry.id)) || null
+    }
+    const meta = eventId ? edtMap.get(eventId) || null : null
+    return {
+      ...entry,
+      edt_duration: meta?.duration || null,
+      edt_category_id: meta?.categoryId || null,
+    }
+  })
 }
 
 /**
