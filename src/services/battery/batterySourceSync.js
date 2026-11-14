@@ -181,6 +181,7 @@ export async function deleteBatteryEntriesForSources(supabase, userId, sources) 
  *   plannedStart?: string | null,
  *   plannedEnd?: string | null,
  *   priority?: string | null,
+ *   allDay?: boolean,
  * }} input
  */
 export async function syncPlannedEntriesForSource(supabase, userId, input) {
@@ -196,6 +197,7 @@ export async function syncPlannedEntriesForSource(supabase, userId, input) {
   const plannedStart = input.plannedStart || null
   const plannedEnd = input.plannedEnd || null
   const priority = normalizeBatteryPriority(input.priority || BATTERY_DEFAULT_PRIORITY)
+  const allDay = Boolean(input.allDay)
 
   const existing = await listBatteryEntriesForSource(supabase, userId, sourceType, sourceId)
   const existingByDayId = new Map(existing.map((row) => [row.day_id, row]))
@@ -236,6 +238,10 @@ export async function syncPlannedEntriesForSource(supabase, userId, input) {
         schedulePatch.duration_minutes = mins
         schedulePatch.duration_all_day = false
       }
+    } else if (allDay) {
+      schedulePatch.has_duration_override = true
+      schedulePatch.duration_minutes = null
+      schedulePatch.duration_all_day = true
     }
     if (prev) {
       const nextCost = preserveCost ? prev.cost : cost
@@ -419,6 +425,7 @@ export async function syncBatteryFromTimetableEvent(supabase, userId, event, opt
     plannedStart: start || null,
     plannedEnd: end || null,
     priority: event.priority || options.priority || BATTERY_DEFAULT_PRIORITY,
+    allDay: Boolean(event.all_day),
   })
 }
 

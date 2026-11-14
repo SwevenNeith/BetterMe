@@ -562,10 +562,11 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
     data = withEntryDefaults(data)
   }
 
-  // Avec créneau → EDT daté. Hobbies sans créneau → rubrique Hobbies (à placer).
-  // Autres catégories sans créneau → Batterie seule.
+  // Avec créneau → EDT daté. Journée entière / Hobbies sans créneau → all_day.
+  // Autres catégories sans créneau ni journée entière → Batterie seule.
   // Seul le prévu synchronise l’EDT de base (le réel ne doit pas fausser le prévu).
   const hasTimedSlot = Boolean(plannedStart && plannedEnd)
+  const isAllDayDuration = Boolean(durationFields?.duration_all_day)
   const hobbyPool =
     !hasTimedSlot &&
     kind === BATTERY_ENTRY_KINDS.PLANNED &&
@@ -575,7 +576,7 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
     payload.sync_to_edt !== false &&
     !payload.source_type &&
     !payload.implied_by_entry_id &&
-    (hasTimedSlot || hobbyPool)
+    (hasTimedSlot || hobbyPool || isAllDayDuration)
 
   if (syncToEdt) {
     try {
@@ -583,7 +584,7 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
         dayIso,
         plannedStart,
         plannedEnd,
-        allDay: hobbyPool,
+        allDay: !hasTimedSlot && (hobbyPool || isAllDayDuration),
         categoryId: activity?.category_id || category?.id || null,
         categoryName: category?.name || null,
         batteryActivityId: activity?.id || null,
@@ -672,9 +673,15 @@ async function syncBatteryEntryEdtOnUpdate(supabase, userId, entry, patch) {
   if (entry.kind !== BATTERY_ENTRY_KINDS.PLANNED) return entry
 
   const timesTouched = 'planned_start' in patch || 'planned_end' in patch
+  const durationTouched =
+    patch.durationChoice != null ||
+    'duration_all_day' in patch ||
+    'duration_minutes' in patch ||
+    'has_duration_override' in patch
   const s = normalizeHhMm(entry.planned_start)
   const e = normalizeHhMm(entry.planned_end)
   const hasTimedSlot = Boolean(s && e)
+  const isAllDayDuration = Boolean(entry.duration_all_day)
 
   const dayRow = await supabase
     .from(DAYS_TABLE)
@@ -707,17 +714,34 @@ async function syncBatteryEntryEdtOnUpdate(supabase, userId, entry, patch) {
       ? entry.source_id
       : null
 
-  // Créneau complet sans événement EDT → en créer un (prévu uniquement)
+  const linkOpts = {
+    dayIso,
+    plannedStart: s,
+    plannedEnd: e,
+    categoryId: activity?.category_id || category?.id || null,
+    categoryName: category?.name || null,
+    batteryActivityId: activity?.id || null,
+    categories,
+  }
+
+  // Créneau complet sans événement EDT → créer un EDT daté
   if (timesTouched && hasTimedSlot && !eventId) {
     return linkBatteryEntryToNewEdtEvent(supabase, userId, entry, {
-      dayIso,
-      plannedStart: s,
-      plannedEnd: e,
+      ...linkOpts,
       allDay: false,
-      categoryId: activity?.category_id || category?.id || null,
-      categoryName: category?.name || null,
-      batteryActivityId: activity?.id || null,
-      categories,
+    })
+  }
+
+  // Journée entière (ou Hobbies à placer) sans EDT → créer un all_day
+  if (
+    !eventId &&
+    !hasTimedSlot &&
+    (isAllDayDuration || isHobbiesCategory(category, categories)) &&
+    (timesTouched || durationTouched || 'label' in patch || 'priority' in patch)
+  ) {
+    return linkBatteryEntryToNewEdtEvent(supabase, userId, entry, {
+      ...linkOpts,
+      allDay: true,
     })
   }
 
@@ -726,32 +750,18 @@ async function syncBatteryEntryEdtOnUpdate(supabase, userId, entry, patch) {
   const edtPatch = {}
   if ('label' in patch) edtPatch.title = entry.label
   if ('priority' in patch) edtPatch.priority = entry.priority
-  if (timesTouched) {
+
+  if (timesTouched || durationTouched) {
     if (hasTimedSlot) {
+      // Horaires explicites sur le prévu → créneau daté (pas journée entière)
       edtPatch.all_day = false
       edtPatch.time = `${s} - ${e}`
       edtPatch.date_start = dayIso
     } else if (!s && !e) {
-      // Sans créneau : Hobbies → pool « à placer » ; sinon retirer l’EDT.
-      if (isHobbiesCategory(category, categories)) {
-        edtPatch.all_day = true
-        edtPatch.time = null
-      } else {
-        await supabase
-          .from('timetable_events')
-          .delete()
-          .eq('id', eventId)
-          .eq('user_id', userId)
-        const { data: unlinked } = await supabase
-          .from(ENTRIES_TABLE)
-          .update({ source_type: null, source_id: null })
-          .eq('id', entry.id)
-          .eq('user_id', userId)
-          .select(ENTRY_COLUMNS)
-          .single()
-        if (unlinked) return withEntryDefaults(unlinked)
-        return entry
-      }
+      // Sans créneau : conserver / forcer journée entière (ne jamais supprimer l’EDT)
+      edtPatch.all_day = true
+      edtPatch.time = null
+      edtPatch.date_start = dayIso
     }
   }
 
@@ -894,7 +904,11 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
     ('planned_start' in patch ||
       'planned_end' in patch ||
       'label' in patch ||
-      'priority' in patch)
+      'priority' in patch ||
+      patch.durationChoice != null ||
+      'duration_all_day' in patch ||
+      'duration_minutes' in patch ||
+      'has_duration_override' in patch)
   ) {
     try {
       const synced = await syncBatteryEntryEdtOnUpdate(supabase, userId, normalized, patch)

@@ -52,7 +52,7 @@ describe('batteryEntryToWeekEvent', () => {
     assert.equal(event.cost, 2)
   })
 
-  it('ignore les activités sans horaire', () => {
+  it('affiche la journée entière sans horaire sur l’EDT réel', () => {
     const event = batteryEntryToWeekEvent(
       {
         id: 'a2',
@@ -60,6 +60,24 @@ describe('batteryEntryToWeekEvent', () => {
         planned_start: null,
         planned_end: null,
         duration_all_day: true,
+        cost: 1,
+        priority: 'p2',
+      },
+      '2026-03-10',
+    )
+    assert.equal(event.all_day, true)
+    assert.equal(event.time, null)
+    assert.equal(event.priority, 'p2')
+  })
+
+  it('ignore les activités sans horaire ni journée entière', () => {
+    const event = batteryEntryToWeekEvent(
+      {
+        id: 'a2b',
+        label: 'Sans créneau',
+        planned_start: null,
+        planned_end: null,
+        duration_all_day: false,
         cost: 1,
       },
       '2026-03-10',

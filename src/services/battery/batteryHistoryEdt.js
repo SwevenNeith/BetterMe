@@ -101,8 +101,10 @@ export function buildActualWeekEvents(history, activityById = new Map()) {
 }
 
 /**
- * EDT réel : uniquement les activités avec un vrai créneau horaire.
- * Sans début/fin → null (pas affiché tant qu’il n’y a pas d’horaires).
+ * EDT réel :
+ * - créneau horaire → bloc daté (horaires réellement faits)
+ * - journée entière sans horaire → bande « Journée » (catégorie / priorité conservées)
+ * - sans horaire et sans journée entière → null
  * @param {object} entry
  * @param {string} dayIso
  * @param {Map<string, object>} activityById
@@ -111,34 +113,57 @@ export function batteryEntryToWeekEvent(entry, dayIso, activityById = new Map())
   const title = String(entry?.label || '').trim() || 'Activité'
   const activity = entry?.activity_id ? activityById.get(entry.activity_id) : null
   const category = activity?.category_id || null
+  const cost = Number(entry?.cost)
+  const costValue = Number.isFinite(cost) ? cost : null
 
   let start = normalizeHhMm(entry?.planned_start)
   let end = normalizeHhMm(entry?.planned_end)
   const duration = normalizeDurationMinutes(entry?.duration_minutes)
+  const isAllDay = Boolean(entry?.duration_all_day)
 
   if (start && !end && duration != null) {
     end = shiftHhMm(start, duration) || ''
   }
 
-  // Pas d’horaires → pas sur l’EDT réel (même si durée / journée entière)
-  if (!start || !end) return null
-
-  const cost = Number(entry?.cost)
-  return {
-    id: `actual-${entry.id}`,
-    title,
-    date_start: dayIso,
-    date_end: dayIso,
-    all_day: false,
-    time: formatEdtTimeRange(start, end),
-    category,
-    detail: '',
-    priority: entry?.priority || null,
-    cost: Number.isFinite(cost) ? cost : null,
-    _source: 'actual',
-    _batteryDay: dayIso,
-    _entryId: entry.id,
+  // Horaires réels renseignés → créneau (même si le prévu est journée entière)
+  if (start && end) {
+    return {
+      id: `actual-${entry.id}`,
+      title,
+      date_start: dayIso,
+      date_end: dayIso,
+      all_day: false,
+      time: formatEdtTimeRange(start, end),
+      category,
+      detail: '',
+      priority: entry?.priority || null,
+      cost: costValue,
+      _source: 'actual',
+      _batteryDay: dayIso,
+      _entryId: entry.id,
+    }
   }
+
+  // Journée entière sans horaire précis → visible en bande journée
+  if (isAllDay) {
+    return {
+      id: `actual-${entry.id}`,
+      title,
+      date_start: dayIso,
+      date_end: dayIso,
+      all_day: true,
+      time: null,
+      category,
+      detail: '',
+      priority: entry?.priority || null,
+      cost: costValue,
+      _source: 'actual',
+      _batteryDay: dayIso,
+      _entryId: entry.id,
+    }
+  }
+
+  return null
 }
 
 /**
