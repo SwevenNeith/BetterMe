@@ -55,7 +55,7 @@ describe('batteryEntryToWeekEvent', () => {
     assert.equal(event.cost, 2)
   })
 
-  it('affiche la journée entière sans horaire sur l’EDT réel', () => {
+  it('n’affiche pas la journée entière sans horaire sur l’EDT réel', () => {
     const event = batteryEntryToWeekEvent(
       {
         id: 'a2',
@@ -68,12 +68,10 @@ describe('batteryEntryToWeekEvent', () => {
       },
       '2026-03-10',
     )
-    assert.equal(event.all_day, true)
-    assert.equal(event.time, null)
-    assert.equal(event.priority, 'p2')
+    assert.equal(event, null)
   })
 
-  it('ignore les activités sans horaire ni journée entière', () => {
+  it('ignore les activités sans horaire (hobbies inclus)', () => {
     const event = batteryEntryToWeekEvent(
       {
         id: 'a2b',
@@ -103,12 +101,14 @@ describe('batteryEntryToWeekEvent', () => {
     assert.equal(event.time, '09:00 - 10:30')
   })
 
-  it('reprend la catégorie EDT liée pour le réel', () => {
+  it('reprend la catégorie EDT liée quand il y a des horaires', () => {
     const categoryByActualId = new Map([['a4', 'cat-travail']])
     const event = batteryEntryToWeekEvent(
       {
         id: 'a4',
         label: 'Léon',
+        planned_start: '10:30',
+        planned_end: '11:30',
         duration_all_day: true,
         cost: 1,
         activity_id: null,
@@ -118,10 +118,11 @@ describe('batteryEntryToWeekEvent', () => {
       categoryByActualId,
     )
     assert.equal(event.category, 'cat-travail')
-    assert.equal(event.all_day, true)
+    assert.equal(event.all_day, false)
+    assert.equal(event.time, '10:30 - 11:30')
   })
 
-  it('garde la bande journée entière avec catégorie même si horaires réels', () => {
+  it('n’ajoute pas de bande journée entière même si le prévu est all-day', () => {
     const meta = new Map([
       ['a5', { category: 'cat-social', allDay: true }],
     ])
@@ -139,11 +140,8 @@ describe('batteryEntryToWeekEvent', () => {
       new Map(),
       meta,
     )
-    assert.equal(events.length, 2)
+    assert.equal(events.length, 1)
     assert.equal(events[0].all_day, false)
     assert.equal(events[0].category, 'cat-social')
-    assert.equal(events[1].all_day, true)
-    assert.equal(events[1].category, 'cat-social')
-    assert.equal(events[1].priority, 'p1')
   })
 })

@@ -271,10 +271,8 @@ function metaForActual(actualMetaById, entryId) {
 }
 
 /**
- * EDT réel :
- * - créneau horaire → bloc daté (horaires réellement faits)
- * - journée entière (prévu / EDT / flag) → bande « Journée » avec catégorie
- * - les deux peuvent coexister (horaires réels + journée entière prévue)
+ * EDT réel : uniquement les activités avec horaires réels.
+ * Sans créneau (journée entière, hobbies sans horaire, etc.) → rien.
  * @param {object} entry
  * @param {string} dayIso
  * @param {Map<string, object>} activityById
@@ -297,18 +295,16 @@ export function batteryEntryToWeekEvents(
   let start = normalizeHhMm(entry?.planned_start)
   let end = normalizeHhMm(entry?.planned_end)
   const duration = normalizeDurationMinutes(entry?.duration_minutes)
-  const isAllDay = Boolean(entry?.duration_all_day) || linked.allDay
 
   if (start && !end && duration != null) {
     end = shiftHhMm(start, duration) || ''
   }
 
-  /** @type {object[]} */
-  const events = []
+  // Pas d’horaires → pas d’affichage sur l’EDT réel (journée entière / hobbies inclus)
+  if (!start || !end) return []
 
-  // Horaires réels renseignés → créneau (indépendant de la bande journée)
-  if (start && end) {
-    events.push({
+  return [
+    {
       id: `actual-${entry.id}`,
       title,
       date_start: dayIso,
@@ -322,29 +318,8 @@ export function batteryEntryToWeekEvents(
       _source: 'actual',
       _batteryDay: dayIso,
       _entryId: entry.id,
-    })
-  }
-
-  // Journée entière (prévue / EDT) → bande journée, même si des horaires réels existent
-  if (isAllDay) {
-    events.push({
-      id: start && end ? `actual-${entry.id}-allday` : `actual-${entry.id}`,
-      title,
-      date_start: dayIso,
-      date_end: dayIso,
-      all_day: true,
-      time: null,
-      category,
-      detail: '',
-      priority: entry?.priority || null,
-      cost: costValue,
-      _source: 'actual',
-      _batteryDay: dayIso,
-      _entryId: entry.id,
-    })
-  }
-
-  return events
+    },
+  ]
 }
 
 /**
