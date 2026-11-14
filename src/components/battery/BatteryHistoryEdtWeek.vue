@@ -89,7 +89,7 @@ const hasAllDayEvents = computed(() => {
 const modeHint = computed(() =>
   edtMode.value === 'planned'
     ? 'Emploi du temps prévu (comme sur la page EDT), y compris les journées entières.'
-    : 'Réel : seules les activités avec horaires apparaissent (journée entière / hobbies sans créneau exclus).',
+    : 'Réel : horaires faits et journées entières ; les hobbies sans créneau n’apparaissent qu’avec un horaire ou « Journée entière ».',
 )
 
 function formatHour(hour) {

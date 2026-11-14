@@ -41,6 +41,7 @@ export async function loadHistoryEdtWeekContext(supabase, userId, weekAnchor) {
     history,
     activityById,
     filteredPlanned,
+    categories,
   )
   const actualEvents = buildActualWeekEvents(history, activityById, actualMetaById)
 
@@ -90,12 +91,14 @@ async function fetchPlannedTimetableEvents(supabase, userId, mondayStr, sundaySt
  */
 
 /**
- * Métadonnées EDT pour chaque entrée réelle : catégorie + journée entière du prévu lié.
+ * Métadonnées EDT pour chaque entrée réelle : catégorie + vraie journée entière liée.
+ * Les hobbies « à placer » (all_day Hobbies sans créneau) ne comptent pas comme journée entière.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {object[]} history
  * @param {Map<string, object>} activityById
  * @param {object[]} [plannedEvents]
+ * @param {object[]} [categories]
  * @returns {Promise<Map<string, ActualEdtMeta>>}
  */
 export async function resolveActualMetaMap(
@@ -104,6 +107,7 @@ export async function resolveActualMetaMap(
   history,
   activityById = new Map(),
   plannedEvents = [],
+  categories = [],
 ) {
   /** @type {Map<string, ActualEdtMeta>} */
   const map = new Map()
@@ -118,12 +122,19 @@ export async function resolveActualMetaMap(
     return map.get(actualId)
   }
 
+  /** true = journée entière réelle (pas un hobby à placer) */
+  function isExplicitAllDayEvent(event) {
+    if (!event?.all_day) return false
+    return !isUnscheduledHobbyEvent(event, categories)
+  }
+
   for (const day of history ?? []) {
     for (const entry of day.entries ?? []) {
       if (entry?.kind !== BATTERY_ENTRY_KINDS.PLANNED || !entry.completed_actual_id) continue
       const actualId = String(entry.completed_actual_id)
       const meta = ensureMeta(actualId)
 
+      // Durée « Journée entière » sur le prévu Batterie
       if (entry.duration_all_day) meta.allDay = true
 
       const plannedActivity = entry.activity_id ? activityById.get(entry.activity_id) : null
@@ -138,8 +149,8 @@ export async function resolveActualMetaMap(
         const eventId = String(entry.source_id)
         actualToEventId.set(actualId, eventId)
         const plannedEvt = plannedByEventId.get(eventId)
-        if (plannedEvt?.all_day) meta.allDay = true
         if (plannedEvt?.category) meta.category = plannedEvt.category
+        if (isExplicitAllDayEvent(plannedEvt)) meta.allDay = true
       }
     }
   }
@@ -160,13 +171,13 @@ export async function resolveActualMetaMap(
           if (eventId !== String(row.id)) continue
           const meta = ensureMeta(actualId)
           if (row.category) meta.category = row.category
-          if (row.all_day) meta.allDay = true
+          if (isExplicitAllDayEvent(row)) meta.allDay = true
         }
       }
     }
   }
 
-  // Repli : activité réelle sans lien → catégorie catalogue
+  // Repli : activité réelle sans lien → catégorie catalogue / journée entière explicite
   for (const day of history ?? []) {
     const dayIso = String(day.day_date || '').slice(0, 10)
     for (const entry of day.entries ?? []) {
@@ -177,11 +188,12 @@ export async function resolveActualMetaMap(
         const activity = entry.activity_id ? activityById.get(entry.activity_id) : null
         if (activity?.category_id) meta.category = activity.category_id
       }
+      if (entry.duration_all_day) meta.allDay = true
       if (!meta.category || !meta.allDay) {
         const title = String(entry.label || '').trim().toLowerCase()
         if (!title || !dayIso) continue
         for (const evt of plannedEvents ?? []) {
-          if (!evt?.all_day) continue
+          if (!isExplicitAllDayEvent(evt)) continue
           if (String(evt.title || '').trim().toLowerCase() !== title) continue
           if (!eventCoversDay(evt, dayIso)) continue
           if (!meta.category && evt.category) meta.category = evt.category
@@ -189,7 +201,6 @@ export async function resolveActualMetaMap(
           break
         }
       }
-      if (entry.duration_all_day) meta.allDay = true
     }
   }
 
@@ -271,8 +282,10 @@ function metaForActual(actualMetaById, entryId) {
 }
 
 /**
- * EDT réel : uniquement les activités avec horaires réels.
- * Sans créneau (journée entière, hobbies sans horaire, etc.) → rien.
+ * EDT réel :
+ * - créneau horaire → bloc daté
+ * - durée « Journée entière » (ou prévu/EDT all-day hors hobbies à placer) → bande journée
+ * - hobby / activité sans horaire et sans journée entière → rien
  * @param {object} entry
  * @param {string} dayIso
  * @param {Map<string, object>} activityById
@@ -295,16 +308,17 @@ export function batteryEntryToWeekEvents(
   let start = normalizeHhMm(entry?.planned_start)
   let end = normalizeHhMm(entry?.planned_end)
   const duration = normalizeDurationMinutes(entry?.duration_minutes)
+  const isAllDay = Boolean(entry?.duration_all_day) || linked.allDay
 
   if (start && !end && duration != null) {
     end = shiftHhMm(start, duration) || ''
   }
 
-  // Pas d’horaires → pas d’affichage sur l’EDT réel (journée entière / hobbies inclus)
-  if (!start || !end) return []
+  /** @type {object[]} */
+  const events = []
 
-  return [
-    {
+  if (start && end) {
+    events.push({
       id: `actual-${entry.id}`,
       title,
       date_start: dayIso,
@@ -318,8 +332,28 @@ export function batteryEntryToWeekEvents(
       _source: 'actual',
       _batteryDay: dayIso,
       _entryId: entry.id,
-    },
-  ]
+    })
+  }
+
+  if (isAllDay) {
+    events.push({
+      id: start && end ? `actual-${entry.id}-allday` : `actual-${entry.id}`,
+      title,
+      date_start: dayIso,
+      date_end: dayIso,
+      all_day: true,
+      time: null,
+      category,
+      detail: '',
+      priority: entry?.priority || null,
+      cost: costValue,
+      _source: 'actual',
+      _batteryDay: dayIso,
+      _entryId: entry.id,
+    })
+  }
+
+  return events
 }
 
 /**
