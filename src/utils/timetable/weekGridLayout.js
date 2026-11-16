@@ -34,9 +34,11 @@ export function parseEventHours(timeRangeStr) {
 
   const start = parseTimeToDecimal(parts[0])
   let end = parseTimeToDecimal(parts[1])
-  if (end <= start) {
-    end = Math.min(start + 1.5, 23.99)
-  }
+  // 00:00 après une heure du soir = minuit (24:00).
+  // 00:15 après 23:00 = lendemain → 24.25 (un seul bloc qui dépasse minuit).
+  if (end === 0 && start > 0) end = 24
+  else if (end < start) end += 24
+  else if (end === start) end = Math.min(start + 1.5, 24)
   return { start, end }
 }
 
@@ -44,8 +46,13 @@ export function parseEventHours(timeRangeStr) {
  * @param {number} decimal
  */
 export function formatDecimalHour(decimal) {
-  const h = Math.floor(decimal)
-  const m = Math.round((decimal - h) * 60) % 60
+  let totalMinutes = Math.round(Number(decimal) * 60)
+  if (!Number.isFinite(totalMinutes)) totalMinutes = 0
+  // Affichage après minuit : 24.25 → 00:15 (pas « 24:15 »).
+  if (totalMinutes >= 24 * 60) totalMinutes -= 24 * 60
+  if (totalMinutes < 0) totalMinutes = 0
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 

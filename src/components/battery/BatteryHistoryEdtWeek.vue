@@ -19,6 +19,7 @@ import {
   categoryColorStyle,
   formatDateToLocalISO,
   getIsoWeekNumber,
+  parseTimeToDecimal,
   positionEventsForDay,
 } from '../../utils/timetable/weekGridLayout.js'
 
@@ -42,6 +43,8 @@ const loadError = ref('')
 const categories = ref([])
 const plannedEvents = ref([])
 const actualEvents = ref([])
+/** @type {import('vue').Ref<Record<string, { id: string, kind: string, label: string, time: string }[]>>} */
+const sleepByDay = ref({})
 const gridViewport = ref(null)
 const mobileGridViewport = ref(null)
 const isReadModalOpen = ref(false)
@@ -139,6 +142,14 @@ function getAllDayForDay(dayIdx) {
 
 function getPositionedForDay(dayIdx) {
   return positionEventsForDay(getTimedForDay(dayIdx), { hourHeight })
+}
+
+function sleepMarkersFor(dayIdx) {
+  return sleepByDay.value[dayIsoAt(dayIdx)] || []
+}
+
+function sleepMarkerStyle(marker) {
+  return { top: `${parseTimeToDecimal(marker.time) * hourHeight}px` }
 }
 
 function scrollToStartingHour() {
@@ -241,6 +252,7 @@ async function loadWeek() {
       userId.value = null
       plannedEvents.value = []
       actualEvents.value = []
+      sleepByDay.value = {}
       return
     }
     userId.value = user.id
@@ -248,11 +260,13 @@ async function loadWeek() {
     categories.value = ctx.categories
     plannedEvents.value = ctx.plannedEvents
     actualEvents.value = ctx.actualEvents
+    sleepByDay.value = ctx.sleepByDay || {}
   } catch (err) {
     console.error(err)
     loadError.value = 'Impossible de charger la semaine EDT.'
     plannedEvents.value = []
     actualEvents.value = []
+    sleepByDay.value = {}
   } finally {
     isLoading.value = false
     await nextTick()
@@ -392,9 +406,20 @@ onMounted(() => {
                   <div v-for="hour in 24" :key="hour" class="grid-hour-line"></div>
                 </div>
                 <div class="grid-events-layer">
+                  <div
+                    v-for="marker in sleepMarkersFor(idx)"
+                    :key="marker.id"
+                    class="sleep-marker"
+                    :class="`sleep-marker--${marker.kind}`"
+                    :style="sleepMarkerStyle(marker)"
+                  >
+                    <span class="sleep-marker__label" :title="`${marker.label} ${marker.time}`">
+                      {{ marker.label }}
+                    </span>
+                  </div>
                   <button
                     v-for="event in getPositionedForDay(idx)"
-                    :key="event.id"
+                    :key="event._gridKey || event.id"
                     type="button"
                     class="event-block"
                     :class="event.isShort ? 'event-block--short' : 'event-block--tall'"
@@ -463,11 +488,13 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="weekly-grid-mobile">
-        <div class="mobile-day-heading">
+      <div class="mobile-day-content">
+        <h3 class="mobile-day-title">
           {{ weekDays[selectedDayIndex].name }}
-          {{ weekDays[selectedDayIndex].dayOfMonth }}
-        </div>
+          <span class="mobile-day-number-highlight">{{
+            weekDays[selectedDayIndex].dayOfMonth
+          }}</span>
+        </h3>
         <div v-if="getAllDayForDay(selectedDayIndex).length" class="mobile-all-day">
           <button
             v-for="event in getAllDayForDay(selectedDayIndex)"
@@ -497,9 +524,20 @@ onMounted(() => {
                   <div v-for="hour in 24" :key="hour" class="grid-hour-line"></div>
                 </div>
                 <div class="grid-events-layer">
+                  <div
+                    v-for="marker in sleepMarkersFor(selectedDayIndex)"
+                    :key="marker.id"
+                    class="sleep-marker"
+                    :class="`sleep-marker--${marker.kind}`"
+                    :style="sleepMarkerStyle(marker)"
+                  >
+                    <span class="sleep-marker__label" :title="`${marker.label} ${marker.time}`">
+                      {{ marker.label }}
+                    </span>
+                  </div>
                   <button
                     v-for="event in getPositionedForDay(selectedDayIndex)"
-                    :key="event.id"
+                    :key="event._gridKey || event.id"
                     type="button"
                     class="event-block event-block--mobile"
                     :class="event.isShort ? 'event-block--short' : 'event-block--tall'"
@@ -809,45 +847,59 @@ onMounted(() => {
 
 .day-tabs {
   display: none;
-  gap: 0.35rem;
-  padding: 0.65rem 0.65rem 0.35rem;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  background: rgba(213, 181, 234, 0.08);
+  padding: 0.4rem;
+  border-radius: 18px;
+  border: 1px solid rgba(213, 181, 234, 0.15);
   overflow-x: auto;
 }
 
 .day-tab {
   flex: 1;
-  min-width: 3.2rem;
+  min-width: 2.6rem;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.15rem;
+  gap: 0.25rem;
+  padding: 0.65rem 0.5rem;
+  border-radius: 14px;
   border: none;
-  border-radius: 12px;
-  padding: 0.45rem 0.3rem;
   background: transparent;
-  cursor: pointer;
   color: #6c757d;
+  cursor: pointer;
   font: inherit;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.day-tab:hover {
+  background: rgba(213, 181, 234, 0.15);
+  color: #ad81be;
 }
 
 .day-tab--active {
-  background: rgba(173, 129, 190, 0.18);
-  color: #5a3d6e;
+  background: linear-gradient(135deg, #d5b5ea, #ad81be) !important;
+  color: white !important;
+  box-shadow: 0 4px 15px rgba(213, 181, 234, 0.35);
+  transform: translateY(-2px);
 }
 
-.day-tab--today .day-tab-number {
-  color: #3d9a6a;
-  font-weight: 800;
+.day-tab--today:not(.day-tab--active) {
+  border: 1.5px solid rgba(149, 209, 170, 0.6);
+  color: #95d1aa;
 }
 
 .day-tab-name {
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-size: 0.72rem;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .day-tab-number {
-  font-size: 1rem;
+  font-size: 1.1rem;
   font-weight: 800;
 }
 
@@ -1015,6 +1067,7 @@ onMounted(() => {
   position: relative;
   height: 100%;
   border-right: 1px solid rgba(213, 181, 234, 0.08);
+  overflow: visible;
 }
 
 .grid-day-column:last-child {
@@ -1040,7 +1093,56 @@ onMounted(() => {
   position: absolute;
   inset: 0;
   height: 100%;
+  overflow: visible;
   pointer-events: none;
+}
+
+.sleep-marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  height: 0;
+  border-top: 2px solid var(--sleep-color);
+  pointer-events: none;
+}
+
+.sleep-marker--bed {
+  --sleep-color: #4c3d8f;
+}
+
+.sleep-marker--wake {
+  --sleep-color: #c2410c;
+}
+
+.sleep-marker--out {
+  --sleep-color: #0f766e;
+}
+
+.sleep-marker__label {
+  position: absolute;
+  top: 2px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  color: var(--sleep-color);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 1px 4px;
+  border-radius: 4px;
+  pointer-events: auto;
+}
+
+.sleep-marker--bed .sleep-marker__label {
+  left: 2px;
+}
+
+.sleep-marker--wake .sleep-marker__label {
+  left: 34%;
+}
+
+.sleep-marker--out .sleep-marker__label {
+  right: 2px;
 }
 
 .event-block {
@@ -1368,39 +1470,113 @@ onMounted(() => {
   border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 
-.weekly-grid-mobile {
+.mobile-day-content {
   display: none;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.mobile-day-heading {
-  padding: 0.55rem 0.85rem 0.25rem;
+.mobile-day-title {
+  font-size: 1.2rem;
   font-weight: 800;
   color: #2c3e50;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1.5px solid rgba(213, 181, 234, 0.2);
+}
+
+.mobile-day-number-highlight {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(213, 181, 234, 0.25);
+  color: #ad81be;
+  padding: 0.15rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
 }
 
 .mobile-all-day {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  padding: 0.35rem 0.65rem;
 }
 
-@media (max-width: 900px) {
+.grid-scroll-viewport.grid-scroll-viewport--mobile {
+  height: min(58vh, 480px);
+  max-height: 480px;
+  overflow-y: auto;
+  position: relative;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(213, 181, 234, 0.2);
+  margin-top: 0.5rem;
+  padding: 0;
+}
+
+.grid-scroll-viewport--mobile .grid-columns-container {
+  grid-template-columns: 1fr;
+}
+
+.event-block--mobile:hover {
+  height: auto;
+  min-height: var(--event-block-height, 0px);
+  width: max(100%, max-content);
+  min-width: 100%;
+  max-width: 90%;
+  transform: translateY(-2px) scale(1.02);
+}
+
+@media (max-width: 1024px) {
   .weekly-grid-desktop {
     display: none;
   }
 
-  .day-tabs,
-  .weekly-grid-mobile {
-    display: block;
+  .mobile-day-content {
+    display: flex;
   }
 
   .day-tabs {
     display: flex;
   }
+}
 
-  .grid-scroll-viewport--mobile {
-    height: min(58vh, 560px);
+@media (max-width: 768px) {
+  .calendar-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.85rem;
+    width: 100%;
+  }
+
+  .navigation-group {
+    width: 100%;
+    justify-content: space-between;
+    box-sizing: border-box;
+    padding: 0.6rem 1rem;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(213, 181, 234, 0.25);
+  }
+
+  .today-btn {
+    width: 100%;
+    text-align: center;
+  }
+
+  .day-tab {
+    padding: 0.5rem 0.3rem;
+  }
+
+  .day-tab-name {
+    font-size: 0.6rem;
+  }
+
+  .day-tab-number {
+    font-size: 0.9rem;
   }
 }
 
@@ -1412,8 +1588,17 @@ onMounted(() => {
 
   .week-badge-title,
   .desktop-day-number,
-  .mobile-day-heading {
+  .mobile-day-title {
     color: #f0e8f8;
+  }
+
+  .day-tab {
+    color: #adb5bd;
+  }
+
+  .grid-scroll-viewport--mobile {
+    background: rgba(25, 20, 35, 0.4);
+    border-color: rgba(213, 181, 234, 0.1);
   }
 
   .mode-hint,
@@ -1424,7 +1609,8 @@ onMounted(() => {
   }
 
   .timetable-card,
-  .nav-arrow {
+  .nav-arrow,
+  .navigation-group {
     background: rgba(35, 30, 48, 0.78);
     border-color: rgba(213, 181, 234, 0.22);
   }
@@ -1435,11 +1621,6 @@ onMounted(() => {
 
   .today-btn {
     background: rgba(173, 129, 190, 0.35);
-    color: #e8d4f0;
-  }
-
-  .day-tab--active {
-    background: rgba(173, 129, 190, 0.22);
     color: #e8d4f0;
   }
 

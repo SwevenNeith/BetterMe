@@ -386,6 +386,7 @@ async function saveEntryEdit() {
       label,
       cost: normalizeBatteryCost(editCost.value),
       priority: editPriority.value,
+      edt_category_id: category?.id || null,
     }
     if (useTimes) {
       patch.planned_start = editStart.value
@@ -1442,7 +1443,7 @@ onUnmounted(() => {
             <p class="entry-plan-hint">
               Horaires facultatifs
               {{ entryKind === BATTERY_ENTRY_KINDS.PLANNED ? ' — avec créneau → EDT' : '' }}.
-              Sans créneau : Hobbies → Mes Hobbies ; sinon Batterie seule.
+              Sans créneau : un hobby du catalogue va dans Mes Hobbies. Un hobby hors catalogue reste sur l’EDT, en catégorie Hobbies.
               <span v-if="computedSlotDurationLabel">
                 Durée : {{ computedSlotDurationLabel }}.
               </span>

@@ -52,9 +52,16 @@ export function eventMatchesHobbiesCategory(event, categories) {
   return String(catRef).toLowerCase() === 'hobbies'
 }
 
-/** Hobby « à placer » : all_day dans la catégorie Hobbies (pas encore de créneau). */
+/**
+ * Hobby du catalogue « à placer » : journée entière, catégorie Hobbies, lié à une activité catalogue.
+ * Un hobby hors catalogue reste sur la grille EDT (prévu et réel), pas dans Mes Hobbies.
+ */
 export function isUnscheduledHobbyEvent(event, categories) {
-  return Boolean(event?.all_day) && eventMatchesHobbiesCategory(event, categories)
+  return (
+    Boolean(event?.all_day) &&
+    Boolean(event?.battery_activity_id) &&
+    eventMatchesHobbiesCategory(event, categories)
+  )
 }
 
 function dedupeHobbyTitles(events) {
@@ -84,35 +91,35 @@ export async function loadUserCategories(supabase, userId) {
 }
 
 /**
- * Titres d'activités hobbies (table timetable_events, category = id Hobbies).
- * Charge tous les événements hobbies de l'utilisateur, pas seulement la semaine affichée.
+ * Hobbies du catalogue encore « à placer » (pas les hobbies saisis hors catalogue).
  */
 export async function loadHobbyEventTitles(supabase, userId, categories) {
   const hobbyCat = findHobbiesCategory(categories)
   const hobbyId = hobbyCat?.id
   const hasRealHobbyId = hobbyId && !String(hobbyId).startsWith('temp-')
+  const columns = 'id, title, category, all_day, battery_activity_id'
+  const legacyColumns = 'id, title, category, all_day'
 
-  if (hasRealHobbyId) {
-    const { data, error } = await supabase
+  const run = (cols, onlyHobby) => {
+    let query = supabase
       .from('timetable_events')
-      .select('id, title, category')
+      .select(cols)
       .eq('user_id', userId)
-      .eq('category', hobbyId)
       .order('title', { ascending: true })
-
-    if (error) throw error
-    return dedupeHobbyTitles(data)
+    if (onlyHobby) query = query.eq('category', hobbyId)
+    return query
   }
 
-  // Secours : parcourir les événements si la catégorie Hobbies n'est pas encore en base
-  const { data, error } = await supabase
-    .from('timetable_events')
-    .select('id, title, category')
-    .eq('user_id', userId)
-    .order('title', { ascending: true })
-
+  let { data, error } = await run(columns, hasRealHobbyId)
+  if (error && String(error.message || '').includes('battery_activity_id')) {
+    ;({ data, error } = await run(legacyColumns, hasRealHobbyId))
+  }
   if (error) throw error
-  return dedupeHobbyTitles((data ?? []).filter((ev) => eventMatchesHobbiesCategory(ev, categories)))
+
+  const rows = hasRealHobbyId
+    ? data ?? []
+    : (data ?? []).filter((ev) => eventMatchesHobbiesCategory(ev, categories))
+  return dedupeHobbyTitles(rows.filter((ev) => isUnscheduledHobbyEvent(ev, categories)))
 }
 
 export async function loadTimetableMeta(supabase, userId) {

@@ -9,11 +9,24 @@ import {
 import {
   batteryEntryToWeekEvent,
   batteryEntryToWeekEvents,
+  bedtimeMarkerDayIso,
+  selectEdtPageEventsForDay,
+  sleepMarkersByDay,
+  sleepMarkersFromDay,
 } from '../../services/battery/batteryHistoryEdt.js'
 
 describe('parseEventHours', () => {
   it('parse une plage HH:MM', () => {
     assert.deepEqual(parseEventHours('09:30 - 11:00'), { start: 9.5, end: 11 })
+  })
+
+  it('lit 23:00–00:00 comme une fin à minuit', () => {
+    assert.deepEqual(parseEventHours('23:00 - 00:00'), { start: 23, end: 24 })
+    assert.deepEqual(parseEventHours('23:00 - 24:00'), { start: 23, end: 24 })
+  })
+
+  it('garde 23:00–00:15 en un seul bloc qui dépasse minuit', () => {
+    assert.deepEqual(parseEventHours('23:00 - 00:15'), { start: 23, end: 24.25 })
   })
 })
 
@@ -139,7 +152,7 @@ describe('batteryEntryToWeekEvent', () => {
     assert.equal(event.all_day, true)
   })
 
-  it('garde la bande journée entière avec catégorie même si horaires réels', () => {
+  it('ne garde pas la bande journée entière si le réel a des horaires', () => {
     const meta = new Map([
       ['a5', { category: 'cat-social', allDay: true }],
     ])
@@ -157,11 +170,179 @@ describe('batteryEntryToWeekEvent', () => {
       new Map(),
       meta,
     )
-    assert.equal(events.length, 2)
+    assert.equal(events.length, 1)
     assert.equal(events[0].all_day, false)
     assert.equal(events[0].category, 'cat-social')
-    assert.equal(events[1].all_day, true)
-    assert.equal(events[1].category, 'cat-social')
-    assert.equal(events[1].priority, 'p1')
+    assert.equal(events[0].priority, 'p1')
+    assert.equal(events[0].time, '10:30 - 11:30')
+  })
+
+  it('prolonge un réel après minuit jusqu’au lendemain', () => {
+    const events = batteryEntryToWeekEvents(
+      {
+        id: 'a6',
+        label: 'Vidéo Worlds',
+        planned_start: '21:00',
+        planned_end: '00:15',
+        duration_all_day: true,
+        cost: 2,
+        priority: 'p3',
+      },
+      '2026-11-15',
+      new Map(),
+      new Map([['a6', { category: 'cat-hobbies', allDay: true }]]),
+    )
+    assert.equal(events.length, 1)
+    assert.equal(events[0].all_day, false)
+    assert.equal(events[0].date_start, '2026-11-15')
+    assert.equal(events[0].date_end, '2026-11-16')
+    assert.equal(events[0].time, '21:00 - 00:15')
+  })
+
+  it('place 00:30–01:30 du jour Batterie 25 sur l’EDT du 26', () => {
+    const events = batteryEntryToWeekEvents(
+      {
+        id: 'a7',
+        label: 'Nuit',
+        planned_start: '00:30',
+        planned_end: '01:30',
+        cost: 1,
+        priority: 'p3',
+      },
+      '2026-11-25',
+      new Map(),
+      new Map(),
+    )
+    assert.equal(events.length, 1)
+    assert.equal(events[0].date_start, '2026-11-26')
+    assert.equal(events[0].date_end, '2026-11-26')
+    assert.equal(events[0].time, '00:30 - 01:30')
+    assert.equal(events[0]._batteryDay, '2026-11-25')
+  })
+})
+
+describe('allDayEventsForDay', () => {
+  it('masque la journée entière si un créneau du même titre existe ce jour-là', async () => {
+    const { allDayEventsForDay } = await import('../../services/battery/batteryHistoryEdt.js')
+    const events = [
+      {
+        id: 'all-1',
+        title: 'Vidéo Worlds',
+        all_day: true,
+        date_start: '2026-11-15',
+        date_end: '2026-11-15',
+      },
+      {
+        id: 'timed-1',
+        title: 'Vidéo Worlds',
+        all_day: false,
+        date_start: '2026-11-15',
+        date_end: '2026-11-16',
+        time: '21:00 - 00:15',
+      },
+    ]
+    assert.equal(allDayEventsForDay(events, '2026-11-15').length, 0)
+  })
+})
+
+describe('sleepMarkersFromDay', () => {
+  it('place couché, réveil et sortie sur le jour, et ignore les horaires vides', () => {
+    const markers = sleepMarkersFromDay({
+      day_date: '2026-11-24',
+      sleep_bedtime: '23:15:00',
+      sleep_wake_time: '07:05',
+      sleep_out_of_bed_time: null,
+    })
+    assert.deepEqual(
+      markers.map((marker) => [marker.kind, marker.label, marker.time]),
+      [
+        ['bed', 'couché', '23:15'],
+        ['wake', 'réveil', '07:05'],
+      ],
+    )
+  })
+
+  it('dessine un coucher à 23h du 25 sur le 24, et garde le réveil le 25', () => {
+    assert.equal(bedtimeMarkerDayIso('2026-11-25', '23:00'), '2026-11-24')
+    assert.equal(bedtimeMarkerDayIso('2026-11-25', '00:40'), '2026-11-25')
+    const byDay = sleepMarkersByDay([
+      {
+        day_date: '2026-11-25',
+        sleep_bedtime: '23:00',
+        sleep_wake_time: '07:10',
+        sleep_out_of_bed_time: '07:30',
+      },
+    ])
+    assert.deepEqual(
+      (byDay['2026-11-24'] || []).map((marker) => [marker.label, marker.time]),
+      [['couché', '23:00']],
+    )
+    assert.deepEqual(
+      (byDay['2026-11-25'] || []).map((marker) => [marker.label, marker.time]),
+      [
+        ['réveil', '07:10'],
+        ['sortie', '07:30'],
+      ],
+    )
+  })
+})
+
+describe('selectEdtPageEventsForDay', () => {
+  const plannedTimed = [{ id: 'plan-1', title: 'Prévu', time: '09:00 - 10:00' }]
+  const plannedAllDay = [
+    { id: 'plan-day', title: 'Journée prévue', all_day: true },
+    { id: 'bday', title: 'Anniversaire', all_day: true, event_kind: 'birthday', _birthdayOccurrence: true },
+  ]
+  const actualEvents = [
+    {
+      id: 'actual-1',
+      title: 'Réel',
+      date_start: '2026-11-24',
+      date_end: '2026-11-24',
+      all_day: false,
+      time: '11:00 - 12:00',
+      _source: 'actual',
+    },
+  ]
+
+  it('garde le prévu pour aujourd’hui et le futur', () => {
+    const today = selectEdtPageEventsForDay({
+      dayIso: '2026-11-25',
+      todayIso: '2026-11-25',
+      plannedTimed,
+      plannedAllDay,
+      actualEvents,
+    })
+    assert.equal(today.locked, false)
+    assert.equal(today.timed[0].id, 'plan-1')
+
+    const future = selectEdtPageEventsForDay({
+      dayIso: '2026-11-26',
+      todayIso: '2026-11-25',
+      plannedTimed,
+      plannedAllDay,
+      actualEvents,
+    })
+    assert.equal(future.locked, false)
+    assert.equal(future.allDay.length, 2)
+  })
+
+  it('remplace le prévu par le réel dès le lendemain, en gardant les anniversaires', () => {
+    const past = selectEdtPageEventsForDay({
+      dayIso: '2026-11-24',
+      todayIso: '2026-11-25',
+      plannedTimed,
+      plannedAllDay,
+      actualEvents,
+    })
+    assert.equal(past.locked, true)
+    assert.deepEqual(
+      past.timed.map((event) => event.title),
+      ['Réel'],
+    )
+    assert.deepEqual(
+      past.allDay.map((event) => event.id),
+      ['bday'],
+    )
   })
 })

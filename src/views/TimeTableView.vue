@@ -1,6 +1,6 @@
 <!-- eslint-disable no-useless-assignment -->
 <script setup>
-import { ref, computed, watch, onMounted, reactive, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, reactive, nextTick } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { useViewLoadGuard } from '../composables/useViewLoadGuard.js'
 import { useTimetableCacheStore } from '../stores/timetableCache.js'
@@ -24,6 +24,11 @@ import {
   isUnscheduledHobbyEvent,
 } from '../services/timetable/timetableCategories.js'
 import { listBatteryActivities } from '../services/battery/batteryActivities.js'
+import {
+  loadActualEdtEventsForRange,
+  selectEdtPageEventsForDay,
+} from '../services/battery/batteryHistoryEdt.js'
+import { sliceEventTimeForDay } from '../utils/battery/batteryTime.js'
 import { createTodoItem, listTodoItems, deleteTodoItem } from '../services/todo/todoItems.js'
 import { loadTodoPromesseLimits } from '../services/todo/todoPromesseSettings.js'
 import { TODO_FREQUENCY } from '../constants/todo/todoOptions.js'
@@ -327,7 +332,7 @@ function closeReadModal() {
 }
 
 function switchToEditMode() {
-  if (!viewingEvent.value) return
+  if (!viewingEvent.value || viewingEvent.value._source === 'actual') return
   const event = viewingEvent.value
   closeReadModal()
   openEventForEditDirect(event)
@@ -437,6 +442,8 @@ const openModalWithDefaultDate = async () => {
 const userEvents = ref([])
 const userCategories = ref([])
 const hobbyQuickPicks = ref([])
+/** EDT réel Batterie, affiché à la place du prévu pour les jours déjà passés. */
+const actualOverlayEvents = ref([])
 const isLoading = ref(true)
 const isMetaLoading = ref(false)
 let timetableLoadGen = 0
@@ -456,6 +463,8 @@ const hobbiesToPlace = computed(() => {
       const start = String(e.date_start || '').slice(0, 10)
       const end = String(e.date_end || e.date_start || '').slice(0, 10)
       if (!start) return false
+      // Jour passé : le prévu est remplacé par le réel, les hobbies à placer disparaissent.
+      if (end < todayIso.value) return false
       return start <= sunday && end >= monday
     })
     .map((e) => ({
@@ -672,6 +681,9 @@ const formatDateToLocalISO = (date) => {
   return `${year}-${month}-${day}`
 }
 
+/** Jour civil local. À minuit, les jours passés de la page EDT passent au réel. */
+const todayIso = ref(formatDateToLocalISO(new Date()))
+
 // Computed properties for date calculations
 const weekNumber = computed(() => getWeekNumber(currentDate.value))
 
@@ -695,7 +707,7 @@ const weekDays = computed(() => {
       date: d,
       dayOfMonth: d.getDate(),
       formatted: d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
-      isToday: d.toDateString() === new Date().toDateString(),
+      isToday: formatDateToLocalISO(d) === todayIso.value,
     })
   }
   return days
@@ -719,6 +731,10 @@ const currentMonthYearString = computed(() => {
   }
   return `${firstMonth} ${firstYear}`
 })
+
+const weekShowsActualDays = computed(() =>
+  (weekDays.value || []).some((day) => formatDateToLocalISO(day.date) < todayIso.value),
+)
 
 // Category Icons Mapper
 const getCategoryIcon = (categoryIdOrName) => {
@@ -865,13 +881,16 @@ const fetchWeekEvents = async (gen) => {
 
     const mondayStr = formatDateToLocalISO(weekDays.value[0].date)
     const sundayStr = formatDateToLocalISO(weekDays.value[6].date)
+    const prev = new Date(weekDays.value[0].date)
+    prev.setDate(prev.getDate() - 1)
+    const prevStr = formatDateToLocalISO(prev)
 
     const weekQuery = supabase
       .from('timetable_events')
       .select('*')
       .eq('user_id', user.id)
       .lte('date_start', sundayStr)
-      .or(`date_start.gte.${mondayStr},date_end.gte.${mondayStr}`)
+      .or(`date_start.gte.${prevStr},date_end.gte.${mondayStr}`)
 
     // Anniversaires : chargés à part (date_start = année de naissance, hors semaine)
     let birthdayQuery = supabase
@@ -926,11 +945,39 @@ function cancelTimetableLoads() {
 
 const timetableCache = useTimetableCacheStore()
 
+async function fetchActualOverlay(gen) {
+  try {
+    const user = await resolveSessionUser()
+    if (!user || !weekDays.value?.length) {
+      if (gen === timetableLoadGen) actualOverlayEvents.value = []
+      return
+    }
+    const mondayStr = formatDateToLocalISO(weekDays.value[0].date)
+    const sundayStr = formatDateToLocalISO(weekDays.value[6].date)
+    if (mondayStr >= todayIso.value) {
+      if (gen === timetableLoadGen) actualOverlayEvents.value = []
+      return
+    }
+    const ctx = await loadActualEdtEventsForRange(supabase, user.id, mondayStr, sundayStr, {
+      categories: userCategories.value,
+      plannedEvents: userEvents.value,
+    })
+    if (gen === timetableLoadGen) {
+      actualOverlayEvents.value = ctx.actualEvents || []
+    }
+  } catch (err) {
+    console.error('EDT réel :', err)
+    if (gen === timetableLoadGen) actualOverlayEvents.value = []
+  }
+}
+
 const fetchEvents = async ({ silent = false } = {}) => {
   const gen = ++timetableLoadGen
   if (!silent) isLoading.value = true
   try {
     await Promise.all([fetchTimetableMeta(gen), fetchWeekEvents(gen)])
+    if (gen !== timetableLoadGen) return
+    await fetchActualOverlay(gen)
     if (gen === timetableLoadGen) {
       timetableCache.publish({
         userEvents: userEvents.value,
@@ -951,11 +998,47 @@ watch(currentDate, () => {
 
 useViewLoadGuard(cancelTimetableLoads)
 
+let midnightTimer = 0
+
+function syncTodayIso() {
+  const next = formatDateToLocalISO(new Date())
+  if (next === todayIso.value) return false
+  todayIso.value = next
+  return true
+}
+
+function scheduleMidnightTick() {
+  window.clearTimeout(midnightTimer)
+  const now = new Date()
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 5, 0)
+  midnightTimer = window.setTimeout(() => {
+    void onCalendarDayRolled()
+  }, Math.max(1000, next.getTime() - now.getTime()))
+}
+
+async function onCalendarDayRolled() {
+  const changed = syncTodayIso()
+  scheduleMidnightTick()
+  if (changed) await fetchEvents({ silent: true })
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState !== 'visible') return
+  if (syncTodayIso()) void fetchEvents({ silent: true })
+}
+
 onMounted(() => {
   const cached = timetableCache.applyToView({ userEvents, userCategories, hobbyQuickPicks })
   if (cached) isLoading.value = false
   fetchEvents({ silent: cached })
   void loadCoupleAnniversaryState()
+  scheduleMidnightTick()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+
+onUnmounted(() => {
+  window.clearTimeout(midnightTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
 // Timer : recalcule la fin ; sinon on ne touche plus aux horaires pendant la saisie
@@ -1021,7 +1104,6 @@ const getEventsForDay = (dayIdx) => {
   if (!weekDays.value || !weekDays.value[dayIdx]) return []
   const targetDate = weekDays.value[dayIdx].date
   const targetDateStr = formatDateToLocalISO(targetDate)
-  const targetTime = new Date(targetDateStr + 'T00:00:00').getTime()
 
   const matched = []
 
@@ -1031,39 +1113,26 @@ const getEventsForDay = (dayIdx) => {
     // Hobbies sans créneau → rubrique Hobbies, pas la grille horaire
     if (isUnscheduledHobbyEvent(event, userCategories.value)) continue
 
-    const startStr = event.date_start
-    if (!startStr) continue
-    const endStr = event.date_end || event.date_start
-
-    const startTime = new Date(startStr + 'T00:00:00').getTime()
-    const endTime = new Date(endStr + 'T00:00:00').getTime()
-
-    if (targetTime >= startTime && targetTime <= endTime) {
-      // Parse the event's time field (e.g. "15:00 - 13:00")
-      const timeParts = (event.time || "12:00 - 13:00").split(" - ")
-      const startHourStr = timeParts[0] || "12:00"
-      const endHourStr = timeParts[1] || "13:00"
-
-      let slicedTime = ""
-
-      if (targetTime === startTime && targetTime === endTime) {
-        slicedTime = `${startHourStr} - ${endHourStr}`
-      } else if (targetTime === startTime) {
-        slicedTime = `${startHourStr} - 24:00`
-      } else if (targetTime === endTime) {
-        slicedTime = `00:00 - ${endHourStr}`
-      } else {
-        slicedTime = `00:00 - 24:00`
-      }
-
-      matched.push({
-        ...event,
-        time: slicedTime,
-      })
-    }
+    const slicedTime = sliceEventTimeForDay(event, targetDateStr)
+    if (!slicedTime) continue
+    const startDay = String(event.date_start || '').slice(0, 10)
+    const isContinuation =
+      Boolean(startDay && targetDateStr > startDay && slicedTime.startsWith('00:00'))
+    matched.push({
+      ...event,
+      _gridKey: `${event.id}__${targetDateStr}`,
+      _overnightContinuation: isContinuation,
+      time: slicedTime,
+    })
   }
 
-  return matched
+  return selectEdtPageEventsForDay({
+    dayIso: targetDateStr,
+    todayIso: todayIso.value,
+    plannedTimed: matched,
+    plannedAllDay: [],
+    actualEvents: actualOverlayEvents.value,
+  }).timed
 }
 
 const hasAllDayEvents = computed(() => {
@@ -1150,7 +1219,20 @@ const getAllDayEventsForDay = (dayIdx) => {
     .map((e) => buildBirthdayDisplayEvent(e, dayISO))
 
   const couple = buildCoupleMarkerForDay(dayISO)
-  return couple ? [...regular, ...birthdays, couple] : [...regular, ...birthdays]
+  const plannedAllDay = couple ? [...regular, ...birthdays, couple] : [...regular, ...birthdays]
+  return selectEdtPageEventsForDay({
+    dayIso: dayISO,
+    todayIso: todayIso.value,
+    plannedTimed: [],
+    plannedAllDay,
+    actualEvents: actualOverlayEvents.value,
+  }).allDay
+}
+
+function eventOpenTitle(event) {
+  if (event?._coupleMarker) return eventDisplayTitle(event)
+  if (event?._source === 'actual') return `Réalisé — ${event.title}`
+  return `Modifier « ${event.title} »`
 }
 
 function eventDisplayTitle(event) {
@@ -1224,7 +1306,7 @@ const handleAddEvent = async () => {
       const endMin = endH * 60 + endM
 
       const isSameDay = !endDStr || endDStr === startDStr
-      if (isSameDay && endMin <= startMin) {
+      if (isSameDay && endMin === startMin) {
         eventFormError.value =
           "L'heure de fin doit être strictement après l'heure de début."
         return
@@ -1928,16 +2010,21 @@ const parseEventHours = (timeRangeStr) => {
   const start = parseTimeToDecimal(parts[0])
   let end = parseTimeToDecimal(parts[1])
 
-  if (end <= start) {
-    end = Math.min(start + 1.5, 23.99)
-  }
+  // 00:00 → minuit (24). 00:15 après 23:00 → 24.25 (un seul bloc).
+  if (end === 0 && start > 0) end = 24
+  else if (end < start) end += 24
+  else if (end === start) end = Math.min(start + 1.5, 24)
 
   return { start, end }
 }
 
 function formatDecimalHour(decimal) {
-  const h = Math.floor(decimal)
-  const m = Math.round((decimal - h) * 60) % 60
+  let totalMinutes = Math.round(Number(decimal) * 60)
+  if (!Number.isFinite(totalMinutes)) totalMinutes = 0
+  if (totalMinutes >= 24 * 60) totalMinutes -= 24 * 60
+  if (totalMinutes < 0) totalMinutes = 0
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
@@ -2121,6 +2208,11 @@ const getPositionedEventsForDay = (dayIdx) => {
       </div>
     </div>
 
+    <p v-if="weekShowsActualDays" class="past-actual-hint">
+      Depuis minuit, les jours passés affichent ce que tu as réellement fait. Le prévu d’origine
+      reste dans l’historique Batterie.
+    </p>
+
     <!-- Rubrique Mes Hobbies (favoris + à placer sans créneau) -->
     <div class="hobbies-quick-reference" v-if="showHobbiesRail">
       <span class="hobbies-ref-label">Mes Hobbies :</span>
@@ -2208,7 +2300,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                 :style="event._coupleMarker ? undefined : getCategoryStyle(event.category)"
                 role="button"
                 tabindex="0"
-                :title="event._coupleMarker ? eventDisplayTitle(event) : `Modifier « ${event.title} »`"
+                :title="eventOpenTitle(event)"
                 @click="event._coupleMarker ? undefined : openEventForEdit(event)"
                 @keydown.enter="event._coupleMarker ? undefined : openEventForEdit(event)"
               >
@@ -2222,7 +2314,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                   {{ eventDisplayTitle(event) }}
                 </span>
                 <button
-                  v-if="!event._coupleMarker"
+                  v-if="!event._coupleMarker && event._source !== 'actual'"
                   class="all-day-delete-btn"
                   @click.stop="requestDeleteEvent(event.id)"
                   title="Supprimer"
@@ -2268,7 +2360,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                 <div class="grid-events-layer">
                   <div
                     v-for="event in getPositionedEventsForDay(idx)"
-                    :key="event.id"
+                    :key="event._gridKey || event.id"
                     class="event-block"
                     :class="event.isShort ? 'event-block--short' : 'event-block--tall'"
                     :style="[getCategoryStyle(event.category), event.positionStyle]"
@@ -2286,6 +2378,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                     @keydown.enter="openEventForEdit(event)"
                   >
                     <button
+                      v-if="event._source !== 'actual'"
                       class="event-delete-btn"
                       @click.stop="requestDeleteEvent(event.id)"
                       title="Supprimer"
@@ -2371,7 +2464,7 @@ const getPositionedEventsForDay = (dayIdx) => {
             :style="event._coupleMarker ? undefined : getCategoryStyle(event.category)"
             role="button"
             tabindex="0"
-            :title="event._coupleMarker ? eventDisplayTitle(event) : `Modifier « ${event.title} »`"
+            :title="eventOpenTitle(event)"
             @click="event._coupleMarker ? undefined : openEventForEdit(event)"
             @keydown.enter="event._coupleMarker ? undefined : openEventForEdit(event)"
           >
@@ -2385,7 +2478,7 @@ const getPositionedEventsForDay = (dayIdx) => {
               {{ eventDisplayTitle(event) }}
             </span>
             <button
-              v-if="!event._coupleMarker"
+              v-if="!event._coupleMarker && event._source !== 'actual'"
               class="all-day-delete-btn"
               @click.stop="requestDeleteEvent(event.id)"
               title="Supprimer"
@@ -2430,7 +2523,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                 <div class="grid-events-layer">
                   <div
                     v-for="event in getPositionedEventsForDay(selectedDayIndex)"
-                    :key="event.id"
+                    :key="event._gridKey || event.id"
                     class="event-block event-block--mobile"
                     :class="event.isShort ? 'event-block--short' : 'event-block--tall'"
                     :style="[getCategoryStyle(event.category), event.positionStyle]"
@@ -2448,6 +2541,7 @@ const getPositionedEventsForDay = (dayIdx) => {
                     @keydown.enter="openEventForEdit(event)"
                   >
                     <button
+                      v-if="event._source !== 'actual'"
                       class="event-delete-btn"
                       @click.stop="requestDeleteEvent(event.id)"
                       title="Supprimer"
@@ -2518,6 +2612,7 @@ const getPositionedEventsForDay = (dayIdx) => {
           <h3>{{ viewingEvent?.title || 'Détails de l\'activité' }}</h3>
           <div class="modal-header-actions">
             <button
+              v-if="viewingEvent?._source !== 'actual'"
               class="modal-edit-btn"
               type="button"
               @click="switchToEditMode"
@@ -2533,6 +2628,9 @@ const getPositionedEventsForDay = (dayIdx) => {
         </div>
 
         <div class="read-modal-content" v-if="viewingEvent">
+          <p v-if="viewingEvent._source === 'actual'" class="read-actual-note">
+            Réalisé ce jour-là. Le prévu d’origine reste dans l’historique Batterie.
+          </p>
           <div class="read-field" v-if="viewingEvent.detail">
             <span class="read-label">Description</span>
             <p class="read-value read-value--description">{{ viewingEvent.detail }}</p>
@@ -2595,7 +2693,7 @@ const getPositionedEventsForDay = (dayIdx) => {
             <span class="read-value">🎂 {{ new Date(viewingEvent.origin_date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) }}</span>
           </div>
 
-          <div class="read-modal-actions">
+          <div v-if="viewingEvent._source !== 'actual'" class="read-modal-actions">
             <button
               class="read-action-btn read-action-btn--edit"
               type="button"
@@ -3315,6 +3413,23 @@ const getPositionedEventsForDay = (dayIdx) => {
   transform: scale(1.2);
 }
 
+.past-actual-hint {
+  margin: -0.85rem 0 1.15rem;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: #5f6b76;
+}
+
+.read-actual-note {
+  margin: 0 0 0.85rem;
+  font-size: 0.86rem;
+  line-height: 1.4;
+  color: #3d5c56;
+  background: rgba(15, 118, 110, 0.08);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+}
+
 /* ─── Navigation Controls ─── */
 .calendar-controls {
   position: relative;
@@ -3812,6 +3927,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   position: relative;
   height: 100%;
   border-right: 1px solid rgba(213, 181, 234, 0.08);
+  overflow: visible;
 }
 
 .grid-day-column:last-child {
@@ -3839,6 +3955,7 @@ const getPositionedEventsForDay = (dayIdx) => {
   position: absolute;
   inset: 0;
   height: 100%;
+  overflow: visible;
   pointer-events: none;
 }
 

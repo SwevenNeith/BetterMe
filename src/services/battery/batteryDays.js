@@ -30,6 +30,7 @@ import {
 } from '../../utils/battery/batteryDuration.js'
 import { sumPlannedCostsWithoutDoubleCount } from '../../utils/battery/batteryImplications.js'
 import {
+  batterySlotToEdtDateRange,
   minutesBetweenHhMm,
   normalizeHhMm,
   validatePlannedSlot,
@@ -79,6 +80,8 @@ function normalizeTimeValue(value) {
 const ENTRY_COLUMNS =
   'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, duration_minutes, duration_all_day, has_duration_override, planned_start, planned_end, priority, implied_by_entry_id, created_at'
 
+const ENTRY_COLUMNS_WITH_CATEGORY = `${ENTRY_COLUMNS}, edt_category_id`
+
 const ENTRY_COLUMNS_LEGACY =
   'id, user_id, day_id, activity_id, label, cost, kind, sort_order, source_type, source_id, completed_actual_id, skip_reason, duration_minutes, duration_all_day, has_duration_override, created_at'
 
@@ -124,32 +127,39 @@ async function fetchDayRow(supabase, userId, dayIso) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} dayId
  */
-export async function listDayEntries(supabase, dayId) {
-  const { data, error } = await supabase
-    .from(ENTRIES_TABLE)
-    .select(ENTRY_COLUMNS)
-    .eq('day_id', dayId)
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: true })
+function entryQueryErrorIsLegacy(error) {
+  const message = String(error?.message || '')
+  return (
+    error?.code === 'PGRST204' ||
+    message.includes('planned_start') ||
+    message.includes('implied_by') ||
+    message.includes('priority')
+  )
+}
 
-  if (error) {
-    if (
-      error.code === 'PGRST204' ||
-      String(error.message || '').includes('planned_start') ||
-      String(error.message || '').includes('implied_by') ||
-      String(error.message || '').includes('priority')
-    ) {
-      const legacy = await supabase
-        .from(ENTRIES_TABLE)
-        .select(ENTRY_COLUMNS_LEGACY)
-        .eq('day_id', dayId)
-        .order('sort_order', { ascending: true })
-        .order('created_at', { ascending: true })
-      if (legacy.error) throw legacy.error
-      return (legacy.data ?? []).map(withEntryDefaults)
-    }
-    throw error
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} dayId
+ */
+export async function listDayEntries(supabase, dayId) {
+  const run = (columns) =>
+    supabase
+      .from(ENTRIES_TABLE)
+      .select(columns)
+      .eq('day_id', dayId)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+
+  let { data, error } = await run(ENTRY_COLUMNS_WITH_CATEGORY)
+  if (error && String(error.message || '').includes('edt_category_id')) {
+    ;({ data, error } = await run(ENTRY_COLUMNS))
   }
+  if (error && entryQueryErrorIsLegacy(error)) {
+    const legacy = await run(ENTRY_COLUMNS_LEGACY)
+    if (legacy.error) throw legacy.error
+    return (legacy.data ?? []).map(withEntryDefaults)
+  }
+  if (error) throw error
   return (data ?? []).map(withEntryDefaults)
 }
 
@@ -527,19 +537,27 @@ export async function addBatteryEntry(supabase, userId, dayIso, payload) {
     ...durationFields,
   }
 
+  if (category?.id && !String(category.id).startsWith('temp-')) {
+    insertRow.edt_category_id = category.id
+  }
+
   let { data, error } = await supabase
     .from(ENTRIES_TABLE)
     .insert(insertRow)
-    .select(ENTRY_COLUMNS)
+    .select(ENTRY_COLUMNS_WITH_CATEGORY)
     .single()
 
+  if (error && String(error.message || '').includes('edt_category_id')) {
+    delete insertRow.edt_category_id
+    ;({ data, error } = await supabase
+      .from(ENTRIES_TABLE)
+      .insert(insertRow)
+      .select(ENTRY_COLUMNS)
+      .single())
+  }
+
   if (error) {
-    if (
-      error.code === 'PGRST204' ||
-      String(error.message || '').includes('planned_start') ||
-      String(error.message || '').includes('priority') ||
-      String(error.message || '').includes('implied_by')
-    ) {
+    if (entryQueryErrorIsLegacy(error)) {
       const {
         planned_start,
         planned_end,
@@ -753,10 +771,12 @@ async function syncBatteryEntryEdtOnUpdate(supabase, userId, entry, patch) {
 
   if (timesTouched || durationTouched) {
     if (hasTimedSlot) {
-      // Horaires explicites sur le prévu → créneau daté (pas journée entière)
+      // Horaires explicites sur le prévu → créneau daté (pas journée entière).
+      // 00:30 le jour Batterie 25 → date EDT calendaire du 26.
+      const edt = batterySlotToEdtDateRange(dayIso, s, e)
       edtPatch.all_day = false
-      edtPatch.time = `${s} - ${e}`
-      edtPatch.date_start = dayIso
+      edtPatch.time = edt.time || `${s} - ${e}`
+      edtPatch.date_start = edt.date_start || dayIso
     } else if (!s && !e) {
       // Sans créneau : conserver / forcer journée entière (ne jamais supprimer l’EDT)
       edtPatch.all_day = true
@@ -836,6 +856,11 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
   if ('implied_by_entry_id' in patch) {
     payload.implied_by_entry_id = patch.implied_by_entry_id || null
   }
+  if ('edt_category_id' in patch) {
+    const catId = patch.edt_category_id ? String(patch.edt_category_id) : null
+    payload.edt_category_id =
+      catId && !catId.startsWith('temp-') ? catId : null
+  }
 
   // Si les deux bornes horaires sont connues après patch → durée dérivée
   const nextStart =
@@ -865,13 +890,24 @@ export async function updateBatteryEntry(supabase, userId, entryId, patch) {
     }
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from(ENTRIES_TABLE)
     .update(payload)
     .eq('id', entryId)
     .eq('user_id', userId)
-    .select(ENTRY_COLUMNS)
+    .select(ENTRY_COLUMNS_WITH_CATEGORY)
     .single()
+
+  if (error && String(error.message || '').includes('edt_category_id')) {
+    delete payload.edt_category_id
+    ;({ data, error } = await supabase
+      .from(ENTRIES_TABLE)
+      .update(payload)
+      .eq('id', entryId)
+      .eq('user_id', userId)
+      .select(ENTRY_COLUMNS)
+      .single())
+  }
 
   if (error) throw error
   const normalized = withEntryDefaults(data)
@@ -1555,7 +1591,7 @@ export async function attachEdtDurationsToEntries(supabase, userId, entries) {
     return {
       ...entry,
       edt_duration: meta?.duration || null,
-      edt_category_id: meta?.categoryId || null,
+      edt_category_id: meta?.categoryId || entry.edt_category_id || null,
     }
   })
 }
@@ -1823,7 +1859,7 @@ async function maybeLearnDefaultDuration(supabase, userId, activityId, entry, en
  * Historique des jours avec dépenses.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
- * @param {{ days?: number, from?: string, to?: string }} [opts]
+ * @param {{ days?: number, from?: string, to?: string, includeEmptyDays?: boolean }} [opts]
  */
 export async function listBatteryHistory(supabase, userId, opts = {}) {
   const today = toDayDateIso(new Date())
@@ -1855,11 +1891,19 @@ export async function listBatteryHistory(supabase, userId, opts = {}) {
   /** @type {Record<string, object[]>} */
   const entriesByDay = {}
   if (ids.length) {
-    const { data: entries, error: entriesError } = await supabase
+    let { data: entries, error: entriesError } = await supabase
       .from(ENTRIES_TABLE)
-      .select(ENTRY_COLUMNS)
+      .select(ENTRY_COLUMNS_WITH_CATEGORY)
       .eq('user_id', userId)
       .in('day_id', ids)
+
+    if (entriesError && String(entriesError.message || '').includes('edt_category_id')) {
+      ;({ data: entries, error: entriesError } = await supabase
+        .from(ENTRIES_TABLE)
+        .select(ENTRY_COLUMNS)
+        .eq('user_id', userId)
+        .in('day_id', ids))
+    }
 
     if (entriesError) throw entriesError
     for (const entry of entries ?? []) {
@@ -1868,27 +1912,30 @@ export async function listBatteryHistory(supabase, userId, opts = {}) {
     }
   }
 
-  return (dayRows ?? [])
-    .map((day) => {
-      const entries = entriesByDay[day.id] ?? []
-      const actual = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL)
-      const planned = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED)
-      const spent = sumEntryCosts(actual)
-      const plannedSpent = sumPlannedCostsWithoutDoubleCount(planned)
-      return {
-        ...day,
-        entries,
-        spent,
-        plannedSpent,
-        remaining: Number(day.computed_budget) - spent,
-      }
-    })
-    // Garde les jours avec réel ou prévu (nécessaire pour les taux de réalisation).
-    .filter((day) =>
-      (day.entries ?? []).some(
-        (e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL || e.kind === BATTERY_ENTRY_KINDS.PLANNED,
-      ),
-    )
+  const rows = (dayRows ?? []).map((day) => {
+    const entries = entriesByDay[day.id] ?? []
+    const actual = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL)
+    const planned = entries.filter((e) => e.kind === BATTERY_ENTRY_KINDS.PLANNED)
+    const spent = sumEntryCosts(actual)
+    const plannedSpent = sumPlannedCostsWithoutDoubleCount(planned)
+    return {
+      ...day,
+      entries,
+      spent,
+      plannedSpent,
+      remaining: Number(day.computed_budget) - spent,
+    }
+  })
+
+  // Jours sans activité : utiles pour coucher / réveil / sortie sur la grille EDT.
+  if (opts.includeEmptyDays) return rows
+
+  // Garde les jours avec réel ou prévu (nécessaire pour les taux de réalisation).
+  return rows.filter((day) =>
+    (day.entries ?? []).some(
+      (e) => e.kind === BATTERY_ENTRY_KINDS.ACTUAL || e.kind === BATTERY_ENTRY_KINDS.PLANNED,
+    ),
+  )
 }
 
 /**

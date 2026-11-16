@@ -10,7 +10,12 @@ import {
 } from '../../constants/battery/battery.js'
 import { findHobbiesCategory } from '../timetable/timetableCategories.js'
 import { ensureTimetableCategory } from '../timetable/timetableEvents.js'
-import { formatEdtTimeRange, normalizeHhMm, shiftHhMm } from '../../utils/battery/batteryTime.js'
+import {
+  batterySlotToEdtDateRange,
+  formatEdtTimeRange,
+  normalizeHhMm,
+  shiftHhMm,
+} from '../../utils/battery/batteryTime.js'
 import { normalizeDurationMinutes } from '../../utils/battery/batteryDuration.js'
 
 /**
@@ -124,10 +129,17 @@ export async function createEdtEventForBatteryPlan(
     throw new Error('Créneau horaire invalide pour l’EDT.')
   }
 
+  // Jour Batterie ≠ jour calendaire EDT (00:30 saisi le 25 → événement le 26).
+  // date_end reste null pour éviter un 2ᵉ jour Batterie via la sync EDT.
+  const edtDates =
+    !wantsAllDay && start && end
+      ? batterySlotToEdtDateRange(dayIso, start, end)
+      : { date_start: dayIso, date_end: dayIso }
+
   const payload = {
     user_id: userId,
     title,
-    date_start: dayIso,
+    date_start: edtDates.date_start || dayIso,
     date_end: null,
     all_day: wantsAllDay,
     time: timeRange,

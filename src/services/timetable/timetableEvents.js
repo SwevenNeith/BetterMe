@@ -75,7 +75,8 @@ export function validateTimetableEventTimes(input) {
   const [startH, startM] = start.split(':').map(Number)
   const [endH, endM] = end.split(':').map(Number)
   const isSameDay = !dateEnd || dateEnd === dateStart
-  if (isSameDay && endH * 60 + endM <= startH * 60 + startM) {
+  // Égalité = durée nulle. Une fin plus tôt sur l’horloge passe minuit (23:00 → 00:00).
+  if (isSameDay && endH * 60 + endM === startH * 60 + startM) {
     return "L'heure de fin doit être strictement supérieure à l'heure de début."
   }
 
