@@ -6,7 +6,11 @@ import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { formDraftKey, useFormDraft } from '../composables/useFormDraft.js'
 import { listFinanceCategories, ensureFinanceCategory } from '../services/finances/financeCategories.js'
-import { getOrCreateFinanceSettings, setOpeningBalance } from '../services/finances/financeSettings.js'
+import {
+  getOrCreateFinanceSettings,
+  saveFixedSeriesStops,
+  setOpeningBalance,
+} from '../services/finances/financeSettings.js'
 import {
   SUGGESTED_SAVINGS_NAMES,
   createSavingsAccount,
@@ -19,7 +23,7 @@ import {
   TX_TYPE_LABELS,
   createFinanceTransaction,
   deleteFinanceTransaction,
-  deleteFinanceTransactions,
+  deleteFixedExpenseSeriesFromMonth,
   listFinanceTransactions,
   updateFinanceTransaction,
 } from '../services/finances/financeTransactions.js'
@@ -33,13 +37,16 @@ import {
   donutSegments,
   endOfMonthIso,
   filterByAccount,
+  clearFixedSeriesStop,
   findFixedExpenseSeries,
+  fixedExpenseSeriesKey,
   formatEuro,
   monthlyBalanceSeries,
   monthlyRecap,
   periodAggregates,
   planFixedExpenseRolloversThrough,
   savingsAccountsOverview,
+  upsertFixedSeriesStop,
 } from '../utils/finances/financeMath.js'
 
 defineOptions({ name: 'FinancesView' })
@@ -398,8 +405,8 @@ const confirmMessage = computed(() => {
   const livret = confirmDialog.value?.livret
   const seriesCount = Number(confirmDialog.value?.seriesCount) || 1
   if (confirmDialog.value?.kind === 'delete' && tx) {
-    if (seriesCount > 1) {
-      return `« ${tx.category} » (${formatEuro(tx.amount)}) et ses ${seriesCount} occurrences (tous les mois) seront définitivement supprimées. Les autres montants restent inchangés.`
+    if (tx.tx_type === TX_TYPES.FIXED) {
+      return `« ${tx.category} » (${formatEuro(tx.amount)}) sera supprimée pour le mois affiché et tous les mois / années suivants. Les mois précédents restent inchangés.`
     }
     return `« ${tx.category} » (${formatEuro(tx.amount)}) sera définitivement supprimé.`
   }
@@ -418,7 +425,11 @@ const confirmMessage = computed(() => {
 
 function seriesForFixedTx(tx) {
   if (!tx || tx.tx_type !== TX_TYPES.FIXED) return tx?.id ? [tx] : []
-  const series = findFixedExpenseSeries(transactions.value, tx)
+  // Suppression = mois sélectionné + suivants ; l’historique antérieur est gardé.
+  const series = findFixedExpenseSeries(transactions.value, tx, {
+    fromYear: selectedYear.value,
+    fromMonth: selectedMonth.value,
+  })
   return series.length ? series : [tx]
 }
 
@@ -430,6 +441,7 @@ async function syncFixedExpenseRollovers() {
     transactions.value,
     selectedYear.value,
     selectedMonth.value,
+    settings.value?.fixed_series_stops || [],
   )
   if (!payloads.length) return
 
@@ -668,6 +680,28 @@ async function persistAmount(amount) {
         applied: false,
         accountId,
       })
+      // Nouvelle saisie de la même série → on peut à nouveau la reporter les mois suivants.
+      if (amountForm.txType === TX_TYPES.FIXED) {
+        const seriesKey = fixedExpenseSeriesKey({
+          account_id: accountId,
+          category,
+          detail: amountForm.detail,
+        })
+        const nextStops = clearFixedSeriesStop(
+          settings.value?.fixed_series_stops || [],
+          seriesKey,
+        )
+        if (nextStops.length !== (settings.value?.fixed_series_stops || []).length) {
+          settings.value = {
+            ...(settings.value || {}),
+            fixed_series_stops: await saveFixedSeriesStops(
+              supabase,
+              userId.value,
+              nextStops,
+            ),
+          }
+        }
+      }
     }
     clearFinanceDraft()
     closeAddForm()
@@ -702,12 +736,35 @@ async function removeTransaction(tx) {
   isDeletingId.value = tx.id
   try {
     if (tx.tx_type === TX_TYPES.FIXED) {
-      const series = seriesForFixedTx(tx)
-      const ids = series.map((entry) => entry.id).filter(Boolean)
-      await deleteFinanceTransactions(supabase, userId.value, ids)
-      const idSet = new Set(ids)
-      transactions.value = transactions.value.filter((t) => !idSet.has(t.id))
-      if (editingId.value && idSet.has(editingId.value)) closeAddForm()
+      const fromYear = selectedYear.value
+      const fromMonth = selectedMonth.value
+      const seriesKey = fixedExpenseSeriesKey(tx)
+      await deleteFixedExpenseSeriesFromMonth(
+        supabase,
+        userId.value,
+        tx,
+        fromYear,
+        fromMonth,
+      )
+      // Empêche le report mensuel de recréer la série (tous mois / années suivants).
+      const nextStops = upsertFixedSeriesStop(
+        settings.value?.fixed_series_stops || [],
+        seriesKey,
+        fromYear,
+        fromMonth,
+      )
+      settings.value = {
+        ...(settings.value || {}),
+        fixed_series_stops: await saveFixedSeriesStops(supabase, userId.value, nextStops),
+      }
+      const removed = new Set(
+        findFixedExpenseSeries(transactions.value, tx, {
+          fromYear,
+          fromMonth,
+        }).map((entry) => entry.id),
+      )
+      transactions.value = transactions.value.filter((t) => !removed.has(t.id))
+      if (editingId.value && removed.has(editingId.value)) closeAddForm()
     } else {
       await deleteFinanceTransaction(supabase, userId.value, tx.id)
       transactions.value = transactions.value.filter((t) => t.id !== tx.id)

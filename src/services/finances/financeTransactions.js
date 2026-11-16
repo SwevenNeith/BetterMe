@@ -122,6 +122,8 @@ export async function deleteFinanceTransaction(supabase, userId, id) {
 
 /**
  * Supprime plusieurs transactions (ex. toutes les occurrences d’une dépense fixe).
+ * Par lots pour éviter les limites de taille de requête (sinon les mois les plus
+ * anciens, en fin de liste, peuvent ne pas être supprimés).
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {string[]} ids
@@ -131,11 +133,63 @@ export async function deleteFinanceTransactions(supabase, userId, ids) {
   const uniqueIds = [...new Set((ids ?? []).map((id) => String(id || '').trim()).filter(Boolean))]
   if (!uniqueIds.length) return
 
-  const { error } = await supabase
+  const CHUNK = 80
+  for (let i = 0; i < uniqueIds.length; i += CHUNK) {
+    const chunk = uniqueIds.slice(i, i + CHUNK)
+    const { error } = await supabase
+      .from(TABLE)
+      .delete()
+      .eq('user_id', userId)
+      .in('id', chunk)
+    if (error) throw error
+  }
+}
+
+/**
+ * Supprime une dépense fixe à partir d’un mois (ce mois + suivants).
+ * Les mois strictement antérieurs sont conservés.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} userId
+ * @param {{ tx_type?: string, category?: string, detail?: string, account_id?: string|null }} templateTx
+ * @param {number} fromYear
+ * @param {number} fromMonth 1-12
+ */
+export async function deleteFixedExpenseSeriesFromMonth(
+  supabase,
+  userId,
+  templateTx,
+  fromYear,
+  fromMonth,
+) {
+  if (!userId) throw new Error('Utilisateur non connecté.')
+  if (!templateTx || templateTx.tx_type !== TX_TYPES.FIXED) {
+    throw new Error('Dépense fixe invalide.')
+  }
+  const y = Number(fromYear)
+  const m = Number(fromMonth)
+  if (!y || m < 1 || m > 12) throw new Error('Mois de départ invalide.')
+
+  const category = String(templateTx.category || '').trim()
+  const detail = String(templateTx.detail || '').trim()
+  if (!category) throw new Error('Catégorie manquante pour la série.')
+
+  const fromIso = `${y}-${String(m).padStart(2, '0')}-01`
+
+  let query = supabase
     .from(TABLE)
     .delete()
     .eq('user_id', userId)
-    .in('id', uniqueIds)
+    .eq('tx_type', TX_TYPES.FIXED)
+    .eq('category', category)
+    .eq('detail', detail)
+    .gte('occurred_on', fromIso)
 
+  if (templateTx.account_id) {
+    query = query.eq('account_id', templateTx.account_id)
+  } else {
+    query = query.is('account_id', null)
+  }
+
+  const { error } = await query
   if (error) throw error
 }

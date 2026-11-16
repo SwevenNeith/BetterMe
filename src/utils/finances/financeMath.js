@@ -424,24 +424,101 @@ export function fixedExpenseSeriesKey(tx) {
   return `${account}|${cat}|${detail}`
 }
 
+/** @param {number} year @param {number} month */
+export function fixedSeriesStopFromLabel(year, month) {
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {{ key: string, from: string }[]}
+ */
+export function normalizeFixedSeriesStops(raw) {
+  if (!Array.isArray(raw)) return []
+  /** @type {{ key: string, from: string }[]} */
+  const out = []
+  for (const row of raw) {
+    const key = String(row?.key || '').trim()
+    const from = String(row?.from || '').trim()
+    if (!key || !/^\d{4}-\d{2}$/.test(from)) continue
+    out.push({ key, from })
+  }
+  return out
+}
+
+/**
+ * La série ne doit plus être reportée à partir de `from` (mois inclus).
+ * @param {{ key: string, from: string }[]} stops
+ * @param {string} seriesKey
+ * @param {number} year
+ * @param {number} month
+ */
+export function isFixedSeriesStoppedAt(stops, seriesKey, year, month) {
+  const key = String(seriesKey || '')
+  if (!key) return false
+  const idx = monthIndex(year, month)
+  for (const stop of stops ?? []) {
+    if (stop.key !== key) continue
+    const [sy, sm] = String(stop.from).split('-').map(Number)
+    if (!sy || !sm) continue
+    if (idx >= monthIndex(sy, sm)) return true
+  }
+  return false
+}
+
+/**
+ * @param {{ key: string, from: string }[]} stops
+ * @param {string} seriesKey
+ * @param {number} fromYear
+ * @param {number} fromMonth
+ */
+export function upsertFixedSeriesStop(stops, seriesKey, fromYear, fromMonth) {
+  const key = String(seriesKey || '').trim()
+  const from = fixedSeriesStopFromLabel(fromYear, fromMonth)
+  if (!key || !/^\d{4}-\d{2}$/.test(from)) return normalizeFixedSeriesStops(stops)
+  const next = normalizeFixedSeriesStops(stops).filter((s) => s.key !== key)
+  next.push({ key, from })
+  return next.sort((a, b) => a.key.localeCompare(b.key) || a.from.localeCompare(b.from))
+}
+
+/**
+ * Reprendre une série (nouvelle saisie après un arrêt).
+ * @param {{ key: string, from: string }[]} stops
+ * @param {string} seriesKey
+ */
+export function clearFixedSeriesStop(stops, seriesKey) {
+  const key = String(seriesKey || '').trim()
+  return normalizeFixedSeriesStops(stops).filter((s) => s.key !== key)
+}
+
 function fixedTemplateKey(tx) {
   return fixedExpenseSeriesKey(tx)
 }
 
 /**
- * Autres mois de la même dépense fixe (même compte / catégorie / détail).
+ * Occurrences de la même dépense fixe (même compte / catégorie / détail).
  * @param {Array} transactions
  * @param {object} templateTx
+ * @param {{ fromYear?: number, fromMonth?: number }} [opts]
+ *   Si fromYear/fromMonth : uniquement ce mois et les suivants (historique conservé).
  */
-export function findFixedExpenseSeries(transactions, templateTx) {
+export function findFixedExpenseSeries(transactions, templateTx, opts = {}) {
   if (!templateTx || templateTx.tx_type !== TX_TYPES.FIXED) return []
   const key = fixedExpenseSeriesKey(templateTx)
-  return (transactions ?? []).filter(
-    (tx) =>
-      tx?.id &&
-      tx.tx_type === TX_TYPES.FIXED &&
-      fixedExpenseSeriesKey(tx) === key,
-  )
+  const fromY = Number(opts.fromYear) || 0
+  const fromM = Number(opts.fromMonth) || 0
+  const hasFrom = fromY > 0 && fromM >= 1 && fromM <= 12
+  const fromIdx = hasFrom ? monthIndex(fromY, fromM) : null
+
+  return (transactions ?? []).filter((tx) => {
+    if (!tx?.id || tx.tx_type !== TX_TYPES.FIXED) return false
+    if (fixedExpenseSeriesKey(tx) !== key) return false
+    if (fromIdx == null) return true
+    const y = Number(String(tx.occurred_on || '').slice(0, 4))
+    const m = Number(String(tx.occurred_on || '').slice(5, 7))
+    if (!y || !m) return false
+    return monthIndex(y, m) >= fromIdx
+  })
 }
 
 export function occurredOnForMonth(sourceDate, year, month) {
@@ -453,17 +530,25 @@ export function occurredOnForMonth(sourceDate, year, month) {
 
 /**
  * Prépare le report mensuel des dépenses fixes (abonnements) jusqu’au mois cible.
- * Chaque mois reprend les fixes du mois précédent ; si une ligne a été supprimée
- * un mois, elle n’est plus reportée ensuite.
+ * Chaque mois reprend les fixes du mois précédent.
+ * Les séries listées dans `stops` ne sont plus reportées à partir de leur mois d’arrêt
+ * (tous les mois / années suivants), même si le mois d’avant existe encore.
  * @param {Array} transactions
  * @param {number} targetYear
  * @param {number} targetMonth
+ * @param {{ key: string, from: string }[]} [stops]
  * @returns {Array<{ occurredOn: string, txType: string, category: string, detail: string, amount: number, applied: boolean, accountId: string|null }>}
  */
-export function planFixedExpenseRolloversThrough(transactions, targetYear, targetMonth) {
+export function planFixedExpenseRolloversThrough(
+  transactions,
+  targetYear,
+  targetMonth,
+  stops = [],
+) {
   const all = transactions ?? []
   const fixed = all.filter((tx) => tx.tx_type === TX_TYPES.FIXED)
   if (!fixed.length) return []
+  const seriesStops = normalizeFixedSeriesStops(stops)
 
   let earliest = null
   for (const tx of fixed) {
@@ -515,6 +600,7 @@ export function planFixedExpenseRolloversThrough(transactions, targetYear, targe
       for (const tpl of sources) {
         const key = fixedTemplateKey(tpl)
         if (existingKeys.has(key)) continue
+        if (isFixedSeriesStoppedAt(seriesStops, key, cursor.year, cursor.month)) continue
         existingKeys.add(key)
         const payload = {
           occurredOn: occurredOnForMonth(tpl.occurred_on, cursor.year, cursor.month),
