@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { supabase } from '../../lib/supabase.js'
 import { WORKSPACE_PAGE_OPTIONS } from '../../constants/workspace/workspacePages.js'
 import { resolveSessionUser } from '../../utils/auth/sessionUser.js'
@@ -17,20 +17,36 @@ const props = defineProps({
 const emit = defineEmits(['close', 'select'])
 
 const visibility = ref(mergePageVisibility(null))
+const searchQuery = ref('')
 
-onMounted(async () => {
+async function refreshVisibility() {
   try {
     const user = await resolveSessionUser()
-    if (!user?.id) return
+    if (!user?.id) {
+      visibility.value = mergePageVisibility(null)
+      return
+    }
     visibility.value = await loadPageVisibility(supabase, user.id)
   } catch (err) {
     console.error(err)
     visibility.value = mergePageVisibility(null)
   }
-})
+}
 
-const options = computed(() =>
-  WORKSPACE_PAGE_OPTIONS.filter((page) => {
+watch(
+  () => props.open,
+  (isOpen) => {
+    if (!isOpen) {
+      searchQuery.value = ''
+      return
+    }
+    void refreshVisibility()
+  },
+  { immediate: true },
+)
+
+const options = computed(() => {
+  const pages = WORKSPACE_PAGE_OPTIONS.filter((page) => {
     if (page.alwaysVisible) return true
     const visibilityId = page.visibilityId || page.id
     return isPageVisible(visibilityId, visibility.value)
@@ -42,8 +58,31 @@ const options = computed(() =>
         ? page.defaultLabel
         : getPageDisplayLabel(visibilityId, visibility.value, page.defaultLabel),
     }
-  }),
-)
+  })
+
+  pages.sort((a, b) =>
+    String(a.label || '').localeCompare(String(b.label || ''), 'fr', {
+      sensitivity: 'base',
+    }),
+  )
+  return pages
+})
+
+const filteredOptions = computed(() => {
+  const q = String(searchQuery.value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+  if (!q) return options.value
+  return options.value.filter((page) => {
+    const label = String(page.label || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+    return label.includes(q)
+  })
+})
 
 function onSelect(page) {
   emit('select', {
@@ -76,9 +115,19 @@ function onOverlayClick() {
           </button>
         </header>
         <p class="workspace-picker__hint">Choisis une page visible dans ton menu.</p>
-        <div class="workspace-picker__grid">
+        <label class="workspace-picker__search">
+          <span class="sr-only">Rechercher une page</span>
+          <input
+            v-model="searchQuery"
+            type="search"
+            class="workspace-picker__search-input"
+            placeholder="Rechercher une page…"
+            autocomplete="off"
+          />
+        </label>
+        <div v-if="filteredOptions.length" class="workspace-picker__grid">
           <button
-            v-for="page in options"
+            v-for="page in filteredOptions"
             :key="page.id"
             type="button"
             class="workspace-picker__item"
@@ -87,12 +136,25 @@ function onOverlayClick() {
             <span class="workspace-picker__item-label">{{ page.label }}</span>
           </button>
         </div>
+        <p v-else class="workspace-picker__empty">Aucune page ne correspond à ta recherche.</p>
       </div>
     </template>
   </Teleport>
 </template>
 
 <style scoped>
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .workspace-picker__overlay {
   position: fixed;
   inset: 0;
@@ -139,9 +201,36 @@ function onOverlayClick() {
 }
 
 .workspace-picker__hint {
-  margin: 0.45rem 0 0.85rem;
+  margin: 0.45rem 0 0.65rem;
   font-size: 0.85rem;
   color: #8b7a96;
+}
+
+.workspace-picker__search {
+  display: block;
+  margin-bottom: 0.85rem;
+}
+
+.workspace-picker__search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.65rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid rgba(213, 181, 234, 0.45);
+  background: rgba(255, 255, 255, 0.92);
+  color: #4a3b58;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.workspace-picker__search-input::placeholder {
+  color: #9a8aa8;
+}
+
+.workspace-picker__search-input:focus {
+  outline: none;
+  border-color: rgba(173, 129, 190, 0.7);
+  box-shadow: 0 0 0 3px rgba(213, 181, 234, 0.28);
 }
 
 .workspace-picker__grid {
@@ -167,6 +256,13 @@ function onOverlayClick() {
   border-color: rgba(173, 129, 190, 0.5);
 }
 
+.workspace-picker__empty {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  color: #8b7a96;
+  text-align: center;
+}
+
 @media (prefers-color-scheme: dark) {
   .workspace-picker {
     background: rgba(35, 30, 48, 0.98);
@@ -177,10 +273,20 @@ function onOverlayClick() {
     color: #e8dcf5;
   }
 
+  .workspace-picker__search-input {
+    background: rgba(25, 20, 35, 0.9);
+    border-color: rgba(213, 181, 234, 0.28);
+    color: #f0e8f8;
+  }
+
   .workspace-picker__item {
     background: rgba(61, 47, 74, 0.65);
     border-color: rgba(213, 181, 234, 0.28);
     color: #e8dcf5;
+  }
+
+  .workspace-picker__empty {
+    color: #adb5bd;
   }
 }
 </style>

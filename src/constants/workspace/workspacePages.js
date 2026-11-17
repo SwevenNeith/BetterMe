@@ -2,9 +2,15 @@ import { APP_PAGE_IDS } from '../common/appPages.js'
 
 /**
  * Pages sélectionnables dans le Plan de Travail.
- * Aligné sur la sidebar (+ Mood sous Exercices, + Réglages).
+ * Aligné sur la sidebar (+ sous-pages Jeux / Création / Exercices, + Réglages).
  */
 export const WORKSPACE_PAGE_OPTIONS = [
+  {
+    id: APP_PAGE_IDS.DASHBOARD,
+    path: '/dashboard',
+    defaultLabel: 'Dashboard',
+    icon: 'dashboard',
+  },
   {
     id: APP_PAGE_IDS.TIMETABLE,
     path: '/timetable',
@@ -96,6 +102,12 @@ export const WORKSPACE_PAGE_OPTIONS = [
     path: '/journal',
     defaultLabel: 'Journaling',
     icon: 'journal',
+  },
+  {
+    id: APP_PAGE_IDS.BATTERY,
+    path: '/battery',
+    defaultLabel: 'Batterie',
+    icon: 'battery',
   },
   {
     id: APP_PAGE_IDS.NOTES,
