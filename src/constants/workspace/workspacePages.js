@@ -73,6 +73,12 @@ export const WORKSPACE_PAGE_OPTIONS = [
     icon: 'wishlist',
   },
   {
+    id: APP_PAGE_IDS.COURSES,
+    path: '/courses',
+    defaultLabel: 'Courses',
+    icon: 'courses',
+  },
+  {
     id: APP_PAGE_IDS.CREATION,
     path: '/creation',
     defaultLabel: 'Création',

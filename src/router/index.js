@@ -24,6 +24,7 @@ const LolSeasonHistoryView = () => import('../views/LolSeasonHistoryView.vue')
 const SportView = () => import('../views/SportView.vue')
 const SportWorkoutView = () => import('../views/SportWorkoutView.vue')
 const WishListView = () => import('../views/WishListView.vue')
+const CoursesView = () => import('../views/CoursesView.vue')
 const FinancesView = () => import('../views/FinancesView.vue')
 const CreationView = () => import('../views/CreationView.vue')
 const PointsDeCroixView = () => import('../views/PointsDeCroixView.vue')
@@ -159,6 +160,11 @@ function createAppChildRoutes(namePrefix = '') {
       path: 'wishlist',
       name: n('wishlist'),
       component: WishListView,
+    },
+    {
+      path: 'courses',
+      name: n('courses'),
+      component: CoursesView,
     },
     {
       path: 'creation',
