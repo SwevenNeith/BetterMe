@@ -1,15 +1,17 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
-import { COURSES_VIEW_MODE } from '../constants/courses/courses.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { useCourses } from '../composables/useCourses.js'
 import { resolveSessionUser } from '../utils/auth/sessionUser.js'
 import CoursesQuickAdd from '../components/courses/CoursesQuickAdd.vue'
+import CoursesListsModal from '../components/courses/CoursesListsModal.vue'
 import CoursesVitrineView from '../components/courses/CoursesVitrineView.vue'
-import CoursesMagasinMode from '../components/courses/CoursesMagasinMode.vue'
+import AppConfirmDialog from '../components/common/AppConfirmDialog.vue'
 import CoursesArticleFormModal from '../components/courses/CoursesArticleFormModal.vue'
-import CoursesManageModal from '../components/courses/CoursesManageModal.vue'
+import CoursesArticleDetailModal from '../components/courses/CoursesArticleDetailModal.vue'
+import CoursesPickListModal from '../components/courses/CoursesPickListModal.vue'
+import CoursesGroupEditModal from '../components/courses/CoursesGroupEditModal.vue'
 
 defineOptions({ name: 'CoursesView' })
 
@@ -25,48 +27,63 @@ const {
   fromCache,
   magasins,
   categories,
-  viewMode,
+  listes,
+  articles,
   groupBy,
-  selectedMagasinId,
+  selectedListeId,
+  selectedListe,
   renewThresholdDays,
   renewSectionOpen,
   renewArticles,
   vitrineGroups,
-  magasinModeGroups,
-  magasinModeChecked,
-  magasinModeProgress,
   load,
   quickAdd,
   autocompleteSuggestions,
   addArticle,
   editArticle,
   removeArticle,
+  addArticleToListe,
+  markPurchased,
+  enrichArticle,
   racheter,
-  setArticleStatut,
-  finishShopping,
-  pendingFinishArticles,
-  canFinishShopping,
-  clearBoughtBag,
   copyExportText,
-  addMagasin,
   editMagasin,
   removeMagasin,
-  reorderMagasins,
-  addCategorie,
   editCategorie,
   removeCategorie,
-  reorderCategories,
+  addListe,
+  editListe,
+  removeListe,
+  closeListeById,
+  reporterRestantsVers,
+  clearListeFilter,
 } = courses
 
 const suggestions = ref([])
 const formOpen = ref(false)
 const formArticle = ref(null)
-const manageOpen = ref(false)
-const bagOpen = ref(false)
+const detailOpen = ref(false)
+const detailArticle = ref(null)
+const pickListOpen = ref(false)
+const pickListArticle = ref(null)
+const listsOpen = ref(false)
 const exportFlash = ref('')
 const toast = ref('')
+const groupEditOpen = ref(false)
+const groupEditKind = ref('magasin')
+const groupEditEntity = ref(null)
+const confirmState = ref(null)
 
-const isVitrine = computed(() => viewMode.value === COURSES_VIEW_MODE.VITRINE)
+function showDetail(article) {
+  if (!article) return
+  detailArticle.value = enrichArticle(article)
+  detailOpen.value = true
+}
+
+function refreshDetail(articleId) {
+  const fresh = articles.value.find((a) => a.id === articleId)
+  if (fresh) detailArticle.value = enrichArticle(fresh)
+}
 
 onMounted(async () => {
   const user = await resolveSessionUser()
@@ -78,13 +95,15 @@ function onQuickQuery(q) {
 }
 
 async function onQuickSubmit(nom) {
-  await quickAdd(nom)
+  const row = await quickAdd(nom)
   suggestions.value = []
+  if (row) showDetail(row)
 }
 
 async function onQuickPick(item) {
-  await quickAdd(item.nom)
+  const row = await quickAdd(item.nom)
   suggestions.value = []
+  if (row) showDetail(row)
 }
 
 function openNewArticle() {
@@ -93,21 +112,126 @@ function openNewArticle() {
 }
 
 function openArticle(article) {
+  showDetail(article)
+}
+
+function openEditFromDetail(article) {
   formArticle.value = article
+  detailOpen.value = false
   formOpen.value = true
 }
 
 async function onSaveArticle({ id, payload }) {
-  if (id) await editArticle(id, payload)
-  else await addArticle(payload)
+  let row
+  if (id) {
+    row = await editArticle(id, payload)
+  } else {
+    row = await addArticle({ ...payload, liste_id: null })
+  }
   formOpen.value = false
   formArticle.value = null
+  if (row) showDetail(row)
 }
 
 async function onDeleteArticle(id) {
   await removeArticle(id)
   formOpen.value = false
   formArticle.value = null
+  detailOpen.value = false
+  detailArticle.value = null
+}
+
+function openPickList(article) {
+  pickListArticle.value = article
+  pickListOpen.value = true
+}
+
+async function onPickListSelect(listeId) {
+  const article = pickListArticle.value
+  if (!article?.id) return
+  await addArticleToListe(article.id, listeId)
+  pickListOpen.value = false
+  pickListArticle.value = null
+  refreshDetail(article.id)
+  showToast('Article ajouté à la liste.')
+}
+
+async function onPickListCreate(input) {
+  const liste = await addListe(input)
+  const article = pickListArticle.value
+  if (liste?.id && article?.id) {
+    await addArticleToListe(article.id, liste.id)
+    refreshDetail(article.id)
+    showToast('Liste créée et article ajouté.')
+  }
+  pickListOpen.value = false
+  pickListArticle.value = null
+}
+
+async function doMarkPurchased(article, updateDurabilite) {
+  if (!article?.id) return
+  await markPurchased(article.id, { updateDurabilite })
+  refreshDetail(article.id)
+  showToast('Achat enregistré.')
+}
+
+function onMarkPurchased(article) {
+  if (!article?.id) return
+  if (!article.suivi_durabilite) {
+    doMarkPurchased(article, false)
+    return
+  }
+  confirmState.value = {
+    type: 'durability',
+    article,
+    title: 'Mettre à jour le suivi ?',
+    message: 'Mettre à jour la date du dernier achat pour le suivi de durée de vie ?',
+    confirmLabel: 'Oui, mettre à jour',
+    cancelLabel: 'Non, sans mise à jour',
+    danger: false,
+  }
+}
+
+function onDeleteFromDetail(article) {
+  if (!article?.id) return
+  confirmState.value = {
+    type: 'delete-article',
+    article,
+    title: 'Supprimer l’article ?',
+    message: 'Cette action est définitive.',
+    confirmLabel: 'Supprimer',
+    cancelLabel: 'Annuler',
+    danger: true,
+  }
+}
+
+async function onConfirmDialog() {
+  const state = confirmState.value
+  confirmState.value = null
+  if (!state) return
+  if (state.type === 'delete-article') {
+    await removeArticle(state.article.id)
+    detailOpen.value = false
+    detailArticle.value = null
+    showToast('Article supprimé.')
+    return
+  }
+  if (state.type === 'durability') {
+    await doMarkPurchased(state.article, true)
+  }
+}
+
+function onCancelConfirmDialog() {
+  const state = confirmState.value
+  confirmState.value = null
+  if (state?.type === 'durability') {
+    doMarkPurchased(state.article, false)
+  }
+}
+
+async function onDeleteListe(id) {
+  await removeListe(id)
+  showToast('Liste supprimée.')
 }
 
 async function onRacheter(article) {
@@ -115,27 +239,9 @@ async function onRacheter(article) {
   showToast('Article remis dans « à acheter ».')
 }
 
-async function onToggleShop(article, statut) {
-  await setArticleStatut(article.id, statut)
-}
-
-async function onFinish({ updateDurabilite }) {
-  await finishShopping({ updateDurabilite })
-  bagOpen.value = true
-  showToast('Courses enregistrées dans l’historique.')
-}
-
-async function onClearBag() {
-  await clearBoughtBag(selectedMagasinId.value)
-  showToast('Sac vidé (suivi de durée de vie conservé).')
-}
-
 async function onExport() {
   try {
-    await copyExportText({
-      magasinId:
-        viewMode.value === COURSES_VIEW_MODE.MAGASIN ? selectedMagasinId.value : null,
-    })
+    await copyExportText()
     exportFlash.value = 'Liste copiée'
     window.setTimeout(() => {
       exportFlash.value = ''
@@ -152,6 +258,42 @@ function showToast(message) {
     if (toast.value === message) toast.value = ''
   }, 2800)
 }
+
+async function onCloseListe({ listeId, reporterRestants, targetListeId }) {
+  await closeListeById(listeId, { reporterRestants, targetListeId })
+  showToast(
+    reporterRestants
+      ? 'Liste fermée — articles non achetés reportés.'
+      : 'Liste fermée.',
+  )
+}
+
+async function onReporter({ listeId, targetListeId }) {
+  await reporterRestantsVers(listeId, targetListeId)
+  showToast('Articles reportés vers une autre liste.')
+}
+
+function onEditGroup({ kind, entity }) {
+  groupEditKind.value = kind
+  groupEditEntity.value = entity
+  groupEditOpen.value = true
+}
+
+async function onSaveGroup({ kind, id, payload }) {
+  if (kind === 'magasin') await editMagasin(id, payload)
+  else await editCategorie(id, payload)
+  groupEditOpen.value = false
+  groupEditEntity.value = null
+  showToast(kind === 'magasin' ? 'Magasin mis à jour.' : 'Rayon mis à jour.')
+}
+
+async function onDeleteGroup({ kind, id }) {
+  if (kind === 'magasin') await removeMagasin(id)
+  else await removeCategorie(id)
+  groupEditOpen.value = false
+  groupEditEntity.value = null
+  showToast(kind === 'magasin' ? 'Magasin supprimé.' : 'Rayon supprimé.')
+}
 </script>
 
 <template>
@@ -159,13 +301,13 @@ function showToast(message) {
     <header class="courses-page__header">
       <h1 class="courses-page__title">{{ pageTitle }}</h1>
       <p class="courses-page__subtitle">
-        Ta liste en vitrine, regroupée par magasin — sans photos, juste des icônes.
+        Ta vitrine d’articles — crée une liste quand tu en as besoin.
       </p>
     </header>
 
     <div class="courses-page__header-actions">
-      <button type="button" class="courses-page__ghost" @click="manageOpen = true">
-        Magasins & rayons
+      <button type="button" class="courses-page__ghost" @click="listsOpen = true">
+        Mes listes de courses
       </button>
       <button type="button" class="courses-page__ghost" @click="onExport">
         {{ exportFlash || 'Exporter' }}
@@ -181,6 +323,18 @@ function showToast(message) {
     <p v-if="error" class="courses-page__error" role="alert">{{ error }}</p>
     <p v-if="toast" class="courses-page__toast" role="status">{{ toast }}</p>
 
+    <div v-if="selectedListe" class="courses-page__filter" role="status">
+      <span>
+        Filtre : <strong>{{ selectedListe.nom }}</strong>
+        <template v-if="selectedListe.date_liste">
+          ({{ selectedListe.date_liste.slice(8, 10) }}/{{ selectedListe.date_liste.slice(5, 7) }}/{{ selectedListe.date_liste.slice(0, 4) }})
+        </template>
+      </span>
+      <button type="button" class="courses-page__filter-clear" @click="clearListeFilter">
+        Voir tout
+      </button>
+    </div>
+
     <CoursesQuickAdd
       :suggestions="suggestions"
       :disabled="saving"
@@ -189,29 +343,7 @@ function showToast(message) {
       @pick="onQuickPick"
     />
 
-    <div class="courses-page__modes" role="group" aria-label="Mode d’affichage">
-      <button
-        type="button"
-        class="courses-page__mode"
-        :class="{ 'is-active': isVitrine }"
-        :aria-pressed="isVitrine"
-        @click="viewMode = COURSES_VIEW_MODE.VITRINE"
-      >
-        Vitrine
-      </button>
-      <button
-        type="button"
-        class="courses-page__mode"
-        :class="{ 'is-active': !isVitrine }"
-        :aria-pressed="!isVitrine"
-        @click="viewMode = COURSES_VIEW_MODE.MAGASIN"
-      >
-        Mode magasin
-      </button>
-    </div>
-
     <CoursesVitrineView
-      v-if="isVitrine"
       :groups="vitrineGroups"
       :renew-articles="renewArticles"
       :renew-open="renewSectionOpen"
@@ -223,25 +355,18 @@ function showToast(message) {
       @update:renew-threshold-days="renewThresholdDays = $event"
       @open-article="openArticle"
       @racheter="onRacheter"
+      @edit-group="onEditGroup"
     />
 
-    <CoursesMagasinMode
-      v-else
-      :magasins="magasins"
-      :selected-magasin-id="selectedMagasinId"
-      :groups="magasinModeGroups"
-      :checked-articles="magasinModeChecked"
-      :progress="magasinModeProgress"
-      :can-finish="canFinishShopping"
-      :pending-finish-articles="pendingFinishArticles"
-      :bag-open="bagOpen"
+    <CoursesArticleDetailModal
+      :open="detailOpen"
+      :article="detailArticle"
       :saving="saving"
-      @update:selected-magasin-id="selectedMagasinId = $event"
-      @update:bag-open="bagOpen = $event"
-      @toggle="onToggleShop"
-      @finish="onFinish"
-      @clear-bag="onClearBag"
-      @open-article="openArticle"
+      @close="detailOpen = false"
+      @edit="openEditFromDetail"
+      @add-to-list="openPickList"
+      @mark-purchased="onMarkPurchased"
+      @delete="onDeleteFromDetail"
     />
 
     <CoursesArticleFormModal
@@ -255,20 +380,51 @@ function showToast(message) {
       @delete="onDeleteArticle"
     />
 
-    <CoursesManageModal
-      :open="manageOpen"
-      :magasins="magasins"
-      :categories="categories"
+    <CoursesPickListModal
+      :open="pickListOpen"
+      :listes="listes"
+      :article="pickListArticle"
       :saving="saving"
-      @close="manageOpen = false"
-      @add-magasin="addMagasin"
-      @edit-magasin="editMagasin"
-      @delete-magasin="removeMagasin"
-      @reorder-magasins="reorderMagasins"
-      @add-categorie="addCategorie"
-      @edit-categorie="editCategorie"
-      @delete-categorie="removeCategorie"
-      @reorder-categories="reorderCategories"
+      @close="pickListOpen = false"
+      @select="onPickListSelect"
+      @create-and-select="onPickListCreate"
+    />
+
+    <CoursesListsModal
+      :open="listsOpen"
+      :listes="listes"
+      :selected-liste-id="selectedListeId"
+      :articles="articles"
+      :saving="saving"
+      @close="listsOpen = false"
+      @create="addListe"
+      @update-liste="editListe"
+      @close-liste="onCloseListe"
+      @reporter="onReporter"
+      @select-liste="selectedListeId = $event"
+      @clear-filter="clearListeFilter"
+      @delete-liste="onDeleteListe"
+    />
+
+    <CoursesGroupEditModal
+      :open="groupEditOpen"
+      :kind="groupEditKind"
+      :entity="groupEditEntity"
+      :saving="saving"
+      @close="groupEditOpen = false"
+      @save="onSaveGroup"
+      @delete="onDeleteGroup"
+    />
+
+    <AppConfirmDialog
+      :open="Boolean(confirmState)"
+      :title="confirmState?.title || 'Confirmation'"
+      :message="confirmState?.message || ''"
+      :confirm-label="confirmState?.confirmLabel || 'Confirmer'"
+      :cancel-label="confirmState?.cancelLabel || 'Annuler'"
+      :danger="Boolean(confirmState?.danger)"
+      @confirm="onConfirmDialog"
+      @cancel="onCancelConfirmDialog"
     />
   </div>
 </template>
@@ -306,12 +462,37 @@ function showToast(message) {
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.5rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.courses-page__filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  font-size: 0.9rem;
+  color: var(--color-text);
+}
+
+.courses-page__filter-clear {
+  min-height: 36px;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  color: var(--color-text);
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .courses-page__ghost,
-.courses-page__primary,
-.courses-page__mode {
+.courses-page__primary {
   min-height: 44px;
   padding: 0 0.9rem;
   border-radius: 12px;
@@ -329,29 +510,6 @@ function showToast(message) {
   border: none;
   background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
   color: #2c3e50;
-}
-
-.courses-page__modes {
-  display: flex;
-  width: fit-content;
-  max-width: 100%;
-  margin: 0 auto 1.1rem;
-  border-radius: 999px;
-  border: 1px solid var(--color-border);
-  overflow: hidden;
-  background: var(--color-background);
-}
-
-.courses-page__mode {
-  border: none;
-  background: transparent;
-  color: var(--color-text-light);
-  border-radius: 0;
-}
-
-.courses-page__mode.is-active {
-  background: color-mix(in srgb, var(--color-primary) 45%, transparent);
-  color: var(--color-text);
 }
 
 .courses-page__cache,

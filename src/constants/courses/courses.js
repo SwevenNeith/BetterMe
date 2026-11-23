@@ -35,6 +35,7 @@ export const COURSES_PRIORITES = [
 
 export const COURSES_DEFAULT_ICONE = '🛒'
 export const COURSES_DEFAULT_MAGASIN_COULEUR = '#AD81BE'
+export const COURSES_DEFAULT_CATEGORIE_COULEUR = '#8FA2D4'
 export const COURSES_DEFAULT_RENEW_THRESHOLD_DAYS = 30
 
 export const COURSES_GROUP_BY = {
@@ -42,9 +43,14 @@ export const COURSES_GROUP_BY = {
   CATEGORIE: 'categorie',
 }
 
-export const COURSES_VIEW_MODE = {
-  VITRINE: 'vitrine',
-  MAGASIN: 'magasin',
+export const COURSES_LISTE_STATUTS = {
+  OUVERTE: 'ouverte',
+  FERMEE: 'fermee',
+}
+
+export const COURSES_LISTE_STATUT_LABELS = {
+  ouverte: 'Ouverte',
+  fermee: 'Fermée',
 }
 
 export const COURSES_CACHE_KEY_PREFIX = 'betterme-courses-cache-'

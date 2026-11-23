@@ -21,10 +21,15 @@ const magasinColor = computed(
 const qtyLabel = computed(() => {
   const q = props.article.quantite
   const u = props.article.unite
-  if (u) return `${q} ${u}`
-  if (Number(q) !== 1) return String(q)
+  if (q != null && q !== '' && u) return `${q} ${u}`
+  if (q != null && q !== '') return String(q)
+  if (u) return u
   return ''
 })
+
+const marqueLabel = computed(() => String(props.article.marque || '').trim())
+
+const imageUrl = computed(() => String(props.article.lien_image || '').trim())
 
 const progressPct = computed(() => {
   const p = props.article.durabilityProgress
@@ -40,7 +45,14 @@ const progressPct = computed(() => {
     :class="{ 'courses-card--compact': compact }"
     @click="emit('open', article)"
   >
-    <span class="courses-card__icone" aria-hidden="true">{{ article.icone || '🛒' }}</span>
+    <span v-if="imageUrl" class="courses-card__media" aria-hidden="true">
+      <img
+        class="courses-card__img"
+        :src="imageUrl"
+        alt=""
+        loading="lazy"
+      />
+    </span>
     <span class="courses-card__body">
       <span class="courses-card__top">
         <span class="courses-card__nom">{{ article.nom }}</span>
@@ -51,6 +63,7 @@ const progressPct = computed(() => {
           :aria-label="`Priorité ${prioriteMeta.label}`"
         >{{ prioriteMeta.marker }}</span>
       </span>
+      <span v-if="marqueLabel" class="courses-card__marque">{{ marqueLabel }}</span>
       <span v-if="qtyLabel" class="courses-card__qty">{{ qtyLabel }}</span>
       <span
         v-if="showDurability && article.durabilityCaption"
@@ -124,10 +137,22 @@ const progressPct = computed(() => {
   padding: 0.75rem 0.85rem;
 }
 
-.courses-card__icone {
-  font-size: 1.55rem;
-  line-height: 1;
-  margin-top: 0.1rem;
+.courses-card__media {
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  margin-top: 0.05rem;
+}
+
+.courses-card__img {
+  width: 2.5rem;
+  height: 2.5rem;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
 }
 
 .courses-card__body {
@@ -157,9 +182,14 @@ const progressPct = computed(() => {
   flex-shrink: 0;
 }
 
+.courses-card__marque,
 .courses-card__qty {
   font-size: 0.85rem;
   color: var(--color-text-light);
+}
+
+.courses-card__marque {
+  font-style: italic;
 }
 
 .courses-card__dura {

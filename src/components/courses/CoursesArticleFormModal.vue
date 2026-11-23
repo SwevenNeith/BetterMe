@@ -1,12 +1,13 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
+import AppConfirmDialog from '../common/AppConfirmDialog.vue'
 import {
-  COURSES_DEFAULT_ICONE,
   COURSES_DUREE_UNITES,
   COURSES_PRIORITES,
   COURSES_STATUT_LABELS,
   COURSES_STATUTS,
 } from '../../constants/courses/courses.js'
+import ReadingCollectionCombobox from '../lecture/ReadingCollectionCombobox.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -20,22 +21,29 @@ const emit = defineEmits(['close', 'save', 'delete'])
 
 const form = reactive(emptyForm())
 const duraPanelOpen = ref(false)
+const moreOpen = ref(false)
+const imagePreviewBroken = ref(false)
+const confirmDeleteOpen = ref(false)
 
 const isEdit = computed(() => Boolean(props.article?.id))
 const panelOpen = computed(() => form.suivi_durabilite || duraPanelOpen.value)
 
+const magasinNames = computed(() => props.magasins.map((m) => m.nom).filter(Boolean))
+const rayonNames = computed(() => props.categories.map((c) => c.nom).filter(Boolean))
+
 function emptyForm() {
   return {
     nom: '',
-    quantite: 1,
+    marque: '',
+    quantite: '',
     unite: '',
-    magasin_id: '',
-    categorie_id: '',
+    magasin_nom: '',
+    categorie_nom: '',
     priorite: '',
-    prix_estime: '',
+    prix: '',
     note: '',
     lien: '',
-    icone: COURSES_DEFAULT_ICONE,
+    lien_image: '',
     statut: COURSES_STATUTS.A_ACHETER,
     suivi_durabilite: false,
     date_dernier_achat: '',
@@ -46,32 +54,48 @@ function emptyForm() {
 
 function fillFromArticle(article) {
   Object.assign(form, emptyForm())
+  moreOpen.value = false
+  imagePreviewBroken.value = false
   if (!article) {
     duraPanelOpen.value = false
     return
   }
   form.nom = article.nom || ''
-  form.quantite = article.quantite ?? 1
+  form.marque = article.marque || ''
+  form.quantite = article.quantite ?? ''
   form.unite = article.unite || ''
-  form.magasin_id = article.magasin_id || ''
-  form.categorie_id = article.categorie_id || ''
+  form.magasin_nom =
+    article.magasin?.nom ||
+    props.magasins.find((m) => m.id === article.magasin_id)?.nom ||
+    ''
+  form.categorie_nom =
+    article.categorie?.nom ||
+    props.categories.find((c) => c.id === article.categorie_id)?.nom ||
+    ''
   form.priorite = article.priorite ?? ''
-  form.prix_estime = article.prix_estime ?? ''
+  form.prix = article.prix ?? article.prix_estime ?? ''
   form.note = article.note || ''
   form.lien = article.lien || ''
-  form.icone = article.icone || COURSES_DEFAULT_ICONE
+  form.lien_image = article.lien_image || ''
   form.statut = article.statut || COURSES_STATUTS.A_ACHETER
   form.suivi_durabilite = Boolean(article.suivi_durabilite)
   form.date_dernier_achat = article.date_dernier_achat || ''
   form.duree_valeur = article.duree_valeur ?? ''
   form.duree_unite = article.duree_unite || 'mois'
   duraPanelOpen.value = Boolean(article.suivi_durabilite)
+  moreOpen.value = Boolean(
+    article.note || article.priorite || article.suivi_durabilite,
+  )
 }
 
 watch(
   () => [props.open, props.article],
   ([open]) => {
-    if (open) fillFromArticle(props.article)
+    if (!open) {
+      confirmDeleteOpen.value = false
+      return
+    }
+    fillFromArticle(props.article)
   },
   { immediate: true },
 )
@@ -91,16 +115,17 @@ function onSubmit() {
     id: props.article?.id || null,
     payload: {
       nom: form.nom,
-      quantite: form.quantite,
+      marque: form.marque || null,
+      quantite: form.quantite === '' ? null : Number(form.quantite),
       unite: form.unite || null,
-      magasin_id: form.magasin_id || null,
-      categorie_id: form.categorie_id || null,
+      magasin_nom: form.magasin_nom,
+      categorie_nom: form.categorie_nom,
       priorite: form.priorite === '' ? null : Number(form.priorite),
-      prix_estime: form.prix_estime === '' ? null : Number(form.prix_estime),
+      prix: form.prix === '' ? null : Number(form.prix),
       note: form.note || null,
       lien: form.lien || null,
-      icone: form.icone || COURSES_DEFAULT_ICONE,
-      statut: form.statut,
+      lien_image: form.lien_image || null,
+      statut: form.statut || COURSES_STATUTS.A_ACHETER,
       suivi_durabilite: form.suivi_durabilite,
       date_dernier_achat: form.suivi_durabilite ? form.date_dernier_achat || null : null,
       duree_valeur: form.suivi_durabilite
@@ -115,7 +140,12 @@ function onSubmit() {
 
 function onDelete() {
   if (!props.article?.id || props.saving) return
-  if (!window.confirm('Supprimer cet article ?')) return
+  confirmDeleteOpen.value = true
+}
+
+function confirmDelete() {
+  confirmDeleteOpen.value = false
+  if (!props.article?.id) return
   emit('delete', props.article.id)
 }
 </script>
@@ -140,122 +170,172 @@ function onDelete() {
             <input v-model="form.nom" type="text" required maxlength="200" />
           </label>
 
-          <div class="caf-row">
-            <label class="caf-field">
-              <span>Quantité</span>
-              <input v-model.number="form.quantite" type="number" min="0.001" step="any" />
-            </label>
-            <label class="caf-field">
-              <span>Unité</span>
-              <input v-model="form.unite" type="text" placeholder="ex. L, kg, pcs" />
-            </label>
-            <label class="caf-field caf-field--icone">
-              <span>Icône</span>
-              <input v-model="form.icone" type="text" maxlength="8" />
-            </label>
-          </div>
-
           <label class="caf-field">
-            <span>Magasin</span>
-            <select v-model="form.magasin_id">
-              <option value="">N’importe où</option>
-              <option v-for="m in magasins" :key="m.id" :value="m.id">{{ m.nom }}</option>
-            </select>
-          </label>
-
-          <label class="caf-field">
-            <span>Rayon</span>
-            <select v-model="form.categorie_id">
-              <option value="">Sans rayon</option>
-              <option v-for="c in categories" :key="c.id" :value="c.id">
-                {{ c.icone }} {{ c.nom }}
-              </option>
-            </select>
+            <span>Marque <em>(facultatif)</em></span>
+            <input v-model="form.marque" type="text" maxlength="120" />
           </label>
 
           <div class="caf-row">
             <label class="caf-field">
-              <span>Priorité</span>
-              <select v-model="form.priorite">
-                <option value="">Aucune</option>
-                <option v-for="p in COURSES_PRIORITES" :key="p.id" :value="p.id">
-                  {{ p.label }} ({{ p.marker }})
-                </option>
-              </select>
+              <span>Quantité <em>(facultatif)</em></span>
+              <input v-model="form.quantite" type="number" min="0.001" step="any" />
             </label>
             <label class="caf-field">
-              <span>Prix estimé</span>
-              <input v-model="form.prix_estime" type="number" min="0" step="0.01" />
+              <span>Unité <em>(facultatif)</em></span>
+              <input v-model="form.unite" type="text" placeholder="ex. L, kg" />
+            </label>
+            <label class="caf-field">
+              <span>Prix <em>(facultatif)</em></span>
+              <input v-model="form.prix" type="number" min="0" step="0.01" />
             </label>
           </div>
 
           <label class="caf-field">
-            <span>Statut</span>
-            <select v-model="form.statut">
-              <option
-                v-for="(label, key) in COURSES_STATUT_LABELS"
-                :key="key"
-                :value="key"
-              >{{ label }}</option>
-            </select>
+            <span>Lien image <em>(facultatif)</em></span>
+            <input
+              v-model="form.lien_image"
+              type="url"
+              placeholder="https://…/photo.jpg"
+              @input="imagePreviewBroken = false"
+            />
           </label>
+          <p v-if="form.lien_image.trim()" class="caf-preview-wrap">
+            <img
+              v-show="!imagePreviewBroken"
+              class="caf-preview"
+              :src="form.lien_image.trim()"
+              alt=""
+              loading="lazy"
+              @error="imagePreviewBroken = true"
+              @load="imagePreviewBroken = false"
+            />
+            <span class="caf-hint-inline">
+              {{
+                imagePreviewBroken
+                  ? 'Image inaccessible — vérifie l’URL.'
+                  : 'Aperçu de l’image sur la carte.'
+              }}
+            </span>
+          </p>
 
           <label class="caf-field">
-            <span>Note</span>
-            <textarea v-model="form.note" rows="2" />
-          </label>
-
-          <label class="caf-field">
-            <span>Lien</span>
+            <span>Lien vers l’article <em>(facultatif)</em></span>
             <input v-model="form.lien" type="url" placeholder="https://…" />
           </label>
 
-          <section class="caf-dura">
-            <button
-              type="button"
-              class="caf-dura-toggle"
-              :aria-expanded="panelOpen"
-              @click="toggleDuraPanel"
-            >
-              <span>Suivre la durée de vie</span>
-              <span aria-hidden="true">{{ panelOpen ? '▾' : '▸' }}</span>
-            </button>
-            <div v-show="panelOpen" class="caf-dura-body">
-              <label class="caf-switch">
-                <input
-                  type="checkbox"
-                  :checked="form.suivi_durabilite"
-                  @change="onSuiviChange"
-                />
-                <span>Activer le suivi (facultatif)</span>
+          <div class="caf-field">
+            <span>Magasin <em>(tape un nom — créé si nouveau)</em></span>
+            <ReadingCollectionCombobox
+              v-model="form.magasin_nom"
+              :collections="magasinNames"
+              appearance="form"
+              placeholder="ex. Carrefour, Amazon…"
+              empty-message="Aucun magasin"
+              toggle-aria-label="Magasins existants"
+              :disabled="saving"
+            />
+          </div>
+
+          <div class="caf-field">
+            <span>Rayon <em>(tape un nom — créé si nouveau)</em></span>
+            <ReadingCollectionCombobox
+              v-model="form.categorie_nom"
+              :collections="rayonNames"
+              appearance="form"
+              placeholder="ex. Fruits, Hygiène…"
+              empty-message="Aucun rayon"
+              toggle-aria-label="Rayons existants"
+              :disabled="saving"
+            />
+          </div>
+
+          <p class="caf-hint-inline">
+            Après enregistrement, tu pourras l’ajouter à une liste de courses depuis la fiche article.
+            Pour personnaliser un magasin ou un rayon, clique sur son bandeau dans la vitrine.
+          </p>
+
+          <button
+            type="button"
+            class="caf-more-toggle"
+            :aria-expanded="moreOpen"
+            @click="moreOpen = !moreOpen"
+          >
+            <span>Options avancées</span>
+            <span aria-hidden="true">{{ moreOpen ? '▾' : '▸' }}</span>
+          </button>
+
+          <template v-if="moreOpen">
+            <div class="caf-row">
+              <label class="caf-field">
+                <span>Priorité</span>
+                <select v-model="form.priorite">
+                  <option value="">Aucune</option>
+                  <option v-for="p in COURSES_PRIORITES" :key="p.id" :value="p.id">
+                    {{ p.label }} ({{ p.marker }})
+                  </option>
+                </select>
               </label>
-              <template v-if="form.suivi_durabilite">
-                <label class="caf-field">
-                  <span>Date du dernier achat</span>
-                  <input v-model="form.date_dernier_achat" type="date" />
-                </label>
-                <div class="caf-row">
-                  <label class="caf-field">
-                    <span>Durée prévue</span>
-                    <input v-model="form.duree_valeur" type="number" min="1" step="1" />
-                  </label>
-                  <label class="caf-field">
-                    <span>Unité</span>
-                    <select v-model="form.duree_unite">
-                      <option
-                        v-for="u in COURSES_DUREE_UNITES"
-                        :key="u.id"
-                        :value="u.id"
-                      >{{ u.label }}</option>
-                    </select>
-                  </label>
-                </div>
-                <p class="caf-hint">
-                  Pas de date d’échéance d’achat : seulement une estimation de renouvellement.
-                </p>
-              </template>
+              <label class="caf-field">
+                <span>Statut</span>
+                <select v-model="form.statut">
+                  <option
+                    v-for="(label, key) in COURSES_STATUT_LABELS"
+                    :key="key"
+                    :value="key"
+                  >{{ label }}</option>
+                </select>
+              </label>
             </div>
-          </section>
+
+            <label class="caf-field">
+              <span>Note</span>
+              <textarea v-model="form.note" rows="2" />
+            </label>
+
+            <section class="caf-dura">
+              <button
+                type="button"
+                class="caf-dura-toggle"
+                :aria-expanded="panelOpen"
+                @click="toggleDuraPanel"
+              >
+                <span>Suivre la durée de vie</span>
+                <span aria-hidden="true">{{ panelOpen ? '▾' : '▸' }}</span>
+              </button>
+              <div v-show="panelOpen" class="caf-dura-body">
+                <label class="caf-switch">
+                  <input
+                    type="checkbox"
+                    :checked="form.suivi_durabilite"
+                    @change="onSuiviChange"
+                  />
+                  <span>Activer le suivi (facultatif)</span>
+                </label>
+                <template v-if="form.suivi_durabilite">
+                  <label class="caf-field">
+                    <span>Date du dernier achat</span>
+                    <input v-model="form.date_dernier_achat" type="date" />
+                  </label>
+                  <div class="caf-row">
+                    <label class="caf-field">
+                      <span>Durée prévue</span>
+                      <input v-model="form.duree_valeur" type="number" min="1" step="1" />
+                    </label>
+                    <label class="caf-field">
+                      <span>Unité</span>
+                      <select v-model="form.duree_unite">
+                        <option
+                          v-for="u in COURSES_DUREE_UNITES"
+                          :key="u.id"
+                          :value="u.id"
+                        >{{ u.label }}</option>
+                      </select>
+                    </label>
+                  </div>
+                </template>
+              </div>
+            </section>
+          </template>
 
           <div class="caf-actions">
             <button
@@ -278,6 +358,17 @@ function onDelete() {
       </div>
     </div>
   </Teleport>
+
+  <AppConfirmDialog
+    :open="confirmDeleteOpen"
+    title="Supprimer l’article ?"
+    message="Cette action est définitive."
+    confirm-label="Supprimer"
+    cancel-label="Annuler"
+    danger
+    @confirm="confirmDelete"
+    @cancel="confirmDeleteOpen = false"
+  />
 </template>
 
 <style scoped>
@@ -300,7 +391,7 @@ function onDelete() {
 
 .caf-modal {
   width: min(100%, 32rem);
-  max-height: min(94vh, 40rem);
+  max-height: min(94vh, 42rem);
   overflow: auto;
   background: var(--color-background);
   border-radius: 18px 18px 0 0;
@@ -360,6 +451,12 @@ function onDelete() {
   min-width: 0;
 }
 
+.caf-field em {
+  font-style: normal;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
 .caf-field input,
 .caf-field select,
 .caf-field textarea {
@@ -378,13 +475,50 @@ function onDelete() {
   resize: vertical;
 }
 
-.caf-field--icone {
-  max-width: 5.5rem;
-}
-
 .caf-row {
   display: flex;
   gap: 0.55rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.caf-preview-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.caf-preview {
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.caf-hint-inline {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--color-text-light);
+  line-height: 1.4;
+}
+
+.caf-more-toggle {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  border: 1px dashed var(--color-border);
+  background: transparent;
+  color: var(--color-text-light);
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .caf-dura {
@@ -421,14 +555,6 @@ function onDelete() {
   font-size: 0.92rem;
   font-weight: 600;
   color: var(--color-text);
-}
-
-.caf-hint {
-  margin: 0;
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: var(--color-text-light);
-  line-height: 1.35;
 }
 
 .caf-actions {

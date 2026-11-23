@@ -2,7 +2,11 @@
 import CoursesMagasinBanner from './CoursesMagasinBanner.vue'
 import CoursesArticleCard from './CoursesArticleCard.vue'
 import CoursesRenewSection from './CoursesRenewSection.vue'
-import { COURSES_GROUP_BY } from '../../constants/courses/courses.js'
+import {
+  COURSES_GROUP_BY,
+  COURSES_SANS_CATEGORIE_ID,
+  COURSES_SANS_MAGASIN_ID,
+} from '../../constants/courses/courses.js'
 
 defineProps({
   groups: { type: Array, default: () => [] },
@@ -19,7 +23,25 @@ const emit = defineEmits([
   'update:renewThresholdDays',
   'open-article',
   'racheter',
+  'edit-group',
 ])
+
+function isEditableGroup(group) {
+  if (!group) return false
+  if (group.key === COURSES_SANS_MAGASIN_ID || group.key === COURSES_SANS_CATEGORIE_ID) {
+    return false
+  }
+  return Boolean(group.meta?.magasin || group.meta?.categorie)
+}
+
+function onEditGroup(group) {
+  if (!isEditableGroup(group)) return
+  if (group.meta?.magasin) {
+    emit('edit-group', { kind: 'magasin', entity: group.meta.magasin })
+  } else if (group.meta?.categorie) {
+    emit('edit-group', { kind: 'categorie', entity: group.meta.categorie })
+  }
+}
 </script>
 
 <template>
@@ -69,7 +91,8 @@ const emit = defineEmits([
       <p class="courses-vitrine__empty-emoji" aria-hidden="true">🛒</p>
       <p class="courses-vitrine__empty-title">Ta vitrine est vide</p>
       <p class="courses-vitrine__empty-text">
-        Ajoute un article ci-dessus, ou crée des magasins et rayons pour organiser ta liste.
+        Ajoute un article ci-dessus. Les magasins et rayons se créent en tapant leur nom,
+        puis tu les personnalises en cliquant sur leur bandeau.
       </p>
     </div>
 
@@ -84,6 +107,8 @@ const emit = defineEmits([
         :color="group.color || '#AD81BE'"
         :count="group.articles.length"
         :subtitle="group.meta?.magasin?.type === 'en_ligne' ? 'En ligne' : ''"
+        :editable="isEditableGroup(group)"
+        @edit="onEditGroup(group)"
       />
       <div class="courses-vitrine__grid">
         <CoursesArticleCard

@@ -3,10 +3,10 @@ import {
   COURSES_CACHE_KEY_PREFIX,
   COURSES_DEFAULT_RENEW_THRESHOLD_DAYS,
   COURSES_GROUP_BY,
+  COURSES_LISTE_STATUTS,
   COURSES_SANS_CATEGORIE_ID,
   COURSES_SANS_MAGASIN_ID,
   COURSES_STATUTS,
-  COURSES_VIEW_MODE,
 } from '../constants/courses/courses.js'
 import * as coursesService from '../services/courses/coursesService.js'
 import {
@@ -30,6 +30,7 @@ function readCache(userId) {
     return {
       magasins: parsed.magasins ?? [],
       categories: parsed.categories ?? [],
+      listes: parsed.listes ?? [],
       articles: parsed.articles ?? [],
       historique: parsed.historique ?? [],
       savedAt: parsed.savedAt ?? null,
@@ -46,6 +47,7 @@ function writeCache(userId, bundle) {
       JSON.stringify({
         magasins: bundle.magasins ?? [],
         categories: bundle.categories ?? [],
+        listes: bundle.listes ?? [],
         articles: bundle.articles ?? [],
         historique: bundle.historique ?? [],
         savedAt: new Date().toISOString(),
@@ -68,16 +70,14 @@ export function useCourses() {
 
   const magasins = ref([])
   const categories = ref([])
+  const listes = ref([])
   const articles = ref([])
   const historique = ref([])
 
-  const viewMode = ref(COURSES_VIEW_MODE.VITRINE)
   const groupBy = ref(COURSES_GROUP_BY.MAGASIN)
-  const selectedMagasinId = ref(null)
+  const selectedListeId = ref(null)
   const renewThresholdDays = ref(COURSES_DEFAULT_RENEW_THRESHOLD_DAYS)
   const renewSectionOpen = ref(true)
-  /** Articles cochés en mode magasin pas encore historisés via « Terminer ». */
-  const pendingHistorizeIds = ref(new Set())
 
   const magasinById = computed(() => {
     const map = new Map()
@@ -91,18 +91,45 @@ export function useCourses() {
     return map
   })
 
-  /** Articles actifs de la vitrine (pas encore « dans le sac » finalisé). */
-  const activeArticles = computed(() =>
-    articles.value.filter((a) =>
+  const listeById = computed(() => {
+    const map = new Map()
+    for (const l of listes.value) map.set(l.id, l)
+    return map
+  })
+
+  const openListes = computed(() =>
+    listes.value.filter((l) => l.statut === COURSES_LISTE_STATUTS.OUVERTE),
+  )
+
+  const closedListes = computed(() =>
+    listes.value.filter((l) => l.statut === COURSES_LISTE_STATUTS.FERMEE),
+  )
+
+  const selectedListe = computed(() =>
+    selectedListeId.value ? listeById.value.get(selectedListeId.value) || null : null,
+  )
+
+  /** Articles actifs de la vitrine (filtre liste courante si sélectionnée). */
+  const activeArticles = computed(() => {
+    const base = articles.value.filter((a) =>
       [COURSES_STATUTS.A_ACHETER, COURSES_STATUTS.DANS_PANIER, COURSES_STATUTS.REPORTE].includes(
         a.statut,
       ),
-    ),
-  )
+    )
+    if (!selectedListeId.value) return base
+    return base.filter((a) => a.liste_id === selectedListeId.value)
+  })
 
-  const boughtArticles = computed(() =>
-    articles.value.filter((a) => a.statut === COURSES_STATUTS.ACHETE),
-  )
+  const selectedListeRestants = computed(() => {
+    if (!selectedListeId.value) return []
+    return articles.value.filter(
+      (a) =>
+        a.liste_id === selectedListeId.value &&
+        [COURSES_STATUTS.A_ACHETER, COURSES_STATUTS.DANS_PANIER, COURSES_STATUTS.REPORTE].includes(
+          a.statut,
+        ),
+    )
+  })
 
   const renewArticles = computed(() => {
     const threshold = renewThresholdDays.value
@@ -121,11 +148,13 @@ export function useCourses() {
     const categorie = article.categorie_id
       ? categorieById.value.get(article.categorie_id)
       : null
+    const liste = article.liste_id ? listeById.value.get(article.liste_id) : null
     const renewalDate = estimatedRenewalDate(article)
     return {
       ...article,
       magasin,
       categorie,
+      liste,
       renewalDate,
       renewLabel: renewalStatusLabel(article, renewThresholdDays.value),
       durabilityCaption: durabilityCardCaption(article),
@@ -160,9 +189,15 @@ export function useCourses() {
           ? categorieById.value.get(article.categorie_id)
           : null
         if (cat) {
-          push(cat.id, `${cat.icone || ''} ${cat.nom}`.trim(), null, { categorie: cat }, article)
+          push(
+            cat.id,
+            `${cat.icone || ''} ${cat.nom}`.trim(),
+            cat.couleur || null,
+            { categorie: cat },
+            article,
+          )
         } else {
-          push(COURSES_SANS_CATEGORIE_ID, 'Sans rayon', null, { categorie: null }, article)
+          push(COURSES_SANS_CATEGORIE_ID, 'Sans rayon', '#9aa0a6', { categorie: null }, article)
         }
       } else {
         const mag = article.magasin_id ? magasinById.value.get(article.magasin_id) : null
@@ -181,31 +216,26 @@ export function useCourses() {
     }
 
     for (const g of groups) {
-      g.articles.sort((a, b) => {
-        const pa = a.priorite ?? 99
-        const pb = b.priorite ?? 99
-        if (pa !== pb) return pa - pb
-        return String(a.nom).localeCompare(String(b.nom), 'fr', { sensitivity: 'base' })
-      })
+      g.articles.sort((a, b) =>
+        String(a.nom || '').localeCompare(String(b.nom || ''), 'fr', { sensitivity: 'base' }),
+      )
     }
 
     if (by === COURSES_GROUP_BY.MAGASIN) {
       groups.sort((a, b) => {
         if (a.key === COURSES_SANS_MAGASIN_ID) return 1
         if (b.key === COURSES_SANS_MAGASIN_ID) return -1
-        const oa = a.meta.magasin?.ordre ?? 999
-        const ob = b.meta.magasin?.ordre ?? 999
-        if (oa !== ob) return oa - ob
-        return a.title.localeCompare(b.title, 'fr', { sensitivity: 'base' })
+        const na = a.meta.magasin?.nom || a.title
+        const nb = b.meta.magasin?.nom || b.title
+        return String(na).localeCompare(String(nb), 'fr', { sensitivity: 'base' })
       })
     } else {
       groups.sort((a, b) => {
         if (a.key === COURSES_SANS_CATEGORIE_ID) return 1
         if (b.key === COURSES_SANS_CATEGORIE_ID) return -1
-        const oa = a.meta.categorie?.ordre ?? 999
-        const ob = b.meta.categorie?.ordre ?? 999
-        if (oa !== ob) return oa - ob
-        return a.title.localeCompare(b.title, 'fr', { sensitivity: 'base' })
+        const na = a.meta.categorie?.nom || a.title
+        const nb = b.meta.categorie?.nom || b.title
+        return String(na).localeCompare(String(nb), 'fr', { sensitivity: 'base' })
       })
     }
 
@@ -214,45 +244,31 @@ export function useCourses() {
 
   const vitrineGroups = computed(() => groupArticles(activeArticles.value, groupBy.value))
 
-  const magasinModeArticles = computed(() => {
-    const id = selectedMagasinId.value
-    if (!id) return []
-    return articles.value
-      .filter((a) => a.magasin_id === id)
-      .filter((a) =>
-        [
-          COURSES_STATUTS.A_ACHETER,
-          COURSES_STATUTS.DANS_PANIER,
-          COURSES_STATUTS.ACHETE,
-        ].includes(a.statut),
-      )
-      .map(enrichArticle)
-  })
-
-  const magasinModePending = computed(() =>
-    magasinModeArticles.value.filter((a) => a.statut !== COURSES_STATUTS.ACHETE),
-  )
-
-  const magasinModeChecked = computed(() =>
-    magasinModeArticles.value.filter((a) => a.statut === COURSES_STATUTS.ACHETE),
-  )
-
-  const magasinModeProgress = computed(() => {
-    const total = magasinModeArticles.value.length
-    const done = magasinModeChecked.value.length
-    return { done, total, label: `${done} sur ${total}` }
-  })
-
-  const magasinModeGroups = computed(() =>
-    groupArticles(magasinModePending.value, COURSES_GROUP_BY.CATEGORIE),
-  )
+  function sortByNom(list) {
+    return [...(list ?? [])].sort((a, b) =>
+      String(a.nom || '').localeCompare(String(b.nom || ''), 'fr', { sensitivity: 'base' }),
+    )
+  }
 
   function applyBundle(bundle, { cached = false } = {}) {
-    magasins.value = bundle.magasins ?? []
-    categories.value = bundle.categories ?? []
+    magasins.value = sortByNom(bundle.magasins)
+    categories.value = sortByNom(bundle.categories)
+    listes.value = bundle.listes ?? []
     articles.value = bundle.articles ?? []
     historique.value = bundle.historique ?? []
     fromCache.value = cached
+    syncSelectedListe()
+  }
+
+  function syncSelectedListe() {
+    if (!selectedListeId.value) return
+    if (!listes.value.some((l) => l.id === selectedListeId.value)) {
+      selectedListeId.value = null
+    }
+  }
+
+  function clearListeFilter() {
+    selectedListeId.value = null
   }
 
   function persistLocal() {
@@ -260,6 +276,7 @@ export function useCourses() {
     writeCache(userId.value, {
       magasins: magasins.value,
       categories: categories.value,
+      listes: listes.value,
       articles: articles.value,
       historique: historique.value,
     })
@@ -269,7 +286,13 @@ export function useCourses() {
     userId.value = uid || null
     error.value = null
     if (!uid) {
-      applyBundle({ magasins: [], categories: [], articles: [], historique: [] })
+      applyBundle({
+        magasins: [],
+        categories: [],
+        listes: [],
+        articles: [],
+        historique: [],
+      })
       return
     }
 
@@ -319,12 +342,49 @@ export function useCourses() {
 
   // —— Actions magasins / catégories ————————————————————————————————
 
+  function upsertMagasinLocal(row) {
+    const idx = magasins.value.findIndex((m) => m.id === row.id)
+    if (idx >= 0) magasins.value.splice(idx, 1, row)
+    else magasins.value = [...magasins.value, row]
+    magasins.value = sortByNom(magasins.value)
+  }
+
+  function upsertCategorieLocal(row) {
+    const idx = categories.value.findIndex((c) => c.id === row.id)
+    if (idx >= 0) categories.value.splice(idx, 1, row)
+    else categories.value = [...categories.value, row]
+    categories.value = sortByNom(categories.value)
+  }
+
+  async function resolveArticleNames(input = {}) {
+    const out = { ...input }
+    if (Object.prototype.hasOwnProperty.call(input, 'magasin_nom')) {
+      const row = await coursesService.ensureMagasinByName(
+        userId.value,
+        input.magasin_nom,
+        magasins.value,
+      )
+      if (row) upsertMagasinLocal(row)
+      out.magasin_id = row?.id ?? null
+      delete out.magasin_nom
+    }
+    if (Object.prototype.hasOwnProperty.call(input, 'categorie_nom')) {
+      const row = await coursesService.ensureCategorieByName(
+        userId.value,
+        input.categorie_nom,
+        categories.value,
+      )
+      if (row) upsertCategorieLocal(row)
+      out.categorie_id = row?.id ?? null
+      delete out.categorie_nom
+    }
+    return out
+  }
+
   async function addMagasin(input) {
     return withSaving(async () => {
       const row = await coursesService.createMagasin(userId.value, input)
-      magasins.value = [...magasins.value, row].sort(
-        (a, b) => a.ordre - b.ordre || a.nom.localeCompare(b.nom, 'fr'),
-      )
+      upsertMagasinLocal(row)
       return row
     })
   }
@@ -332,7 +392,7 @@ export function useCourses() {
   async function editMagasin(id, input) {
     return withSaving(async () => {
       const row = await coursesService.updateMagasin(userId.value, id, input)
-      magasins.value = magasins.value.map((m) => (m.id === id ? row : m))
+      magasins.value = sortByNom(magasins.value.map((m) => (m.id === id ? row : m)))
       return row
     })
   }
@@ -351,18 +411,16 @@ export function useCourses() {
     return withSaving(async () => {
       await coursesService.reorderMagasins(userId.value, ids)
       const order = new Map(ids.map((id, i) => [id, (i + 1) * 10]))
-      magasins.value = [...magasins.value]
-        .map((m) => (order.has(m.id) ? { ...m, ordre: order.get(m.id) } : m))
-        .sort((a, b) => a.ordre - b.ordre || a.nom.localeCompare(b.nom, 'fr'))
+      magasins.value = sortByNom(
+        magasins.value.map((m) => (order.has(m.id) ? { ...m, ordre: order.get(m.id) } : m)),
+      )
     })
   }
 
   async function addCategorie(input) {
     return withSaving(async () => {
       const row = await coursesService.createCategorie(userId.value, input)
-      categories.value = [...categories.value, row].sort(
-        (a, b) => a.ordre - b.ordre || a.nom.localeCompare(b.nom, 'fr'),
-      )
+      upsertCategorieLocal(row)
       return row
     })
   }
@@ -370,7 +428,7 @@ export function useCourses() {
   async function editCategorie(id, input) {
     return withSaving(async () => {
       const row = await coursesService.updateCategorie(userId.value, id, input)
-      categories.value = categories.value.map((c) => (c.id === id ? row : c))
+      categories.value = sortByNom(categories.value.map((c) => (c.id === id ? row : c)))
       return row
     })
   }
@@ -389,9 +447,109 @@ export function useCourses() {
     return withSaving(async () => {
       await coursesService.reorderCategories(userId.value, ids)
       const order = new Map(ids.map((id, i) => [id, (i + 1) * 10]))
-      categories.value = [...categories.value]
-        .map((c) => (order.has(c.id) ? { ...c, ordre: order.get(c.id) } : c))
-        .sort((a, b) => a.ordre - b.ordre || a.nom.localeCompare(b.nom, 'fr'))
+      categories.value = sortByNom(
+        categories.value.map((c) => (order.has(c.id) ? { ...c, ordre: order.get(c.id) } : c)),
+      )
+    })
+  }
+
+  // —— Listes ————————————————————————————————————————————————————————
+
+  function upsertListeLocal(row) {
+    const idx = listes.value.findIndex((l) => l.id === row.id)
+    if (idx >= 0) listes.value.splice(idx, 1, row)
+    else listes.value = [row, ...listes.value]
+    listes.value = [...listes.value].sort((a, b) => {
+      const da = String(b.date_liste || '')
+      const db = String(a.date_liste || '')
+      if (da !== db) return da.localeCompare(db)
+      return String(b.created_at || '').localeCompare(String(a.created_at || ''))
+    })
+  }
+
+  async function addListe(input = {}) {
+    return withSaving(async () => {
+      const row = await coursesService.createListe(userId.value, input)
+      upsertListeLocal(row)
+      return row
+    })
+  }
+
+  async function editListe(id, input) {
+    return withSaving(async () => {
+      const row = await coursesService.updateListe(userId.value, id, input)
+      upsertListeLocal(row)
+      return row
+    })
+  }
+
+  async function removeListe(id) {
+    return withSaving(async () => {
+      await coursesService.deleteListe(userId.value, id)
+      listes.value = listes.value.filter((l) => l.id !== id)
+      articles.value = articles.value.map((a) =>
+        a.liste_id === id ? { ...a, liste_id: null } : a,
+      )
+      syncSelectedListe()
+    })
+  }
+
+  /**
+   * Ferme une liste. Optionnellement reporte les non achetés vers une autre liste
+   * (créée si besoin).
+   */
+  async function closeListeById(
+    listeId,
+    { reporterRestants = false, targetListeId = null } = {},
+  ) {
+    if (!listeId) return null
+    return withSaving(async () => {
+      let targetId = targetListeId
+      if (reporterRestants && !targetId) {
+        const target = await coursesService.createListe(userId.value, {
+          nom: 'Reportés',
+        })
+        upsertListeLocal(target)
+        targetId = target.id
+      }
+      const result = await coursesService.closeListe(userId.value, listeId, {
+        reporterRestants,
+        targetListeId: targetId,
+      })
+      upsertListeLocal(result.liste)
+      for (const row of result.reported || []) replaceArticle(row)
+      if (selectedListeId.value === listeId) {
+        selectedListeId.value = reporterRestants && targetId ? targetId : null
+      }
+      return result
+    })
+  }
+
+  async function reporterRestantsVers(fromListeId, targetListeId = null) {
+    const listeId = fromListeId || selectedListeId.value
+    if (!listeId) return []
+    const ids = articles.value
+      .filter(
+        (a) =>
+          a.liste_id === listeId &&
+          [COURSES_STATUTS.A_ACHETER, COURSES_STATUTS.DANS_PANIER, COURSES_STATUTS.REPORTE].includes(
+            a.statut,
+          ),
+      )
+      .map((a) => a.id)
+    if (!ids.length) return []
+    return withSaving(async () => {
+      let targetId = targetListeId
+      if (!targetId) {
+        const target = await coursesService.createListe(userId.value, { nom: 'Reportés' })
+        upsertListeLocal(target)
+        targetId = target.id
+      }
+      const rows = await coursesService.moveArticlesToListe(userId.value, ids, targetId, {
+        statut: COURSES_STATUTS.REPORTE,
+      })
+      for (const row of rows) replaceArticle(row)
+      return rows
     })
   }
 
@@ -399,15 +557,48 @@ export function useCourses() {
 
   async function addArticle(input) {
     return withSaving(async () => {
-      const row = await coursesService.createArticle(userId.value, input)
+      const resolved = await resolveArticleNames(input)
+      // Pas d’auto-rattachement à une liste : uniquement si liste_id est fourni explicitement.
+      const payload = { ...resolved }
+      if (payload.liste_id === undefined) payload.liste_id = null
+      const row = await coursesService.createArticle(userId.value, payload)
       articles.value = [row, ...articles.value]
       return row
     })
   }
 
+  async function addArticleToListe(articleId, listeId) {
+    if (!articleId || !listeId) throw new Error('Liste introuvable.')
+    return editArticle(articleId, {
+      liste_id: listeId,
+      statut: COURSES_STATUTS.A_ACHETER,
+    })
+  }
+
+  /**
+   * Marque un article comme acheté maintenant (historique + suivi de durée de vie éventuel).
+   */
+  async function markPurchased(articleId, { updateDurabilite = true } = {}) {
+    const article = articles.value.find((a) => a.id === articleId)
+    if (!article) throw new Error('Article introuvable.')
+    return withSaving(async () => {
+      const result = await coursesService.finishShoppingTrip(
+        userId.value,
+        [article],
+        { updateDurabilite: updateDurabilite && Boolean(article.suivi_durabilite) },
+      )
+      for (const row of result.updated) replaceArticle(row)
+      if (result.historique?.length) {
+        historique.value = [...result.historique, ...historique.value]
+      }
+      return result
+    })
+  }
+
   async function editArticle(id, input) {
     return withSaving(async () => {
-      const row = await coursesService.updateArticle(userId.value, id, input)
+      const resolved = await resolveArticleNames(input)
+      const row = await coursesService.updateArticle(userId.value, id, resolved)
       replaceArticle(row)
       return row
     })
@@ -420,17 +611,8 @@ export function useCourses() {
     })
   }
 
-  async function setArticleStatut(id, statut) {
-    const result = await editArticle(id, { statut })
-    const next = new Set(pendingHistorizeIds.value)
-    if (statut === COURSES_STATUTS.ACHETE) next.add(id)
-    else next.delete(id)
-    pendingHistorizeIds.value = next
-    return result
-  }
-
   async function racheter(id) {
-    return setArticleStatut(id, COURSES_STATUTS.A_ACHETER)
+    return editArticle(id, { statut: COURSES_STATUTS.A_ACHETER })
   }
 
   /**
@@ -449,11 +631,13 @@ export function useCourses() {
 
     return addArticle({
       nom,
-      quantite: template?.quantite ?? 1,
+      marque: template?.marque ?? null,
+      quantite: template?.quantite ?? null,
       unite: template?.unite ?? null,
       categorie_id: template?.categorie_id ?? null,
       magasin_id: template?.magasin_id ?? histMagasin,
-      icone: template?.icone ?? '🛒',
+      liste_id: null,
+      lien_image: template?.lien_image ?? null,
       statut: COURSES_STATUTS.A_ACHETER,
       priorite: template?.priorite ?? null,
     })
@@ -479,83 +663,27 @@ export function useCourses() {
     return out.slice(0, 8)
   }
 
-  async function finishShopping({ updateDurabilite = true } = {}) {
-    const pending = pendingHistorizeIds.value
-    const checked = magasinModeChecked.value.filter((a) => pending.has(a.id))
-    if (!checked.length) return { historique: [], updated: [] }
-    return withSaving(async () => {
-      const result = await coursesService.finishShoppingTrip(
-        userId.value,
-        checked,
-        { updateDurabilite },
-      )
-      for (const row of result.updated) replaceArticle(row)
-      if (result.historique?.length) {
-        historique.value = [...result.historique, ...historique.value]
-      }
-      const next = new Set(pendingHistorizeIds.value)
-      for (const a of checked) next.delete(a.id)
-      pendingHistorizeIds.value = next
-      return result
-    })
-  }
-
-  const pendingFinishArticles = computed(() =>
-    magasinModeChecked.value.filter((a) => pendingHistorizeIds.value.has(a.id)),
-  )
-
-  const canFinishShopping = computed(() => pendingFinishArticles.value.length > 0)
-
-  /**
-   * Vide « Déjà dans le sac » : conserve les articles avec suivi de durabilité.
-   */
-  async function clearBoughtBag(magasinId = null) {
-    const toClear = boughtArticles.value.filter((a) => {
-      if (magasinId && a.magasin_id !== magasinId) return false
-      return !a.suivi_durabilite
-    })
-    if (!toClear.length) return
-    return withSaving(async () => {
-      await coursesService.deleteArticles(
-        userId.value,
-        toClear.map((a) => a.id),
-      )
-      removeArticlesLocal(toClear.map((a) => a.id))
-    })
-  }
-
-  function buildExportText({ magasinId = null } = {}) {
-    const list = activeArticles.value.filter((a) =>
-      magasinId ? a.magasin_id === magasinId : true,
-    )
-    const groups = groupArticles(list, COURSES_GROUP_BY.CATEGORIE)
-    const lines = []
-    const header =
-      magasinId && magasinById.value.get(magasinId)
-        ? `Courses — ${magasinById.value.get(magasinId).nom}`
-        : 'Courses — liste complète'
-    lines.push(header, '')
+  function buildExportText() {
+    const groups = groupArticles(activeArticles.value, groupBy.value)
+    const lines = ['Courses — liste complète', '']
     for (const group of groups) {
       lines.push(group.title)
       for (const a of group.articles) {
-        const qty =
-          a.unite && Number(a.quantite) !== 1
-            ? `${a.quantite} ${a.unite}`
-            : a.unite
-              ? `${a.quantite} ${a.unite}`
-              : Number(a.quantite) !== 1
-                ? String(a.quantite)
-                : ''
-        const left = qty ? `- ${a.icone || '🛒'} ${a.nom} (${qty})` : `- ${a.icone || '🛒'} ${a.nom}`
-        lines.push(left)
+        const parts = []
+        if (a.marque) parts.push(a.marque)
+        if (a.quantite != null && a.unite) parts.push(`${a.quantite} ${a.unite}`)
+        else if (a.quantite != null) parts.push(String(a.quantite))
+        else if (a.unite) parts.push(a.unite)
+        const extra = parts.length ? ` (${parts.join(' · ')})` : ''
+        lines.push(`- ${a.nom}${extra}`)
       }
       lines.push('')
     }
     return lines.join('\n').trim()
   }
 
-  async function copyExportText(options) {
-    const text = buildExportText(options)
+  async function copyExportText() {
+    const text = buildExportText()
     await navigator.clipboard.writeText(text)
     return text
   }
@@ -568,24 +696,24 @@ export function useCourses() {
     fromCache,
     magasins,
     categories,
+    listes,
     articles,
     historique,
-    viewMode,
     groupBy,
-    selectedMagasinId,
+    selectedListeId,
+    selectedListe,
+    openListes,
+    closedListes,
+    selectedListeRestants,
+    clearListeFilter,
     renewThresholdDays,
     renewSectionOpen,
     magasinById,
     categorieById,
+    listeById,
     activeArticles,
-    boughtArticles,
     renewArticles,
     vitrineGroups,
-    magasinModeArticles,
-    magasinModePending,
-    magasinModeChecked,
-    magasinModeProgress,
-    magasinModeGroups,
     enrichArticle,
     estimatedRenewalDate,
     load,
@@ -597,21 +725,23 @@ export function useCourses() {
     editCategorie,
     removeCategorie,
     reorderCategories,
+    addListe,
+    editListe,
+    removeListe,
+    closeListeById,
+    reporterRestantsVers,
     addArticle,
     editArticle,
     removeArticle,
-    setArticleStatut,
+    addArticleToListe,
+    markPurchased,
     racheter,
     quickAdd,
     autocompleteSuggestions,
-    finishShopping,
-    pendingFinishArticles,
-    canFinishShopping,
-    clearBoughtBag,
     buildExportText,
     copyExportText,
-    COURSES_VIEW_MODE,
     COURSES_GROUP_BY,
     COURSES_STATUTS,
+    COURSES_LISTE_STATUTS,
   }
 }

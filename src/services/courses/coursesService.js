@@ -5,20 +5,24 @@
 
 import { supabase } from '../../lib/supabase.js'
 import {
+  COURSES_DEFAULT_CATEGORIE_COULEUR,
   COURSES_DEFAULT_ICONE,
   COURSES_DEFAULT_MAGASIN_COULEUR,
+  COURSES_LISTE_STATUTS,
   COURSES_STATUTS,
 } from '../../constants/courses/courses.js'
 
 const TABLE_MAGASINS = 'courses_magasins'
 const TABLE_CATEGORIES = 'courses_categories'
+const TABLE_LISTES = 'courses_listes'
 const TABLE_ARTICLES = 'courses_articles'
 const TABLE_HISTORIQUE = 'courses_historique'
 
 const SELECT_MAGASIN = 'id, user_id, nom, type, couleur, url, ordre, created_at'
-const SELECT_CATEGORIE = 'id, user_id, nom, icone, ordre, created_at'
+const SELECT_CATEGORIE = 'id, user_id, nom, icone, couleur, ordre, created_at'
+const SELECT_LISTE = 'id, user_id, nom, date_liste, statut, created_at, updated_at'
 const SELECT_ARTICLE =
-  'id, user_id, nom, quantite, unite, categorie_id, magasin_id, statut, priorite, prix_estime, note, lien, icone, suivi_durabilite, date_dernier_achat, duree_valeur, duree_unite, created_at, updated_at'
+  'id, user_id, nom, marque, quantite, unite, categorie_id, magasin_id, liste_id, statut, priorite, prix, note, lien, lien_image, icone, suivi_durabilite, date_dernier_achat, duree_valeur, duree_unite, created_at, updated_at'
 const SELECT_HISTORIQUE =
   'id, user_id, article_id, nom, magasin_id, date_achat, prix, created_at'
 
@@ -56,8 +60,41 @@ function normalizeCategoriePayload(input = {}) {
   return {
     nom,
     icone: trimOrNull(input.icone) || COURSES_DEFAULT_ICONE,
+    couleur: trimOrNull(input.couleur) || COURSES_DEFAULT_CATEGORIE_COULEUR,
     ordre: Number.isFinite(Number(input.ordre)) ? Number(input.ordre) : 100,
   }
+}
+
+function normalizeListePayload(input = {}, { partial = false } = {}) {
+  const out = {}
+  if (!partial || input.nom !== undefined) {
+    const nom = String(input.nom ?? '').trim()
+    if (!nom) throw new Error('Indique un nom de liste.')
+    out.nom = nom
+  }
+  if (!partial || input.date_liste !== undefined) {
+    out.date_liste = trimOrNull(input.date_liste) || todayISO()
+  }
+  if (!partial || input.statut !== undefined) {
+    const statut = String(input.statut || COURSES_LISTE_STATUTS.OUVERTE)
+    out.statut = Object.values(COURSES_LISTE_STATUTS).includes(statut)
+      ? statut
+      : COURSES_LISTE_STATUTS.OUVERTE
+  }
+  out.updated_at = new Date().toISOString()
+  return out
+}
+
+function normalizeOptionalQuantity(value) {
+  if (value == null || value === '') return null
+  const q = Number(value)
+  return Number.isFinite(q) && q > 0 ? q : null
+}
+
+function normalizeOptionalPrix(value) {
+  if (value == null || value === '') return null
+  const prix = Number(value)
+  return Number.isFinite(prix) && prix >= 0 ? prix : null
 }
 
 function normalizeArticlePayload(input = {}, { partial = false } = {}) {
@@ -68,9 +105,9 @@ function normalizeArticlePayload(input = {}, { partial = false } = {}) {
     if (!nom) throw new Error('Indique un nom d’article.')
     out.nom = nom
   }
+  if (!partial || input.marque !== undefined) out.marque = trimOrNull(input.marque)
   if (!partial || input.quantite !== undefined) {
-    const q = Number(input.quantite)
-    out.quantite = Number.isFinite(q) && q > 0 ? q : 1
+    out.quantite = normalizeOptionalQuantity(input.quantite)
   }
   if (!partial || input.unite !== undefined) out.unite = trimOrNull(input.unite)
   if (!partial || input.categorie_id !== undefined) {
@@ -78,6 +115,9 @@ function normalizeArticlePayload(input = {}, { partial = false } = {}) {
   }
   if (!partial || input.magasin_id !== undefined) {
     out.magasin_id = trimOrNull(input.magasin_id)
+  }
+  if (!partial || input.liste_id !== undefined) {
+    out.liste_id = trimOrNull(input.liste_id)
   }
   if (!partial || input.statut !== undefined) {
     const statut = String(input.statut || COURSES_STATUTS.A_ACHETER)
@@ -93,16 +133,18 @@ function normalizeArticlePayload(input = {}, { partial = false } = {}) {
       out.priorite = p >= 1 && p <= 3 ? p : null
     }
   }
-  if (!partial || input.prix_estime !== undefined) {
-    if (input.prix_estime == null || input.prix_estime === '') {
-      out.prix_estime = null
-    } else {
-      const prix = Number(input.prix_estime)
-      out.prix_estime = Number.isFinite(prix) && prix >= 0 ? prix : null
-    }
+
+  const prixRaw =
+    input.prix !== undefined ? input.prix : input.prix_estime !== undefined ? input.prix_estime : undefined
+  if (!partial || prixRaw !== undefined) {
+    out.prix = normalizeOptionalPrix(prixRaw)
   }
+
   if (!partial || input.note !== undefined) out.note = trimOrNull(input.note)
   if (!partial || input.lien !== undefined) out.lien = trimOrNull(input.lien)
+  if (!partial || input.lien_image !== undefined) {
+    out.lien_image = trimOrNull(input.lien_image)
+  }
   if (!partial || input.icone !== undefined) {
     out.icone = trimOrNull(input.icone) || COURSES_DEFAULT_ICONE
   }
@@ -151,7 +193,6 @@ export async function listMagasins(userId) {
     .from(TABLE_MAGASINS)
     .select(SELECT_MAGASIN)
     .eq('user_id', userId)
-    .order('ordre', { ascending: true })
     .order('nom', { ascending: true })
   if (error) throw error
   return data ?? []
@@ -167,6 +208,20 @@ export async function createMagasin(userId, input) {
     .single()
   if (error) throw error
   return data
+}
+
+/**
+ * Trouve un magasin par nom (insensible à la casse) ou le crée.
+ * @returns {Promise<object|null>} null si nom vide
+ */
+export async function ensureMagasinByName(userId, rawName, existing = null) {
+  await requireUserId(userId)
+  const nom = String(rawName ?? '').trim()
+  if (!nom) return null
+  const list = existing ?? (await listMagasins(userId))
+  const found = list.find((m) => String(m.nom).trim().toLowerCase() === nom.toLowerCase())
+  if (found) return found
+  return createMagasin(userId, { nom })
 }
 
 export async function updateMagasin(userId, id, input = {}) {
@@ -234,7 +289,6 @@ export async function listCategories(userId) {
     .from(TABLE_CATEGORIES)
     .select(SELECT_CATEGORIE)
     .eq('user_id', userId)
-    .order('ordre', { ascending: true })
     .order('nom', { ascending: true })
   if (error) throw error
   return data ?? []
@@ -252,6 +306,20 @@ export async function createCategorie(userId, input) {
   return data
 }
 
+/**
+ * Trouve un rayon par nom (insensible à la casse) ou le crée.
+ * @returns {Promise<object|null>} null si nom vide
+ */
+export async function ensureCategorieByName(userId, rawName, existing = null) {
+  await requireUserId(userId)
+  const nom = String(rawName ?? '').trim()
+  if (!nom) return null
+  const list = existing ?? (await listCategories(userId))
+  const found = list.find((c) => String(c.nom).trim().toLowerCase() === nom.toLowerCase())
+  if (found) return found
+  return createCategorie(userId, { nom })
+}
+
 export async function updateCategorie(userId, id, input = {}) {
   await requireUserId(userId)
   if (!id) throw new Error('Rayon introuvable.')
@@ -263,6 +331,9 @@ export async function updateCategorie(userId, id, input = {}) {
   }
   if (input.icone !== undefined) {
     payload.icone = trimOrNull(input.icone) || COURSES_DEFAULT_ICONE
+  }
+  if (input.couleur !== undefined) {
+    payload.couleur = trimOrNull(input.couleur) || COURSES_DEFAULT_CATEGORIE_COULEUR
   }
   if (input.ordre !== undefined) {
     payload.ordre = Number.isFinite(Number(input.ordre)) ? Number(input.ordre) : 100
@@ -301,6 +372,114 @@ export async function reorderCategories(userId, orderedIds) {
         .eq('id', id),
     ),
   )
+}
+
+// —— Listes —————————————————————————————————————————————————————————————————
+
+export async function listListes(userId) {
+  if (!userId) return []
+  const { data, error } = await supabase
+    .from(TABLE_LISTES)
+    .select(SELECT_LISTE)
+    .eq('user_id', userId)
+    .order('date_liste', { ascending: false })
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+
+export async function createListe(userId, input = {}) {
+  await requireUserId(userId)
+  const nom = String(input.nom ?? '').trim()
+  if (!nom) throw new Error('Indique un nom de liste.')
+  const payload = {
+    user_id: userId,
+    ...normalizeListePayload({
+      nom,
+      date_liste: input.date_liste,
+      statut: input.statut || COURSES_LISTE_STATUTS.OUVERTE,
+    }),
+  }
+  const { data, error } = await supabase
+    .from(TABLE_LISTES)
+    .insert(payload)
+    .select(SELECT_LISTE)
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateListe(userId, id, input = {}) {
+  await requireUserId(userId)
+  if (!id) throw new Error('Liste introuvable.')
+  const payload = normalizeListePayload(input, { partial: true })
+  const { data, error } = await supabase
+    .from(TABLE_LISTES)
+    .update(payload)
+    .eq('user_id', userId)
+    .eq('id', id)
+    .select(SELECT_LISTE)
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function deleteListe(userId, id) {
+  await requireUserId(userId)
+  if (!id) throw new Error('Liste introuvable.')
+  const { error } = await supabase
+    .from(TABLE_LISTES)
+    .delete()
+    .eq('user_id', userId)
+    .eq('id', id)
+  if (error) throw error
+}
+
+/**
+ * Ferme une liste. Si reporterRestants + targetListeId, déplace les non achetés.
+ */
+export async function closeListe(userId, listeId, options = {}) {
+  await requireUserId(userId)
+  if (!listeId) throw new Error('Liste introuvable.')
+
+  const { reporterRestants = false, targetListeId = null } = options
+  let reported = []
+
+  if (reporterRestants) {
+    const targetId = targetListeId
+    if (!targetId) throw new Error('Choisis une liste pour reporter les articles.')
+
+    const { data: restants, error: listError } = await supabase
+      .from(TABLE_ARTICLES)
+      .select(SELECT_ARTICLE)
+      .eq('user_id', userId)
+      .eq('liste_id', listeId)
+      .in('statut', [
+        COURSES_STATUTS.A_ACHETER,
+        COURSES_STATUTS.DANS_PANIER,
+        COURSES_STATUTS.REPORTE,
+      ])
+    if (listError) throw listError
+
+    const ids = (restants ?? []).map((a) => a.id)
+    if (ids.length) {
+      const { data, error } = await supabase
+        .from(TABLE_ARTICLES)
+        .update({
+          liste_id: targetId,
+          statut: COURSES_STATUTS.REPORTE,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId)
+        .in('id', ids)
+        .select(SELECT_ARTICLE)
+      if (error) throw error
+      reported = data ?? []
+    }
+  }
+
+  const liste = await updateListe(userId, listeId, { statut: COURSES_LISTE_STATUTS.FERMEE })
+  return { liste, reported }
 }
 
 // —— Articles ———————————————————————————————————————————————————————————————
@@ -366,20 +545,40 @@ export async function deleteArticles(userId, ids) {
   if (error) throw error
 }
 
+export async function moveArticlesToListe(userId, articleIds, targetListeId, { statut = null } = {}) {
+  await requireUserId(userId)
+  const ids = (articleIds || []).filter(Boolean)
+  if (!ids.length || !targetListeId) return []
+  const patch = {
+    liste_id: targetListeId,
+    updated_at: new Date().toISOString(),
+  }
+  if (statut) patch.statut = statut
+  const { data, error } = await supabase
+    .from(TABLE_ARTICLES)
+    .update(patch)
+    .eq('user_id', userId)
+    .in('id', ids)
+    .select(SELECT_ARTICLE)
+  if (error) throw error
+  return data ?? []
+}
+
 /**
- * Charge magasins, catégories, articles et un extrait d’historique (autocomplete).
+ * Charge magasins, catégories, listes, articles et un extrait d’historique.
  */
 export async function loadCoursesBundle(userId) {
   if (!userId) {
-    return { magasins: [], categories: [], articles: [], historique: [] }
+    return { magasins: [], categories: [], listes: [], articles: [], historique: [] }
   }
-  const [magasins, categories, articles, historique] = await Promise.all([
+  const [magasins, categories, listes, articles, historique] = await Promise.all([
     listMagasins(userId),
     listCategories(userId),
+    listListes(userId),
     listArticles(userId),
     listHistorique(userId, { limit: 200 }),
   ])
-  return { magasins, categories, articles, historique }
+  return { magasins, categories, listes, articles, historique }
 }
 
 // —— Historique —————————————————————————————————————————————————————————————
@@ -424,13 +623,6 @@ export async function createHistoriqueEntry(userId, input) {
   return data
 }
 
-/**
- * Termine une session courses : historique + statut achete + date dernier achat
- * pour les articles avec suivi de durabilité (si updateDurabilite).
- * @param {string} userId
- * @param {object[]} articles
- * @param {{ updateDurabilite?: boolean, dateAchat?: string }} [options]
- */
 export async function finishShoppingTrip(userId, articles, options = {}) {
   await requireUserId(userId)
   const list = Array.isArray(articles) ? articles : []
@@ -445,7 +637,7 @@ export async function finishShoppingTrip(userId, articles, options = {}) {
     nom: article.nom,
     magasin_id: article.magasin_id ?? null,
     date_achat: dateAchat,
-    prix: article.prix_estime ?? null,
+    prix: article.prix ?? article.prix_estime ?? null,
   }))
 
   const { data: historique, error: histError } = await supabase
