@@ -1188,21 +1188,28 @@ export async function updatePlannedSkipReason(supabase, userId, entryId, skipRea
 }
 
 /**
- * Premier jour éligible à la revue du plan (≥ 23h → aujourd’hui, sinon → veille).
+ * Jour du bilan : la veille, à partir de minuit.
+ * Le bilan du 24 s’ouvre à 00h00 le 25.
  * @param {Date} [now]
  */
 export function resolvePlanReviewDayIso(now = new Date()) {
   const date = now instanceof Date ? now : new Date()
-  const hour = date.getHours()
-  const today = toDayDateIso(date)
-  if (hour >= 23) return today
-  return shiftDayIso(today, -1)
+  return shiftDayIso(toDayDateIso(date), -1)
+}
+
+/**
+ * Entre 23h et minuit, aucun bilan n’est proposé.
+ * @param {Date} [now]
+ */
+export function isBatteryPlanReviewQuietHours(now = new Date()) {
+  const date = now instanceof Date ? now : new Date()
+  return date.getHours() >= 23
 }
 
 /**
  * Charge le payload de revue si nécessaire (prévu non fait + revue non validée).
- * Avant 23h : revue de la veille (ou d’un jour antérieur encore en attente).
- * À partir de 23h : revue d’aujourd’hui en priorité.
+ * À partir de minuit : revue de la veille (ou d’un jour antérieur encore en attente).
+ * Entre 23h et minuit : rien. Le jour en cours n’est jamais proposé.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} userId
  * @param {Date} [now]
@@ -1215,8 +1222,17 @@ export function resolvePlanReviewDayIso(now = new Date()) {
  */
 export async function prepareBatteryPlanReview(supabase, userId, now = new Date()) {
   const date = now instanceof Date ? now : new Date()
+  if (isBatteryPlanReviewQuietHours(date)) {
+    return {
+      shouldShow: false,
+      dayIso: resolvePlanReviewDayIso(date),
+      day: null,
+      pending: [],
+    }
+  }
+
   const today = toDayDateIso(date)
-  const startOffset = date.getHours() >= 23 ? 0 : 1
+  const startOffset = 1
 
   for (let offset = startOffset; offset <= 7; offset += 1) {
     const dayIso = shiftDayIso(today, -offset)

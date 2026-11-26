@@ -27,6 +27,6 @@ ALTER TABLE public.battery_days
   ADD COLUMN IF NOT EXISTS plan_review_at timestamptz NULL;
 
 COMMENT ON COLUMN public.battery_days.plan_review_at IS
-  'Horodatage de la revue du plan non fait (popup ≥ 23h). Null = revue encore attendue s’il reste du prévu non fait.';
+  'Horodatage de la revue du plan non fait (popup à minuit le lendemain). Null = revue encore attendue s’il reste du prévu non fait.';
 
 COMMIT;

@@ -10,7 +10,11 @@ import {
   buildRealizationInsights,
   formatCompletionRate,
 } from './batteryInsights.js'
-import { resolvePlanReviewDayIso } from '../../services/battery/batteryDays.js'
+import {
+  isBatteryPlanReviewQuietHours,
+  prepareBatteryPlanReview,
+  resolvePlanReviewDayIso,
+} from '../../services/battery/batteryDays.js'
 
 describe('completionRatePercent', () => {
   it('renvoie null sans plan (dépense)', () => {
@@ -87,10 +91,16 @@ describe('buildRealizationInsights', () => {
 })
 
 describe('resolvePlanReviewDayIso', () => {
-  it('cible aujourd’hui à partir de 23h, sinon la veille', () => {
-    const late = new Date(2026, 10, 25, 23, 10, 0)
-    const early = new Date(2026, 10, 25, 10, 0, 0)
-    assert.equal(resolvePlanReviewDayIso(late), '2026-11-25')
-    assert.equal(resolvePlanReviewDayIso(early), '2026-11-24')
+  it('cible le 24 à partir de minuit le 25, et rien entre 23h et minuit', async () => {
+    const late = new Date(2026, 10, 24, 23, 10, 0)
+    const midnight = new Date(2026, 10, 25, 0, 0, 0)
+    const morning = new Date(2026, 10, 25, 10, 0, 0)
+    assert.equal(resolvePlanReviewDayIso(midnight), '2026-11-24')
+    assert.equal(resolvePlanReviewDayIso(morning), '2026-11-24')
+    assert.equal(isBatteryPlanReviewQuietHours(late), true)
+    assert.equal(isBatteryPlanReviewQuietHours(midnight), false)
+    const quiet = await prepareBatteryPlanReview(null, 'user', late)
+    assert.equal(quiet.shouldShow, false)
+    assert.deepEqual(quiet.pending, [])
   })
 })

@@ -76,7 +76,7 @@ COMMENT ON COLUMN public.battery_days.sleep_hours IS
 COMMENT ON COLUMN public.battery_days.evening_feeling IS
   'Ressenti du soir : empty = à sec, just = juste, left = il m’en restait.';
 COMMENT ON COLUMN public.battery_days.plan_review_at IS
-  'Horodatage de la revue du plan non fait (popup ≥ 23h). Null = revue encore attendue s’il reste du prévu non fait.';
+  'Horodatage de la revue du plan non fait (popup à minuit le lendemain). Null = revue encore attendue s’il reste du prévu non fait.';
 COMMENT ON COLUMN public.battery_days.carryover IS
   'Report négatif de la veille (moitié du dépassement, plafond −3).';
 
