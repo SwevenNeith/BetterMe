@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import LolRadarChart from '../components/jeux/LolRadarChart.vue'
 import LolItemTooltipCard from '../components/jeux/LolItemTooltipCard.vue'
-import LolPoroAssistant from '../components/jeux/LolPoroAssistant.vue'
 import { APP_PAGE_IDS } from '../constants/common/appPages.js'
 import { usePageDisplayLabel } from '../composables/usePageDisplayLabel.js'
 import { supabase } from '../lib/supabase.js'
@@ -105,9 +104,6 @@ const errorMessage = ref('')
 const matchesError = ref('')
 const rankedResetError = ref('')
 const showAddForm = ref(false)
-const showPoro = ref(false)
-/** Prompt à envoyer auto à l’ouverture de Poro (ex. analyse match). */
-const poroAutoPrompt = ref('')
 
 const selectedMatch = ref(null)
 /** Puuid du joueur dont les items sont dépliés dans le détail d’équipe. */
@@ -593,11 +589,6 @@ function closeMatch() {
   selectedMatch.value = null
 }
 
-function openPoroMatchAnalysis() {
-  poroAutoPrompt.value = 'Analyse cette partie'
-  showPoro.value = true
-}
-
 /**
  * Déplie / replie les items d’un coéquipier ou adversaire (pas soi-même).
  * @param {string | null | undefined} puuid
@@ -771,30 +762,11 @@ onUnmounted(() => {
         Suivi multi-comptes : elo, matchs, détail de partie et comparatif au niveau de ton rang.
       </p>
       <div class="lol-page__actions">
-        <button type="button" class="lol-btn lol-btn--poro" @click="showPoro = true">
-          🐾 Assistant Poro
-        </button>
         <RouterLink to="/league-of-legends/partie" class="lol-btn lol-btn--primary">
           Lancer une partie
         </RouterLink>
       </div>
     </header>
-
-    <LolPoroAssistant
-      :open="showPoro"
-      :user-id="userId"
-      :puuid="selectedAccount?.puuid || null"
-      :account-label="
-        selectedAccount
-          ? `${selectedAccount.game_name}#${selectedAccount.tag_line}`
-          : ''
-      "
-      :match="selectedMatch"
-      :recent-matches="matches"
-      :auto-prompt="poroAutoPrompt"
-      @close="showPoro = false"
-      @auto-prompt-done="poroAutoPrompt = ''"
-    />
 
     <p v-if="errorMessage" class="lol-page__error" role="alert">{{ errorMessage }}</p>
 
@@ -896,7 +868,7 @@ onUnmounted(() => {
     <p v-if="!isLoadingAccounts && !accounts.length && !showAddForm" class="lol-muted">
       Aucun compte visible.
       <template v-if="userId">
-        S’il était déjà enregistré, ré-ajoute-le avec le même Riot ID (« + Compte ») — Poro / stats
+        S’il était déjà enregistré, ré-ajoute-le avec le même Riot ID (« + Compte ») — les stats
         se rattacheront au même puuid. Sinon vérifie que tu es bien connecté au bon compte BetterMe.
       </template>
       <template v-else> Connecte-toi pour charger tes comptes Supabase. </template>
@@ -1237,9 +1209,6 @@ onUnmounted(() => {
             </p>
           </div>
           <div class="lol-detail__actions">
-            <button type="button" class="lol-btn lol-btn--poro" @click="openPoroMatchAnalysis">
-              🐾 Analyser avec Poro
-            </button>
             <button type="button" class="lol-btn" @click="closeMatch">Fermer</button>
           </div>
         </header>
@@ -1699,12 +1668,6 @@ a.lol-btn:focus-visible {
 
 .lol-btn--primary {
   background: linear-gradient(135deg, #d5b5ea, #ad81be);
-  border-color: transparent;
-  color: #fff;
-}
-
-.lol-btn--poro {
-  background: linear-gradient(135deg, rgba(143, 162, 212, 0.95), rgba(173, 129, 190, 0.95));
   border-color: transparent;
   color: #fff;
 }
@@ -2522,12 +2485,6 @@ a.lol-btn:focus-visible {
 
   .lol-team__name {
     font-size: 0.74rem;
-  }
-
-  .lol-btn--poro {
-    white-space: normal;
-    text-align: center;
-    line-height: 1.25;
   }
 
   .lol-match {
