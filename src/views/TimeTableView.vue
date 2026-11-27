@@ -511,8 +511,25 @@ const mesHobbiesPills = computed(() => {
 })
 
 const showHobbiesRail = computed(() => mesHobbiesPills.value.length > 0)
+const hobbiesMenuOpen = ref(false)
+const hobbiesMenuRef = ref(null)
+
+function toggleHobbiesMenu() {
+  hobbiesMenuOpen.value = !hobbiesMenuOpen.value
+}
+
+function closeHobbiesMenu() {
+  hobbiesMenuOpen.value = false
+}
+
+function onHobbiesMenuPointerDown(event) {
+  if (!hobbiesMenuOpen.value) return
+  const root = hobbiesMenuRef.value
+  if (root && !root.contains(event.target)) closeHobbiesMenu()
+}
 
 const openModalWithHobby = async (hobbyTitle, existingEvent = null, extras = null) => {
+  closeHobbiesMenu()
   resetEventForm()
   if (existingEvent?.id) {
     await openEventForEditDirect(existingEvent)
@@ -1034,11 +1051,13 @@ onMounted(() => {
   void loadCoupleAnniversaryState()
   scheduleMidnightTick()
   document.addEventListener('visibilitychange', onVisibilityChange)
+  document.addEventListener('pointerdown', onHobbiesMenuPointerDown)
 })
 
 onUnmounted(() => {
   window.clearTimeout(midnightTimer)
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  document.removeEventListener('pointerdown', onHobbiesMenuPointerDown)
 })
 
 // Timer : recalcule la fin ; sinon on ne touche plus aux horaires pendant la saisie
@@ -2214,31 +2233,49 @@ const getPositionedEventsForDay = (dayIdx) => {
     </p>
 
     <!-- Rubrique Mes Hobbies (favoris + à placer sans créneau) -->
-    <div class="hobbies-quick-reference" v-if="showHobbiesRail">
-      <span class="hobbies-ref-label">Mes Hobbies :</span>
-      <div class="hobbies-ref-pills">
-        <button
-          v-for="hobby in mesHobbiesPills"
-          :key="hobby.id"
-          class="hobby-ref-pill"
-          draggable="true"
-          @dragstart="handleDragStart($event, hobby)"
-          @click="
-            openModalWithHobby(hobby.title, hobby.event, {
-              defaultCost: hobby.defaultCost,
-              batteryActivityId: hobby.batteryActivityId,
-            })
-          "
-          :title="
-            hobby.toPlace
-              ? 'Glisse dans un créneau libre'
-              : 'Planifier cette activité (glisse-dépose dans l’EDT)'
-          "
-        >
-          <span class="hobby-pill-icon">🎨</span>
-          <span class="hobby-pill-title">{{ hobby.title }}</span>
-          <span class="hobby-pill-plus">+</span>
-        </button>
+    <div
+      v-if="showHobbiesRail"
+      ref="hobbiesMenuRef"
+      class="hobbies-quick-reference"
+      :class="{ 'hobbies-quick-reference--open': hobbiesMenuOpen }"
+    >
+      <button
+        type="button"
+        class="hobbies-ref-toggle"
+        :aria-expanded="hobbiesMenuOpen"
+        aria-controls="hobbies-ref-menu"
+        @click="toggleHobbiesMenu"
+      >
+        <span class="hobbies-ref-label">Mes Hobbies</span>
+        <span class="hobbies-ref-count">{{ mesHobbiesPills.length }}</span>
+        <span class="hobbies-ref-chevron" aria-hidden="true"></span>
+      </button>
+      <div v-if="hobbiesMenuOpen" id="hobbies-ref-menu" class="hobbies-ref-menu">
+        <div class="hobbies-ref-pills">
+          <button
+            v-for="hobby in mesHobbiesPills"
+            :key="hobby.id"
+            type="button"
+            class="hobby-ref-pill"
+            draggable="true"
+            @dragstart="handleDragStart($event, hobby)"
+            @click="
+              openModalWithHobby(hobby.title, hobby.event, {
+                defaultCost: hobby.defaultCost,
+                batteryActivityId: hobby.batteryActivityId,
+              })
+            "
+            :title="
+              hobby.toPlace
+                ? 'Glisse dans un créneau libre'
+                : 'Planifier cette activité (glisse-dépose dans l’EDT)'
+            "
+          >
+            <span class="hobby-pill-icon">🎨</span>
+            <span class="hobby-pill-title">{{ hobby.title }}</span>
+            <span class="hobby-pill-plus">+</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -3329,26 +3366,36 @@ const getPositionedEventsForDay = (dayIdx) => {
 /* ─── Rubrique Mes Hobbies ─── */
 .hobbies-quick-reference {
   position: relative;
-  z-index: 1;
+  z-index: 8;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
   margin-bottom: 1.5rem;
-  background: rgba(255, 255, 255, 0.55);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  padding: 0.6rem 1rem;
-  border-radius: 18px;
-  border: 1px solid rgba(213, 181, 234, 0.2);
-  flex-wrap: wrap;
   animation: fadeIn 0.25s ease;
 }
 
-@media (prefers-color-scheme: dark) {
-  .hobbies-quick-reference {
-    background: rgba(25, 20, 35, 0.55);
-    border-color: rgba(213, 181, 234, 0.1);
-  }
+.hobbies-quick-reference--open {
+  z-index: 30;
+}
+
+.hobbies-ref-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.55rem 0.9rem;
+  border-radius: 16px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  cursor: pointer;
+  color: inherit;
+}
+
+.hobbies-ref-toggle:hover,
+.hobbies-ref-toggle:focus-visible {
+  border-color: rgba(114, 160, 152, 0.55);
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .hobbies-ref-label {
@@ -3358,6 +3405,70 @@ const getPositionedEventsForDay = (dayIdx) => {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   flex-shrink: 0;
+}
+
+.hobbies-ref-count {
+  min-width: 1.35rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(114, 160, 152, 0.16);
+  color: #3d5c56;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.hobbies-ref-chevron {
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-left: 0.1rem;
+  border-right: 2px solid #72a098;
+  border-bottom: 2px solid #72a098;
+  transform: rotate(45deg) translateY(-1px);
+  transition: transform 0.15s ease;
+}
+
+.hobbies-quick-reference--open .hobbies-ref-chevron {
+  transform: rotate(225deg) translateY(-1px);
+}
+
+.hobbies-ref-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  z-index: 31;
+  width: min(42rem, calc(100vw - 2rem));
+  max-height: min(16rem, 40vh);
+  overflow: auto;
+  padding: 0.7rem 0.8rem;
+  border-radius: 16px;
+  border: 1px solid rgba(213, 181, 234, 0.35);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 28px rgba(44, 62, 80, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  .hobbies-ref-toggle {
+    background: rgba(25, 20, 35, 0.72);
+    border-color: rgba(213, 181, 234, 0.18);
+  }
+
+  .hobbies-ref-toggle:hover,
+  .hobbies-ref-toggle:focus-visible {
+    background: rgba(25, 20, 35, 0.9);
+  }
+
+  .hobbies-ref-count {
+    color: #d7efe8;
+    background: rgba(114, 160, 152, 0.28);
+  }
+
+  .hobbies-ref-menu {
+    background: rgba(28, 22, 38, 0.97);
+    border-color: rgba(213, 181, 234, 0.2);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  }
 }
 
 .hobbies-ref-pills {
